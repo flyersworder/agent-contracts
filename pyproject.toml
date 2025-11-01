@@ -1,0 +1,7 @@
+[project]
+name = "agent-contracts"
+version = "0.1.0"
+description = "A formal framework for governing autonomous AI agents through explicit resource constraints and temporal boundaries"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = []

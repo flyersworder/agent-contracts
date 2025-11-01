@@ -360,10 +360,10 @@ class ContractNegotiation:
 ```python
 def graceful_degradation(self, remaining_budget: dict):
     """Automatically adjust quality targets as budget depletes"""
-    
+
     if remaining_budget["tokens"] < 10000:
-        # Switch to smaller model
-        self.model = "gpt-3.5-turbo"
+        # Switch to smaller, more efficient model
+        self.model = "small-model"  # e.g., gpt-4o-mini, claude-haiku
         self.reduce_context_window(max_tokens=4000)
     
     if remaining_budget["web"] == 0:
@@ -1582,9 +1582,9 @@ Agent Contracts are not the final answer to agentic AI governance, but they prov
 
 ### Appendix B: Reference Implementation (Python)
 
-See GitHub repository: `github.com/agent-contracts/reference-implementation`
+*Reference implementation planned for future release.*
 
-Key modules:
+Planned modules:
 - `contract.py`: Core contract data structures
 - `monitor.py`: Resource and temporal monitoring
 - `enforcer.py`: Contract enforcement logic
@@ -1603,7 +1603,7 @@ Key modules:
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: October 29, 2025  
-**Authors**: Qing Ye, Claude (Anthropic)  
+**Document Version**: 1.0
+**Last Updated**: October 29, 2024
+**Authors**: Qing Ye (with assistance from Claude, Anthropic)
 **License**: CC BY 4.0
