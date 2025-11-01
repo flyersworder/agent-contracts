@@ -18,8 +18,12 @@ class ResourceUsage:
     This class accumulates resource usage across multiple dimensions and provides
     methods to check if usage exceeds contract constraints.
 
+    Supports separate tracking of reasoning vs text tokens for reasoning models.
+
     Attributes:
-        tokens: Total tokens consumed
+        tokens: Total tokens consumed (reasoning + text)
+        reasoning_tokens: Tokens used for internal reasoning/thinking
+        text_tokens: Tokens used for text output
         api_calls: Total API calls made
         web_searches: Total web searches performed
         tool_invocations: Total tool invocations
@@ -32,6 +36,8 @@ class ResourceUsage:
     """
 
     tokens: int = 0
+    reasoning_tokens: int = 0
+    text_tokens: int = 0
     api_calls: int = 0
     web_searches: int = 0
     tool_invocations: int = 0
@@ -47,6 +53,8 @@ class ResourceUsage:
         """Validate resource usage values are non-negative."""
         for field_name in [
             "tokens",
+            "reasoning_tokens",
+            "text_tokens",
             "api_calls",
             "web_searches",
             "tool_invocations",
@@ -58,18 +66,32 @@ class ResourceUsage:
             if value < 0:
                 raise ValueError(f"{field_name} must be non-negative, got {value}")
 
-    def add_tokens(self, count: int) -> None:
-        """Add token usage.
+    def add_tokens(self, count: int, reasoning: int = 0, text: int = 0) -> None:
+        """Add token usage with optional reasoning/text breakdown.
 
         Args:
-            count: Number of tokens to add
+            count: Total number of tokens to add (if reasoning and text not specified)
+            reasoning: Number of reasoning tokens (for reasoning models)
+            text: Number of text output tokens (for reasoning models)
 
         Raises:
             ValueError: If count is negative
         """
         if count < 0:
             raise ValueError(f"Token count must be non-negative, got {count}")
-        self.tokens += count
+        if reasoning < 0:
+            raise ValueError(f"Reasoning tokens must be non-negative, got {reasoning}")
+        if text < 0:
+            raise ValueError(f"Text tokens must be non-negative, got {text}")
+
+        # If reasoning/text specified, use those; otherwise use total count
+        if reasoning > 0 or text > 0:
+            self.reasoning_tokens += reasoning
+            self.text_tokens += text
+            self.tokens += reasoning + text
+        else:
+            self.tokens += count
+
         self.last_updated = datetime.now()
 
     def add_api_call(self, cost: float = 0.0, tokens: int = 0) -> None:
@@ -160,6 +182,8 @@ class ResourceUsage:
         """
         return {
             "tokens": self.tokens,
+            "reasoning_tokens": self.reasoning_tokens,
+            "text_tokens": self.text_tokens,
             "api_calls": self.api_calls,
             "web_searches": self.web_searches,
             "tool_invocations": self.tool_invocations,
@@ -173,6 +197,13 @@ class ResourceUsage:
 
     def __repr__(self) -> str:
         """String representation of resource usage."""
+        if self.reasoning_tokens > 0 or self.text_tokens > 0:
+            return (
+                f"ResourceUsage(tokens={self.tokens} "
+                f"[reasoning={self.reasoning_tokens}, text={self.text_tokens}], "
+                f"api_calls={self.api_calls}, "
+                f"cost_usd={self.cost_usd:.4f}, elapsed={self.elapsed_time()})"
+            )
         return (
             f"ResourceUsage(tokens={self.tokens}, api_calls={self.api_calls}, "
             f"cost_usd={self.cost_usd:.4f}, elapsed={self.elapsed_time()})"
@@ -235,6 +266,32 @@ class ResourceMonitor:
             violations.append(
                 ViolationInfo(
                     resource="tokens", limit=self.constraints.tokens, actual=self.usage.tokens
+                )
+            )
+
+        # Check reasoning tokens separately if specified
+        if (
+            self.constraints.reasoning_tokens is not None
+            and self.usage.reasoning_tokens > self.constraints.reasoning_tokens
+        ):
+            violations.append(
+                ViolationInfo(
+                    resource="reasoning_tokens",
+                    limit=self.constraints.reasoning_tokens,
+                    actual=self.usage.reasoning_tokens,
+                )
+            )
+
+        # Check text tokens separately if specified
+        if (
+            self.constraints.text_tokens is not None
+            and self.usage.text_tokens > self.constraints.text_tokens
+        ):
+            violations.append(
+                ViolationInfo(
+                    resource="text_tokens",
+                    limit=self.constraints.text_tokens,
+                    actual=self.usage.text_tokens,
                 )
             )
 
@@ -337,6 +394,16 @@ class ResourceMonitor:
 
         if self.constraints.tokens is not None and self.constraints.tokens > 0:
             percentages["tokens"] = (self.usage.tokens / self.constraints.tokens) * 100
+
+        if self.constraints.reasoning_tokens is not None and self.constraints.reasoning_tokens > 0:
+            percentages["reasoning_tokens"] = (
+                self.usage.reasoning_tokens / self.constraints.reasoning_tokens
+            ) * 100
+
+        if self.constraints.text_tokens is not None and self.constraints.text_tokens > 0:
+            percentages["text_tokens"] = (
+                self.usage.text_tokens / self.constraints.text_tokens
+            ) * 100
 
         if self.constraints.api_calls is not None and self.constraints.api_calls > 0:
             percentages["api_calls"] = (self.usage.api_calls / self.constraints.api_calls) * 100

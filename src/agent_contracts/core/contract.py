@@ -41,8 +41,14 @@ class DeadlineType(Enum):
 class ResourceConstraints:
     """Multi-dimensional resource budget (Section 2.2 of whitepaper).
 
+    Supports both lumpsum and separate token budgets for reasoning models:
+    - Lumpsum: Specify only `tokens` (model decides reasoning vs text split)
+    - Separate: Specify `reasoning_tokens` and/or `text_tokens` for fine control
+
     Attributes:
-        tokens: Maximum LLM tokens allowed (None = unlimited)
+        tokens: Maximum total LLM tokens (reasoning + text) (None = unlimited)
+        reasoning_tokens: Maximum tokens for internal reasoning/thinking (None = unlimited)
+        text_tokens: Maximum tokens for text output (None = unlimited)
         api_calls: Maximum API calls allowed (None = unlimited)
         web_searches: Maximum web searches allowed (None = unlimited)
         tool_invocations: Maximum tool uses allowed (None = unlimited)
@@ -52,6 +58,8 @@ class ResourceConstraints:
     """
 
     tokens: int | None = None
+    reasoning_tokens: int | None = None
+    text_tokens: int | None = None
     api_calls: int | None = None
     web_searches: int | None = None
     tool_invocations: int | None = None

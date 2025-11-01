@@ -105,6 +105,20 @@ class ContractedLLM:
         output_tokens = usage.get("completion_tokens", 0)
         total_tokens = usage.get("total_tokens", input_tokens + output_tokens)
 
+        # Extract reasoning vs text tokens for reasoning models (e.g., Gemini 2.5, o1)
+        reasoning_tokens = 0
+        text_tokens = 0
+        completion_tokens_details = usage.get("completion_tokens_details")
+        if completion_tokens_details:
+            # Handle both dict and Pydantic object formats
+            if isinstance(completion_tokens_details, dict):
+                reasoning_tokens = completion_tokens_details.get("reasoning_tokens", 0)
+                text_tokens = completion_tokens_details.get("text_tokens", 0)
+            else:
+                # Pydantic object - use attribute access
+                reasoning_tokens = getattr(completion_tokens_details, "reasoning_tokens", 0) or 0
+                text_tokens = getattr(completion_tokens_details, "text_tokens", 0) or 0
+
         # Estimate cost using our token counter or litellm's tracking
         model = kwargs.get("model", "unknown")
         try:
@@ -121,8 +135,13 @@ class ContractedLLM:
             # If cost calculation fails, use 0
             cost = 0
 
-        # Update resource usage
+        # Update resource usage with separate reasoning/text tracking if available
         self.enforcer.monitor.usage.add_api_call(cost=cost, tokens=total_tokens)
+        if reasoning_tokens > 0 or text_tokens > 0:
+            # Update with detailed breakdown
+            self.enforcer.monitor.usage.add_tokens(
+                count=0, reasoning=reasoning_tokens, text=text_tokens
+            )
 
         # Emit completion event
         self.enforcer._emit_event(

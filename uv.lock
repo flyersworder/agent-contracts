@@ -8,6 +8,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "litellm" },
+    { name = "python-dotenv" },
 ]
 
 [package.dev-dependencies]
@@ -20,7 +21,10 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "litellm", specifier = ">=1.60.0" }]
+requires-dist = [
+    { name = "litellm", specifier = ">=1.60.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+]
 
 [package.metadata.requires-dev]
 dev = [
