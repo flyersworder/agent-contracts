@@ -15,6 +15,7 @@ from agent_contracts.core.contract import (
     TemporalConstraints,
     TerminationCondition,
 )
+from agent_contracts.core.monitor import ResourceMonitor, ResourceUsage, ViolationInfo
 
 __all__ = [
     "Contract",
@@ -23,7 +24,10 @@ __all__ = [
     "InputSpecification",
     "OutputSpecification",
     "ResourceConstraints",
+    "ResourceMonitor",
+    "ResourceUsage",
     "SuccessCriterion",
     "TemporalConstraints",
     "TerminationCondition",
+    "ViolationInfo",
 ]
