@@ -119,7 +119,7 @@ Where:
 $$t_{completion} \leq t_{deadline}$$
 
 **Soft Deadline**: Task should complete by $t_{soft}$ with quality degradation after
-$$Q(t) = \begin{cases} 
+$$Q(t) = \begin{cases}
 Q_{max} & \text{if } t \leq t_{soft} \\
 Q_{max} \cdot e^{-\lambda(t-t_{soft})} & \text{if } t > t_{soft}
 \end{cases}$$
@@ -241,17 +241,17 @@ class ResourceMonitor:
         self.budget = contract.R
         self.consumed = {r: 0 for r in contract.R}
         self.start_time = time.time()
-    
+
     def consume(self, resource: str, amount: float):
         self.consumed[resource] += amount
         if self.consumed[resource] > self.budget[resource]:
             raise ContractViolation(f"{resource} budget exceeded")
-    
+
     def get_remaining(self, resource: str) -> float:
         return self.budget[resource] - self.consumed[resource]
-    
+
     def get_utilization(self) -> dict:
-        return {r: self.consumed[r] / self.budget[r] 
+        return {r: self.consumed[r] / self.budget[r]
                 for r in self.budget}
 ```
 
@@ -262,12 +262,12 @@ class TemporalMonitor:
         self.deadline = contract.T.deadline
         self.max_duration = contract.T.max_duration
         self.start_time = time.time()
-    
+
     def check_deadline(self) -> bool:
         if time.time() > self.deadline:
             raise DeadlineViolation()
         return True
-    
+
     def get_time_pressure(self) -> float:
         elapsed = time.time() - self.start_time
         remaining = self.deadline - time.time()
@@ -300,12 +300,12 @@ class BudgetAwareAgent:
                 "cost": {"tokens": 15000, "web": 3, "time": 25}
             }
         ]
-        
+
         # Filter feasible strategies
-        feasible = [s for s in strategies 
-                    if all(s["cost"][r] <= remaining_budget[r] 
+        feasible = [s for s in strategies
+                    if all(s["cost"][r] <= remaining_budget[r]
                            for r in s["cost"])]
-        
+
         # Select highest quality feasible strategy
         if feasible:
             return max(feasible, key=lambda s: s["quality"])
@@ -317,7 +317,7 @@ class BudgetAwareAgent:
 ```python
 def adaptive_strategy(self, budget_utilization: float):
     """Adjust strategy based on budget consumption rate"""
-    
+
     if budget_utilization < 0.3:
         # Plenty of budget remaining
         return "high_quality_mode"
@@ -336,7 +336,7 @@ Contracts can be modified during execution:
 **Extension Request**:
 ```python
 class ContractNegotiation:
-    def request_extension(self, agent_id: str, 
+    def request_extension(self, agent_id: str,
                          additional_resources: dict,
                          justification: str) -> bool:
         """
@@ -344,7 +344,7 @@ class ContractNegotiation:
         """
         current_contract = self.get_contract(agent_id)
         current_progress = self.assess_progress(agent_id)
-        
+
         # Decision logic
         if current_progress > 0.8 and \
            additional_resources["tokens"] < 20000:
@@ -365,11 +365,11 @@ def graceful_degradation(self, remaining_budget: dict):
         # Switch to smaller, more efficient model
         self.model = "small-model"  # e.g., gpt-4o-mini, claude-haiku
         self.reduce_context_window(max_tokens=4000)
-    
+
     if remaining_budget["web"] == 0:
         # Disable web search, use only cached knowledge
         self.disable_tool("web_search")
-    
+
     # Return partial results with confidence scores
     return self.compile_results(mark_incomplete=True)
 ```
@@ -401,7 +401,7 @@ ParentContract: 200K tokens, 100 API calls, 60 min
 
 **Allocation Strategy**:
 ```python
-def allocate_resources(self, subtasks: list, 
+def allocate_resources(self, subtasks: list,
                       total_budget: dict) -> list:
     """
     Allocate parent budget across child contracts
@@ -409,17 +409,17 @@ def allocate_resources(self, subtasks: list,
     # Reserve buffer (10% of budget)
     buffer = {r: total_budget[r] * 0.1 for r in total_budget}
     available = {r: total_budget[r] - buffer[r] for r in total_budget}
-    
+
     # Allocate proportionally by estimated complexity
     total_complexity = sum(t.complexity for t in subtasks)
-    
+
     allocations = []
     for task in subtasks:
         proportion = task.complexity / total_complexity
-        allocation = {r: available[r] * proportion 
+        allocation = {r: available[r] * proportion
                      for r in available}
         allocations.append(allocation)
-    
+
     return allocations
 ```
 
@@ -433,8 +433,8 @@ class ResourceMarket:
     def __init__(self):
         self.offers = []
         self.demands = []
-    
-    def offer_resources(self, agent_id: str, 
+
+    def offer_resources(self, agent_id: str,
                        resource: str, amount: float):
         """Agent offers unused resources"""
         self.offers.append({
@@ -443,16 +443,16 @@ class ResourceMarket:
             "amount": amount,
             "timestamp": time.time()
         })
-    
+
     def request_resources(self, agent_id: str,
                          resource: str, amount: float,
                          max_price: float):
         """Agent requests additional resources"""
         # Find matching offers
-        matches = [o for o in self.offers 
-                  if o["resource"] == resource 
+        matches = [o for o in self.offers
+                  if o["resource"] == resource
                   and o["amount"] >= amount]
-        
+
         if matches:
             # Execute trade
             offer = matches[0]
@@ -483,10 +483,10 @@ def allocate_scarce_resource(self, resource: str,
             agent.expected_completion * 0.1
         )
         scores.append((agent, score))
-    
+
     # Sort by priority
     ranked = sorted(scores, key=lambda x: x[1], reverse=True)
-    
+
     # Allocate to highest priority agent
     return ranked[0][0]
 ```
@@ -504,14 +504,14 @@ def sequential_pipeline(task, total_budget):
         Contract("Analyzer", budget=total_budget * 0.4),
         Contract("Reporter", budget=total_budget * 0.3)
     ]
-    
+
     result = task
     for contract in contracts:
         agent = spawn_agent(contract)
         result = agent.execute(result)
         if not contract.is_fulfilled():
             return partial_result(result, contract)
-    
+
     return result
 ```
 
@@ -523,21 +523,21 @@ def parallel_competition(task, total_budget):
     """
     num_agents = 3
     budget_per_agent = total_budget / num_agents
-    
+
     contracts = [
-        Contract(f"Solver_{i}", 
+        Contract(f"Solver_{i}",
                 budget=budget_per_agent,
                 deadline=time.time() + 300)
         for i in range(num_agents)
     ]
-    
+
     # Run in parallel
     results = []
     with ThreadPoolExecutor() as executor:
         futures = [executor.submit(spawn_agent(c).execute, task)
                   for c in contracts]
         results = [f.result() for f in futures]
-    
+
     # Select best result
     return max(results, key=lambda r: r.quality_score)
 ```
@@ -549,19 +549,19 @@ def collaborative_ensemble(task, total_budget):
     Specialized agents collaborate on different aspects
     """
     contracts = {
-        "research": Contract("Researcher", 
+        "research": Contract("Researcher",
                            budget={"tokens": 50K, "web": 10}),
         "analysis": Contract("Analyst",
                            budget={"tokens": 40K, "api": 20}),
         "synthesis": Contract("Writer",
                             budget={"tokens": 30K})
     }
-    
+
     # Execute in dependency order
     research_data = contracts["research"].execute(task)
     analysis_results = contracts["analysis"].execute(research_data)
     final_report = contracts["synthesis"].execute(analysis_results)
-    
+
     return final_report
 ```
 
@@ -602,13 +602,13 @@ def collaborative_ensemble(task, total_budget):
 contract:
   id: "code-review-agent-2024-q4"
   version: "1.0"
-  
+
   metadata:
     name: "Code Review Agent"
     description: "Automated code review for pull requests"
     created: "2024-10-01T00:00:00Z"
     expires: "2024-12-31T23:59:59Z"
-  
+
   inputs:
     schema:
       type: "object"
@@ -619,7 +619,7 @@ contract:
     constraints:
       max_file_size: "1MB"
       max_files: 50
-  
+
   outputs:
     schema:
       type: "object"
@@ -630,13 +630,13 @@ contract:
     quality_criteria:
       min_confidence: 0.8
       max_false_positives: 0.05
-  
+
   skills:
     - static_analysis
     - security_scanning
     - style_checking
     - complexity_analysis
-    
+
   resources:
     tokens:
       budget: 50000
@@ -652,13 +652,13 @@ contract:
       budget: "500MB"
     cost:
       budget: 2.50  # USD
-  
+
   temporal:
     max_duration: "5 minutes"
     deadline_type: "soft"
     soft_deadline: "3 minutes"
     quality_decay: 0.1  # per minute after soft deadline
-  
+
   success_criteria:
     - name: "completion_rate"
       condition: "all_files_reviewed == true"
@@ -669,7 +669,7 @@ contract:
     - name: "timeliness"
       condition: "completion_time < 300"  # seconds
       weight: 0.3
-  
+
   termination_conditions:
     - type: "time_limit"
       condition: "elapsed_time > max_duration"
@@ -691,13 +691,13 @@ class ContractAgent:
         self.agent = base_agent
         self.resource_monitor = ResourceMonitor(contract)
         self.temporal_monitor = TemporalMonitor(contract)
-        
+
     def execute(self, task):
         """Execute task within contract constraints"""
         try:
             # Activate contract
             self.contract.state = ContractState.ACTIVE
-            
+
             # Inject contract awareness into agent
             self.agent.set_budget_callback(
                 self.resource_monitor.get_remaining
@@ -705,10 +705,10 @@ class ContractAgent:
             self.agent.set_time_pressure_callback(
                 self.temporal_monitor.get_time_pressure
             )
-            
+
             # Execute with monitoring
             result = self._monitored_execution(task)
-            
+
             # Verify success criteria
             if self._check_success_criteria(result):
                 self.contract.state = ContractState.FULFILLED
@@ -716,43 +716,43 @@ class ContractAgent:
             else:
                 self.contract.state = ContractState.INCOMPLETE
                 return PartialResult(result, self.contract)
-                
+
         except ContractViolation as e:
             self.contract.state = ContractState.VIOLATED
             self._handle_violation(e)
             raise
         finally:
             self._log_metrics()
-    
+
     def _monitored_execution(self, task):
         """Execute with resource/time monitoring"""
         result = None
-        
+
         # Wrap agent tools with monitors
         for tool in self.agent.tools:
             tool.set_pre_hook(self._pre_tool_check)
             tool.set_post_hook(self._post_tool_update)
-        
+
         # Execute with periodic checks
         check_interval = 5  # seconds
         last_check = time.time()
-        
+
         for step in self.agent.execute_streaming(task):
             # Periodic monitoring
             if time.time() - last_check > check_interval:
                 self.temporal_monitor.check_deadline()
                 self._check_resource_health()
                 last_check = time.time()
-            
+
             result = step
-        
+
         return result
-    
+
     def _pre_tool_check(self, tool_name: str, args: dict):
         """Check before tool execution"""
         # Estimate resource cost
         estimated_cost = self._estimate_tool_cost(tool_name, args)
-        
+
         # Verify sufficient budget
         for resource, cost in estimated_cost.items():
             remaining = self.resource_monitor.get_remaining(resource)
@@ -761,8 +761,8 @@ class ContractAgent:
                     f"Tool {tool_name} requires {cost} {resource}, "
                     f"only {remaining} remaining"
                 )
-    
-    def _post_tool_update(self, tool_name: str, 
+
+    def _post_tool_update(self, tool_name: str,
                          result: dict, actual_cost: dict):
         """Update resource consumption after tool use"""
         for resource, cost in actual_cost.items():
@@ -775,19 +775,19 @@ class ContractAgent:
 ```python
 def generate_contract_aware_prompt(contract: Contract, task: str):
     """Generate system prompt with contract constraints"""
-    
+
     budget_info = "\n".join([
         f"- {resource}: {budget} {unit} "
         f"({contract.resource_monitor.get_remaining(resource)} remaining)"
         for resource, budget in contract.resources.items()
     ])
-    
+
     time_info = f"""
     Deadline: {contract.temporal.deadline}
     Time remaining: {contract.temporal_monitor.get_remaining_time()}
     Time pressure: {contract.temporal_monitor.get_time_pressure():.0%}
     """
-    
+
     prompt = f"""
 You are operating under a formal Agent Contract with explicit resource and time constraints.
 
@@ -822,7 +822,7 @@ Think step-by-step about how to allocate your remaining resources optimally.
 ```python
 def adaptive_instruction(budget_utilization: float):
     """Adjust instructions based on budget consumption"""
-    
+
     if budget_utilization < 0.3:
         return """
         You have ample budget remaining. Prioritize thoroughness and quality.
@@ -862,7 +862,7 @@ research_contract = Contract(
     outputs={
         "schema": "markdown_report",
         "min_length": 5000,
-        "sections": ["executive_summary", "market_analysis", 
+        "sections": ["executive_summary", "market_analysis",
                     "competitive_landscape", "recommendations"]
     },
     skills=["web_search", "data_analysis", "report_writing"],
@@ -882,35 +882,35 @@ research_contract = Contract(
 ```python
 def execute_research_report(contract):
     """Execute research with budget-aware strategy"""
-    
+
     # Phase 1: Information Gathering (40% of budget)
     web_budget = int(contract.resources["web_searches"] * 0.4)
     token_budget_p1 = int(contract.resources["tokens"] * 0.4)
-    
+
     research_data = gather_information(
         topic=contract.inputs["topic"],
         max_searches=web_budget,
         max_tokens=token_budget_p1
     )
-    
+
     # Phase 2: Analysis (30% of budget)
     token_budget_p2 = int(contract.resources["tokens"] * 0.3)
-    
+
     analysis = analyze_data(
         data=research_data,
         max_tokens=token_budget_p2,
         max_api_calls=int(contract.resources["api_calls"] * 0.3)
     )
-    
+
     # Phase 3: Report Writing (30% of budget)
     token_budget_p3 = int(contract.resources["tokens"] * 0.3)
-    
+
     report = generate_report(
         analysis=analysis,
         max_tokens=token_budget_p3,
         required_sections=contract.outputs["sections"]
     )
-    
+
     return report
 ```
 
@@ -957,33 +957,33 @@ code_review_contract = Contract(
 ```python
 def review_pull_request(contract):
     """Review PR with resource constraints"""
-    
+
     files = fetch_pr_files(contract.inputs["pr_number"])
     num_files = len(files)
-    
+
     # Allocate tokens per file
     tokens_per_file = contract.resources["tokens"] // num_files
-    
+
     reviews = []
     for file in files:
         # Check remaining budget
         remaining = contract.resource_monitor.get_remaining("tokens")
-        
+
         if remaining < tokens_per_file * 0.5:
             # Running low, use fast mode
             review = quick_review(file, max_tokens=remaining // 2)
         else:
             # Normal review
             review = thorough_review(file, max_tokens=tokens_per_file)
-        
+
         reviews.append(review)
-        
+
         # Check time pressure
         if contract.temporal_monitor.get_time_pressure() > 0.8:
             # Running out of time, summarize remaining files
             reviews.extend(batch_review(files[len(reviews):]))
             break
-    
+
     return consolidate_reviews(reviews)
 ```
 
@@ -1036,30 +1036,30 @@ specialist_contracts = {
 ```python
 def handle_support_ticket(ticket, coordinator_contract):
     """Route and handle support ticket"""
-    
+
     # Triage (determine category and urgency)
     triage_agent = spawn_agent(specialist_contracts["triage"])
     category, urgency = triage_agent.classify(ticket)
-    
+
     # Allocate resources based on urgency
     if urgency == "critical":
         # Relax resource constraints, tighten time
         specialist_contracts[category].resources["tokens"] *= 1.5
         specialist_contracts[category].temporal["deadline"] *= 0.5
-    
+
     # Route to specialist
     specialist = spawn_agent(specialist_contracts[category])
-    
+
     try:
         response = specialist.handle(ticket)
-        
+
         if response.requires_escalation:
             # Escalate with remaining coordinator budget
             escalation = spawn_agent(specialist_contracts["escalation"])
             response = escalation.handle(ticket, context=response)
-        
+
         return response
-        
+
     except ContractViolation:
         # Graceful degradation
         return generate_holding_response(ticket)
@@ -1075,11 +1075,11 @@ def create_adaptive_pipeline_contract(data_size, deadline, quality_target):
     """
     Create contract that adapts to data size and requirements
     """
-    
+
     # Estimate base resources
     base_tokens = data_size * 100  # tokens per record
     base_api = data_size * 0.5     # API calls per record
-    
+
     # Apply quality multiplier
     quality_multipliers = {
         "quick": 0.5,
@@ -1087,7 +1087,7 @@ def create_adaptive_pipeline_contract(data_size, deadline, quality_target):
         "thorough": 2.0
     }
     multiplier = quality_multipliers[quality_target]
-    
+
     return Contract(
         name=f"Data Pipeline - {quality_target}",
         resources={
@@ -1109,17 +1109,17 @@ def create_adaptive_pipeline_contract(data_size, deadline, quality_target):
 ```python
 def process_dataset(data, contract):
     """Process with adaptive quality based on constraints"""
-    
+
     results = []
-    
+
     for i, record in enumerate(data):
         # Calculate remaining budget per record
         records_remaining = len(data) - i
         tokens_per_record = (
-            contract.resource_monitor.get_remaining("tokens") 
+            contract.resource_monitor.get_remaining("tokens")
             / records_remaining
         )
-        
+
         # Adapt processing strategy
         if tokens_per_record > 500:
             # Thorough processing
@@ -1130,15 +1130,15 @@ def process_dataset(data, contract):
         else:
             # Quick processing
             result = quick_analysis(record, max_tokens=100)
-        
+
         results.append(result)
-        
+
         # Early exit if time running out
         if contract.temporal_monitor.get_time_pressure() > 0.95:
             # Process remaining records in batch
             results.extend(batch_process(data[i+1:]))
             break
-    
+
     return results
 ```
 
@@ -1171,25 +1171,25 @@ def process_dataset(data, contract):
 class ContractOptimizer:
     def __init__(self):
         self.history = []  # Contract execution history
-    
+
     def suggest_contract(self, task_type: str):
         """Suggest optimal contract based on historical data"""
-        
+
         # Filter similar past tasks
-        similar = [h for h in self.history 
+        similar = [h for h in self.history
                   if h.task_type == task_type]
-        
+
         if not similar:
             return default_contract(task_type)
-        
+
         # Analyze successful contracts
-        successful = [h for h in similar 
+        successful = [h for h in similar
                      if h.state == ContractState.FULFILLED]
-        
+
         # Calculate statistics
         avg_tokens = np.mean([h.tokens_used for h in successful])
         avg_time = np.mean([h.time_elapsed for h in successful])
-        
+
         # Add buffer (20%)
         recommended = Contract(
             resources={
@@ -1200,7 +1200,7 @@ class ContractOptimizer:
                 "deadline": avg_time * 1.2
             }
         )
-        
+
         return recommended
 ```
 
@@ -1208,7 +1208,7 @@ class ContractOptimizer:
 ```python
 def ab_test_contracts(task_type: str, n_trials: int = 100):
     """Test different contract configurations"""
-    
+
     variants = {
         "aggressive": Contract(
             resources={"tokens": 50000, "time": 300}
@@ -1220,22 +1220,22 @@ def ab_test_contracts(task_type: str, n_trials: int = 100):
             resources={"tokens": 150000, "time": 900}
         )
     }
-    
+
     results = {v: [] for v in variants}
-    
+
     for _ in range(n_trials):
         for variant_name, contract in variants.items():
             task = generate_task(task_type)
             result = execute_with_contract(task, contract)
             results[variant_name].append(result)
-    
+
     # Analyze results
     for variant_name, outcomes in results.items():
-        success_rate = sum(1 for o in outcomes 
+        success_rate = sum(1 for o in outcomes
                           if o.state == ContractState.FULFILLED) / n_trials
         avg_cost = np.mean([o.total_cost for o in outcomes])
         avg_quality = np.mean([o.quality_score for o in outcomes])
-        
+
         print(f"{variant_name}: {success_rate:.1%} success, "
               f"${avg_cost:.2f} cost, {avg_quality:.2f} quality")
 ```
@@ -1270,12 +1270,12 @@ Train models to predict optimal resource allocation:
 class ResourcePredictor:
     def __init__(self):
         self.model = train_model(historical_contracts)
-    
+
     def predict_requirements(self, task_description: str):
         """Predict optimal resources for task"""
         features = extract_features(task_description)
         predicted = self.model.predict(features)
-        
+
         return {
             "tokens": predicted["tokens"],
             "api_calls": predicted["api_calls"],
@@ -1314,15 +1314,15 @@ cross_org_contract:
     - organization: "CompanyB"
       agent: "AnalysisAgent"
       contributes: {skills: ["ml_analysis"], resources: {compute: "10 GPU-hours"}}
-  
+
   shared_resources:
     tokens: 150000
     api_calls: 100
-  
+
   resource_sharing:
     CompanyA_percentage: 60%
     CompanyB_percentage: 40%
-  
+
   output_distribution:
     CompanyA: ["market_insights", "raw_data"]
     CompanyB: ["analysis_results", "ml_models"]
@@ -1335,9 +1335,9 @@ cross_org_contract:
 contract_with_human_approval = Contract(
     # ... standard fields ...
     approval_required=[
-        {"stage": "before_expensive_operation", 
+        {"stage": "before_expensive_operation",
          "threshold": {"cost": 10.00}},
-        {"stage": "before_external_api", 
+        {"stage": "before_external_api",
          "apis": ["payment_api", "email_api"]},
         {"stage": "before_deadline_extension"}
     ]
@@ -1352,21 +1352,21 @@ def request_human_renegotiation(agent_id, reason):
     """
     notification = f"""
     Agent {agent_id} requests contract modification:
-    
+
     Current State:
     - Progress: 75% complete
     - Resources: 90% of token budget consumed
     - Time: 80% of deadline elapsed
-    
+
     Request:
     - Additional 30K tokens
     - 10-minute deadline extension
-    
+
     Reason: {reason}
-    
+
     [Approve] [Deny] [Modify]
     """
-    
+
     return await_human_decision(notification)
 ```
 

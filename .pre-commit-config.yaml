@@ -1,0 +1,105 @@
+# Pre-commit hooks for agent-contracts
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+
+repos:
+  # uv-specific hooks
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    # uv version
+    rev: 0.9.7
+    hooks:
+      # Update uv.lock when pyproject.toml changes
+      - id: uv-lock
+        name: uv-lock
+
+  # Ruff - Fast Python linter and formatter (replaces black, isort, flake8, etc.)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.3
+    hooks:
+      # Run the linter
+      - id: ruff
+        args: [--fix]
+        name: ruff-lint
+      # Run the formatter
+      - id: ruff-format
+        name: ruff-format
+
+  # Type checking with mypy
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      - id: mypy
+        name: mypy-type-check
+        additional_dependencies: []
+        args: [--strict, --ignore-missing-imports]
+
+  # General file quality checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # Remove trailing whitespace
+      - id: trailing-whitespace
+        name: trailing-whitespace
+      # Ensure files end with newline
+      - id: end-of-file-fixer
+        name: end-of-file-fixer
+      # Check YAML file syntax
+      - id: check-yaml
+        name: check-yaml
+      # Check for accidentally committed merge conflict markers
+      - id: check-merge-conflict
+        name: check-merge-conflict
+      # Prevent committing large files
+      - id: check-added-large-files
+        name: check-added-large-files
+        args: [--maxkb=1000]
+      # Check for files that would conflict on case-insensitive filesystems
+      - id: check-case-conflict
+        name: check-case-conflict
+      # Check JSON file syntax
+      - id: check-json
+        name: check-json
+      # Check TOML file syntax
+      - id: check-toml
+        name: check-toml
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.45.0
+    hooks:
+      - id: markdownlint
+        name: markdownlint
+        args: [--fix, --disable, MD013, MD033, MD041]
+        # MD013: Line length (disabled - many code blocks)
+        # MD033: Inline HTML (disabled - we use HTML in docs)
+        # MD041: First line in file should be a top level heading (disabled)
+
+# Configuration for pre-commit itself
+default_language_version:
+  python: python3.12
+
+# Exclude certain files/directories
+exclude: |
+  (?x)^(
+      \.git/.*|
+      \.venv/.*|
+      __pycache__/.*|
+      \.pytest_cache/.*|
+      \.mypy_cache/.*|
+      \.ruff_cache/.*|
+      dist/.*|
+      build/.*
+  )$
+
+# CI configuration
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from pre-commit hooks
+
+    for more information, see https://pre-commit.ci
+  autofix_prs: true
+  autoupdate_branch: ''
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: []
+  submodules: false

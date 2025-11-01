@@ -138,6 +138,65 @@ agent-contracts/
 
 *Installation instructions will be added when the reference implementation is available.*
 
+## Development
+
+### Setup
+
+This project uses [uv](https://github.com/astral-sh/uv) for dependency management. To set up the development environment:
+
+```bash
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Clone the repository
+git clone https://github.com/flyersworder/agent-contracts.git
+cd agent-contracts
+
+# Install dependencies (including dev dependencies)
+uv sync --dev
+
+# Install pre-commit hooks
+uv run pre-commit install
+```
+
+### Code Quality
+
+This project uses several tools to maintain code quality:
+
+- **[Ruff](https://github.com/astral-sh/ruff)**: Fast Python linter and formatter (replaces black, isort, flake8)
+- **[mypy](https://github.com/python/mypy)**: Static type checker
+- **[pre-commit](https://pre-commit.com/)**: Git hooks for automated checks
+
+Pre-commit hooks will automatically run on every commit. To manually run all checks:
+
+```bash
+# Run all pre-commit hooks
+uv run pre-commit run --all-files
+
+# Run specific tools
+uv run ruff check .                    # Linting
+uv run ruff format .                   # Formatting
+uv run mypy .                          # Type checking
+```
+
+### Running Tests
+
+```bash
+# Run tests (when available)
+uv run pytest
+
+# Run with coverage
+uv run pytest --cov=agent_contracts --cov-report=html
+```
+
+### Project Structure
+
+- `docs/` - Documentation (whitepaper, testing strategy)
+- `src/` - Source code (planned)
+- `tests/` - Test suite (planned)
+- `pyproject.toml` - Project configuration and dependencies
+- `uv.lock` - Locked dependencies for reproducibility
+
 ## Contributing
 
 This is an evolving framework. We welcome contributions in:

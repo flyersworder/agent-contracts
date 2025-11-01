@@ -18,20 +18,30 @@ The complete theoretical framework document covering:
 - **Empirical Considerations** - Performance metrics, optimization, and common pitfalls
 - **Future Directions** - ML integration, blockchain, and human-in-the-loop systems
 
+### [Testing Strategy](./testing-strategy.md)
+**Comprehensive Validation Framework for Agent Contracts**
+
+The rigorous testing and validation strategy covering:
+
+- **Core Hypotheses** - 6 testable claims with clear success criteria
+- **Metrics Framework** - Cost, efficiency, temporal, quality, and multi-agent metrics
+- **Benchmark Suite** - Standardized tasks from simple to complex
+- **Experimental Protocols** - Detailed procedures for each hypothesis test
+- **Statistical Validation** - Significance testing, sample sizes, and effect sizes
+- **Baseline Comparisons** - Fair comparisons against unconstrained, hard-limit, and manual approaches
+- **Implementation Roadmap** - 4-phase plan from foundation to publication
+
 ## 🎯 Quick Navigation
 
 ### By Role
 
 **For Researchers:**
-- Section 2: Formal Framework
-- Section 7: Empirical Considerations
-- Section 8: Future Directions
+- Whitepaper: Section 2 (Formal Framework), Section 7 (Empirical Considerations), Section 8 (Future Directions)
+- **Testing Strategy: Full document** - Hypotheses, metrics, and experimental design
 
 **For Engineers:**
-- Section 5: Implementation Architecture
-- Section 6: Use Cases
-- Appendix A: Contract Schema
-- Appendix B: Reference Implementation
+- Whitepaper: Section 5 (Implementation Architecture), Section 6 (Use Cases), Appendices
+- **Testing Strategy: Section 7** - Implementation roadmap and Phase 1-4 plan
 
 **For Product Managers:**
 - Section 1: Introduction
@@ -54,9 +64,10 @@ The complete theoretical framework document covering:
 
 ```
 docs/
-├── README.md          # This file - documentation index
-├── whitepaper.md      # Complete theoretical framework
-└── examples/          # Future code examples and tutorials
+├── README.md            # This file - documentation index
+├── whitepaper.md        # Complete theoretical framework
+├── testing-strategy.md  # Comprehensive validation framework
+└── examples/            # Future code examples and tutorials
 ```
 
 ## 🚀 Getting Started
