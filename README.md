@@ -218,10 +218,10 @@ Qing Ye (with assistance from Claude, Anthropic)
 If you use this framework in your research, please cite:
 
 ```bibtex
-@techreport{ye2024agentcontracts,
+@techreport{ye2025agentcontracts,
   title={Agent Contracts: A Resource-Bounded Optimization Framework for Autonomous AI Systems},
   author={Ye, Qing},
-  year={2024},
+  year={2025},
   month={October}
 }
 ```
@@ -234,4 +234,4 @@ If you use this framework in your research, please cite:
 
 ---
 
-**Version**: 1.0 | **Last Updated**: October 29, 2024
+**Version**: 1.0 | **Last Updated**: October 29, 2025

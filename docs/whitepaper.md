@@ -600,14 +600,14 @@ def collaborative_ensemble(task, total_budget):
 **YAML Contract Definition**:
 ```yaml
 contract:
-  id: "code-review-agent-2024-q4"
+  id: "code-review-agent-2025-q4"
   version: "1.0"
 
   metadata:
     name: "Code Review Agent"
     description: "Automated code review for pull requests"
-    created: "2024-10-01T00:00:00Z"
-    expires: "2024-12-31T23:59:59Z"
+    created: "2025-10-01T00:00:00Z"
+    expires: "2025-12-31T23:59:59Z"
 
   inputs:
     schema:
@@ -1604,6 +1604,6 @@ Planned modules:
 ---
 
 **Document Version**: 1.0
-**Last Updated**: October 29, 2024
+**Last Updated**: October 29, 2025
 **Authors**: Qing Ye (with assistance from Claude, Anthropic)
 **License**: CC BY 4.0
