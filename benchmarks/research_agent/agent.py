@@ -271,8 +271,8 @@ Final Answer:"""
         Returns:
             LLM response
         """
-        # Default implementation: direct litellm call
-        return completion(model=self.model, messages=messages)
+        # Default implementation: direct litellm call with temperature=0 for reproducibility
+        return completion(model=self.model, messages=messages, temperature=0)
 
     def _extract_reasoning_tokens(self, usage: dict[str, Any]) -> int:
         """Extract reasoning tokens from usage data.

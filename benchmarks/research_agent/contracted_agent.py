@@ -53,7 +53,7 @@ class ContractedResearchAgent(ResearchAgent):
 
         # Create fresh ContractedLLM with auto_start
         with ContractedLLM(contract=contract, strict_mode=self.strict_mode) as llm:
-            response = llm.completion(model=self.model, messages=messages)
+            response = llm.completion(model=self.model, messages=messages, temperature=0)
 
         return response
 
@@ -61,17 +61,17 @@ class ContractedResearchAgent(ResearchAgent):
         """Create default contract for planning step.
 
         Returns:
-            Contract with low reasoning effort for decomposition
+            Contract with MEDIUM reasoning effort for quality decomposition
         """
         return Contract(
             id="planning",
             name="Question Decomposition",
             description="Decompose research question into sub-questions",
             resources=ResourceConstraints(
-                reasoning_tokens=500,  # Low effort - simple planning task
+                reasoning_tokens=1200,  # MEDIUM effort - quality planning (was 500)
                 text_tokens=300,  # List of 3-5 questions
                 api_calls=1,
-                cost_usd=0.01,
+                cost_usd=0.015,  # Increased to match higher token budget
             ),
         )
 
@@ -97,16 +97,16 @@ class ContractedResearchAgent(ResearchAgent):
         """Create default contract for synthesis step.
 
         Returns:
-            Contract with medium reasoning effort for integration
+            Contract with HIGH reasoning effort for quality synthesis
         """
         return Contract(
             id="synthesis",
             name="Answer Synthesis",
             description="Synthesize sub-answers into final answer",
             resources=ResourceConstraints(
-                reasoning_tokens=1200,  # Medium effort - connecting insights
+                reasoning_tokens=2500,  # HIGH effort - complex technical synthesis (was 1200)
                 text_tokens=800,  # Comprehensive final answer
                 api_calls=1,
-                cost_usd=0.02,
+                cost_usd=0.03,  # Increased cost budget to match higher tokens
             ),
         )

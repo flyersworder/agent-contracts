@@ -42,4 +42,5 @@ class UncontractedResearchAgent(ResearchAgent):
             model=self.model,
             messages=messages,
             reasoning_effort="high",  # Always use high effort (no optimization)
+            temperature=0,  # Deterministic for reproducibility
         )
