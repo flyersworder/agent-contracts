@@ -23,6 +23,16 @@ from agent_contracts.core.enforcement import (
     EnforcementEvent,
 )
 from agent_contracts.core.monitor import ResourceMonitor, ResourceUsage, ViolationInfo
+from agent_contracts.core.planning import (
+    ResourceAllocation,
+    StrategyRecommendation,
+    Task,
+    TaskPriority,
+    estimate_quality_cost_time,
+    plan_resource_allocation,
+    prioritize_tasks,
+    recommend_strategy,
+)
 from agent_contracts.core.prompts import (
     estimate_prompt_tokens,
     generate_adaptive_instruction,
@@ -48,10 +58,14 @@ __all__ = [
     "EnforcementEvent",
     "InputSpecification",
     "OutputSpecification",
+    "ResourceAllocation",
     "ResourceConstraints",
     "ResourceMonitor",
     "ResourceUsage",
+    "StrategyRecommendation",
     "SuccessCriterion",
+    "Task",
+    "TaskPriority",
     "TemporalConstraints",
     "TerminationCondition",
     "TokenCount",
@@ -59,7 +73,11 @@ __all__ = [
     "ViolationInfo",
     "estimate_cost",
     "estimate_prompt_tokens",
+    "estimate_quality_cost_time",
     "estimate_tokens",
     "generate_adaptive_instruction",
     "generate_budget_prompt",
+    "plan_resource_allocation",
+    "prioritize_tasks",
+    "recommend_strategy",
 ]
