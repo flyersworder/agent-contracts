@@ -30,33 +30,59 @@ Agent Contracts provide a mathematical framework that enables:
 ## Quick Example
 
 ```python
-# Define a contract for a code review agent
+from agent_contracts import Contract, ContractedLLM, ResourceConstraints, ContractMode
+
+# Define a contract with resource budgets
 contract = Contract(
-    name="PR Review Agent",
-    resources={
-        "tokens": 50000,
-        "api_calls": 30,
-        "cost": 2.50  # USD
-    },
-    temporal={
-        "deadline": "5 minutes",
-        "urgency": "high"
-    },
-    success_criteria=[
-        {"name": "completion", "weight": 0.4},
-        {"name": "accuracy", "weight": 0.3},
-        {"name": "timeliness", "weight": 0.3}
-    ]
+    id="research-task",
+    name="Research Assistant",
+    mode=ContractMode.BALANCED,  # Optimize for quality-cost-time balance
+    resources=ResourceConstraints(
+        tokens=10000,
+        api_calls=50,
+        cost_usd=1.0
+    )
 )
 
-# Execute within contract constraints
-agent = ContractAgent(contract)
-result = agent.execute(pull_request)
+# Execute LLM calls within contract constraints
+with ContractedLLM(contract) as llm:
+    response = llm.completion(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "Summarize recent AI papers"}]
+    )
 
 # Contract automatically enforces:
-# - Resource consumption limits
-# - Deadline compliance
-# - Quality-speed tradeoffs
+# ✅ Token budget limits
+# ✅ API call tracking
+# ✅ Cost monitoring
+# ✅ Violations trigger warnings or stops
+```
+
+### Contract Modes
+
+Choose the mode that fits your requirements:
+
+```python
+# URGENT mode: Minimize time, accept higher costs
+contract = Contract(
+    mode=ContractMode.URGENT,
+    resources=ResourceConstraints(tokens=10000)
+)
+# → 50% faster execution, 20% more tokens
+
+# BALANCED mode: Optimize quality-cost-time tradeoff
+contract = Contract(
+    mode=ContractMode.BALANCED,
+    resources=ResourceConstraints(tokens=10000)
+)
+# → Standard execution with quality focus
+
+# ECONOMICAL mode: Minimize costs, accept longer runtime
+contract = Contract(
+    mode=ContractMode.ECONOMICAL,
+    resources=ResourceConstraints(tokens=10000)
+)
+# → 60% fewer tokens, 50% longer execution
 ```
 
 ## Documentation
@@ -106,11 +132,29 @@ DRAFTED → ACTIVE → {FULFILLED, VIOLATED, EXPIRED, TERMINATED}
 
 ## Repository Status
 
-🚧 **Early Development**
+🚀 **Active Development** (November 2025)
 
-- ✅ Theoretical framework complete
-- ⏳ Reference implementation in progress
-- ⏳ Integration examples coming soon
+**Phase 1: Core Framework** ✅ Complete
+- ✅ Contract data structures (C = I, O, S, R, T, Φ, Ψ)
+- ✅ Resource monitoring and enforcement
+- ✅ Token counting and cost tracking
+- ✅ LiteLLM integration wrapper
+- ✅ 145 tests, 96% coverage
+- ✅ Live demo with Gemini 2.0 Flash
+
+**Phase 2A: Strategic Optimization** ✅ Complete
+- ✅ Contract modes (URGENT, BALANCED, ECONOMICAL)
+- ✅ Budget-aware prompt generation
+- ✅ Strategic planning utilities
+- ✅ Quality-cost-time Pareto benchmark
+- ✅ 209 core tests passing
+
+**Phase 2B: Governance & Benchmarks** 🏗️ In Progress
+- ✅ Multi-step research benchmark
+- ✅ Budget violation policy testing
+- ✅ Cost governance validation
+- 🏗️ Variance reduction analysis
+- ⏳ Quality metrics framework
 
 ## Use Cases
 
@@ -125,18 +169,50 @@ Agent Contracts are designed for:
 
 ```
 agent-contracts/
+├── src/agent_contracts/           # Core package
+│   ├── core/
+│   │   ├── contract.py           # Contract data structures
+│   │   ├── monitor.py            # Resource monitoring
+│   │   ├── enforcement.py        # Constraint enforcement
+│   │   ├── tokens.py             # Token counting
+│   │   ├── planning.py           # Strategic planning
+│   │   └── prompts.py            # Budget-aware prompts
+│   └── integrations/
+│       └── litellm_wrapper.py    # LiteLLM integration
+├── tests/                         # 209 tests, 94% coverage
+│   ├── core/                     # Core module tests
+│   └── integrations/             # Integration tests
+├── benchmarks/                    # Live demonstrations & benchmarks
+│   ├── demo_phase1.py            # Phase 1 interactive demo
+│   ├── strategic/                # Strategic optimization benchmarks
+│   ├── research_agent/           # Multi-step research benchmark
+│   └── governance/               # Policy & governance tests
 ├── docs/
-│   ├── README.md          # Documentation index
-│   ├── whitepaper.md      # Complete theoretical framework
-│   └── examples/          # Code examples (coming soon)
-├── src/                   # Reference implementation (planned)
-├── tests/                 # Test suite (planned)
-└── README.md              # This file
+│   ├── whitepaper.md             # Complete theoretical framework
+│   └── testing-strategy.md       # Testing & validation plan
+├── pyproject.toml                 # Package configuration
+└── README.md                      # This file
 ```
 
 ## Installation
 
-*Installation instructions will be added when the reference implementation is available.*
+```bash
+# Clone the repository
+git clone https://github.com/flyersworder/agent-contracts.git
+cd agent-contracts
+
+# Install with uv (recommended)
+uv pip install -e .
+
+# Or install with pip
+pip install -e .
+```
+
+**Requirements**: Python ≥ 3.12
+
+**Optional dependencies**:
+- `litellm` - For LLM integration (automatically installed)
+- `matplotlib` - For visualization benchmarks (`pip install matplotlib`)
 
 ## Development
 
@@ -234,4 +310,4 @@ If you use this framework in your research, please cite:
 
 ---
 
-**Version**: 1.0 | **Last Updated**: October 29, 2025
+**Version**: 0.1.0 | **Last Updated**: November 2, 2025
