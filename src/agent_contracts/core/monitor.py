@@ -256,44 +256,56 @@ class ResourceMonitor:
     def check_constraints(self) -> list[ViolationInfo]:
         """Check if current usage violates any constraints.
 
+        Token constraints are checked based on the active mode:
+        - Lumpsum mode: Check total tokens only
+        - Fine-grained mode: Check reasoning_tokens and/or text_tokens separately
+        - No mode: Skip token checks
+
         Returns:
             List of violations (empty if all constraints satisfied)
         """
         violations: list[ViolationInfo] = []
 
-        # Check each resource constraint
-        if self.constraints.tokens is not None and self.usage.tokens > self.constraints.tokens:
-            violations.append(
-                ViolationInfo(
-                    resource="tokens", limit=self.constraints.tokens, actual=self.usage.tokens
-                )
-            )
+        # Token validation based on mode
+        mode = self.constraints.token_mode
 
-        # Check reasoning tokens separately if specified
-        if (
-            self.constraints.reasoning_tokens is not None
-            and self.usage.reasoning_tokens > self.constraints.reasoning_tokens
-        ):
-            violations.append(
-                ViolationInfo(
-                    resource="reasoning_tokens",
-                    limit=self.constraints.reasoning_tokens,
-                    actual=self.usage.reasoning_tokens,
+        if mode == "lumpsum":
+            # Lumpsum mode: Check total tokens against combined budget
+            if self.constraints.tokens is not None and self.usage.tokens > self.constraints.tokens:
+                violations.append(
+                    ViolationInfo(
+                        resource="tokens",
+                        limit=self.constraints.tokens,
+                        actual=self.usage.tokens,
+                    )
                 )
-            )
 
-        # Check text tokens separately if specified
-        if (
-            self.constraints.text_tokens is not None
-            and self.usage.text_tokens > self.constraints.text_tokens
-        ):
-            violations.append(
-                ViolationInfo(
-                    resource="text_tokens",
-                    limit=self.constraints.text_tokens,
-                    actual=self.usage.text_tokens,
+        elif mode == "fine_grained":
+            # Fine-grained mode: Check reasoning and text tokens separately
+            if (
+                self.constraints.reasoning_tokens is not None
+                and self.usage.reasoning_tokens > self.constraints.reasoning_tokens
+            ):
+                violations.append(
+                    ViolationInfo(
+                        resource="reasoning_tokens",
+                        limit=self.constraints.reasoning_tokens,
+                        actual=self.usage.reasoning_tokens,
+                    )
                 )
-            )
+
+            if (
+                self.constraints.text_tokens is not None
+                and self.usage.text_tokens > self.constraints.text_tokens
+            ):
+                violations.append(
+                    ViolationInfo(
+                        resource="text_tokens",
+                        limit=self.constraints.text_tokens,
+                        actual=self.usage.text_tokens,
+                    )
+                )
+        # else: mode == "none", skip token checks
 
         if (
             self.constraints.api_calls is not None
@@ -386,24 +398,40 @@ class ResourceMonitor:
     def get_usage_percentage(self) -> dict[str, float]:
         """Calculate usage as percentage of constraints.
 
+        Token percentages are reported based on the active mode:
+        - Lumpsum mode: Only show "tokens" percentage
+        - Fine-grained mode: Show "reasoning_tokens" and/or "text_tokens" percentages
+        - No mode: No token percentages
+
         Returns:
             Dictionary mapping resource names to usage percentages (0-100+)
             Resources without constraints are excluded
         """
         percentages: dict[str, float] = {}
 
-        if self.constraints.tokens is not None and self.constraints.tokens > 0:
-            percentages["tokens"] = (self.usage.tokens / self.constraints.tokens) * 100
+        # Token percentages based on mode
+        mode = self.constraints.token_mode
 
-        if self.constraints.reasoning_tokens is not None and self.constraints.reasoning_tokens > 0:
-            percentages["reasoning_tokens"] = (
-                self.usage.reasoning_tokens / self.constraints.reasoning_tokens
-            ) * 100
+        if mode == "lumpsum":
+            # Lumpsum mode: Show total tokens only
+            if self.constraints.tokens is not None and self.constraints.tokens > 0:
+                percentages["tokens"] = (self.usage.tokens / self.constraints.tokens) * 100
 
-        if self.constraints.text_tokens is not None and self.constraints.text_tokens > 0:
-            percentages["text_tokens"] = (
-                self.usage.text_tokens / self.constraints.text_tokens
-            ) * 100
+        elif mode == "fine_grained":
+            # Fine-grained mode: Show reasoning and/or text tokens
+            if (
+                self.constraints.reasoning_tokens is not None
+                and self.constraints.reasoning_tokens > 0
+            ):
+                percentages["reasoning_tokens"] = (
+                    self.usage.reasoning_tokens / self.constraints.reasoning_tokens
+                ) * 100
+
+            if self.constraints.text_tokens is not None and self.constraints.text_tokens > 0:
+                percentages["text_tokens"] = (
+                    self.usage.text_tokens / self.constraints.text_tokens
+                ) * 100
+        # else: mode == "none", no token percentages
 
         if self.constraints.api_calls is not None and self.constraints.api_calls > 0:
             percentages["api_calls"] = (self.usage.api_calls / self.constraints.api_calls) * 100

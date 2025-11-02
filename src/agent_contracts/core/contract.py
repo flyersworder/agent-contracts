@@ -41,14 +41,41 @@ class DeadlineType(Enum):
 class ResourceConstraints:
     """Multi-dimensional resource budget (Section 2.2 of whitepaper).
 
-    Supports both lumpsum and separate token budgets for reasoning models:
-    - Lumpsum: Specify only `tokens` (model decides reasoning vs text split)
-    - Separate: Specify `reasoning_tokens` and/or `text_tokens` for fine control
+    Token Budget Modes:
+
+    1. Lumpsum Mode (default, backward compatible):
+       ResourceConstraints(tokens=10000)
+       - Single budget for reasoning + text output combined
+       - Model decides the split between thinking and output
+
+    2. Fine-Grained Mode (explicit control):
+       ResourceConstraints(reasoning_tokens=5000, text_tokens=2000)
+       - Separate budgets for reasoning vs text output
+       - More control over model behavior (limit verbosity, allow deep thinking, etc.)
+
+    3. Partial Fine-Grained Mode:
+       ResourceConstraints(text_tokens=1000)  # Limit output, unlimited reasoning
+       ResourceConstraints(reasoning_tokens=5000)  # Limit thinking, unlimited output
+
+    Note: Cannot mix modes - specify EITHER tokens OR (reasoning_tokens/text_tokens).
+
+    Reasoning Effort Control:
+
+    For reasoning models (Gemini 2.5, o1, Claude extended thinking), you can specify
+    how deeply the model should think:
+
+    - reasoning_effort="low": Quick, shallow thinking (~100-500 tokens)
+    - reasoning_effort="medium": Balanced thinking (~500-2000 tokens)
+    - reasoning_effort="high": Deep, thorough thinking (≥2000 tokens)
+
+    If reasoning_effort is specified, it must be compatible with reasoning_tokens budget.
+    If not specified, effort is auto-selected based on budget.
 
     Attributes:
         tokens: Maximum total LLM tokens (reasoning + text) (None = unlimited)
         reasoning_tokens: Maximum tokens for internal reasoning/thinking (None = unlimited)
         text_tokens: Maximum tokens for text output (None = unlimited)
+        reasoning_effort: How deeply model should think ("low"/"medium"/"high") (None = auto)
         api_calls: Maximum API calls allowed (None = unlimited)
         web_searches: Maximum web searches allowed (None = unlimited)
         tool_invocations: Maximum tool uses allowed (None = unlimited)
@@ -60,6 +87,7 @@ class ResourceConstraints:
     tokens: int | None = None
     reasoning_tokens: int | None = None
     text_tokens: int | None = None
+    reasoning_effort: str | None = None
     api_calls: int | None = None
     web_searches: int | None = None
     tool_invocations: int | None = None
@@ -68,10 +96,104 @@ class ResourceConstraints:
     cost_usd: float | None = None
 
     def __post_init__(self) -> None:
-        """Validate resource constraints are non-negative."""
+        """Validate resource constraints are non-negative and mode consistency."""
+        # Validate non-negative values (skip string fields like reasoning_effort)
         for field_name, value in self.__dict__.items():
-            if value is not None and value < 0:
+            if value is not None and isinstance(value, (int, float)) and value < 0:
                 raise ValueError(f"{field_name} must be non-negative, got {value}")
+
+        # Validate token mode consistency - cannot mix lumpsum with fine-grained
+        has_lumpsum = self.tokens is not None
+        has_fine_grained = self.reasoning_tokens is not None or self.text_tokens is not None
+
+        if has_lumpsum and has_fine_grained:
+            raise ValueError(
+                "Cannot mix token budget modes. Use EITHER:\n"
+                "  - Lumpsum mode: tokens=10000\n"
+                "  - Fine-grained mode: reasoning_tokens=5000, text_tokens=2000\n"
+                "  - Partial fine-grained: text_tokens=1000 (or reasoning_tokens=5000)"
+            )
+
+        # Validate reasoning_effort values
+        if self.reasoning_effort is not None:
+            valid_efforts = {"low", "medium", "high"}
+            if self.reasoning_effort not in valid_efforts:
+                raise ValueError(
+                    f"reasoning_effort must be one of {valid_efforts}, "
+                    f"got '{self.reasoning_effort}'"
+                )
+
+        # Validate reasoning_effort + reasoning_tokens compatibility
+        if self.reasoning_effort and self.reasoning_tokens:
+            self._validate_reasoning_compatibility()
+
+    def _validate_reasoning_compatibility(self) -> None:
+        """Ensure reasoning_effort aligns with reasoning_tokens budget.
+
+        Raises:
+            ValueError: If effort level is incompatible with token budget
+        """
+        effort = self.reasoning_effort
+        budget = self.reasoning_tokens
+
+        # Define minimum token requirements for each effort level
+        # These are empirical guidelines based on reasoning model behavior
+        if effort == "high" and budget is not None and budget < 2000:
+            raise ValueError(
+                f"reasoning_effort='high' typically requires ≥2000 reasoning tokens, "
+                f"but budget is only {budget}. Consider:\n"
+                f"  - Increase reasoning_tokens to ≥2000\n"
+                f"  - Reduce reasoning_effort to 'medium' or 'low'\n"
+                f"  - Remove reasoning_effort (auto-select based on budget)"
+            )
+        elif effort == "medium" and budget is not None and budget < 500:
+            raise ValueError(
+                f"reasoning_effort='medium' typically requires ≥500 reasoning tokens, "
+                f"but budget is only {budget}. Consider:\n"
+                f"  - Increase reasoning_tokens to ≥500\n"
+                f"  - Reduce reasoning_effort to 'low'\n"
+                f"  - Remove reasoning_effort (auto-select based on budget)"
+            )
+        # "low" effort can work with any budget (even <500 tokens)
+
+    @property
+    def token_mode(self) -> str:
+        """Determine active token budget mode.
+
+        Returns:
+            "lumpsum" if using combined tokens budget
+            "fine_grained" if using separate reasoning/text budgets
+            "none" if no token constraints specified
+        """
+        if self.tokens is not None:
+            return "lumpsum"
+        elif self.reasoning_tokens is not None or self.text_tokens is not None:
+            return "fine_grained"
+        else:
+            return "none"
+
+    @property
+    def recommended_reasoning_effort(self) -> str | None:
+        """Get recommended reasoning effort based on budget.
+
+        Auto-selects effort level based on reasoning_tokens budget:
+        - ≥2000 tokens → "high" effort (deep thinking)
+        - ≥500 tokens → "medium" effort (balanced)
+        - <500 tokens → "low" effort (quick thinking)
+
+        Returns:
+            Recommended effort level, or None if no reasoning_tokens specified
+        """
+        if self.reasoning_tokens is None:
+            return None
+
+        # Auto-select effort based on budget
+        if self.reasoning_tokens >= 2000:
+            return "high"
+        elif self.reasoning_tokens >= 500:
+            return "medium"
+        else:
+            return "low"
 
 
 @dataclass(frozen=True)

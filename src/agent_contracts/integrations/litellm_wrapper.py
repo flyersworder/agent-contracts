@@ -91,6 +91,12 @@ class ContractedLLM:
         # Check constraints before call
         self._check_constraints_before_call()
 
+        # Auto-apply reasoning_effort from contract if not already specified
+        if "reasoning_effort" not in kwargs:
+            effort = self._get_reasoning_effort()
+            if effort is not None:
+                kwargs["reasoning_effort"] = effort
+
         # Make the LLM call
         try:
             response = completion(**kwargs)
@@ -135,13 +141,23 @@ class ContractedLLM:
             # If cost calculation fails, use 0
             cost = 0
 
-        # Update resource usage with separate reasoning/text tracking if available
-        self.enforcer.monitor.usage.add_api_call(cost=cost, tokens=total_tokens)
+        # Update resource usage with separate reasoning/text tracking
+        # Note: Don't pass tokens to add_api_call since we track them separately below
+        self.enforcer.monitor.usage.add_api_call(cost=cost, tokens=0)
+
+        # Track tokens based on whether model provides reasoning/text breakdown
         if reasoning_tokens > 0 or text_tokens > 0:
-            # Update with detailed breakdown
+            # Models with breakdown (Gemini 2.5, o1, etc.) - use detailed tracking
             self.enforcer.monitor.usage.add_tokens(
                 count=0, reasoning=reasoning_tokens, text=text_tokens
             )
+        else:
+            # Models without breakdown (GPT-4, Claude, etc.) - treat all as text
+            # This allows fine-grained mode to work with non-reasoning models
+            self.enforcer.monitor.usage.add_tokens(count=0, reasoning=0, text=output_tokens)
+
+        # Also track input tokens
+        self.enforcer.monitor.usage.add_tokens(count=input_tokens, reasoning=0, text=0)
 
         # Emit completion event
         self.enforcer._emit_event(
@@ -188,6 +204,12 @@ class ContractedLLM:
 
         # Check constraints before call
         self._check_constraints_before_call()
+
+        # Auto-apply reasoning_effort from contract if not already specified
+        if "reasoning_effort" not in kwargs:
+            effort = self._get_reasoning_effort()
+            if effort is not None:
+                kwargs["reasoning_effort"] = effort
 
         # Track that we made an API call
         self.enforcer.monitor.usage.add_api_call()
@@ -273,6 +295,24 @@ class ContractedLLM:
 
             # Final constraint check
             self._check_constraints_after_call()
+
+    def _get_reasoning_effort(self) -> str | None:
+        """Get reasoning effort level to use for the call.
+
+        Priority:
+        1. Explicit reasoning_effort in contract (if specified)
+        2. Auto-selected based on reasoning_tokens budget
+        3. None if no reasoning constraints
+
+        Returns:
+            Reasoning effort level ("low"/"medium"/"high") or None
+        """
+        # If explicitly specified in contract, use that
+        if self.contract.resources.reasoning_effort:
+            return self.contract.resources.reasoning_effort
+
+        # Otherwise, auto-select based on budget
+        return self.contract.resources.recommended_reasoning_effort
 
     def _check_constraints_before_call(self) -> None:
         """Check constraints before making an LLM call.
