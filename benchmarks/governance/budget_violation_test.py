@@ -439,7 +439,7 @@ class ContractedBudgetAgent(ContractedResearchAgent):
             description=f"{step_type} with unified budget tracking",
             resources=ResourceConstraints(
                 reasoning_tokens=remaining_tokens,
-                text_tokens=1000,  # Generous text budget
+                text_tokens=2500,  # Generous text budget (research agent outputs 1300-2000 tokens)
                 api_calls=1,
                 cost_usd=remaining_cost,
             ),

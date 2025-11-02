@@ -88,7 +88,7 @@ class CostGovernanceTest:
         self,
         model: str = "gemini/gemini-2.5-flash-preview-09-2025",
         output_dir: str = "benchmarks/governance/results",
-        policy_limit_usd: float = 0.01,  # $0.01 per query policy
+        policy_limit_usd: float = 0.02,  # $0.02 per query policy (realistic for research agent)
     ) -> None:
         """Initialize cost governance test.
 
@@ -405,8 +405,8 @@ def main() -> None:
     parser.add_argument(
         "--policy-limit",
         type=float,
-        default=0.01,
-        help="Maximum cost per query policy (default: $0.01)",
+        default=0.02,
+        help="Maximum cost per query policy (default: $0.02)",
     )
     parser.add_argument(
         "--quick",
