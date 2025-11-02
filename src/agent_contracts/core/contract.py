@@ -37,6 +37,41 @@ class DeadlineType(Enum):
     SOFT = "soft"  # Task should complete by deadline, quality degrades after
 
 
+class ContractMode(Enum):
+    """Strategic contract modes for quality-cost-time tradeoffs (Section 2.4 of whitepaper).
+
+    These modes define the optimization strategy for contract execution:
+
+    - URGENT: Optimize for speed, relax resource constraints
+      * Minimize time to completion
+      * Allow higher resource usage
+      * Target: ≥85% quality in ≤50% time (vs balanced)
+      * Use case: Time-critical tasks, urgent deadlines
+
+    - BALANCED: Equal priority on quality, cost, and time
+      * Default mode for standard execution
+      * Balanced resource utilization
+      * Target: Optimal quality-cost-time balance
+      * Use case: Standard production workloads
+
+    - ECONOMICAL: Minimize costs, allow more time
+      * Minimize resource consumption
+      * Accept longer execution time
+      * Target: ≥90% quality at ≤40% tokens (vs balanced)
+      * Use case: Batch processing, cost-sensitive tasks
+
+    The mode affects:
+    - Budget allocation strategy
+    - System prompts (budget-aware prompting)
+    - Resource consumption patterns
+    - Strategic decision-making during execution
+    """
+
+    URGENT = "urgent"
+    BALANCED = "balanced"
+    ECONOMICAL = "economical"
+
+
 @dataclass(frozen=True)
 class ResourceConstraints:
     """Multi-dimensional resource budget (Section 2.2 of whitepaper).
@@ -337,6 +372,9 @@ class Contract:
     temporal: TemporalConstraints = field(default_factory=TemporalConstraints)
     success_criteria: list[SuccessCriterion] = field(default_factory=list)
     termination_conditions: list[TerminationCondition] = field(default_factory=list)
+
+    # Strategic mode (Section 2.4 - Time-Resource Tradeoff Surface)
+    mode: ContractMode = ContractMode.BALANCED
 
     # State tracking
     state: ContractState = ContractState.DRAFTED

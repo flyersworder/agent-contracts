@@ -6,6 +6,7 @@ for Agent Contracts.
 
 from agent_contracts.core.contract import (
     Contract,
+    ContractMode,
     ContractState,
     DeadlineType,
     InputSpecification,
@@ -33,6 +34,7 @@ from agent_contracts.core.tokens import (
 __all__ = [
     "Contract",
     "ContractEnforcer",
+    "ContractMode",
     "ContractState",
     "CostEstimate",
     "DeadlineType",

@@ -11,6 +11,7 @@ __license__ = "CC BY 4.0"
 # Core contract components
 from agent_contracts.core.contract import (
     Contract,
+    ContractMode,
     ContractState,
     DeadlineType,
     InputSpecification,
@@ -48,6 +49,7 @@ from agent_contracts.integrations.litellm_wrapper import (
 __all__ = [
     "Contract",
     "ContractEnforcer",
+    "ContractMode",
     "ContractState",
     "ContractViolationError",
     "ContractedLLM",

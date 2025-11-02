@@ -6,6 +6,7 @@ import pytest
 
 from agent_contracts.core import (
     Contract,
+    ContractMode,
     ContractState,
     DeadlineType,
     InputSpecification,
@@ -55,6 +56,52 @@ class TestResourceConstraints:
         constraints = ResourceConstraints(tokens=1000)
         with pytest.raises(AttributeError):
             constraints.tokens = 2000  # type: ignore
+
+
+class TestContractMode:
+    """Tests for ContractMode enum and strategic modes."""
+
+    def test_contract_mode_values(self) -> None:
+        """Test that ContractMode has all three strategic modes."""
+        assert ContractMode.URGENT.value == "urgent"
+        assert ContractMode.BALANCED.value == "balanced"
+        assert ContractMode.ECONOMICAL.value == "economical"
+
+    def test_contract_default_mode(self) -> None:
+        """Test that Contract defaults to BALANCED mode."""
+        contract = Contract(id="test", name="Test Contract")
+        assert contract.mode == ContractMode.BALANCED
+
+    def test_contract_with_urgent_mode(self) -> None:
+        """Test creating contract with URGENT mode."""
+        contract = Contract(
+            id="urgent-task",
+            name="Urgent Task",
+            mode=ContractMode.URGENT,
+            resources=ResourceConstraints(tokens=20000),  # Higher budget for speed
+        )
+        assert contract.mode == ContractMode.URGENT
+        assert contract.resources.tokens == 20000
+
+    def test_contract_with_economical_mode(self) -> None:
+        """Test creating contract with ECONOMICAL mode."""
+        contract = Contract(
+            id="batch-job",
+            name="Batch Processing",
+            mode=ContractMode.ECONOMICAL,
+            resources=ResourceConstraints(tokens=5000),  # Lower budget for cost savings
+        )
+        assert contract.mode == ContractMode.ECONOMICAL
+        assert contract.resources.tokens == 5000
+
+    def test_contract_mode_in_repr(self) -> None:
+        """Test that contract mode is represented in string format."""
+        contract_urgent = Contract(id="u1", name="Urgent", mode=ContractMode.URGENT)
+        contract_eco = Contract(id="e1", name="Eco", mode=ContractMode.ECONOMICAL)
+
+        # Mode should be accessible
+        assert contract_urgent.mode == ContractMode.URGENT
+        assert contract_eco.mode == ContractMode.ECONOMICAL
 
 
 class TestTemporalConstraints:
