@@ -34,6 +34,11 @@ from agent_contracts.core.monitor import (
     ResourceUsage,
     ViolationInfo,
 )
+from agent_contracts.core.prompts import (
+    estimate_prompt_tokens,
+    generate_adaptive_instruction,
+    generate_budget_prompt,
+)
 from agent_contracts.core.tokens import (
     CostEstimate,
     TokenCount,
@@ -69,4 +74,7 @@ __all__ = [
     "TokenCount",
     "TokenCounter",
     "ViolationInfo",
+    "estimate_prompt_tokens",
+    "generate_adaptive_instruction",
+    "generate_budget_prompt",
 ]
