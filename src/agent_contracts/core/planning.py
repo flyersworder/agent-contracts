@@ -179,7 +179,7 @@ def _allocate_urgent(
             ResourceAllocation(
                 task_id=task.id,
                 allocated_tokens=allocated,
-                allocated_time=task.estimated_time,
+                allocated_time=task.estimated_time * 0.5,  # 50% time reduction for speed
                 expected_quality=max(0.85, task.estimated_quality),  # URGENT accepts 85% quality
             )
         )
