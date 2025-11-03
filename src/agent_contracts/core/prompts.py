@@ -56,26 +56,42 @@ def generate_budget_prompt(
     # Generate strategic guidance based on mode and budget state
     strategy_section = _generate_strategic_guidance(contract, current_usage)
 
+    # Calculate budget utilization for conditional meta-instructions
+    utilization = 0.0
+    if current_usage and contract.resources.tokens:
+        utilization = current_usage.tokens / contract.resources.tokens
+
     # Assemble complete prompt
-    prompt = f"""You are operating under a formal Agent Contract with explicit resource and time constraints.
+    prompt_parts = [
+        "You are operating under a formal Agent Contract with explicit resource and time constraints.",
+        "",
+        mode_intro,
+        "",
+        "# Task",
+        task_description,
+        "",
+        budget_section,
+    ]
 
-{mode_intro}
+    if temporal_section:
+        prompt_parts.extend(["", temporal_section])
 
-# Task
-{task_description}
+    prompt_parts.extend(["", strategy_section])
 
-{budget_section}
+    # Only add meta-instructions under real budget pressure (>70% utilization)
+    # or for ECONOMICAL mode which requires active optimization
+    if utilization > 0.7 or contract.mode == ContractMode.ECONOMICAL:
+        prompt_parts.extend(
+            [
+                "",
+                "# Important",
+                "- Monitor your resource usage continuously",
+                "- If you cannot complete the full task within constraints, provide partial results with confidence scores",
+                "- Explain your resource allocation decisions when relevant",
+            ]
+        )
 
-{temporal_section}
-
-{strategy_section}
-
-# Important
-- Monitor your resource usage continuously
-- If you cannot complete the full task within constraints, provide partial results with confidence scores
-- Explain your resource allocation decisions when relevant
-"""
-    return prompt.strip()
+    return "\n".join(prompt_parts)
 
 
 def _generate_mode_introduction(mode: ContractMode) -> str:
@@ -97,10 +113,10 @@ def _generate_mode_introduction(mode: ContractMode) -> str:
 """,
         ContractMode.BALANCED: """
 # Execution Mode: BALANCED ⚖️
-**Optimize for balance.** Maintain equilibrium between quality, cost, and time.
-- Target: Optimal quality-cost-time tradeoff
-- Prioritize: Balanced resource utilization
-- Strategy: Standard execution with measured resource allocation
+**Focus on quality.** You have adequate resources allocated for this task.
+- Approach: Work naturally and thoroughly
+- Prioritize: Comprehensive, high-quality results
+- Strategy: Standard execution without premature optimization
 """,
         ContractMode.ECONOMICAL: """
 # Execution Mode: ECONOMICAL 💰
@@ -210,9 +226,9 @@ def _generate_strategic_guidance(contract: Contract, current_usage: ResourceUsag
         lines.append("- Batch operations: Consolidate multiple queries")
         lines.append("- Cache aggressively: Reuse results from previous calls")
     else:  # BALANCED
-        lines.append("- Balance quality and efficiency")
-        lines.append("- Use tools judiciously based on expected value")
-        lines.append("- Monitor usage and adapt if approaching limits")
+        lines.append("- Work thoroughly to deliver comprehensive results")
+        lines.append("- Use available tools and resources as needed")
+        lines.append("- Focus on quality rather than premature optimization")
 
     # Add adaptive guidance based on utilization
     if utilization > 0:
