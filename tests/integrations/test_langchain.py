@@ -77,8 +77,7 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(
-            id="test-chain",
+        contract = Contract(id="test-chain", name="test-chain",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -97,8 +96,7 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(
-            id="test-exec",
+        contract = Contract(id="test-exec", name="test-exec",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -123,8 +121,7 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(
-            id="test-run",
+        contract = Contract(id="test-run", name="test-run",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -150,8 +147,7 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(
-            id="test-callable",
+        contract = Contract(id="test-callable", name="test-callable",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -177,8 +173,7 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(
-            id="test-strict",
+        contract = Contract(id="test-strict", name="test-strict",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -197,8 +192,7 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(
-            id="test-no-log",
+        contract = Contract(id="test-no-log", name="test-no-log",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -221,8 +215,7 @@ class TestContractedLLMMocked:
 
         from agent_contracts.integrations.langchain import ContractedLLM
 
-        contract = Contract(
-            id="test-llm",
+        contract = Contract(id="test-llm", name="test-llm",
             resources=ResourceConstraints(tokens=500),
         )
 
@@ -239,8 +232,7 @@ class TestContractedLLMMocked:
 
         from agent_contracts.integrations.langchain import ContractedLLM
 
-        contract = Contract(
-            id="test-llm-call",
+        contract = Contract(id="test-llm-call", name="test-llm-call",
             resources=ResourceConstraints(tokens=500),
         )
 
@@ -264,8 +256,7 @@ class TestContractedLLMMocked:
 
         from agent_contracts.integrations.langchain import ContractedLLM
 
-        contract = Contract(
-            id="test-llm-exec",
+        contract = Contract(id="test-llm-exec", name="test-llm-exec",
             resources=ResourceConstraints(tokens=500),
         )
 
@@ -366,8 +357,7 @@ class TestLangChainTokenTracking:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(
-            id="test-callback",
+        contract = Contract(id="test-callback", name="test-callback",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -417,8 +407,7 @@ class TestLangChainBudgetAwareness:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(
-            id="test-budget-info",
+        contract = Contract(id="test-budget-info", name="test-budget-info",
             resources=ResourceConstraints(tokens=1000, cost_usd=0.50),
         )
 

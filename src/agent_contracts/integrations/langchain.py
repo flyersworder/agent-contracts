@@ -31,14 +31,22 @@ from agent_contracts.core.wrapper import ContractAgent, ExecutionResult
 
 # Type checking imports
 try:
-    from langchain.chains.base import Chain
-    from langchain.schema import LLMResult
+    # LangChain 1.0+ uses langchain_core
+    from langchain_core.runnables import Runnable as Chain
+    from langchain_core.outputs import LLMResult
 
     LANGCHAIN_AVAILABLE = True
 except ImportError:
-    LANGCHAIN_AVAILABLE = False
-    Chain = Any  # type: ignore
-    LLMResult = Any  # type: ignore
+    try:
+        # Fallback for older LangChain versions
+        from langchain.chains.base import Chain  # type: ignore
+        from langchain.schema import LLMResult  # type: ignore
+
+        LANGCHAIN_AVAILABLE = True
+    except ImportError:
+        LANGCHAIN_AVAILABLE = False
+        Chain = Any  # type: ignore
+        LLMResult = Any  # type: ignore
 
 
 class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
@@ -135,7 +143,12 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
         """
         # Try to set up callback handler for automatic token tracking
         try:
-            from langchain.callbacks.base import BaseCallbackHandler
+            # Try LangChain 1.0+ first
+            try:
+                from langchain_core.callbacks import BaseCallbackHandler
+            except ImportError:
+                # Fallback to older LangChain
+                from langchain.callbacks.base import BaseCallbackHandler  # type: ignore
 
             class TokenTrackingCallback(BaseCallbackHandler):
                 """Callback to track token usage and update monitor."""
@@ -284,12 +297,33 @@ class ContractedLLM:
         self.strict_mode = strict_mode
 
         # Create a simple chain wrapper
-        from langchain.chains import LLMChain
-        from langchain.prompts import PromptTemplate
+        try:
+            # Try LangChain 1.0+ LCEL API first
+            from langchain_core.prompts import PromptTemplate
+            from langchain_core.output_parsers import StrOutputParser
+            from langchain_core.runnables import RunnableLambda
 
-        # Simple pass-through prompt
-        prompt = PromptTemplate(input_variables=["input"], template="{input}")
-        self.chain = LLMChain(llm=llm, prompt=prompt)
+            # Simple pass-through prompt using LCEL
+            # Wrap output to match old LLMChain API (returns dict with "text" key)
+            def format_output(text: str) -> dict[str, Any]:
+                return {"text": text}
+
+            prompt = PromptTemplate.from_template("{input}")
+            self.chain = prompt | llm | StrOutputParser() | RunnableLambda(format_output)
+        except ImportError:
+            try:
+                # Fallback to old LangChain API (pre-1.0)
+                from langchain.chains import LLMChain  # type: ignore
+                from langchain.prompts import PromptTemplate  # type: ignore
+
+                # Simple pass-through prompt
+                prompt = PromptTemplate(input_variables=["input"], template="{input}")
+                self.chain = LLMChain(llm=llm, prompt=prompt)
+            except ImportError:
+                raise ImportError(
+                    "ContractedLLM requires either LangChain 1.0+ or LangChain <1.0. "
+                    "Install with: pip install langchain langchain-core"
+                )
 
         # Wrap with ContractedChain
         self.contracted_chain = ContractedChain(
@@ -363,8 +397,10 @@ def create_contracted_chain(
     )
 
     # Create contract
+    contract_id_val = contract_id or f"chain-{id(chain)}"
     contract = Contract(
-        id=contract_id or f"chain-{id(chain)}",
+        id=contract_id_val,
+        name=contract_id_val,
         resources=ResourceConstraints(**resources) if resources else None,
         temporal=TemporalConstraints(**temporal) if temporal else None,
     )
