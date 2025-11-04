@@ -22,7 +22,12 @@ from agent_contracts.core.enforcement import (
     EnforcementCallback,
     EnforcementEvent,
 )
-from agent_contracts.core.monitor import ResourceMonitor, ResourceUsage, ViolationInfo
+from agent_contracts.core.monitor import (
+    ResourceMonitor,
+    ResourceUsage,
+    TemporalMonitor,
+    ViolationInfo,
+)
 from agent_contracts.core.planning import (
     ResourceAllocation,
     StrategyRecommendation,
@@ -45,17 +50,27 @@ from agent_contracts.core.tokens import (
     estimate_cost,
     estimate_tokens,
 )
+from agent_contracts.core.wrapper import (
+    ContractAgent,
+    ContractViolationError,
+    ExecutionLog,
+    ExecutionResult,
+)
 
 __all__ = [
     "Contract",
+    "ContractAgent",
     "ContractEnforcer",
     "ContractMode",
     "ContractState",
+    "ContractViolationError",
     "CostEstimate",
     "DeadlineType",
     "EnforcementAction",
     "EnforcementCallback",
     "EnforcementEvent",
+    "ExecutionLog",
+    "ExecutionResult",
     "InputSpecification",
     "OutputSpecification",
     "ResourceAllocation",
@@ -67,6 +82,7 @@ __all__ = [
     "Task",
     "TaskPriority",
     "TemporalConstraints",
+    "TemporalMonitor",
     "TerminationCondition",
     "TokenCount",
     "TokenCounter",

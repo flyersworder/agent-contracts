@@ -32,7 +32,13 @@ from agent_contracts.core.enforcement import (
 from agent_contracts.core.monitor import (
     ResourceMonitor,
     ResourceUsage,
+    TemporalMonitor,
     ViolationInfo,
+)
+from agent_contracts.core.wrapper import (
+    ContractAgent,
+    ExecutionLog,
+    ExecutionResult,
 )
 from agent_contracts.core.planning import (
     ResourceAllocation,
@@ -55,14 +61,38 @@ from agent_contracts.core.tokens import (
     TokenCounter,
 )
 
+# Contract templates
+from agent_contracts.templates import (
+    CodeReviewContract,
+    CustomerSupportContract,
+    DataAnalysisContract,
+    ResearchContract,
+    get_template,
+)
+
 # Integrations
 from agent_contracts.integrations.litellm_wrapper import (
     ContractedLLM,
     ContractViolationError,
 )
 
+# LangChain integration (optional)
+try:
+    from agent_contracts.integrations.langchain import (
+        ContractedChain,
+        create_contracted_chain,
+    )
+
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+    ContractedChain = None  # type: ignore
+    create_contracted_chain = None  # type: ignore
+
 __all__ = [
+    # Core
     "Contract",
+    "ContractAgent",
     "ContractEnforcer",
     "ContractMode",
     "ContractState",
@@ -73,6 +103,8 @@ __all__ = [
     "EnforcementAction",
     "EnforcementCallback",
     "EnforcementEvent",
+    "ExecutionLog",
+    "ExecutionResult",
     "InputSpecification",
     "OutputSpecification",
     "ResourceAllocation",
@@ -84,10 +116,22 @@ __all__ = [
     "Task",
     "TaskPriority",
     "TemporalConstraints",
+    "TemporalMonitor",
     "TerminationCondition",
     "TokenCount",
     "TokenCounter",
     "ViolationInfo",
+    # Templates
+    "CodeReviewContract",
+    "CustomerSupportContract",
+    "DataAnalysisContract",
+    "ResearchContract",
+    "get_template",
+    # LangChain (optional)
+    "ContractedChain",
+    "create_contracted_chain",
+    "LANGCHAIN_AVAILABLE",
+    # Planning & Prompts
     "estimate_prompt_tokens",
     "estimate_quality_cost_time",
     "generate_adaptive_instruction",
