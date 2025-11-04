@@ -145,7 +145,7 @@ class ContractAgent(Generic[TInput, TOutput]):
         self.enable_logging = enable_logging
 
         # Initialize monitoring and enforcement
-        self.resource_monitor = ResourceMonitor(contract)
+        self.resource_monitor = ResourceMonitor(contract.resources)
         self.temporal_monitor = TemporalMonitor(contract)
         self.enforcer = ContractEnforcer(
             contract=contract,

@@ -141,8 +141,9 @@ class TestContractAgent:
         wrapped = ContractAgent(contract=contract, agent=agent, enable_logging=False)
         result = wrapped.execute("input")
 
-        # Log still created but minimal
-        assert result.execution_log is not None
+        # No log created when logging disabled
+        assert result.execution_log is None
+        assert result.success is True
 
     def test_execution_log_resource_usage(self) -> None:
         """Test that resource usage is logged."""
@@ -278,6 +279,7 @@ class TestContractAgent:
         for mode in [ContractMode.URGENT, ContractMode.BALANCED, ContractMode.ECONOMICAL]:
             contract = Contract(
                 id=f"test-{mode.value}",
+                name=f"test-{mode.value}",
                 mode=mode,
                 resources=ResourceConstraints(tokens=1000),
             )
