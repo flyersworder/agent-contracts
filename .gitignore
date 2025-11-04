@@ -212,4 +212,6 @@ __marimo__/
 
 # Benchmark results
 benchmarks/**/results/
+benchmarks/quality_validation/samples/
+benchmarks/quality_validation/extended_samples/
 *.png
