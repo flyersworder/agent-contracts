@@ -459,6 +459,36 @@ class ResourceMonitor:
 
         return percentages
 
+    def get_remaining_tokens(self) -> float:
+        """Get remaining tokens budget.
+
+        Returns:
+            Remaining tokens, or float('inf') if no limit set
+        """
+        if self.constraints.tokens is None:
+            return float('inf')
+        return max(0.0, self.constraints.tokens - self.usage.tokens)
+
+    def get_remaining_cost(self) -> float:
+        """Get remaining cost budget.
+
+        Returns:
+            Remaining cost in USD, or float('inf') if no limit set
+        """
+        if self.constraints.cost_usd is None:
+            return float('inf')
+        return max(0.0, self.constraints.cost_usd - self.usage.cost_usd)
+
+    def get_remaining_api_calls(self) -> float:
+        """Get remaining API calls budget.
+
+        Returns:
+            Remaining API calls, or float('inf') if no limit set
+        """
+        if self.constraints.api_calls is None:
+            return float('inf')
+        return max(0.0, self.constraints.api_calls - self.usage.api_calls)
+
     def reset(self) -> None:
         """Reset usage tracking and clear violations."""
         self.usage = ResourceUsage()
