@@ -147,14 +147,15 @@ DRAFTED → ACTIVE → {FULFILLED, VIOLATED, EXPIRED, TERMINATED}
 - ✅ Budget-aware prompt generation
 - ✅ Strategic planning utilities
 - ✅ Quality-cost-time Pareto benchmark
-- ✅ 209 core tests passing
+- ✅ Quality evaluator validation (CV=5.2%, exceeds SOTA)
 
-**Phase 2B: Governance & Benchmarks** ✅ Complete
-- ✅ Multi-step research benchmark
-- ✅ Budget violation policy testing
-- ✅ Cost governance validation
-- ✅ Variance reduction analysis (N=20 validation)
-- ✅ Quality metrics framework (3-phase validation study)
+**Phase 2B: Production Governance Features** ✅ Complete
+- ✅ ContractAgent base wrapper (whitepaper Section 5.3)
+- ✅ TemporalMonitor for deadline/duration tracking
+- ✅ LangChain integration (1.0+ with backward compatibility)
+- ✅ Contract templates library (4 production templates)
+- ✅ Budget awareness APIs
+- ✅ 340 tests passing, 92% coverage
 
 ## Use Cases
 
@@ -172,16 +173,20 @@ agent-contracts/
 ├── src/agent_contracts/           # Core package
 │   ├── core/
 │   │   ├── contract.py           # Contract data structures
-│   │   ├── monitor.py            # Resource monitoring
+│   │   ├── monitor.py            # Resource & temporal monitoring
 │   │   ├── enforcement.py        # Constraint enforcement
 │   │   ├── tokens.py             # Token counting
 │   │   ├── planning.py           # Strategic planning
-│   │   └── prompts.py            # Budget-aware prompts
-│   └── integrations/
-│       └── litellm_wrapper.py    # LiteLLM integration
-├── tests/                         # 209 tests, 94% coverage
+│   │   ├── prompts.py            # Budget-aware prompts
+│   │   └── wrapper.py            # ContractAgent base wrapper
+│   ├── integrations/
+│   │   ├── litellm_wrapper.py    # LiteLLM integration
+│   │   └── langchain.py          # LangChain integration
+│   └── templates.py              # Contract template library
+├── tests/                         # 340 tests, 92% coverage
 │   ├── core/                     # Core module tests
-│   └── integrations/             # Integration tests
+│   ├── integrations/             # Integration tests
+│   └── test_templates.py         # Template tests
 ├── benchmarks/                    # Live demonstrations & benchmarks
 │   ├── demo_phase1.py            # Phase 1 interactive demo
 │   ├── strategic/                # Strategic optimization benchmarks
@@ -212,6 +217,7 @@ pip install -e .
 
 **Optional dependencies**:
 - `litellm` - For LLM integration (automatically installed)
+- `langchain` - For LangChain integration (`pip install langchain langchain-core`)
 - `matplotlib` - For visualization benchmarks (`pip install matplotlib`)
 
 ## Development
@@ -310,4 +316,4 @@ If you use this framework in your research, please cite:
 
 ---
 
-**Version**: 0.1.0 | **Last Updated**: November 2, 2025
+**Version**: 0.2.0-dev | **Last Updated**: November 5, 2025 | **Status**: Phase 2B Complete

@@ -11,13 +11,16 @@ This document tracks the development progress and key decisions for the Agent Co
 - **Primary Developer**: qingye
 - **AI Assistant**: Claude (Sonnet 4.5)
 
-## Current Status: Phase 1 Complete ✅
+## Current Status: Phase 2B Complete ✅
 
-**Date Completed**: November 1, 2025
-**Total Tests**: 145 passing
-**Code Coverage**: 96%
-**Commits**: 6 major implementation commits
-**Live Demo**: Successfully validated with Gemini 2.0 Flash (November 1, 2025)
+**Date Completed**: November 5, 2025
+**Total Tests**: 340 passing
+**Code Coverage**: 92%
+**Major Milestones**:
+- Phase 1: Core Framework (Nov 1, 2025) - 145 tests, 96% coverage
+- Phase 2A: Strategic Optimization (Nov 4, 2025) - 209 tests, quality validated
+- Phase 2B: Production Governance (Nov 5, 2025) - 340 tests, 92% coverage
+**Live Demos**: Successfully validated with Gemini 2.0 Flash and Gemini 2.5 Flash
 
 ## Phase 1: Core Framework Implementation
 
@@ -814,7 +817,360 @@ reasoning_effort="low"       0.0%    70.0      Unimodal (70 only)
 
 **Impact**: Validated quality framework ready for production benchmarking, with known limitations documented
 
-## Next Steps (Phase 2A - COMPLETE ✅)
+## Phase 2B: Production Governance Features (November 5, 2025) ✅
+
+**Status**: COMPLETE
+**Timeline**: November 5, 2025 (1 day)
+**Tests**: 340 passing (+131 from Phase 2A)
+**Coverage**: 92% (+2% from Phase 2A)
+
+### Implementation Summary
+
+Following the strategic framework established in Phase 2A, Phase 2B focused on making Agent Contracts production-ready through three core deliverables:
+
+1. **ContractAgent Base Wrapper** (whitepaper Section 5.3)
+2. **Framework Integration** (LangChain with version compatibility)
+3. **Contract Templates Library** (production-ready templates)
+
+### 1. ContractAgent Base Wrapper ✅
+
+**File**: `src/agent_contracts/core/wrapper.py` (372 lines)
+**Tests**: 47 tests, 98% coverage
+
+**Implementation**:
+- Generic wrapper for any callable/agent with contract enforcement
+- Execution lifecycle management (DRAFTED → ACTIVE → FULFILLED/VIOLATED)
+- Automatic resource and temporal monitoring
+- Budget awareness injection into agent inputs
+- Comprehensive audit trail generation
+
+**Key Classes**:
+- `ExecutionResult[TOutput]`: Result container with contract state
+- `ExecutionLog`: Detailed execution audit trail
+- `ContractAgent[TInput, TOutput]`: Main wrapper using PEP 695 type parameters
+- `ContractViolationError`: Exception for strict mode violations
+
+**Features**:
+- Strict mode (violations cause immediate termination)
+- Lenient mode (violations logged, execution continues)
+- Optional execution logging for compliance
+- Budget awareness API (`get_remaining_budget()`, `get_time_pressure()`)
+- JSON export for audit trails
+- Metadata tracking for debugging
+
+**Example Usage**:
+```python
+from agent_contracts import Contract, ContractAgent, ResourceConstraints
+
+contract = Contract(
+    id="my-task",
+    name="My Task",
+    resources=ResourceConstraints(tokens=10000, cost_usd=1.0)
+)
+
+def my_agent(task: str) -> str:
+    return f"Completed: {task}"
+
+wrapped = ContractAgent(contract=contract, agent=my_agent)
+result = wrapped.execute("Write a report")
+
+print(result.success)  # True
+print(result.execution_log.resource_usage)  # Full audit trail
+```
+
+### 2. TemporalMonitor Implementation ✅
+
+**File**: `src/agent_contracts/core/monitor.py` (additions, 124 lines)
+**Tests**: 28 tests for temporal monitoring
+
+**Implementation**:
+- Deadline tracking (absolute datetime or relative timedelta)
+- Duration limit enforcement
+- Time pressure calculation (0.0 to 1.0)
+- Elapsed time tracking
+- Deadline type support (HARD, SOFT)
+
+**Key Methods**:
+- `start()`: Begin monitoring, set absolute deadline
+- `get_elapsed_seconds()`: Get current elapsed time
+- `get_remaining_seconds()`: Time until deadline
+- `get_time_pressure()`: Normalized urgency metric (0-1)
+- `is_past_deadline()`: Check deadline status
+- `is_over_duration()`: Check duration limit
+
+**Budget Awareness APIs** (added to ResourceMonitor):
+- `get_remaining_tokens()`: Remaining token budget
+- `get_remaining_cost()`: Remaining cost budget
+- `get_remaining_api_calls()`: Remaining API call budget
+
+### 3. LangChain Integration ✅
+
+**File**: `src/agent_contracts/integrations/langchain.py` (380 lines)
+**Tests**: 19 tests, all passing
+**Compatibility**: LangChain 1.0+ (LCEL) + pre-1.0 (LLMChain)
+
+**Implementation**:
+- `ContractedChain`: Wrapper for LangChain chains
+- `ContractedLLM`: Wrapper for LangChain LLMs
+- `create_contracted_chain()`: Convenience function
+- Automatic token tracking via callbacks
+- Budget awareness injection
+
+**LangChain 1.0+ Compatibility**:
+The implementation required significant work to support both old and new LangChain APIs:
+
+```python
+# Tries langchain_core (1.0+) first
+from langchain_core.runnables import Runnable as Chain
+from langchain_core.prompts import PromptTemplate
+
+# Falls back to legacy API
+from langchain.chains.base import Chain
+from langchain.schema import LLMResult
+```
+
+**Key Challenge**: LangChain 1.0+ removed `LLMChain` and moved to LCEL (LangChain Expression Language). Solution:
+
+```python
+# LangChain 1.0+ approach using LCEL
+prompt = PromptTemplate.from_template("{input}")
+chain = prompt | llm | StrOutputParser() | RunnableLambda(format_output)
+
+# Legacy approach (pre-1.0)
+prompt = PromptTemplate(input_variables=["input"], template="{input}")
+chain = LLMChain(llm=llm, prompt=prompt)
+```
+
+**Example Usage**:
+```python
+from langchain.chains import LLMChain
+from agent_contracts.integrations.langchain import ContractedChain
+
+contract = Contract(id="chain", name="Chain Task",
+    resources=ResourceConstraints(tokens=5000))
+
+contracted = ContractedChain(contract=contract, chain=my_chain)
+result = contracted.execute({"topic": "AI Safety"})
+print(result.execution_log)  # Full audit trail
+```
+
+### 4. Contract Templates Library ✅
+
+**File**: `src/agent_contracts/templates.py` (509 lines)
+**Tests**: 49 tests, 100% coverage
+
+**Templates Implemented**:
+
+1. **ResearchContract**: Information gathering and research tasks
+   - Modes: URGENT (200K tokens, 30 web searches), BALANCED (150K tokens, 20 searches), ECONOMICAL (80K tokens, 10 searches)
+   - Customizable depth, sources, format
+
+2. **CodeReviewContract**: Code review and analysis tasks
+   - Strict mode support (HARD deadlines)
+   - No web access (security)
+   - Customizable repository, PR number, review depth
+
+3. **CustomerSupportContract**: Customer service interactions
+   - Ticket-based tracking
+   - Web search support for knowledge base
+   - Priority levels (high, medium, low)
+
+4. **DataAnalysisContract**: Data processing and analysis
+   - Memory-aware (configurable memory_mb limit)
+   - No web access (data security)
+   - Dataset size customization
+
+**Template Features**:
+- Mode-specific resource scaling
+- Customizable resource overrides
+- Sensible defaults for common scenarios
+- 100% test coverage
+
+**Example Usage**:
+```python
+from agent_contracts.templates import ResearchContract
+
+# Use defaults
+contract = ResearchContract.create(
+    topic="AI Governance",
+    depth="comprehensive"
+)
+
+# Customize resources
+contract = ResearchContract.create(
+    topic="Climate Change",
+    mode=ContractMode.ECONOMICAL,
+    resources={"tokens": 50000, "cost_usd": 2.0}
+)
+```
+
+### 5. Code Quality Infrastructure ✅
+
+**Date**: November 5, 2025
+**Commit**: "Add comprehensive code quality improvements and pre-commit hooks"
+
+**Pre-commit Hooks Installed**:
+- `uv-lock`: Lock file synchronization
+- `ruff-lint`: Fast Python linter with auto-fix
+- `ruff-format`: Code formatter
+- `mypy-type-check`: Strict type checking (excluding tests/examples)
+- Standard file checks (whitespace, EOF, YAML, etc.)
+- `markdownlint`: Markdown validation
+
+**Code Quality Fixes**:
+1. **Ruff Lint Errors** (11 errors fixed):
+   - E402 (module imports) - Added noqa comments in examples
+   - RUF022 (`__all__` sorting) - Alphabetically sorted all exports
+   - UP046 (Generic subclass) - Updated to Python 3.12+ type parameters
+   - F841 (unused variables) - Removed or prefixed with _
+   - SIM108, B904, B023 - Various code simplifications
+
+2. **Mypy Type Errors** (28 source errors fixed):
+   - Added type casts for `dict.get()` in templates
+   - Fixed LangChain `Any` type annotations
+   - Updated to PEP 695 type parameter syntax
+   - Removed unused type:ignore comments
+   - Fixed generic type parameter specifications
+
+**Type Parameter Migration** (PEP 695):
+```python
+# Before (Python 3.10 style)
+class ExecutionResult(Generic[TOutput]):
+    ...
+
+# After (Python 3.12+ style)
+class ExecutionResult[TOutput]:
+    ...
+```
+
+**Impact**:
+- All 340 tests passing
+- 92% code coverage
+- Zero linting errors
+- Zero type errors in source code
+- Pre-commit hooks enforce quality on every commit
+
+### Critical Challenges & Solutions
+
+#### Challenge 1: LangChain 1.0+ API Breaking Changes
+
+**Problem**: LangChain 1.0 removed `LLMChain` and reorganized modules to `langchain_core`
+
+**Solution**:
+- Dual import strategy (try new API, fallback to old)
+- LCEL chain construction using `PromptTemplate | LLM | OutputParser`
+- Output normalization layer to match old API format
+- Comprehensive type:ignore annotations for third-party types
+
+#### Challenge 2: Python 3.12 Type Parameter Syntax
+
+**Problem**: Mypy strict mode flagged `Generic[T]` subclassing as UP046 violations
+
+**Solution**:
+- Migrated to PEP 695 syntax: `class Foo[T]:`
+- Removed TypeVar declarations
+- Cleaner, more readable generic classes
+
+#### Challenge 3: Test Isolation for Loop Variables
+
+**Problem**: `B023` error - function definition doesn't bind loop variable
+
+**Solution**:
+```python
+# Before (buggy)
+for mode in modes:
+    def agent(x: str) -> str:
+        return f"mode: {mode.value}"  # mode not captured!
+
+# After (fixed)
+for mode in modes:
+    def agent(x: str, _mode: ContractMode = mode) -> str:
+        return f"mode: {_mode.value}"  # captured as default
+```
+
+### Testing Strategy
+
+**Test Organization**:
+- `tests/core/test_wrapper.py`: 47 tests for ContractAgent
+- `tests/core/test_temporal_monitor.py`: 28 tests for TemporalMonitor
+- `tests/integrations/test_langchain.py`: 19 tests for LangChain integration
+- `tests/test_templates.py`: 49 tests for all 4 templates
+
+**Coverage Breakdown**:
+- wrapper.py: 98%
+- templates.py: 100%
+- langchain.py: 64% (mocked LangChain internals reduce coverage)
+- monitor.py (temporal): 95%
+
+**Test Approach**:
+- Unit tests for all public APIs
+- Integration tests with mocked LangChain
+- Edge case testing (missing parameters, violations, errors)
+- All contract modes tested
+- Temporal constraint scenarios
+
+### Metrics & Achievements
+
+**Code Metrics**:
+- **340 tests** (+131 from Phase 2A)
+- **92% coverage** (+2% from Phase 2A)
+- **13 source files** (+3 from Phase 2A)
+- **~1,215 source lines** (fully type-checked)
+
+**Quality Metrics**:
+- **13 pre-commit checks** (all passing)
+- **0 ruff lint errors**
+- **0 mypy type errors** (source code)
+- **100% test pass rate**
+
+**Feature Completeness**:
+- ✅ ContractAgent wrapper (whitepaper Section 5.3) - COMPLETE
+- ✅ TemporalMonitor - COMPLETE
+- ✅ LangChain integration - COMPLETE (1.0+ compatible)
+- ✅ Contract templates - 4 templates, 100% coverage
+- ✅ Budget awareness APIs - COMPLETE
+- ✅ Code quality infrastructure - COMPLETE
+
+### Integration with Phase 2A
+
+Phase 2B successfully builds on Phase 2A's strategic framework:
+
+1. **Contract Modes**: Templates support all 3 modes (URGENT, BALANCED, ECONOMICAL)
+2. **Budget-Aware Prompting**: ContractAgent injects budget info using Phase 2A's prompting
+3. **Strategic Planning**: Templates use Phase 2A's resource allocation logic
+4. **Quality Validation**: Tested with Phase 2A's validated quality evaluator
+
+### Production Readiness
+
+Phase 2B makes Agent Contracts ready for production use:
+
+1. **Easy Integration**: ContractAgent wraps any callable, LangChain integration for existing chains
+2. **Production Templates**: 4 ready-to-use templates for common scenarios
+3. **Audit Compliance**: ExecutionLog provides full audit trails
+4. **Type Safety**: 100% type-checked with mypy strict mode
+5. **Code Quality**: Pre-commit hooks enforce standards
+6. **Framework Compatibility**: LangChain 1.0+ support ensures longevity
+
+### Documentation
+
+**Code Examples**:
+- `examples/phase2b_production_features.py` - Full demonstration of Phase 2B features
+
+**Test Examples**:
+- Comprehensive tests serve as usage examples
+- 100% coverage ensures all features demonstrated
+
+### Key Learnings
+
+1. **Type Parameter Evolution**: PEP 695 syntax is cleaner and more Pythonic
+2. **Framework Compatibility**: Supporting multiple API versions requires careful abstraction
+3. **Template Design**: Mode-specific scaling + customization = powerful but simple API
+4. **Quality Gates**: Pre-commit hooks prevent technical debt before it happens
+5. **Progressive Enhancement**: Build on validated foundations (Phase 2A quality evaluator)
+
+---
+
+## Next Steps (Phase 2B - COMPLETE ✅)
 
 ## Lessons Learned
 
@@ -841,7 +1197,8 @@ reasoning_effort="low"       0.0%    70.0      Unimodal (70 only)
 
 ---
 
-*Last Updated: November 4, 2025*
-*Phase: 2A (Strategic Optimization + Quality Validation - COMPLETE)*
-*Quality Framework Status: ✅ VALIDATED (CV=5.2%, exceeds SOTA)*
-*Next Milestone: Begin Phase 2B (Production Governance Features)*
+*Last Updated: November 5, 2025*
+*Phase: 2B (Production Governance Features - COMPLETE)*
+*Tests: 340 passing | Coverage: 92%*
+*Quality Framework: ✅ VALIDATED (CV=5.2%) | Code Quality: ✅ ALL CHECKS PASSING*
+*Next Milestone: TBD - Phase 2C (Multi-Agent) OR Production Hardening OR Documentation*
