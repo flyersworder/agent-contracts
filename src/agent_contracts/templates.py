@@ -22,7 +22,7 @@ Example:
 """
 
 from datetime import timedelta
-from typing import Any
+from typing import Any, cast
 
 from agent_contracts.core.contract import (
     Contract,
@@ -113,15 +113,15 @@ class ResearchContract:
 
         # Create resource constraints
         resource_constraints = ResourceConstraints(
-            tokens=config.get("tokens"),
-            web_searches=config.get("web_searches"),
-            api_calls=config.get("api_calls"),
-            cost_usd=config.get("cost_usd"),
+            tokens=cast("int | None", config.get("tokens")),
+            web_searches=cast("int | None", config.get("web_searches")),
+            api_calls=cast("int | None", config.get("api_calls")),
+            cost_usd=cast("float | None", config.get("cost_usd")),
         )
 
         # Create temporal constraints
         temporal_constraints = TemporalConstraints(
-            max_duration=config.get("max_duration"),
+            max_duration=cast("timedelta | None", config.get("max_duration")),
             deadline_type=DeadlineType.SOFT,
         )
 
@@ -221,15 +221,15 @@ class CodeReviewContract:
 
         # Create resource constraints
         resource_constraints = ResourceConstraints(
-            tokens=default_config.get("tokens"),
-            api_calls=default_config.get("api_calls"),
-            cost_usd=default_config.get("cost_usd"),
+            tokens=cast("int | None", default_config.get("tokens")),
+            api_calls=cast("int | None", default_config.get("api_calls")),
+            cost_usd=cast("float | None", default_config.get("cost_usd")),
             web_searches=0,  # No web access for code review
         )
 
         # Create temporal constraints
         temporal_constraints = TemporalConstraints(
-            max_duration=default_config.get("max_duration"),
+            max_duration=cast("timedelta | None", default_config.get("max_duration")),
             deadline_type=DeadlineType.SOFT if not strict_mode else DeadlineType.HARD,
         )
 
@@ -341,15 +341,15 @@ class CustomerSupportContract:
 
         # Create resource constraints
         resource_constraints = ResourceConstraints(
-            tokens=config.get("tokens"),
-            api_calls=config.get("api_calls"),
-            web_searches=config.get("web_searches"),
-            cost_usd=config.get("cost_usd"),
+            tokens=cast("int | None", config.get("tokens")),
+            api_calls=cast("int | None", config.get("api_calls")),
+            web_searches=cast("int | None", config.get("web_searches")),
+            cost_usd=cast("float | None", config.get("cost_usd")),
         )
 
         # Create temporal constraints
         temporal_constraints = TemporalConstraints(
-            max_duration=config.get("max_duration"),
+            max_duration=cast("timedelta | None", config.get("max_duration")),
             deadline_type=DeadlineType.SOFT,
         )
 
@@ -446,16 +446,16 @@ class DataAnalysisContract:
 
         # Create resource constraints
         resource_constraints = ResourceConstraints(
-            tokens=default_config.get("tokens"),
-            api_calls=default_config.get("api_calls"),
-            cost_usd=default_config.get("cost_usd"),
-            memory_mb=default_config.get("memory_mb"),
+            tokens=cast("int | None", default_config.get("tokens")),
+            api_calls=cast("int | None", default_config.get("api_calls")),
+            cost_usd=cast("float | None", default_config.get("cost_usd")),
+            memory_mb=cast("float | None", default_config.get("memory_mb")),
             web_searches=0,  # No web access for data analysis
         )
 
         # Create temporal constraints
         temporal_constraints = TemporalConstraints(
-            max_duration=default_config.get("max_duration"),
+            max_duration=cast("timedelta | None", default_config.get("max_duration")),
             deadline_type=DeadlineType.SOFT,
         )
 
@@ -503,7 +503,5 @@ def get_template(template_name: str) -> type:
     """
     if template_name not in TEMPLATES:
         available = ", ".join(TEMPLATES.keys())
-        raise KeyError(
-            f"Template '{template_name}' not found. Available templates: {available}"
-        )
+        raise KeyError(f"Template '{template_name}' not found. Available templates: {available}")
     return TEMPLATES[template_name]

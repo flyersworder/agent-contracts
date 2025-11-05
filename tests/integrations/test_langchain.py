@@ -3,11 +3,11 @@
 Note: These tests mock LangChain since it's an optional dependency.
 """
 
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
-from agent_contracts.core.contract import Contract, ContractMode, ResourceConstraints
+from agent_contracts.core.contract import Contract, ResourceConstraints
 
 
 class TestLangChainIntegration:
@@ -77,7 +77,9 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(id="test-chain", name="test-chain",
+        contract = Contract(
+            id="test-chain",
+            name="test-chain",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -96,7 +98,9 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(id="test-exec", name="test-exec",
+        contract = Contract(
+            id="test-exec",
+            name="test-exec",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -121,7 +125,9 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(id="test-run", name="test-run",
+        contract = Contract(
+            id="test-run",
+            name="test-run",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -147,7 +153,9 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(id="test-callable", name="test-callable",
+        contract = Contract(
+            id="test-callable",
+            name="test-callable",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -173,16 +181,16 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(id="test-strict", name="test-strict",
+        contract = Contract(
+            id="test-strict",
+            name="test-strict",
             resources=ResourceConstraints(tokens=1000),
         )
 
         mock_chain = Mock()
         mock_chain.callbacks = []
 
-        contracted = ContractedChain(
-            contract=contract, chain=mock_chain, strict_mode=True
-        )
+        contracted = ContractedChain(contract=contract, chain=mock_chain, strict_mode=True)
 
         assert contracted.strict_mode is True
 
@@ -192,16 +200,16 @@ class TestContractedChainMocked:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(id="test-no-log", name="test-no-log",
+        contract = Contract(
+            id="test-no-log",
+            name="test-no-log",
             resources=ResourceConstraints(tokens=1000),
         )
 
         mock_chain = Mock()
         mock_chain.callbacks = []
 
-        contracted = ContractedChain(
-            contract=contract, chain=mock_chain, enable_logging=False
-        )
+        contracted = ContractedChain(contract=contract, chain=mock_chain, enable_logging=False)
 
         assert contracted.enable_logging is False
 
@@ -215,7 +223,9 @@ class TestContractedLLMMocked:
 
         from agent_contracts.integrations.langchain import ContractedLLM
 
-        contract = Contract(id="test-llm", name="test-llm",
+        contract = Contract(
+            id="test-llm",
+            name="test-llm",
             resources=ResourceConstraints(tokens=500),
         )
 
@@ -232,7 +242,9 @@ class TestContractedLLMMocked:
 
         from agent_contracts.integrations.langchain import ContractedLLM
 
-        contract = Contract(id="test-llm-call", name="test-llm-call",
+        contract = Contract(
+            id="test-llm-call",
+            name="test-llm-call",
             resources=ResourceConstraints(tokens=500),
         )
 
@@ -256,7 +268,9 @@ class TestContractedLLMMocked:
 
         from agent_contracts.integrations.langchain import ContractedLLM
 
-        contract = Contract(id="test-llm-exec", name="test-llm-exec",
+        contract = Contract(
+            id="test-llm-exec",
+            name="test-llm-exec",
             resources=ResourceConstraints(tokens=500),
         )
 
@@ -357,7 +371,9 @@ class TestLangChainTokenTracking:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(id="test-callback", name="test-callback",
+        contract = Contract(
+            id="test-callback",
+            name="test-callback",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -379,9 +395,7 @@ class TestLangChainIntegrationImportError:
         # Temporarily remove langchain from sys.modules
         import sys
 
-        langchain_modules = {
-            k: v for k, v in sys.modules.items() if k.startswith("langchain")
-        }
+        langchain_modules = {k: v for k, v in sys.modules.items() if k.startswith("langchain")}
 
         for module in langchain_modules:
             if module in sys.modules:
@@ -407,7 +421,9 @@ class TestLangChainBudgetAwareness:
 
         from agent_contracts.integrations.langchain import ContractedChain
 
-        contract = Contract(id="test-budget-info", name="test-budget-info",
+        contract = Contract(
+            id="test-budget-info",
+            name="test-budget-info",
             resources=ResourceConstraints(tokens=1000, cost_usd=0.50),
         )
 
@@ -427,7 +443,7 @@ class TestLangChainBudgetAwareness:
         contracted._run_chain = capture_run_chain
 
         # Execute through monitored_execution
-        result = contracted._monitored_execution(input_data)
+        _result = contracted._monitored_execution(input_data)
 
         # Should have added budget_info
         assert "budget_info" in input_data

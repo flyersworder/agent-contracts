@@ -32,6 +32,7 @@ repos:
         name: mypy-type-check
         additional_dependencies: []
         args: [--strict, --ignore-missing-imports]
+        exclude: ^(tests/|examples/)
 
   # General file quality checks
   - repo: https://github.com/pre-commit/pre-commit-hooks

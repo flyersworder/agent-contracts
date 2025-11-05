@@ -8,6 +8,9 @@ This file demonstrates the Phase 2B features:
 
 Phase 2B makes Agent Contracts production-ready by providing easy integration
 with popular frameworks and pre-configured templates for common use cases.
+
+NOTE: This file has imports scattered throughout for tutorial purposes.
+# ruff: noqa: E402
 """
 
 # Example 1: Using Contract Templates
@@ -77,7 +80,8 @@ print()
 # Example 2: ContractAgent Base Wrapper
 # ======================================
 
-from agent_contracts.core import ContractAgent, ResourceConstraints
+from agent_contracts.core import ContractAgent, ResourceConstraints  # noqa: E402
+
 
 # Define a simple agent (any callable)
 def research_agent(query: str) -> str:
@@ -123,9 +127,7 @@ try:
     print("LangChain integration available!")
 
     # Method 1: Wrap existing chain
-    prompt = PromptTemplate(
-        input_variables=["topic"], template="Write a summary about {topic}"
-    )
+    prompt = PromptTemplate(input_variables=["topic"], template="Write a summary about {topic}")
     llm = OpenAI(temperature=0)
     chain = LLMChain(llm=llm, prompt=prompt)
 
@@ -156,9 +158,9 @@ print()
 # Example 4: Execution Logging and Audit Trails
 # =============================================
 
-from datetime import timedelta
+from datetime import timedelta  # noqa: E402
 
-from agent_contracts.core import TemporalConstraints
+from agent_contracts.core import TemporalConstraints  # noqa: E402
 
 # Create contract with temporal constraints
 audit_contract = Contract(
@@ -185,11 +187,11 @@ print(f"  Contract ID: {log.contract_id}")
 print(f"  Start Time: {log.start_time}")
 print(f"  End Time: {log.end_time}")
 print(f"  Final State: {log.final_state.value}")
-print(f"  Resource Usage:")
+print("  Resource Usage:")
 print(f"    - Tokens: {log.resource_usage['tokens']}")
 print(f"    - API Calls: {log.resource_usage['api_calls']}")
 print(f"    - Cost: ${log.resource_usage['cost_usd']:.4f}")
-print(f"  Temporal Metrics:")
+print("  Temporal Metrics:")
 print(f"    - Elapsed: {log.temporal_metrics['elapsed_seconds']:.2f}s")
 print(f"    - Deadline Met: {log.temporal_metrics['deadline_met']}")
 print(f"  Events: {len(log.events)}")
@@ -271,16 +273,18 @@ print("\n2. Wrapped agent with contract enforcement")
 # 4. Execute
 result = contracted_agent.execute("ML Interpretability")
 
-print(f"\n3. Execution complete:")
+print("\n3. Execution complete:")
 print(f"   Success: {result.success}")
 print(f"   State: {result.contract.state.value}")
 
 # 5. Audit and monitor
-print(f"\n4. Audit trail:")
+print("\n4. Audit trail:")
 print(f"   Tokens used: {result.execution_log.resource_usage['tokens']}")
 print(f"   Cost: ${result.execution_log.resource_usage['cost_usd']:.4f}")
 print(f"   Duration: {result.execution_log.temporal_metrics['elapsed_seconds']:.2f}s")
-print(f"   Budget compliance: {result.execution_log.resource_usage['tokens'] <= contract.resources.tokens}")
+print(
+    f"   Budget compliance: {result.execution_log.resource_usage['tokens'] <= contract.resources.tokens}"
+)
 
 # 6. Export logs for compliance
 log_data = result.execution_log.to_dict()

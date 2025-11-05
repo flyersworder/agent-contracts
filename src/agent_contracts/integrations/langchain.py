@@ -32,21 +32,21 @@ from agent_contracts.core.wrapper import ContractAgent, ExecutionResult
 # Type checking imports
 try:
     # LangChain 1.0+ uses langchain_core
-    from langchain_core.runnables import Runnable as Chain
     from langchain_core.outputs import LLMResult
+    from langchain_core.runnables import Runnable as Chain
 
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     try:
         # Fallback for older LangChain versions
-        from langchain.chains.base import Chain  # type: ignore
-        from langchain.schema import LLMResult  # type: ignore
+        from langchain.chains.base import Chain
+        from langchain.schema import LLMResult
 
         LANGCHAIN_AVAILABLE = True
     except ImportError:
         LANGCHAIN_AVAILABLE = False
-        Chain = Any  # type: ignore
-        LLMResult = Any  # type: ignore
+        Chain = Any
+        LLMResult = Any
 
 
 class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
@@ -88,7 +88,7 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
     def __init__(
         self,
         contract: Contract,
-        chain: "Chain",
+        chain: Any,  # LangChain Chain type (varies by version)
         strict_mode: bool = True,
         enable_logging: bool = True,
     ) -> None:
@@ -112,7 +112,7 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
         # Initialize base ContractAgent with chain as callable
         super().__init__(
             contract=contract,
-            agent=self._run_chain,  # type: ignore
+            agent=self._run_chain,
             strict_mode=strict_mode,
             enable_logging=enable_logging,
         )
@@ -133,7 +133,7 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
         Returns:
             Chain's output dictionary
         """
-        return self.chain(inputs)
+        return self.chain(inputs)  # type: ignore[no-any-return]
 
     def _setup_callbacks(self) -> None:
         """Set up LangChain callbacks for token tracking.
@@ -148,9 +148,9 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
                 from langchain_core.callbacks import BaseCallbackHandler
             except ImportError:
                 # Fallback to older LangChain
-                from langchain.callbacks.base import BaseCallbackHandler  # type: ignore
+                from langchain.callbacks.base import BaseCallbackHandler
 
-            class TokenTrackingCallback(BaseCallbackHandler):
+            class TokenTrackingCallback(BaseCallbackHandler):  # type: ignore[misc]
                 """Callback to track token usage and update monitor."""
 
                 def __init__(self, monitor: Any) -> None:
@@ -164,8 +164,6 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
 
                         # Extract token counts
                         total_tokens = usage.get("total_tokens", 0)
-                        prompt_tokens = usage.get("prompt_tokens", 0)
-                        completion_tokens = usage.get("completion_tokens", 0)
 
                         # Update monitor
                         self.monitor.update_resource("tokens", total_tokens)
@@ -225,10 +223,7 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
             Chain's output dictionary
         """
         # Convert args/kwargs to input dict
-        if args:
-            inputs = args[0] if isinstance(args[0], dict) else {"input": args[0]}
-        else:
-            inputs = kwargs
+        inputs = (args[0] if isinstance(args[0], dict) else {"input": args[0]}) if args else kwargs
 
         # Execute with contract enforcement
         result = self.execute(inputs)
@@ -299,8 +294,8 @@ class ContractedLLM:
         # Create a simple chain wrapper
         try:
             # Try LangChain 1.0+ LCEL API first
-            from langchain_core.prompts import PromptTemplate
             from langchain_core.output_parsers import StrOutputParser
+            from langchain_core.prompts import PromptTemplate
             from langchain_core.runnables import RunnableLambda
 
             # Simple pass-through prompt using LCEL
@@ -313,17 +308,17 @@ class ContractedLLM:
         except ImportError:
             try:
                 # Fallback to old LangChain API (pre-1.0)
-                from langchain.chains import LLMChain  # type: ignore
-                from langchain.prompts import PromptTemplate  # type: ignore
+                from langchain.chains import LLMChain
+                from langchain.prompts import PromptTemplate as LegacyPromptTemplate
 
                 # Simple pass-through prompt
-                prompt = PromptTemplate(input_variables=["input"], template="{input}")
+                prompt = LegacyPromptTemplate(input_variables=["input"], template="{input}")
                 self.chain = LLMChain(llm=llm, prompt=prompt)
-            except ImportError:
+            except ImportError as err:
                 raise ImportError(
                     "ContractedLLM requires either LangChain 1.0+ or LangChain <1.0. "
                     "Install with: pip install langchain langchain-core"
-                )
+                ) from err
 
         # Wrap with ContractedChain
         self.contracted_chain = ContractedChain(
@@ -344,7 +339,7 @@ class ContractedLLM:
         result = self.contracted_chain.execute({"input": prompt})
 
         if result.success and result.output:
-            return result.output.get("text", "")
+            return result.output.get("text", "")  # type: ignore[no-any-return]
         else:
             raise RuntimeError(f"LLM call failed: {result.violations}")
 
@@ -362,7 +357,7 @@ class ContractedLLM:
 
 # Convenience function for creating contracted chains
 def create_contracted_chain(
-    chain: "Chain",
+    chain: Any,  # LangChain Chain type (varies by version)
     resources: dict[str, Any] | None = None,
     temporal: dict[str, Any] | None = None,
     contract_id: str | None = None,
@@ -401,8 +396,8 @@ def create_contracted_chain(
     contract = Contract(
         id=contract_id_val,
         name=contract_id_val,
-        resources=ResourceConstraints(**resources) if resources else None,
-        temporal=TemporalConstraints(**temporal) if temporal else None,
+        resources=ResourceConstraints(**resources) if resources else ResourceConstraints(),
+        temporal=TemporalConstraints(**temporal) if temporal else TemporalConstraints(),
     )
 
     return ContractedChain(contract=contract, chain=chain, strict_mode=strict_mode)

@@ -4,7 +4,7 @@ from datetime import timedelta
 
 import pytest
 
-from agent_contracts.core.contract import Contract, ContractMode, ResourceConstraints
+from agent_contracts.core.contract import Contract, ContractMode
 from agent_contracts.templates import (
     CodeReviewContract,
     CustomerSupportContract,
@@ -31,9 +31,7 @@ class TestResearchContract:
 
     def test_research_contract_urgent_mode(self) -> None:
         """Test research contract in URGENT mode."""
-        contract = ResearchContract.create(
-            topic="Quantum Computing", mode=ContractMode.URGENT
-        )
+        contract = ResearchContract.create(topic="Quantum Computing", mode=ContractMode.URGENT)
 
         assert contract.mode == ContractMode.URGENT
         assert contract.resources.tokens == 200_000
@@ -108,9 +106,7 @@ class TestCodeReviewContract:
 
     def test_create_code_review_small_pr(self) -> None:
         """Test code review for small PR (<5 files)."""
-        contract = CodeReviewContract.create(
-            repository="org/repo", pr_number=123, files_changed=3
-        )
+        contract = CodeReviewContract.create(repository="org/repo", pr_number=123, files_changed=3)
 
         assert isinstance(contract, Contract)
         assert contract.name == "Code Review: org/repo"
@@ -121,9 +117,7 @@ class TestCodeReviewContract:
 
     def test_code_review_medium_pr(self) -> None:
         """Test code review for medium PR (5-15 files)."""
-        contract = CodeReviewContract.create(
-            repository="org/repo", pr_number=456, files_changed=10
-        )
+        contract = CodeReviewContract.create(repository="org/repo", pr_number=456, files_changed=10)
 
         assert contract.resources.tokens == 50_000
         assert contract.resources.api_calls == 25
@@ -131,9 +125,7 @@ class TestCodeReviewContract:
 
     def test_code_review_large_pr(self) -> None:
         """Test code review for large PR (>15 files)."""
-        contract = CodeReviewContract.create(
-            repository="org/repo", pr_number=789, files_changed=20
-        )
+        contract = CodeReviewContract.create(repository="org/repo", pr_number=789, files_changed=20)
 
         assert contract.resources.tokens == 80_000
         assert contract.resources.api_calls == 40
@@ -148,9 +140,7 @@ class TestCodeReviewContract:
 
     def test_code_review_with_pr_number_in_id(self) -> None:
         """Test that PR number is included in contract ID."""
-        contract = CodeReviewContract.create(
-            repository="org/repo", pr_number=123, files_changed=5
-        )
+        contract = CodeReviewContract.create(repository="org/repo", pr_number=123, files_changed=5)
 
         assert "pr123" in contract.id
 
@@ -187,9 +177,7 @@ class TestCodeReviewContract:
 
     def test_code_review_metadata(self) -> None:
         """Test code review metadata."""
-        contract = CodeReviewContract.create(
-            repository="org/repo", pr_number=123, files_changed=10
-        )
+        contract = CodeReviewContract.create(repository="org/repo", pr_number=123, files_changed=10)
 
         assert contract.metadata["repository"] == "org/repo"
         assert contract.metadata["pr_number"] == 123
@@ -213,9 +201,7 @@ class TestCustomerSupportContract:
 
     def test_customer_support_high_priority(self) -> None:
         """Test customer support with high priority."""
-        contract = CustomerSupportContract.create(
-            ticket_id="TICKET-456", priority="high"
-        )
+        contract = CustomerSupportContract.create(ticket_id="TICKET-456", priority="high")
 
         assert contract.mode == ContractMode.URGENT
         assert contract.resources.tokens == 10_000
@@ -224,9 +210,7 @@ class TestCustomerSupportContract:
 
     def test_customer_support_urgent_priority(self) -> None:
         """Test customer support with urgent priority."""
-        contract = CustomerSupportContract.create(
-            ticket_id="TICKET-789", priority="urgent"
-        )
+        contract = CustomerSupportContract.create(ticket_id="TICKET-789", priority="urgent")
 
         assert contract.mode == ContractMode.URGENT
 
@@ -259,9 +243,7 @@ class TestCustomerSupportContract:
 
     def test_customer_support_metadata(self) -> None:
         """Test customer support metadata."""
-        contract = CustomerSupportContract.create(
-            ticket_id="TICKET-333", priority="high"
-        )
+        contract = CustomerSupportContract.create(ticket_id="TICKET-333", priority="high")
 
         assert contract.metadata["ticket_id"] == "TICKET-333"
         assert contract.metadata["priority"] == "high"
@@ -273,9 +255,7 @@ class TestDataAnalysisContract:
 
     def test_create_data_analysis_small_dataset(self) -> None:
         """Test data analysis for small dataset (<1MB)."""
-        contract = DataAnalysisContract.create(
-            dataset_name="small.csv", dataset_size_mb=0.5
-        )
+        contract = DataAnalysisContract.create(dataset_name="small.csv", dataset_size_mb=0.5)
 
         assert isinstance(contract, Contract)
         assert contract.name == "Data Analysis: small.csv"
@@ -286,9 +266,7 @@ class TestDataAnalysisContract:
 
     def test_data_analysis_medium_dataset(self) -> None:
         """Test data analysis for medium dataset (1-10MB)."""
-        contract = DataAnalysisContract.create(
-            dataset_name="medium.csv", dataset_size_mb=5.0
-        )
+        contract = DataAnalysisContract.create(dataset_name="medium.csv", dataset_size_mb=5.0)
 
         assert contract.resources.tokens == 50_000
         assert contract.resources.api_calls == 25
@@ -297,9 +275,7 @@ class TestDataAnalysisContract:
 
     def test_data_analysis_large_dataset(self) -> None:
         """Test data analysis for large dataset (>10MB)."""
-        contract = DataAnalysisContract.create(
-            dataset_name="large.csv", dataset_size_mb=15.0
-        )
+        contract = DataAnalysisContract.create(dataset_name="large.csv", dataset_size_mb=15.0)
 
         assert contract.resources.tokens == 100_000
         assert contract.resources.api_calls == 50
@@ -308,9 +284,7 @@ class TestDataAnalysisContract:
 
     def test_data_analysis_no_web_access(self) -> None:
         """Test that data analysis has no web access."""
-        contract = DataAnalysisContract.create(
-            dataset_name="test.csv", dataset_size_mb=1.0
-        )
+        contract = DataAnalysisContract.create(dataset_name="test.csv", dataset_size_mb=1.0)
 
         assert contract.resources.web_searches == 0
 
@@ -406,9 +380,7 @@ class TestTemplateIntegration:
         assert support.resources is not None
 
         # Data Analysis
-        analysis = DataAnalysisContract.create(
-            dataset_name="test.csv", dataset_size_mb=1.0
-        )
+        analysis = DataAnalysisContract.create(dataset_name="test.csv", dataset_size_mb=1.0)
         assert isinstance(analysis, Contract)
         assert analysis.resources is not None
 
@@ -437,16 +409,12 @@ class TestTemplateIntegration:
         assert small_pr.resources.tokens < medium_pr.resources.tokens < large_pr.resources.tokens
 
         # Data analysis scales by dataset size
-        small_data = DataAnalysisContract.create(
-            dataset_name="test", dataset_size_mb=0.5
-        )
+        small_data = DataAnalysisContract.create(dataset_name="test", dataset_size_mb=0.5)
         medium_data = DataAnalysisContract.create(dataset_name="test", dataset_size_mb=5.0)
         large_data = DataAnalysisContract.create(dataset_name="test", dataset_size_mb=15.0)
 
         assert (
-            small_data.resources.tokens
-            < medium_data.resources.tokens
-            < large_data.resources.tokens
+            small_data.resources.tokens < medium_data.resources.tokens < large_data.resources.tokens
         )
 
     def test_template_mode_variations(self) -> None:

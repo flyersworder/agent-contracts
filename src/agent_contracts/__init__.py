@@ -35,11 +35,6 @@ from agent_contracts.core.monitor import (
     TemporalMonitor,
     ViolationInfo,
 )
-from agent_contracts.core.wrapper import (
-    ContractAgent,
-    ExecutionLog,
-    ExecutionResult,
-)
 from agent_contracts.core.planning import (
     ResourceAllocation,
     StrategyRecommendation,
@@ -60,6 +55,17 @@ from agent_contracts.core.tokens import (
     TokenCount,
     TokenCounter,
 )
+from agent_contracts.core.wrapper import (
+    ContractAgent,
+    ExecutionLog,
+    ExecutionResult,
+)
+
+# Integrations
+from agent_contracts.integrations.litellm_wrapper import (
+    ContractedLLM,
+    ContractViolationError,
+)
 
 # Contract templates
 from agent_contracts.templates import (
@@ -68,12 +74,6 @@ from agent_contracts.templates import (
     DataAnalysisContract,
     ResearchContract,
     get_template,
-)
-
-# Integrations
-from agent_contracts.integrations.litellm_wrapper import (
-    ContractedLLM,
-    ContractViolationError,
 )
 
 # LangChain integration (optional)
@@ -90,15 +90,19 @@ except ImportError:
     create_contracted_chain = None  # type: ignore
 
 __all__ = [
-    # Core
+    "LANGCHAIN_AVAILABLE",
+    "CodeReviewContract",
     "Contract",
     "ContractAgent",
     "ContractEnforcer",
     "ContractMode",
     "ContractState",
     "ContractViolationError",
+    "ContractedChain",
     "ContractedLLM",
     "CostEstimate",
+    "CustomerSupportContract",
+    "DataAnalysisContract",
     "DeadlineType",
     "EnforcementAction",
     "EnforcementCallback",
@@ -107,6 +111,7 @@ __all__ = [
     "ExecutionResult",
     "InputSpecification",
     "OutputSpecification",
+    "ResearchContract",
     "ResourceAllocation",
     "ResourceConstraints",
     "ResourceMonitor",
@@ -121,21 +126,12 @@ __all__ = [
     "TokenCount",
     "TokenCounter",
     "ViolationInfo",
-    # Templates
-    "CodeReviewContract",
-    "CustomerSupportContract",
-    "DataAnalysisContract",
-    "ResearchContract",
-    "get_template",
-    # LangChain (optional)
-    "ContractedChain",
     "create_contracted_chain",
-    "LANGCHAIN_AVAILABLE",
-    # Planning & Prompts
     "estimate_prompt_tokens",
     "estimate_quality_cost_time",
     "generate_adaptive_instruction",
     "generate_budget_prompt",
+    "get_template",
     "plan_resource_allocation",
     "prioritize_tasks",
     "recommend_strategy",

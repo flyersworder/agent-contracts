@@ -12,8 +12,10 @@ from agent_contracts.integrations.litellm_wrapper import (
 try:
     from agent_contracts.integrations.langchain import (
         ContractedChain,
-        ContractedLLM as LangChainContractedLLM,
         create_contracted_chain,
+    )
+    from agent_contracts.integrations.langchain import (
+        ContractedLLM as LangChainContractedLLM,
     )
 
     LANGCHAIN_AVAILABLE = True
@@ -24,10 +26,9 @@ except ImportError:
     create_contracted_chain = None  # type: ignore
 
 __all__ = [
-    "ContractViolationError",
-    "ContractedLLM",
-    # LangChain (if available)
-    "ContractedChain",
-    "create_contracted_chain",
     "LANGCHAIN_AVAILABLE",
+    "ContractViolationError",
+    "ContractedChain",
+    "ContractedLLM",
+    "create_contracted_chain",
 ]

@@ -3,8 +3,6 @@
 import time
 from datetime import datetime, timedelta
 
-import pytest
-
 from agent_contracts.core.contract import (
     Contract,
     DeadlineType,
@@ -19,7 +17,9 @@ class TestTemporalMonitor:
 
     def test_create_monitor_without_temporal_constraints(self) -> None:
         """Test creating monitor with contract that has no temporal constraints."""
-        contract = Contract(id="test-no-temporal", name="test-no-temporal",
+        contract = Contract(
+            id="test-no-temporal",
+            name="test-no-temporal",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -32,7 +32,9 @@ class TestTemporalMonitor:
 
     def test_create_monitor_with_max_duration_timedelta(self) -> None:
         """Test creating monitor with max_duration as timedelta."""
-        contract = Contract(id="test-duration-td", name="test-duration-td",
+        contract = Contract(
+            id="test-duration-td",
+            name="test-duration-td",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=60)),
         )
@@ -44,7 +46,9 @@ class TestTemporalMonitor:
 
     def test_create_monitor_with_max_duration_numeric(self) -> None:
         """Test creating monitor with max_duration as number."""
-        contract = Contract(id="test-duration-num", name="test-duration-num",
+        contract = Contract(
+            id="test-duration-num",
+            name="test-duration-num",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=30),  # seconds
         )
@@ -56,7 +60,9 @@ class TestTemporalMonitor:
     def test_create_monitor_with_absolute_deadline(self) -> None:
         """Test creating monitor with absolute deadline datetime."""
         deadline = datetime.now() + timedelta(minutes=5)
-        contract = Contract(id="test-absolute-deadline", name="test-absolute-deadline",
+        contract = Contract(
+            id="test-absolute-deadline",
+            name="test-absolute-deadline",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(deadline=deadline),
         )
@@ -67,7 +73,9 @@ class TestTemporalMonitor:
 
     def test_create_monitor_with_relative_deadline_timedelta(self) -> None:
         """Test creating monitor with deadline as timedelta."""
-        contract = Contract(id="test-relative-deadline", name="test-relative-deadline",
+        contract = Contract(
+            id="test-relative-deadline",
+            name="test-relative-deadline",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(deadline=timedelta(minutes=10)),
         )
@@ -79,7 +87,9 @@ class TestTemporalMonitor:
 
     def test_start_monitoring(self) -> None:
         """Test starting time monitoring."""
-        contract = Contract(id="test-start", name="test-start",
+        contract = Contract(
+            id="test-start",
+            name="test-start",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -94,7 +104,9 @@ class TestTemporalMonitor:
 
     def test_start_sets_absolute_deadline(self) -> None:
         """Test that start() sets absolute deadline from max_duration."""
-        contract = Contract(id="test-deadline-set", name="test-deadline-set",
+        contract = Contract(
+            id="test-deadline-set",
+            name="test-deadline-set",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=30)),
         )
@@ -110,7 +122,9 @@ class TestTemporalMonitor:
 
     def test_get_elapsed_seconds(self) -> None:
         """Test getting elapsed seconds."""
-        contract = Contract(id="test-elapsed", name="test-elapsed",
+        contract = Contract(
+            id="test-elapsed",
+            name="test-elapsed",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -129,7 +143,9 @@ class TestTemporalMonitor:
 
     def test_get_remaining_seconds(self) -> None:
         """Test getting remaining seconds until deadline."""
-        contract = Contract(id="test-remaining", name="test-remaining",
+        contract = Contract(
+            id="test-remaining",
+            name="test-remaining",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -148,7 +164,9 @@ class TestTemporalMonitor:
 
     def test_get_remaining_seconds_without_deadline(self) -> None:
         """Test get_remaining_seconds when no deadline set."""
-        contract = Contract(id="test-no-deadline", name="test-no-deadline",
+        contract = Contract(
+            id="test-no-deadline",
+            name="test-no-deadline",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -159,7 +177,9 @@ class TestTemporalMonitor:
 
     def test_get_time_pressure_without_duration(self) -> None:
         """Test time pressure when no max_duration set."""
-        contract = Contract(id="test-no-pressure", name="test-no-pressure",
+        contract = Contract(
+            id="test-no-pressure",
+            name="test-no-pressure",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -170,7 +190,9 @@ class TestTemporalMonitor:
 
     def test_get_time_pressure_at_start(self) -> None:
         """Test time pressure immediately after start."""
-        contract = Contract(id="test-pressure-start", name="test-pressure-start",
+        contract = Contract(
+            id="test-pressure-start",
+            name="test-pressure-start",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -184,7 +206,9 @@ class TestTemporalMonitor:
 
     def test_get_time_pressure_increases_over_time(self) -> None:
         """Test that time pressure increases as time passes."""
-        contract = Contract(id="test-pressure-increase", name="test-pressure-increase",
+        contract = Contract(
+            id="test-pressure-increase",
+            name="test-pressure-increase",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=1)),
         )
@@ -206,7 +230,9 @@ class TestTemporalMonitor:
 
     def test_get_time_pressure_clamped_at_one(self) -> None:
         """Test that time pressure is clamped to 1.0."""
-        contract = Contract(id="test-pressure-clamp", name="test-pressure-clamp",
+        contract = Contract(
+            id="test-pressure-clamp",
+            name="test-pressure-clamp",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(milliseconds=100)),
         )
@@ -220,7 +246,9 @@ class TestTemporalMonitor:
 
     def test_is_past_deadline_false_initially(self) -> None:
         """Test that deadline is not past initially."""
-        contract = Contract(id="test-deadline-false", name="test-deadline-false",
+        contract = Contract(
+            id="test-deadline-false",
+            name="test-deadline-false",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -232,7 +260,9 @@ class TestTemporalMonitor:
 
     def test_is_past_deadline_true_after_duration(self) -> None:
         """Test that deadline is past after duration exceeds."""
-        contract = Contract(id="test-deadline-true", name="test-deadline-true",
+        contract = Contract(
+            id="test-deadline-true",
+            name="test-deadline-true",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(milliseconds=100)),
         )
@@ -245,7 +275,9 @@ class TestTemporalMonitor:
 
     def test_is_past_deadline_without_deadline(self) -> None:
         """Test is_past_deadline when no deadline set."""
-        contract = Contract(id="test-no-deadline-check", name="test-no-deadline-check",
+        contract = Contract(
+            id="test-no-deadline-check",
+            name="test-no-deadline-check",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -256,7 +288,9 @@ class TestTemporalMonitor:
 
     def test_is_over_duration_false_initially(self) -> None:
         """Test that duration is not exceeded initially."""
-        contract = Contract(id="test-duration-false", name="test-duration-false",
+        contract = Contract(
+            id="test-duration-false",
+            name="test-duration-false",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -268,7 +302,9 @@ class TestTemporalMonitor:
 
     def test_is_over_duration_true_after_exceeding(self) -> None:
         """Test that duration is exceeded after time passes."""
-        contract = Contract(id="test-duration-true", name="test-duration-true",
+        contract = Contract(
+            id="test-duration-true",
+            name="test-duration-true",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(milliseconds=100)),
         )
@@ -281,7 +317,9 @@ class TestTemporalMonitor:
 
     def test_is_over_duration_without_max_duration(self) -> None:
         """Test is_over_duration when no max_duration set."""
-        contract = Contract(id="test-no-duration", name="test-no-duration",
+        contract = Contract(
+            id="test-no-duration",
+            name="test-no-duration",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -292,7 +330,9 @@ class TestTemporalMonitor:
 
     def test_is_over_duration_before_start(self) -> None:
         """Test is_over_duration before monitoring starts."""
-        contract = Contract(id="test-before-start", name="test-before-start",
+        contract = Contract(
+            id="test-before-start",
+            name="test-before-start",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -303,7 +343,9 @@ class TestTemporalMonitor:
 
     def test_repr_before_start(self) -> None:
         """Test string representation before start."""
-        contract = Contract(id="test-repr-before", name="test-repr-before",
+        contract = Contract(
+            id="test-repr-before",
+            name="test-repr-before",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -315,7 +357,9 @@ class TestTemporalMonitor:
 
     def test_repr_after_start_ok(self) -> None:
         """Test string representation after start with OK status."""
-        contract = Contract(id="test-repr-ok", name="test-repr-ok",
+        contract = Contract(
+            id="test-repr-ok",
+            name="test-repr-ok",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -329,7 +373,9 @@ class TestTemporalMonitor:
 
     def test_repr_after_exceeding_duration(self) -> None:
         """Test string representation after exceeding duration."""
-        contract = Contract(id="test-repr-exceeded", name="test-repr-exceeded",
+        contract = Contract(
+            id="test-repr-exceeded",
+            name="test-repr-exceeded",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(milliseconds=100)),
         )
@@ -349,7 +395,9 @@ class TestTemporalMonitorIntegration:
     def test_realistic_deadline_scenario(self) -> None:
         """Test realistic scenario with deadline tracking."""
         # 5-second deadline
-        contract = Contract(id="realistic-deadline", name="realistic-deadline",
+        contract = Contract(
+            id="realistic-deadline",
+            name="realistic-deadline",
             resources=ResourceConstraints(tokens=10000),
             temporal=TemporalConstraints(
                 max_duration=timedelta(seconds=5), deadline_type=DeadlineType.SOFT
@@ -376,7 +424,9 @@ class TestTemporalMonitorIntegration:
     def test_deadline_exceeded_scenario(self) -> None:
         """Test scenario where deadline is exceeded."""
         # Very short deadline
-        contract = Contract(id="exceeded-deadline", name="exceeded-deadline",
+        contract = Contract(
+            id="exceeded-deadline",
+            name="exceeded-deadline",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(milliseconds=50)),
         )
@@ -394,10 +444,13 @@ class TestTemporalMonitorIntegration:
         # Absolute deadline in 10 seconds
         absolute = datetime.now() + timedelta(seconds=10)
 
-        contract = Contract(id="both-deadlines", name="both-deadlines",
+        contract = Contract(
+            id="both-deadlines",
+            name="both-deadlines",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(
-                deadline=absolute, max_duration=timedelta(seconds=5)  # Shorter duration
+                deadline=absolute,
+                max_duration=timedelta(seconds=5),  # Shorter duration
             ),
         )
 
@@ -411,7 +464,9 @@ class TestTemporalMonitorIntegration:
 
     def test_time_pressure_ranges(self) -> None:
         """Test time pressure in different ranges."""
-        contract = Contract(id="pressure-ranges", name="pressure-ranges",
+        contract = Contract(
+            id="pressure-ranges",
+            name="pressure-ranges",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=1)),
         )

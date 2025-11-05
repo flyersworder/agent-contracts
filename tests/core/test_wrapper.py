@@ -25,7 +25,9 @@ class TestContractAgent:
 
     def test_create_contract_agent(self) -> None:
         """Test creating a ContractAgent."""
-        contract = Contract(id="test-agent", name="test-agent",
+        contract = Contract(
+            id="test-agent",
+            name="test-agent",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -41,7 +43,9 @@ class TestContractAgent:
 
     def test_execute_simple_agent(self) -> None:
         """Test executing a simple agent."""
-        contract = Contract(id="test-exec", name="test-exec",
+        contract = Contract(
+            id="test-exec",
+            name="test-exec",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -59,7 +63,9 @@ class TestContractAgent:
 
     def test_execute_updates_contract_state(self) -> None:
         """Test that execution updates contract state."""
-        contract = Contract(id="test-state", name="test-state",
+        contract = Contract(
+            id="test-state",
+            name="test-state",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -78,7 +84,9 @@ class TestContractAgent:
 
     def test_execute_with_none_output_marks_violated(self) -> None:
         """Test that None output is considered a failure."""
-        contract = Contract(id="test-none", name="test-none",
+        contract = Contract(
+            id="test-none",
+            name="test-none",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -94,7 +102,9 @@ class TestContractAgent:
 
     def test_execute_with_exception(self) -> None:
         """Test handling of agent exceptions."""
-        contract = Contract(id="test-exception", name="test-exception",
+        contract = Contract(
+            id="test-exception",
+            name="test-exception",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -112,7 +122,9 @@ class TestContractAgent:
 
     def test_execution_log_created(self) -> None:
         """Test that execution log is created."""
-        contract = Contract(id="test-log", name="test-log",
+        contract = Contract(
+            id="test-log",
+            name="test-log",
             resources=ResourceConstraints(tokens=1000, cost_usd=0.10),
         )
 
@@ -131,7 +143,9 @@ class TestContractAgent:
 
     def test_execution_log_disabled(self) -> None:
         """Test execution with logging disabled."""
-        contract = Contract(id="test-no-log", name="test-no-log",
+        contract = Contract(
+            id="test-no-log",
+            name="test-no-log",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -147,7 +161,9 @@ class TestContractAgent:
 
     def test_execution_log_resource_usage(self) -> None:
         """Test that resource usage is logged."""
-        contract = Contract(id="test-resources", name="test-resources",
+        contract = Contract(
+            id="test-resources",
+            name="test-resources",
             resources=ResourceConstraints(tokens=1000, api_calls=5, cost_usd=0.10),
         )
 
@@ -166,7 +182,9 @@ class TestContractAgent:
 
     def test_execution_log_temporal_metrics(self) -> None:
         """Test that temporal metrics are logged."""
-        contract = Contract(id="test-temporal", name="test-temporal",
+        contract = Contract(
+            id="test-temporal",
+            name="test-temporal",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -185,7 +203,9 @@ class TestContractAgent:
 
     def test_get_remaining_budget(self) -> None:
         """Test getting remaining budget."""
-        contract = Contract(id="test-budget", name="test-budget",
+        contract = Contract(
+            id="test-budget",
+            name="test-budget",
             resources=ResourceConstraints(tokens=1000, cost_usd=0.50),
         )
 
@@ -203,7 +223,9 @@ class TestContractAgent:
 
     def test_get_time_pressure(self) -> None:
         """Test getting time pressure."""
-        contract = Contract(id="test-pressure", name="test-pressure",
+        contract = Contract(
+            id="test-pressure",
+            name="test-pressure",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )
@@ -219,7 +241,9 @@ class TestContractAgent:
 
     def test_to_json_export(self) -> None:
         """Test exporting execution log to JSON."""
-        contract = Contract(id="test-json", name="test-json",
+        contract = Contract(
+            id="test-json",
+            name="test-json",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -227,7 +251,7 @@ class TestContractAgent:
             return "result"
 
         wrapped = ContractAgent(contract=contract, agent=agent)
-        result = wrapped.execute("input")
+        _result = wrapped.execute("input")
 
         json_data = wrapped.to_json()
         assert isinstance(json_data, dict)
@@ -238,7 +262,9 @@ class TestContractAgent:
 
     def test_to_json_without_execution(self) -> None:
         """Test JSON export before execution."""
-        contract = Contract(id="test-no-exec", name="test-no-exec",
+        contract = Contract(
+            id="test-no-exec",
+            name="test-no-exec",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -252,7 +278,9 @@ class TestContractAgent:
 
     def test_strict_mode_enabled(self) -> None:
         """Test strict mode enforcement."""
-        contract = Contract(id="test-strict", name="test-strict",
+        contract = Contract(
+            id="test-strict",
+            name="test-strict",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -264,7 +292,9 @@ class TestContractAgent:
 
     def test_strict_mode_disabled(self) -> None:
         """Test lenient mode."""
-        contract = Contract(id="test-lenient", name="test-lenient",
+        contract = Contract(
+            id="test-lenient",
+            name="test-lenient",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -284,8 +314,8 @@ class TestContractAgent:
                 resources=ResourceConstraints(tokens=1000),
             )
 
-            def agent(x: str) -> str:
-                return f"mode: {mode.value}"
+            def agent(x: str, _mode: ContractMode = mode) -> str:
+                return f"mode: {_mode.value}"
 
             wrapped = ContractAgent(contract=contract, agent=agent)
             result = wrapped.execute("input")
@@ -295,7 +325,9 @@ class TestContractAgent:
 
     def test_execution_metadata(self) -> None:
         """Test execution result metadata."""
-        contract = Contract(id="test-metadata", name="test-metadata",
+        contract = Contract(
+            id="test-metadata",
+            name="test-metadata",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -330,7 +362,9 @@ class TestContractAgent:
 
     def test_execution_with_temporal_constraint(self) -> None:
         """Test execution with temporal constraints."""
-        contract = Contract(id="test-temporal-exec", name="test-temporal-exec",
+        contract = Contract(
+            id="test-temporal-exec",
+            name="test-temporal-exec",
             resources=ResourceConstraints(tokens=1000),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=5)),
         )
@@ -400,7 +434,9 @@ class TestContractViolationError:
 
     def test_create_violation_error(self) -> None:
         """Test creating a violation error."""
-        contract = Contract(id="test-violation", name="test-violation",
+        contract = Contract(
+            id="test-violation",
+            name="test-violation",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -418,7 +454,9 @@ class TestContractViolationError:
 
     def test_raise_violation_error(self) -> None:
         """Test raising and catching violation error."""
-        contract = Contract(id="test-raise", name="test-raise",
+        contract = Contract(
+            id="test-raise",
+            name="test-raise",
             resources=ResourceConstraints(tokens=1000),
         )
 
@@ -439,7 +477,9 @@ class TestContractAgentIntegration:
     def test_full_workflow_with_logging(self) -> None:
         """Test complete workflow with execution logging."""
         # Create contract
-        contract = Contract(id="workflow-test", name="workflow-test",
+        contract = Contract(
+            id="workflow-test",
+            name="workflow-test",
             resources=ResourceConstraints(tokens=5000, api_calls=10, cost_usd=0.50),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=30)),
         )
@@ -475,7 +515,9 @@ class TestContractAgentIntegration:
 
     def test_budget_awareness_during_execution(self) -> None:
         """Test that agent can check budget during execution."""
-        contract = Contract(id="budget-aware-test", name="budget-aware-test",
+        contract = Contract(
+            id="budget-aware-test",
+            name="budget-aware-test",
             resources=ResourceConstraints(tokens=10000, cost_usd=1.0),
             temporal=TemporalConstraints(max_duration=timedelta(seconds=10)),
         )

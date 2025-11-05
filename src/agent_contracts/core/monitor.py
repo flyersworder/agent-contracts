@@ -466,7 +466,7 @@ class ResourceMonitor:
             Remaining tokens, or float('inf') if no limit set
         """
         if self.constraints.tokens is None:
-            return float('inf')
+            return float("inf")
         return max(0.0, self.constraints.tokens - self.usage.tokens)
 
     def get_remaining_cost(self) -> float:
@@ -476,7 +476,7 @@ class ResourceMonitor:
             Remaining cost in USD, or float('inf') if no limit set
         """
         if self.constraints.cost_usd is None:
-            return float('inf')
+            return float("inf")
         return max(0.0, self.constraints.cost_usd - self.usage.cost_usd)
 
     def get_remaining_api_calls(self) -> float:
@@ -486,7 +486,7 @@ class ResourceMonitor:
             Remaining API calls, or float('inf') if no limit set
         """
         if self.constraints.api_calls is None:
-            return float('inf')
+            return float("inf")
         return max(0.0, self.constraints.api_calls - self.usage.api_calls)
 
     def reset(self) -> None:

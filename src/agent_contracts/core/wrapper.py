@@ -30,19 +30,15 @@ Example:
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from agent_contracts.core.contract import Contract, ContractState
 from agent_contracts.core.enforcement import ContractEnforcer, EnforcementEvent
 from agent_contracts.core.monitor import ResourceMonitor, TemporalMonitor
 
-# Type variables for generic agent wrapper
-TInput = TypeVar("TInput")
-TOutput = TypeVar("TOutput")
-
 
 @dataclass
-class ExecutionResult(Generic[TOutput]):
+class ExecutionResult[TOutput]:
     """Result of contract-bounded agent execution.
 
     Attributes:
@@ -100,7 +96,7 @@ class ExecutionLog:
         }
 
 
-class ContractAgent(Generic[TInput, TOutput]):
+class ContractAgent[TInput, TOutput]:
     """Contract-aware agent wrapper (Whitepaper Section 5.3).
 
     This class wraps any callable (function, agent, chain) and adds contract
@@ -225,7 +221,9 @@ class ContractAgent(Generic[TInput, TOutput]):
                     }
                 )
 
-            violations = [event["message"] for event in self._events if event["type"] == "violation"]
+            violations = [
+                event["message"] for event in self._events if event["type"] == "violation"
+            ]
 
             # Finalize log
             end_time = datetime.now()
@@ -274,7 +272,10 @@ class ContractAgent(Generic[TInput, TOutput]):
                 success=False,
                 violations=[str(e)],
                 execution_log=self.execution_log,  # type: ignore
-                metadata={"error": str(e), "elapsed_seconds": (end_time - start_time).total_seconds()},
+                metadata={
+                    "error": str(e),
+                    "elapsed_seconds": (end_time - start_time).total_seconds(),
+                },
             )
 
     def _monitored_execution(self, input_data: TInput) -> TOutput:
