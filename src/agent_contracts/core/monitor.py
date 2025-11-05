@@ -459,6 +459,36 @@ class ResourceMonitor:
 
         return percentages
 
+    def get_remaining_tokens(self) -> float:
+        """Get remaining tokens budget.
+
+        Returns:
+            Remaining tokens, or float('inf') if no limit set
+        """
+        if self.constraints.tokens is None:
+            return float("inf")
+        return max(0.0, self.constraints.tokens - self.usage.tokens)
+
+    def get_remaining_cost(self) -> float:
+        """Get remaining cost budget.
+
+        Returns:
+            Remaining cost in USD, or float('inf') if no limit set
+        """
+        if self.constraints.cost_usd is None:
+            return float("inf")
+        return max(0.0, self.constraints.cost_usd - self.usage.cost_usd)
+
+    def get_remaining_api_calls(self) -> float:
+        """Get remaining API calls budget.
+
+        Returns:
+            Remaining API calls, or float('inf') if no limit set
+        """
+        if self.constraints.api_calls is None:
+            return float("inf")
+        return max(0.0, self.constraints.api_calls - self.usage.api_calls)
+
     def reset(self) -> None:
         """Reset usage tracking and clear violations."""
         self.usage = ResourceUsage()
@@ -468,3 +498,126 @@ class ResourceMonitor:
         """String representation of monitor."""
         violated = "VIOLATED" if self.is_violated() else "OK"
         return f"ResourceMonitor(status={violated}, usage={self.usage})"
+
+
+class TemporalMonitor:
+    """Monitors temporal constraints (deadlines, duration limits).
+
+    This class tracks time-related metrics and checks if execution meets
+    temporal constraints defined in the contract.
+
+    Attributes:
+        contract: The contract being monitored
+        start_time: When monitoring started
+        deadline: Absolute deadline timestamp (if set)
+        max_duration: Maximum allowed duration in seconds (if set)
+    """
+
+    def __init__(self, contract: "Contract") -> None:  # type: ignore # noqa: F821
+        """Initialize temporal monitor.
+
+        Args:
+            contract: Contract with temporal constraints to monitor
+        """
+        self.contract = contract
+        self.start_time: datetime | None = None
+        self.deadline: datetime | None = None
+        self.max_duration: float | None = None
+
+        # Extract temporal constraints if present
+        if contract.temporal:
+            # Handle deadline (could be datetime or timedelta)
+            if hasattr(contract.temporal, "deadline") and contract.temporal.deadline:
+                deadline_val = contract.temporal.deadline
+                if isinstance(deadline_val, datetime):
+                    self.deadline = deadline_val
+                elif isinstance(deadline_val, timedelta):
+                    # Will set absolute deadline when start() is called
+                    self.max_duration = deadline_val.total_seconds()
+                elif isinstance(deadline_val, (int, float)):
+                    self.max_duration = float(deadline_val)
+
+            # Handle max_duration
+            if hasattr(contract.temporal, "max_duration"):
+                duration_val = contract.temporal.max_duration
+                if isinstance(duration_val, timedelta):
+                    self.max_duration = duration_val.total_seconds()
+                elif isinstance(duration_val, (int, float)):
+                    self.max_duration = float(duration_val)
+
+    def start(self) -> None:
+        """Start timing (call at beginning of execution)."""
+        self.start_time = datetime.now()
+
+        # Set absolute deadline if max_duration was specified
+        if self.max_duration and not self.deadline:
+            self.deadline = self.start_time + timedelta(seconds=self.max_duration)
+
+    def get_elapsed_seconds(self) -> float:
+        """Get elapsed time in seconds since start.
+
+        Returns:
+            Elapsed time in seconds, or 0.0 if not started
+        """
+        if not self.start_time:
+            return 0.0
+        return (datetime.now() - self.start_time).total_seconds()
+
+    def get_remaining_seconds(self) -> float | None:
+        """Get remaining time until deadline in seconds.
+
+        Returns:
+            Remaining seconds, or None if no deadline set
+        """
+        if not self.deadline:
+            return None
+        return (self.deadline - datetime.now()).total_seconds()
+
+    def get_time_pressure(self) -> float:
+        """Get time pressure value (0.0 = no pressure, 1.0 = deadline reached).
+
+        This metric helps agents adjust their strategy based on time remaining:
+        - 0.0-0.3: Plenty of time, can be thorough
+        - 0.3-0.7: Moderate pressure, balance quality and speed
+        - 0.7-1.0: High pressure, prioritize completion
+
+        Returns:
+            Time pressure value between 0.0 and 1.0
+        """
+        if not self.start_time or not self.max_duration:
+            return 0.0
+
+        elapsed = self.get_elapsed_seconds()
+        pressure = elapsed / self.max_duration
+
+        # Clamp to [0.0, 1.0]
+        return max(0.0, min(1.0, pressure))
+
+    def is_past_deadline(self) -> bool:
+        """Check if current time is past the deadline.
+
+        Returns:
+            True if deadline has passed, False otherwise
+        """
+        if not self.deadline:
+            return False
+        return datetime.now() > self.deadline
+
+    def is_over_duration(self) -> bool:
+        """Check if execution has exceeded max duration.
+
+        Returns:
+            True if over duration limit, False otherwise
+        """
+        if not self.max_duration or not self.start_time:
+            return False
+        return self.get_elapsed_seconds() > self.max_duration
+
+    def __repr__(self) -> str:
+        """String representation of temporal monitor."""
+        if not self.start_time:
+            return "TemporalMonitor(not started)"
+
+        elapsed = self.get_elapsed_seconds()
+        status = "EXCEEDED" if self.is_past_deadline() or self.is_over_duration() else "OK"
+        return f"TemporalMonitor(elapsed={elapsed:.1f}s, status={status})"

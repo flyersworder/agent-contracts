@@ -10,6 +10,12 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
+[project.optional-dependencies]
+langchain = [
+    "langchain>=0.3.0",
+    "langchain-core>=0.3.0",
+]
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.0.0",
