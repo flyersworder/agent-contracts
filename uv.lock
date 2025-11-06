@@ -17,6 +17,11 @@ langchain = [
     { name = "langchain" },
     { name = "langchain-core" },
 ]
+langgraph = [
+    { name = "langchain" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -30,12 +35,15 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "langchain", marker = "extra == 'langchain'", specifier = ">=0.3.0" },
+    { name = "langchain", marker = "extra == 'langgraph'", specifier = ">=0.3.0" },
     { name = "langchain-core", marker = "extra == 'langchain'", specifier = ">=0.3.0" },
+    { name = "langchain-core", marker = "extra == 'langgraph'", specifier = ">=0.3.0" },
+    { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=0.2.0" },
     { name = "litellm", specifier = ">=1.60.0" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
-provides-extras = ["langchain"]
+provides-extras = ["langchain", "langgraph"]
 
 [package.metadata.requires-dev]
 dev = [
