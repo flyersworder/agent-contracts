@@ -133,14 +133,42 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
         Returns:
             Chain's output dictionary
         """
-        return self.chain(inputs)  # type: ignore[no-any-return]
+        # Try new LangChain 1.0+ API first (invoke), then fall back to old API (__call__)
+        if hasattr(self.chain, "invoke"):
+            # Pass callback handler via config for token tracking
+            config = {"callbacks": [self._callback_handler] if self._callback_handler else []}
+            result = self.chain.invoke(inputs, config=config)
+
+            # Extract usage metadata from result if available
+            if hasattr(result, "usage_metadata") and result.usage_metadata:
+                total_tokens = result.usage_metadata.get("total_tokens", 0)
+                reasoning_tokens = result.usage_metadata.get("output_token_details", {}).get(
+                    "reasoning", 0
+                )
+
+                if total_tokens > 0:
+                    # Track tokens (with reasoning breakdown if available)
+                    self.resource_monitor.usage.add_tokens(
+                        count=0, reasoning=reasoning_tokens, text=total_tokens - reasoning_tokens
+                    )
+
+                    # Track API call with cost
+                    # Estimate cost for Gemini 2.5 Flash (~$0.15 per 1M tokens average)
+                    cost = total_tokens * 0.00000015
+                    self.resource_monitor.usage.add_api_call(cost=cost, tokens=0)
+
+            return result  # type: ignore[no-any-return]
+        else:
+            return self.chain(inputs)  # type: ignore[no-any-return]
 
     def _setup_callbacks(self) -> None:
         """Set up LangChain callbacks for token tracking.
 
-        This adds a callback handler that tracks token usage from LLM calls
+        This creates a callback handler that tracks token usage from LLM calls
         and updates the resource monitor automatically.
         """
+        self._callback_handler = None
+
         # Try to set up callback handler for automatic token tracking
         try:
             # Try LangChain 1.0+ first
@@ -159,29 +187,45 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
 
                 def on_llm_end(self, response: "LLMResult", **kwargs: Any) -> None:
                     """Track tokens when LLM call completes."""
+                    total_tokens = 0
+
+                    # Try multiple locations for token usage
+                    # 1. OpenAI-style: response.llm_output["token_usage"]
                     if response.llm_output and "token_usage" in response.llm_output:
                         usage = response.llm_output["token_usage"]
-
-                        # Extract token counts
                         total_tokens = usage.get("total_tokens", 0)
 
-                        # Update monitor
-                        self.monitor.update_resource("tokens", total_tokens)
-                        self.monitor.update_resource("api_calls", 1)
+                    # 2. Google-style: response.llm_output["usage_metadata"]
+                    elif response.llm_output and "usage_metadata" in response.llm_output:
+                        usage = response.llm_output["usage_metadata"]
+                        total_tokens = usage.get("total_tokens", 0)
 
-                        # Estimate cost (rough approximation)
-                        # Real implementation should use model-specific pricing
-                        cost_estimate = total_tokens * 0.00002  # ~$0.02 per 1K tokens
-                        self.monitor.update_resource("cost_usd", cost_estimate)
+                    # 3. Try generations metadata (some providers put it here)
+                    elif (
+                        response.generations
+                        and len(response.generations) > 0
+                        and len(response.generations[0]) > 0
+                    ):
+                        gen = response.generations[0][0]
+                        if hasattr(gen, "message") and hasattr(gen.message, "response_metadata"):
+                            metadata = gen.message.response_metadata
+                            if "usage_metadata" in metadata:
+                                usage = metadata["usage_metadata"]
+                                total_tokens = usage.get("total_tokens", 0)
 
-            # Add callback to chain
-            callback = TokenTrackingCallback(self.resource_monitor)
+                    # If we found tokens, update the monitor
+                    if total_tokens > 0:
+                        # Track tokens using proper API
+                        self.monitor.usage.add_tokens(count=total_tokens)
 
-            # Inject callback into chain if it supports callbacks
-            if hasattr(self.chain, "callbacks"):
-                if self.chain.callbacks is None:
-                    self.chain.callbacks = []
-                self.chain.callbacks.append(callback)
+                        # Track API call with cost estimate
+                        # Gemini 2.5 Flash: $0.075 per 1M input, $0.30 per 1M output
+                        # Use average rate of ~$0.15 per 1M tokens
+                        cost_estimate = total_tokens * 0.00000015
+                        self.monitor.usage.add_api_call(cost=cost_estimate, tokens=0)
+
+            # Store callback handler for use in _run_chain
+            self._callback_handler = TokenTrackingCallback(self.resource_monitor)
 
         except ImportError:
             # Callback setup failed, will need manual token tracking

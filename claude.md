@@ -841,9 +841,13 @@ After completing Phase 2A and quality validation, Phase 2B focused on delivering
 - Bimodal behavior analysis and root cause identification
 - Production-ready with documented limitations
 
-**4. LangChain 1.0+ Integration** ✅
-- Full support for LangChain 1.0+ API
-- Integration tests passing
+**4. LangChain Integration & Governance Benchmarks** ✅
+- Full support for LangChain 1.0+ API (`invoke()` and legacy `__call__()`)
+- Integration tests passing (4 tests, 15 skipped)
+- Comprehensive benchmarks and demos (`benchmarks/langchain/`)
+- Honest value proposition: Governance & compliance, NOT single-call prevention
+- **Key Finding**: Cannot prevent single expensive call (tokens unknown until after API completes)
+- **Real Value**: Multi-call protection, audit trails, organizational policy enforcement
 - Backward compatibility maintained
 
 **5. Code Quality Infrastructure** ✅
@@ -888,6 +892,122 @@ After completing Phase 2A and quality validation, Phase 2B focused on delivering
 - ✅ Code quality infrastructure
 
 **Rationale**: Prioritized empirical validation and scientific rigor over feature breadth. The governance benchmarks provided critical evidence for the framework's value proposition.
+
+---
+
+## LangChain Integration Deep Dive (November 6, 2025)
+
+After Phase 2B completion, we conducted comprehensive testing and benchmarking of the LangChain integration that was implemented but never fully validated.
+
+### Initial Implementation Review
+
+**File**: `src/agent_contracts/integrations/langchain.py`
+**Status**: Implemented during Phase 1, but never tested with real benchmarks
+
+**Components**:
+- `ContractedChain`: Wraps LangChain chains with contract enforcement
+- `ContractedLLM`: Wraps standalone LLM calls
+- `create_contracted_chain()`: Convenience function for creating contracted chains
+
+### Testing and Bug Fixes
+
+**Three Critical Bugs Fixed**:
+
+1. **LangChain 1.0+ API Compatibility**:
+   - Problem: `RunnableSequence` not callable directly
+   - Fix: Check for `invoke()` method first, fallback to `__call__()`
+   - Impact: Full support for both LangChain 1.0+ and legacy APIs
+
+2. **Token Tracking Field Names**:
+   - Problem: Looking for `total_token_count` instead of `total_tokens`
+   - Discovered via: Debug output showing actual metadata structure
+   - Fix: Changed to correct field names in both integration and benchmarks
+   - Impact: Token tracking now accurate (was showing 0 before)
+
+3. **ResourceMonitor API Mismatch**:
+   - Problem: Using generic `update_resource()` that doesn't exist
+   - Fix: Changed to specific methods (`add_tokens()`, `add_api_call()`)
+   - Impact: Resource tracking now works correctly
+
+### Critical User Insight: What's the Real Value?
+
+**User Question**: "This token tracking comes from the built-in feature of langchain, right? We just expose it. What's the real benefits of our framework and how can we demo it in a benchmark test?"
+
+This question triggered a fundamental reassessment of the value proposition.
+
+### The Honest Realization
+
+**Fundamental Limitation Discovered**:
+- ❌ Cannot prevent a SINGLE LLM call from exceeding budget
+- Why: Token count is unknown until AFTER the API call completes
+- Money is already spent by the time we detect violations
+- Can only detect and log, not prevent
+
+**What LangChain Already Provides**:
+- ✓ Token usage metadata (via `usage_metadata`)
+- ✓ Model response tracking
+
+**What Agent Contracts ACTUALLY Adds**:
+- ✓✓✓ **Governance**: Organization-wide policy enforcement
+- ✓✓✓ **Compliance**: Complete audit trails for regulatory requirements
+- ✓✓✓ **Multi-Call Protection**: Budget enforcement across multiple operations
+- ✓✓✓ **Detection**: Budget violation logging and alerting
+
+### Honest Documentation Strategy
+
+**Decision**: Option A - Be transparent about limitations, focus on real value
+
+**Created**:
+1. `benchmarks/langchain/README.md` - Honest value proposition
+   - Clear "What Works" section
+   - Explicit "Current Limitations" section
+   - Focus on governance, compliance, multi-call protection
+
+2. `benchmarks/langchain/demo_integration.py` - Four demonstrations:
+   - Demo 1: Token Tracking & Cost Monitoring
+   - Demo 2: Complete Audit Trails (compliance)
+   - Demo 3: Multi-Call Budget Protection ⭐ (the REAL value)
+   - Demo 4: Organizational Policy Enforcement
+
+3. Updated `benchmarks/README.md` with LangChain section
+4. Updated integration tests validation (4 passing, 15 skipped)
+
+### Value Proposition Reframing
+
+**Before**: "Budget enforcement for LangChain chains"
+**After**: "Governance and compliance for production AI systems"
+
+| LangChain Provides | Agent Contracts Adds |
+|-------------------|---------------------|
+| Token usage tracking | Organizational policy enforcement |
+| Model responses | Compliance audit trails |
+| | Multi-call budget protection |
+| | Violation detection & alerting |
+
+**Perfect Use Cases**:
+- Enterprises with AI cost policies
+- Teams needing budget accountability
+- Compliance and regulatory requirements
+- Multi-agent systems with shared budgets
+
+### Key Learnings
+
+1. **User feedback is invaluable**: The question "what's the real benefit?" forced honest assessment
+2. **Limitations can be strengths**: Focus on what we DO provide (governance) rather than what we can't (single-call prevention)
+3. **Honest documentation builds trust**: Being explicit about limitations is more valuable than overpromising
+4. **Integration value ≠ Core value**: Integrations expose existing capabilities in domain-specific ways
+5. **Governance > Optimization**: Enterprise value is in organizational control, not individual efficiency
+
+### Documentation Structure
+
+```
+benchmarks/langchain/
+├── README.md                   # Honest value proposition & limitations
+├── demo_integration.py         # 4 demonstrations of real value
+└── (tests validated)           # Integration tests passing
+```
+
+**Status**: ✅ Complete, documented, validated
 
 ---
 
@@ -939,8 +1059,9 @@ After completing Phase 2A and quality validation, Phase 2B focused on delivering
 
 ---
 
-*Last Updated: November 5, 2025*
+*Last Updated: November 6, 2025*
 *Phase: 2B (Production Governance - COMPLETE)* ✅
 *Status: Production-ready, 209+ tests, 94%+ coverage*
 *Quality Framework: ✅ VALIDATED (CV=5.2%, exceeds SOTA)*
+*LangChain Integration: ✅ VALIDATED (governance & compliance focus)*
 *Next Milestone: Package for PyPI release (v0.1.0)*

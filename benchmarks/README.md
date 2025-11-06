@@ -118,10 +118,61 @@ The benchmark provides:
 - Implement dynamic budget allocation based on question importance
 - Add multi-turn conversation scenarios
 
+## LangChain Integration Benchmarks
+
+### Overview (`langchain/`)
+
+The LangChain integration demonstrates Agent Contracts' **governance and compliance** capabilities when wrapping LangChain chains and agents.
+
+**Key Finding**: Agent Contracts adds organizational governance that LangChain's token tracking doesn't provide.
+
+### What Agent Contracts Provides
+
+**✅ What Works:**
+1. **Token Tracking & Cost Monitoring** - Automatic extraction from LangChain responses
+2. **Organizational Policy Enforcement** - Company-wide cost policies and budget violation detection
+3. **Multi-Call Protection** - Cumulative budget tracking across multiple operations
+4. **Audit Trails** - Complete execution logs for compliance documentation
+
+**⚠️ Current Limitation:**
+- **Single-Call Prevention**: Cannot prevent a SINGLE LLM call from exceeding budget because token count is unknown until AFTER the API call completes
+- Money is already spent by the time we detect violations
+- Focus: Detection + multi-call protection, not single-call prevention
+
+### Value Proposition
+
+| LangChain Provides | Agent Contracts Adds |
+|-------------------|---------------------|
+| ✓ Token usage metadata | ✓✓✓ Governance: Organization-wide policy enforcement |
+| ✓ Model response tracking | ✓✓✓ Compliance: Complete audit trails for regulatory requirements |
+|  | ✓✓✓ Protection: Multi-call budget enforcement |
+|  | ✓✓✓ Detection: Budget violation logging and alerting |
+
+**Perfect for:**
+- Enterprises with AI cost policies
+- Teams needing budget accountability
+- Compliance and audit requirements
+- Multi-agent systems with shared budgets
+
+### Running the Demo
+
+```bash
+# Ensure you have your GOOGLE_API_KEY in .env
+uv run python benchmarks/langchain/demo_integration.py
+```
+
+**Demonstrations:**
+1. Token Tracking & Cost Monitoring
+2. Complete Audit Trails for Compliance
+3. Multi-Call Budget Protection (the REAL value)
+4. Organizational Policy Enforcement
+
+**Documentation**: See `benchmarks/langchain/README.md` for detailed explanation of capabilities and limitations.
+
 ## Future Benchmarks
 
 Additional benchmarks will be added as we progress through the roadmap:
 
 - **Phase 2**: Quality metrics benchmarks, skill verification tests
-- **Phase 3**: Framework integration benchmarks (LangChain, AutoGen, CrewAI)
+- **Phase 3**: Framework integration benchmarks (AutoGen, CrewAI)
 - **Phase 4**: Scalability tests, production performance benchmarks
