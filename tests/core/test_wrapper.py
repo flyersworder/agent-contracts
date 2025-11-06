@@ -58,7 +58,7 @@ class TestContractAgent:
         assert isinstance(result, ExecutionResult)
         assert result.success is True
         assert result.output == "Result: test input"
-        assert result.contract.state == ContractState.FULFILLED
+        assert result.contract.state == ContractState.ACTIVE  # Stays ACTIVE for cumulative tracking
         assert len(result.violations) == 0
 
     def test_execute_updates_contract_state(self) -> None:
@@ -79,7 +79,7 @@ class TestContractAgent:
 
         # After execution
         result = wrapped.execute("input")
-        assert contract.state == ContractState.FULFILLED
+        assert contract.state == ContractState.ACTIVE  # Stays ACTIVE for cumulative tracking
         assert result.success is True
 
     def test_execute_with_none_output_marks_violated(self) -> None:
@@ -139,7 +139,9 @@ class TestContractAgent:
         assert result.execution_log.contract_id == "test-log"
         assert result.execution_log.start_time is not None
         assert result.execution_log.end_time is not None
-        assert result.execution_log.final_state == ContractState.FULFILLED
+        assert (
+            result.execution_log.final_state == ContractState.ACTIVE
+        )  # Stays ACTIVE for cumulative tracking
 
     def test_execution_log_disabled(self) -> None:
         """Test execution with logging disabled."""
@@ -499,19 +501,19 @@ class TestContractAgentIntegration:
         # Verify results
         assert result.success is True
         assert "AI Safety" in result.output
-        assert contract.state == ContractState.FULFILLED
+        assert contract.state == ContractState.ACTIVE  # Stays ACTIVE for cumulative tracking
 
         # Verify logging
         log = result.execution_log
         assert log.contract_id == "workflow-test"
-        assert log.final_state == ContractState.FULFILLED
+        assert log.final_state == ContractState.ACTIVE  # Stays ACTIVE for cumulative tracking
         assert log.temporal_metrics["elapsed_seconds"] >= 0.05
         assert log.temporal_metrics["deadline_met"] is True
 
         # Verify JSON export
         json_data = wrapped.to_json()
         assert json_data["contract_id"] == "workflow-test"
-        assert json_data["final_state"] == "fulfilled"
+        assert json_data["final_state"] == "active"  # Stays ACTIVE for cumulative tracking
 
     def test_budget_awareness_during_execution(self) -> None:
         """Test that agent can check budget during execution."""

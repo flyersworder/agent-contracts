@@ -155,13 +155,13 @@ def demo_3_multi_call_protection() -> None:
         print(f"Call {i} ({topic}):")
         print(f"  Tokens: {total_tokens:,} | API calls: {calls}")
 
-        if not result.success:
-            print(f"  ⚠️  Violations: {result.violations}")
+        # Check for violations (budget exceeded)
+        if result.violations:
+            print(f"  ⚠️  VIOLATION DETECTED: {result.violations}")
+            print("  🛑 Stopping execution (budget exhausted)")
+            break
         else:
             print("  ✅ Within budget")
-
-        # Note: Each execute() call resets context in current implementation
-        # For true cumulative tracking, we'd need persistent contract state
 
     print("\n💡 Value: Multi-call protection prevents runaway costs")
     print("   • First call: Always completes (limitation)")

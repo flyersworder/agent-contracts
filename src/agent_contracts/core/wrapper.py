@@ -148,6 +148,8 @@ class ContractAgent[TInput, TOutput]:
             strict_mode=strict_mode,
             callbacks=[self._on_enforcement_event] if enable_logging else None,
         )
+        # IMPORTANT: Make enforcer use the same resource monitor for tracking
+        self.enforcer.monitor = self.resource_monitor
 
         # Execution state
         self.execution_log: ExecutionLog | None = None
@@ -177,10 +179,6 @@ class ContractAgent[TInput, TOutput]:
         start_time = datetime.now()
         self._events = []
 
-        # Activate contract
-        if self.contract.state == ContractState.DRAFTED:
-            self.contract.state = ContractState.ACTIVE
-
         # Initialize execution log
         if self.enable_logging:
             self.execution_log = ExecutionLog(
@@ -197,6 +195,10 @@ class ContractAgent[TInput, TOutput]:
         # Start monitoring
         self.temporal_monitor.start()
 
+        # Start enforcement (only if not already active)
+        if not self.enforcer._enforcement_active:
+            self.enforcer.start()
+
         try:
             # Inject budget/time awareness (optional - agent may use these)
             # For now, agents need to manually check these via get_remaining_budget()
@@ -205,13 +207,21 @@ class ContractAgent[TInput, TOutput]:
             # Execute agent with monitoring
             output = self._monitored_execution(input_data)
 
-            # Check success criteria
-            success = self._check_success_criteria(output)
+            # Check constraints after execution
+            is_violated, _constraint_violations = self.enforcer.check_constraints()
 
-            # Update contract state
-            if success:
-                self.contract.state = ContractState.FULFILLED
-            else:
+            # Check temporal constraints
+            self.enforcer.check_temporal_constraints()
+
+            # Check success criteria
+            success = self._check_success_criteria(output) and not is_violated
+
+            # Update contract state based on violations
+            # Note: We keep it ACTIVE if successful to allow cumulative tracking
+            # Only mark as VIOLATED if there were actual violations
+            if is_violated:
+                self.contract.state = ContractState.VIOLATED
+            elif not success:
                 self.contract.state = ContractState.VIOLATED
                 self._events.append(
                     {
@@ -220,10 +230,16 @@ class ContractAgent[TInput, TOutput]:
                         "timestamp": datetime.now().isoformat(),
                     }
                 )
+            # else: keep contract in ACTIVE state for cumulative tracking
 
             violations = [
-                event["message"] for event in self._events if event["type"] == "violation"
+                event["message"]
+                for event in self._events
+                if event["type"] in ("violation", "constraint_violated")
             ]
+
+            # Note: We don't stop the enforcer here to allow cumulative tracking
+            # across multiple execute() calls. The enforcer stays active.
 
             # Finalize log
             end_time = datetime.now()
@@ -253,6 +269,8 @@ class ContractAgent[TInput, TOutput]:
             )
 
         except Exception as e:
+            # Note: Don't stop enforcer to allow recovery and cumulative tracking
+
             # Handle execution failure
             self.contract.state = ContractState.VIOLATED
             self._events.append(
