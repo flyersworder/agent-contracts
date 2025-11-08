@@ -25,10 +25,26 @@ except ImportError:
     LangChainContractedLLM = None  # type: ignore
     create_contracted_chain = None  # type: ignore
 
+# LangGraph integration (optional, requires langgraph package)
+try:
+    from agent_contracts.integrations.langgraph import (
+        ContractedGraph,
+        create_contracted_graph,
+    )
+
+    LANGGRAPH_AVAILABLE = True
+except ImportError:
+    LANGGRAPH_AVAILABLE = False
+    ContractedGraph = None  # type: ignore
+    create_contracted_graph = None  # type: ignore
+
 __all__ = [
     "LANGCHAIN_AVAILABLE",
+    "LANGGRAPH_AVAILABLE",
     "ContractViolationError",
     "ContractedChain",
+    "ContractedGraph",
     "ContractedLLM",
     "create_contracted_chain",
+    "create_contracted_graph",
 ]

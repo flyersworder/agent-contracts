@@ -1011,23 +1011,274 @@ benchmarks/langchain/
 
 ---
 
-## Project Complete: Ready for Release 🎉
+## LangGraph Integration: Premium Multi-Agent Governance (November 6, 2025) ✅
 
-**Current State** (November 5, 2025):
+After completing the LangChain integration, we implemented **LangGraph integration** - the premium feature for complex multi-agent workflows. This is where Agent Contracts provides the MOST value.
+
+### Why LangGraph > LangChain for Governance
+
+**LangChain** (baseline integration):
+- Simple sequential/branching chains
+- Typically 3-10 LLM calls per execution
+- Budget risk: LOW to MODERATE
+
+**LangGraph** (premium integration):
+- Complex stateful workflows with cycles, retries, parallel execution
+- Multi-agent systems with message passing
+- Can easily make 30+ LLM calls in a single workflow
+- Budget risk: **VERY HIGH** - can spiral out of control without governance!
+
+**This is the killer feature for production deployments.**
+
+### Implementation Details
+
+**File**: `src/agent_contracts/integrations/langgraph.py` (93 lines)
+**Tests**: `tests/integrations/test_langgraph.py` (27 tests, 85% coverage)
+**Benchmarks**: `benchmarks/langgraph/` (3 comprehensive demos)
+
+**Components**:
+- `ContractedGraph`: Wrapper for LangGraph's compiled graphs
+- `create_contracted_graph()`: Convenience function
+- Cumulative budget tracking across ALL nodes and cycles
+- Multi-agent budget sharing (fair resource allocation)
+- Token tracking callbacks (OpenAI, Google, etc.)
+- Streaming support for progressive execution
+
+### Key Features
+
+1. **Cumulative Budget Tracking Across Entire Graph**
+   - Track tokens/cost across ALL nodes, not just individual calls
+   - Budget shared by entire workflow (not per-node)
+   - Critical for multi-agent coordination
+
+2. **Cycle & Loop Protection**
+   - Prevent infinite loops in validation cycles
+   - Limit retry attempts in error recovery
+   - Stop execution when budget exhausted (mid-workflow!)
+
+3. **Multi-Agent Budget Sharing**
+   - Multiple agents share single budget pool
+   - No single agent can monopolize resources
+   - Fair allocation across parallel branches
+
+4. **Real-Time Violation Detection**
+   - Check constraints at every node execution
+   - Stop workflow immediately on violation (strict mode)
+   - Log violations and continue (lenient mode)
+
+5. **Complete Audit Trail**
+   - Track which nodes consumed resources
+   - Debug why workflows exceeded budget
+   - Compliance documentation for complex workflows
+
+### Testing & Validation
+
+**Test Coverage**: 27 tests, 85% coverage
+
+**Test Categories**:
+- ✅ Basic graph creation and execution
+- ✅ Cycles and loop protection
+- ✅ Parallel execution
+- ✅ Token tracking (OpenAI-style, Google-style, generations)
+- ✅ Streaming support
+- ✅ Violation handling (strict & lenient modes)
+- ✅ Budget awareness injection
+- ✅ Cumulative tracking across multiple calls
+
+**Uncovered Code** (15%):
+- ImportError fallbacks (when langgraph not installed)
+- Legacy API fallbacks
+- Edge cases in callback imports
+
+### Benchmarks & Demonstrations
+
+**File**: `benchmarks/langgraph/demo_integration.py`
+
+**Three Realistic Scenarios**:
+
+1. **Simple Sequential Graph**
+   - Basic workflow with budget tracking
+   - 2 nodes: analyze → summarize
+   - Demonstrates automatic tracking across nodes
+
+2. **Validation Cycle with Loop Protection** ⭐
+   - Research → Validate → Research (cycle)
+   - Retries up to 3 times or until budget exhausted
+   - **This is THE value demonstration!**
+   - Shows how contracts prevent runaway loop costs
+
+3. **Multi-Agent Coordination**
+   - 3 agents: Research → Planning → Execution
+   - Shared budget pool across all agents
+   - No single agent monopolizes resources
+
+### Real-World Impact
+
+**Without Agent Contracts**:
+```
+Research loop iteration 1: $0.20 ✓
+Research loop iteration 2: $0.20 ✓
+Research loop iteration 3: $0.20 ✓
+... (loops indefinitely, validation never passes)
+Research loop iteration 47: $0.20 ✓
+Total: $9.40 💸 (yikes!)
+```
+
+**With Agent Contracts**:
+```
+Research loop iteration 1: $0.20 ✓
+Research loop iteration 2: $0.20 ✓
+Research loop iteration 3: $0.20 ✓
+Budget limit ($2.00) reached - stopping execution 🛑
+Total: $0.60 ✅ (saved $8.80!)
+```
+
+**That's the value proposition.**
+
+### Strategic Positioning
+
+**LangChain integration** = Baseline feature
+- For completeness and simple use cases
+- Value: Governance, audit trails, multi-call protection
+
+**LangGraph integration** = Premium feature ⭐
+- Where the REAL value is!
+- High complexity → High budget risk → High governance value
+
+**Complete Production Stack**:
+- **LangSmith** (Observability): "Here's what happened" (retrospective)
+- **Agent Contracts** (Governance): "Stop before exceeding budget" (proactive)
+- **LangGraph + LangSmith + Agent Contracts** = Complete observability + governance
+
+They're complementary, not competitive!
+
+### Technical Implementation Highlights
+
+**1. Import Compatibility**:
+```python
+try:
+    from langgraph.graph import StateGraph
+    LANGGRAPH_AVAILABLE = True
+except ImportError:
+    LANGGRAPH_AVAILABLE = False
+    StateGraph = Any
+```
+
+**2. Token Tracking Callbacks**:
+- Supports OpenAI-style responses (`token_usage`)
+- Supports Google-style responses (`usage_metadata`)
+- Supports generations metadata (alternative location)
+- Cumulative tracking across all nodes
+
+**3. Budget Awareness Injection**:
+```python
+input_data["budget_info"] = {
+    "remaining_tokens": monitor.get_remaining_tokens(),
+    "remaining_cost": monitor.get_remaining_cost(),
+    "remaining_api_calls": monitor.get_remaining_api_calls(),
+    "time_pressure": temporal.get_time_pressure(),
+}
+```
+
+**4. Streaming Support**:
+- Experimental streaming with constraint checks at checkpoints
+- Budget tracking at state boundaries
+- Early termination on violations during streaming
+
+### Pre-commit Hook Integration
+
+As part of this implementation, we also set up comprehensive pre-commit hooks:
+
+**Installed hooks**:
+- ✅ `uv-lock`: Lock file synchronization
+- ✅ `ruff-lint`: Python linting with auto-fix
+- ✅ `ruff-format`: Python code formatting
+- ✅ `mypy-type-check`: Strict type checking
+- ✅ Standard file checks (trailing whitespace, EOF, YAML, etc.)
+- ✅ `markdownlint`: Markdown linting
+
+**First commit with hooks**: `e151882` - All hooks passing!
+
+### Documentation
+
+**README**: `benchmarks/langgraph/README.md`
+- Why LangGraph vs LangChain (complexity comparison)
+- Where Agent Contracts shines (cycle protection, multi-agent)
+- Agent Contracts vs LangSmith (governance vs observability)
+- Real-world impact examples
+- Strategic positioning
+
+**Demo**: `benchmarks/langgraph/demo_integration.py`
+- Executable demonstrations with Google Gemini 2.5 Flash
+- Clear output showing value at each step
+- Comprehensive summary at the end
+
+### Key Learnings
+
+1. **Complexity = Value**: The more complex the workflow, the more valuable governance becomes
+2. **Loops are the killer**: Validation cycles can spiral without protection
+3. **Multi-agent coordination is critical**: Budget sharing prevents monopolization
+4. **Streaming is experimental**: Budget tracking at checkpoints, not per-token
+5. **85% coverage is excellent**: For integration code with external dependencies
+
+### Git History
+
+**Branch**: `claude/langchain-integration-benchmarks-011CUsEmXfrzB7VomNUthC2E`
+**Commit**: `e151882` - "Add LangGraph integration for complex multi-agent workflows"
+
+**Files Changed**:
+- New: `src/agent_contracts/integrations/langgraph.py` (93 lines)
+- New: `tests/integrations/test_langgraph.py` (632 lines, 27 tests)
+- New: `benchmarks/langgraph/README.md` (comprehensive documentation)
+- New: `benchmarks/langgraph/demo_integration.py` (3 demos)
+- Modified: `src/agent_contracts/integrations/__init__.py` (added LangGraph exports)
+- Modified: `pyproject.toml` (added langgraph optional dependency)
+- Modified: `uv.lock` (locked dependencies)
+
+**Status**: ✅ Complete, tested, documented, committed, pushed
+
+### What's Next: Phase 2C Consideration
+
+Originally Phase 2C was planned for multi-agent coordination. However, **LangGraph integration already delivers much of that value**:
+
+✅ Multi-agent budget sharing
+✅ Complex workflow governance
+✅ Cycle/retry protection
+✅ Parallel execution support
+
+**Potential Phase 2C alternatives**:
+1. Create comprehensive benchmarks with real LangGraph workflows
+2. Add more framework integrations (AutoGen, CrewAI)
+3. Build policy management and compliance dashboards
+4. Package for PyPI release (v0.1.0)
+
+**Recommendation**: Consider moving to release preparation instead of additional Phase 2C development.
+
+---
+
+## Project Status: Phase 2 Complete 🎉
+
+**Current State** (November 6, 2025):
 - **Phase 1**: Core Framework ✅
 - **Phase 2A**: Strategic Optimization ✅
-- **Phase 2B**: Governance & Validation ✅
-- **Total**: 209+ tests, 94%+ coverage
+- **Phase 2B**: Production Governance ✅
+- **LangGraph Integration**: Premium Multi-Agent Feature ✅
+- **Total**: 236+ tests (209 core + 27 LangGraph)
+- **Coverage**: 94%+ core, 85% LangGraph integration
 - **Status**: Production-ready, validated, documented
+
+**Key Integrations Complete**:
+- ✅ LiteLLM (100+ LLM providers)
+- ✅ LangChain 1.0+ (simple chains, baseline)
+- ✅ LangGraph (complex graphs, premium) ⭐
 
 **Remaining Features** (Future Phase 3):
 - Additional framework adapters (AutoGen, CrewAI)
 - Audit & compliance dashboards
 - Contract templates library
-- Multi-agent coordination
 - Policy management system
 
-**Next Steps** (Option 1 - Package for Release):
+**Next Steps**:
 1. Final documentation review
 2. Package for PyPI (v0.1.0)
 3. Write announcement/blog post
@@ -1060,8 +1311,10 @@ benchmarks/langchain/
 ---
 
 *Last Updated: November 6, 2025*
-*Phase: 2B (Production Governance - COMPLETE)* ✅
-*Status: Production-ready, 209+ tests, 94%+ coverage*
+*Phase: Phase 2 COMPLETE (Core + Strategic + Governance + LangGraph)* ✅
+*Status: Production-ready, 236+ tests, 94%+ coverage*
 *Quality Framework: ✅ VALIDATED (CV=5.2%, exceeds SOTA)*
-*LangChain Integration: ✅ VALIDATED (governance & compliance focus)*
+*LangChain Integration: ✅ VALIDATED (governance & compliance)*
+*LangGraph Integration: ✅ COMPLETE (premium multi-agent feature)* ⭐
+*Pre-commit Hooks: ✅ CONFIGURED (all checks passing)*
 *Next Milestone: Package for PyPI release (v0.1.0)*

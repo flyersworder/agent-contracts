@@ -27,7 +27,9 @@ Agent Contracts provide a mathematical framework that enables:
 - **Time-Resource Tradeoffs** - Strategic optimization between speed and economy
 - **Multi-Agent Coordination** - Hierarchical contracts and resource markets
 
-## Quick Example
+## Quick Examples
+
+### Basic LLM Integration
 
 ```python
 from agent_contracts import Contract, ContractedLLM, ResourceConstraints, ContractMode
@@ -56,6 +58,46 @@ with ContractedLLM(contract) as llm:
 # ✅ API call tracking
 # ✅ Cost monitoring
 # ✅ Violations trigger warnings or stops
+```
+
+### LangGraph Multi-Agent Workflows ⭐
+
+For complex workflows with cycles and multi-agent coordination:
+
+```python
+from langgraph.graph import StateGraph, END
+from agent_contracts import Contract, ResourceConstraints
+from agent_contracts.integrations.langgraph import ContractedGraph
+
+# Build complex graph with validation cycle
+workflow = StateGraph(AgentState)
+workflow.add_node("research", research_agent)
+workflow.add_node("validate", validate_agent)
+workflow.add_conditional_edges(
+    "validate",
+    should_retry,
+    {True: "research", False: END}  # Can loop!
+)
+app = workflow.compile()
+
+# Wrap with contract to prevent runaway loops
+contract = Contract(
+    id="research-workflow",
+    resources=ResourceConstraints(
+        tokens=50000,
+        api_calls=25,  # Limit iterations!
+        cost_usd=2.0
+    )
+)
+
+contracted_workflow = ContractedGraph(contract=contract, graph=app)
+result = contracted_workflow.invoke({"query": "Research topic"})
+
+# Budget enforced across ALL nodes and cycles:
+# ✅ Prevents infinite loops
+# ✅ Multi-agent budget sharing
+# ✅ Real-time violation detection
+# ✅ Cumulative tracking across entire graph
 ```
 
 ### Contract Modes
@@ -158,17 +200,41 @@ DRAFTED → ACTIVE → {FULFILLED, VIOLATED, EXPIRED, TERMINATED}
 - ✅ Cost governance validation (organizational policy compliance)
 - ✅ Variance reduction analysis (N=20 validation, temperature=0 effect discovered)
 - ✅ Quality metrics framework (3-phase validation study, CV=5.2%)
-- ✅ LangChain 1.0+ integration
+- ✅ LangChain 1.0+ integration (governance & compliance)
 - ✅ Pre-commit hooks and code quality infrastructure
+
+**LangGraph Integration** ✅ Complete (Premium Feature)
+- ✅ ContractedGraph for complex multi-agent workflows
+- ✅ Cumulative budget tracking across ALL nodes and cycles
+- ✅ Loop/retry protection (prevents runaway costs)
+- ✅ Multi-agent budget sharing
+- ✅ 27 comprehensive tests, 85% coverage
+- ✅ Real-world demos (validation cycles, parallel agents)
+
+**Total**: 236+ tests (209 core + 27 LangGraph), 94%+ coverage
 
 ## Use Cases
 
 Agent Contracts are designed for:
 
 - **Production AI Systems** - Cost control and SLA compliance
-- **Multi-Agent Systems** - Resource coordination and task distribution
+- **Complex Multi-Agent Workflows** ⭐ - LangGraph loops, retries, validation cycles
 - **Enterprise Deployments** - Governance, audit trails, and compliance
+- **LangChain Applications** - Simple chains with budget enforcement
 - **Research** - Studying optimal agent behavior under constraints
+
+### Where Agent Contracts Shines
+
+**LangChain** (simple chains):
+- 3-10 LLM calls per execution
+- Budget risk: LOW to MODERATE
+- Value: Governance, compliance, multi-call protection
+
+**LangGraph** (complex workflows) ⭐:
+- 30+ LLM calls per execution (cycles, retries, parallel agents)
+- Budget risk: VERY HIGH (can spiral to $10+ without limits!)
+- Value: Loop protection, multi-agent coordination, cumulative tracking
+- **This is the killer feature for production deployments**
 
 ## Project Structure
 
@@ -183,15 +249,19 @@ agent-contracts/
 │   │   ├── planning.py           # Strategic planning
 │   │   └── prompts.py            # Budget-aware prompts
 │   └── integrations/
-│       └── litellm_wrapper.py    # LiteLLM integration
-├── tests/                         # 209 tests, 94% coverage
-│   ├── core/                     # Core module tests
-│   └── integrations/             # Integration tests
+│       ├── litellm_wrapper.py    # LiteLLM integration
+│       ├── langchain.py          # LangChain integration
+│       └── langgraph.py          # LangGraph integration ⭐
+├── tests/                         # 236+ tests, 94%+ coverage
+│   ├── core/                     # Core module tests (209 tests)
+│   └── integrations/             # Integration tests (27 tests)
 ├── benchmarks/                    # Live demonstrations & benchmarks
 │   ├── demo_phase1.py            # Phase 1 interactive demo
 │   ├── strategic/                # Strategic optimization benchmarks
 │   ├── research_agent/           # Multi-step research benchmark
-│   └── governance/               # Policy & governance tests
+│   ├── governance/               # Policy & governance tests
+│   ├── langchain/                # LangChain demos
+│   └── langgraph/                # LangGraph demos (multi-agent)
 ├── docs/
 │   ├── whitepaper.md             # Complete theoretical framework
 │   └── testing-strategy.md       # Testing & validation plan
@@ -217,6 +287,8 @@ pip install -e .
 
 **Optional dependencies**:
 - `litellm` - For LLM integration (automatically installed)
+- `langchain` - For LangChain integration (`pip install ".[langchain]"`)
+- `langgraph` - For LangGraph integration ⭐ (`pip install ".[langgraph]"`)
 - `matplotlib` - For visualization benchmarks (`pip install matplotlib`)
 
 ## Development
@@ -315,4 +387,4 @@ If you use this framework in your research, please cite:
 
 ---
 
-**Version**: 0.1.0 | **Last Updated**: November 5, 2025 | **Status**: Production Ready
+**Version**: 0.1.0 | **Last Updated**: November 6, 2025 | **Status**: Production Ready ⭐
