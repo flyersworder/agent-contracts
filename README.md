@@ -100,6 +100,59 @@ result = contracted_workflow.invoke({"query": "Research topic"})
 # ✅ Cumulative tracking across entire graph
 ```
 
+### Google ADK Multi-Agent Systems
+
+For Google ADK-based agents and multi-agent hierarchies:
+
+```python
+from google.adk.agents import LlmAgent
+from agent_contracts import Contract, ResourceConstraints
+from agent_contracts.integrations.google_adk import ContractedAdkAgent
+
+# Create multi-agent hierarchy
+researcher = LlmAgent(
+    name="researcher",
+    model="gemini-2.0-flash",
+    instruction="You research topics thoroughly."
+)
+
+summarizer = LlmAgent(
+    name="summarizer",
+    model="gemini-2.0-flash",
+    instruction="You create concise summaries."
+)
+
+coordinator = LlmAgent(
+    name="coordinator",
+    model="gemini-2.0-flash",
+    instruction="You coordinate research and summarization.",
+    sub_agents=[researcher, summarizer]
+)
+
+# Single budget for ENTIRE multi-agent system
+contract = Contract(
+    id="research-system",
+    resources=ResourceConstraints(
+        tokens=50000,  # For ALL agents combined
+        api_calls=25,
+        cost_usd=2.0
+    )
+)
+
+contracted_system = ContractedAdkAgent(contract=contract, agent=coordinator)
+result = contracted_system.run(
+    user_id="user1",
+    session_id="session1",
+    message="Research and summarize quantum computing"
+)
+
+# Budget enforced across ALL agents in hierarchy:
+# ✅ Detailed token tracking (prompt/response/thinking/cached)
+# ✅ Multi-turn conversation protection
+# ✅ Multi-agent coordination governance
+# ✅ Tool execution monitoring
+```
+
 ### Contract Modes
 
 Choose the mode that fits your requirements:
@@ -211,7 +264,16 @@ DRAFTED → ACTIVE → {FULFILLED, VIOLATED, EXPIRED, TERMINATED}
 - ✅ 27 comprehensive tests, 85% coverage
 - ✅ Real-world demos (validation cycles, parallel agents)
 
-**Total**: 236+ tests (209 core + 27 LangGraph), 94%+ coverage
+**Google ADK Integration** ✅ Complete
+- ✅ ContractedAdkAgent for Google ADK agents
+- ✅ Detailed token tracking (prompt, response, thinking, cached)
+- ✅ Multi-turn conversation protection
+- ✅ Multi-agent hierarchy governance
+- ✅ Tool execution monitoring
+- ✅ 11 comprehensive tests, 90% coverage
+- ✅ Real-world demos (multi-turn, multi-agent)
+
+**Total**: 247+ tests (209 core + 27 LangGraph + 11 Google ADK), 94%+ coverage
 
 ## Use Cases
 
@@ -220,6 +282,7 @@ Agent Contracts are designed for:
 - **Production AI Systems** - Cost control and SLA compliance
 - **Complex Multi-Agent Workflows** ⭐ - LangGraph loops, retries, validation cycles
 - **Enterprise Deployments** - Governance, audit trails, and compliance
+- **Google ADK Applications** - Multi-turn conversations and multi-agent hierarchies
 - **LangChain Applications** - Simple chains with budget enforcement
 - **Research** - Studying optimal agent behavior under constraints
 
@@ -236,6 +299,12 @@ Agent Contracts are designed for:
 - Value: Loop protection, multi-agent coordination, cumulative tracking
 - **This is the killer feature for production deployments**
 
+**Google ADK** (multi-turn & multi-agent):
+- 10-50+ LLM calls per conversation (turns, agent coordination, tool use)
+- Budget risk: HIGH (multi-agent hierarchies can explode costs)
+- Value: Multi-turn protection, hierarchical governance, detailed token tracking
+- Ideal for: Google Cloud deployments, Gemini-based agents, conversational AI
+
 ## Project Structure
 
 ```
@@ -251,17 +320,19 @@ agent-contracts/
 │   └── integrations/
 │       ├── litellm_wrapper.py    # LiteLLM integration
 │       ├── langchain.py          # LangChain integration
-│       └── langgraph.py          # LangGraph integration ⭐
-├── tests/                         # 236+ tests, 94%+ coverage
+│       ├── langgraph.py          # LangGraph integration ⭐
+│       └── google_adk.py         # Google ADK integration
+├── tests/                         # 247+ tests, 94%+ coverage
 │   ├── core/                     # Core module tests (209 tests)
-│   └── integrations/             # Integration tests (27 tests)
+│   └── integrations/             # Integration tests (38 tests)
 ├── benchmarks/                    # Live demonstrations & benchmarks
 │   ├── demo_phase1.py            # Phase 1 interactive demo
 │   ├── strategic/                # Strategic optimization benchmarks
 │   ├── research_agent/           # Multi-step research benchmark
 │   ├── governance/               # Policy & governance tests
 │   ├── langchain/                # LangChain demos
-│   └── langgraph/                # LangGraph demos (multi-agent)
+│   ├── langgraph/                # LangGraph demos (multi-agent)
+│   └── google_adk/               # Google ADK demos (multi-turn, multi-agent)
 ├── docs/
 │   ├── whitepaper.md             # Complete theoretical framework
 │   └── testing-strategy.md       # Testing & validation plan
@@ -287,8 +358,9 @@ pip install -e .
 
 **Optional dependencies**:
 - `litellm` - For LLM integration (automatically installed)
-- `langchain` - For LangChain integration (`pip install ".[langchain]"`)
-- `langgraph` - For LangGraph integration ⭐ (`pip install ".[langgraph]"`)
+- `langchain` - For LangChain integration (`uv sync --extra langchain`)
+- `langgraph` - For LangGraph integration ⭐ (`uv sync --extra langgraph`)
+- `google-adk` - For Google ADK integration (`uv sync --extra google-adk`)
 - `matplotlib` - For visualization benchmarks (`pip install matplotlib`)
 
 ## Development
