@@ -38,13 +38,32 @@ except ImportError:
     ContractedGraph = None  # type: ignore
     create_contracted_graph = None  # type: ignore
 
+# Google ADK integration (optional, requires google-adk package)
+try:
+    from agent_contracts.integrations.google_adk import (
+        ContractedAdkAgent,
+        ContractedAdkMultiAgent,
+        create_contracted_adk_agent,
+    )
+
+    GOOGLE_ADK_AVAILABLE = True
+except ImportError:
+    GOOGLE_ADK_AVAILABLE = False
+    ContractedAdkAgent = None  # type: ignore
+    ContractedAdkMultiAgent = None  # type: ignore
+    create_contracted_adk_agent = None  # type: ignore
+
 __all__ = [
+    "GOOGLE_ADK_AVAILABLE",
     "LANGCHAIN_AVAILABLE",
     "LANGGRAPH_AVAILABLE",
     "ContractViolationError",
+    "ContractedAdkAgent",
+    "ContractedAdkMultiAgent",
     "ContractedChain",
     "ContractedGraph",
     "ContractedLLM",
+    "create_contracted_adk_agent",
     "create_contracted_chain",
     "create_contracted_graph",
 ]
