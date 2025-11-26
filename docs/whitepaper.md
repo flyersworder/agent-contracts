@@ -87,11 +87,33 @@ Common resource dimensions include:
 |----------|--------|------|-------------------|
 | LLM Tokens | $r_{tok}$ | tokens | 100,000 tokens |
 | API Calls | $r_{api}$ | calls | 50 calls |
+| Iterations | $r_{iter}$ | rounds | 10 rounds |
 | Web Searches | $r_{web}$ | queries | 10 queries |
 | Tool Invocations | $r_{tool}$ | invocations | 30 invocations |
 | Memory/Storage | $r_{mem}$ | MB | 500 MB |
 | Compute Time | $r_{cpu}$ | CPU-seconds | 300 seconds |
 | External Cost | $r_{cost}$ | USD | $5.00 |
+
+**Iteration Constraints**:
+
+The iteration resource $r_{iter}$ deserves special attention in agentic systems. Unlike traditional software, agents often operate in loops:
+- **ReAct loops**: Reasoning → Action → Observation cycles
+- **Retry loops**: Automatic retries on failure or unsatisfactory results
+- **Refinement loops**: Iterative improvement toward quality targets
+- **Validation loops**: Repeated checks until criteria are met
+
+Without explicit iteration limits, agents can enter runaway loops that consume unbounded resources. The iteration constraint provides a structural bound independent of token or time budgets:
+
+$$c_{iter}(t) \leq b_{iter}$$
+
+**Relationship to Other Resources**:
+
+Iterations interact with other resources but are not reducible to them:
+- High-token iterations vs. low-token iterations (orthogonal to $r_{tok}$)
+- Fast iterations vs. slow iterations (orthogonal to $r_{cpu}$)
+- Single-API iterations vs. multi-API iterations (orthogonal to $r_{api}$)
+
+This independence makes $r_{iter}$ a critical safety constraint for preventing infinite loops in agentic systems.
 
 Each resource $r_i$ has:
 - **Budget** $b_i$: Total allocation
