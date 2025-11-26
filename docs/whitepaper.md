@@ -101,7 +101,66 @@ Each resource $r_i$ has:
 **Constraint satisfaction** requires:
 $$\forall i: c_i(t) \leq b_i \text{ and } \frac{dc_i}{dt} \leq \dot{r}_i$$
 
-### 2.3 Temporal Constraint Space
+### 2.3 Token Budget Decomposition
+
+Modern reasoning-capable LLMs distinguish between functionally different token types, creating a hierarchical structure within the token resource:
+
+$$R_{tok} = (r_{input}, r_{reasoning}, r_{output})$$
+
+Where:
+- $r_{input}$: Tokens for task specification, context, and few-shot examples
+- $r_{reasoning}$: Internal "thinking" tokens used for chain-of-thought, planning, and analysis (often hidden from user)
+- $r_{output}$: Final response tokens visible to the user
+
+**Token Type Characteristics**:
+
+| Token Type | Visibility | Control | Strategic Role |
+|------------|------------|---------|----------------|
+| Input | User-provided | Pre-determined | Task specification |
+| Reasoning | Hidden (model internal) | Configurable budget | Depth of analysis |
+| Output | Visible to user | Max tokens limit | Response comprehensiveness |
+
+**The Reasoning-Output Tradeoff**:
+
+Given a fixed total token budget $B_{tok}$, an agent must solve:
+
+$$\max_{r_r, r_o} Q(r_r, r_o) \text{ subject to } r_r + r_o \leq B_{tok}$$
+
+Where $Q(r_r, r_o)$ is the quality function dependent on reasoning and output allocation.
+
+**Key Insight**: This creates a secondary optimization problem within the token budget:
+
+1. **Deep Thinker Strategy** ($r_r >> r_o$): Allocate most tokens to reasoning
+   - High analytical depth
+   - Concise, well-reasoned output
+   - Slower execution (more thinking)
+
+2. **Verbose Explainer Strategy** ($r_o >> r_r$): Allocate most tokens to output
+   - Shallow analysis
+   - Comprehensive, detailed response
+   - Faster execution (less thinking)
+
+3. **Balanced Strategy** ($r_r \approx r_o$): Equal allocation
+   - Moderate depth and coverage
+   - Pareto-optimal for many tasks
+
+**Formal Quality-Allocation Relationship**:
+
+Empirically, quality often follows a concave function with diminishing returns:
+
+$$Q(r_r, r_o) = \alpha \cdot \log(1 + r_r) + \beta \cdot \log(1 + r_o) + \gamma \cdot \sqrt{r_r \cdot r_o}$$
+
+Where:
+- $\alpha$: Weight of reasoning depth on quality
+- $\beta$: Weight of output comprehensiveness on quality
+- $\gamma$: Interaction term capturing reasoning-output synergy
+
+The optimal allocation depends on task type:
+- **Analytical tasks** (high $\alpha$): Favor reasoning allocation
+- **Explanatory tasks** (high $\beta$): Favor output allocation
+- **Balanced tasks** (high $\gamma$): Benefit from balanced allocation
+
+### 2.4 Temporal Constraint Space
 
 The temporal constraint $T$ defines time-related boundaries:
 
@@ -130,7 +189,7 @@ $$\int_{t_{start}}^{t_{completion}} \mathbb{1}_{computing}(t) \, dt \leq \Delta 
 **Contract Expiration**: Agent lifecycle terminates after duration $\tau$
 $$t_{current} - t_{start} \geq \tau \implies \text{terminate contract}$$
 
-### 2.4 The Time-Resource Tradeoff Surface
+### 2.5 The Time-Resource Tradeoff Surface
 
 A fundamental property of Agent Contracts is the **time-resource tradeoff**, which creates a multi-dimensional feasible region for optimization.
 
@@ -174,7 +233,7 @@ subject to: t ≤ t_deadline
             α·t/t_deadline + β·R/R_budget ≤ 1
 ```
 
-### 2.5 Agent Optimization Problem
+### 2.6 Agent Optimization Problem
 
 Under a contract $C$, an agent solves:
 
@@ -374,6 +433,86 @@ def graceful_degradation(self, remaining_budget: dict):
     return self.compile_results(mark_incomplete=True)
 ```
 
+### 3.5 Fundamental Constraints on Real-Time Enforcement
+
+A critical consideration for contract enforcement is the **observability** of resource consumption during execution.
+
+**The Single-Call Limitation**:
+
+Current LLM APIs exhibit a fundamental constraint: token consumption is only known *after* a call completes, not during execution. This creates an important boundary on what contracts can enforce:
+
+$$c_{tok}(t) = \begin{cases}
+\text{unknown} & \text{during API call} \\
+c_{actual} & \text{after API returns}
+\end{cases}$$
+
+**Implications for Enforcement**:
+
+| Enforcement Type | Feasibility | Mechanism |
+|------------------|-------------|-----------|
+| Pre-call estimation | Approximate | Heuristic models, historical data |
+| Single-call hard limit | **Not possible** | Tokens unknown until completion |
+| Multi-call cumulative | **Fully enforceable** | Stop subsequent calls after violation |
+| Cost ceiling | Approximate | Upper bound via max_tokens parameter |
+
+**Why This Matters**:
+
+1. **Contracts cannot prevent** a single expensive call from exceeding budget
+2. **Contracts can prevent** subsequent calls after budget is exceeded
+3. The primary value is **multi-call protection**, not single-call prevention
+
+**Current API Constraints**:
+
+Even streaming APIs provide token usage only in the final chunk:
+
+```python
+# OpenAI streaming
+response = client.chat.completions.create(
+    stream=True,
+    stream_options={"include_usage": True}  # Usage in final chunk only
+)
+
+# Gemini streaming
+# usageMetadata available only in final response chunk
+```
+
+**Pre-execution Estimation**:
+
+Contracts can use pre-call estimation to provide approximate enforcement:
+
+$$\hat{c}_{tok} = f(|input|, task\_complexity, model\_characteristics)$$
+
+Where $\hat{c}_{tok}$ is an estimate that may differ from actual consumption.
+
+**Future Possibilities**:
+
+Real-time token metering would require new API capabilities:
+
+1. **Per-chunk token counts**: Report cumulative tokens with each streaming chunk
+2. **Interruptible generation**: Allow mid-generation cancellation with partial output
+3. **Token reservation**: Pre-allocate token budget with guaranteed limits
+
+Such infrastructure would enable **true hard limits** on single calls:
+
+```python
+# Hypothetical future API with real-time metering
+response = client.generate(
+    prompt=task,
+    hard_token_limit=5000,  # Guaranteed to stop at 5000 tokens
+    on_budget_warning=callback  # Called at 80% consumption
+)
+```
+
+**Practical Guidance**:
+
+Given current constraints, contracts are most valuable for:
+
+1. **Retry loops**: Prevent runaway retry costs
+2. **Multi-step workflows**: Stop pipeline after phase exceeds budget
+3. **Multi-agent systems**: Prevent downstream agents from executing
+4. **Iterative refinement**: Limit improvement iterations
+5. **Tool-heavy agents**: Control cumulative tool invocation costs
+
 ---
 
 ## 4. Multi-Agent Coordination
@@ -565,6 +704,146 @@ def collaborative_ensemble(task, total_budget):
     return final_report
 ```
 
+### 4.4 The Coordination Overhead Problem
+
+A fundamental tension exists in multi-agent budget allocation: **coordination itself consumes the resource being coordinated**. This creates a meta-optimization problem that must be explicitly addressed.
+
+**The Paradox**:
+
+Let $B$ be the total budget pool and $O$ be the overhead spent on coordination:
+
+$$B_{effective} = B - O$$
+
+Where $O > 0$ for any non-trivial coordination strategy.
+
+**Formal Framework**:
+
+Define the **coordination benefit function** $\phi(O)$ as the quality improvement from spending $O$ tokens on coordination:
+
+$$Q_{coordinated} = Q_{baseline} + \phi(O)$$
+
+The optimization problem becomes:
+
+$$\max_O \left[ Q_{baseline} + \phi(O) \right] \text{ subject to } O \leq B \cdot \alpha_{max}$$
+
+Where $\alpha_{max}$ is the maximum acceptable overhead fraction.
+
+**Key Insight - Diminishing Returns**:
+
+The benefit function $\phi(O)$ typically exhibits diminishing returns:
+
+$$\frac{d\phi}{dO} > 0, \quad \frac{d^2\phi}{dO^2} < 0$$
+
+This means additional coordination effort yields progressively smaller improvements.
+
+**Coordination Strategy Spectrum**:
+
+| Strategy | Overhead $O$ | Benefit $\phi(O)$ | Use When |
+|----------|--------------|-------------------|----------|
+| No Coordination | 0 | 0 | Very small budgets |
+| Heuristic | 0 | $\phi_h$ (fixed) | Simple task structures |
+| Single-round | $O_1$ | $\phi_1$ | Medium budgets |
+| Multi-round | $O_n > O_1$ | $\phi_n > \phi_1$ | Large budgets, complex tasks |
+
+**The Break-Even Condition**:
+
+Coordination is worthwhile when:
+
+$$\phi(O) \cdot \frac{B - O}{B} > 0$$
+
+Simplifying, coordination should be used when:
+
+$$\frac{\phi(O)}{O} > \frac{Q_{baseline}}{B - O}$$
+
+In other words: **marginal benefit per overhead token must exceed baseline quality per effective token**.
+
+**Practical Break-Even Analysis**:
+
+For typical coordination overhead of 500-2000 tokens:
+
+| Total Budget $B$ | Overhead $O$ | Overhead % | Coordination Viable? |
+|------------------|--------------|------------|---------------------|
+| 5,000 tokens | 500 | 10% | Rarely |
+| 20,000 tokens | 500 | 2.5% | Sometimes |
+| 50,000 tokens | 500 | 1% | Usually |
+| 100,000+ tokens | 500 | <0.5% | Almost always |
+
+**Coordination Strategies**:
+
+**Strategy 1: Zero-Overhead Heuristic**
+
+Pre-defined allocation based on task complexity estimates:
+
+$$a_i = \frac{w_i}{\sum_j w_j} \cdot B$$
+
+Where $w_i$ is the complexity weight for agent $i$.
+
+- **Overhead**: $O = 0$
+- **Quality**: Good for well-understood task structures
+- **Limitation**: Cannot adapt to specific task characteristics
+
+**Strategy 2: Single-Round Coordinator**
+
+One LLM call to analyze tasks and allocate:
+
+$$a = \text{LLM}(\text{``Analyze tasks } T_1...T_n \text{ and allocate budget } B\text{''})$$
+
+- **Overhead**: $O \approx 500-1000$ tokens
+- **Quality**: Adapts to specific task content
+- **Limitation**: No iteration or refinement
+
+**Strategy 3: Sealed-Bid Allocation**
+
+Each agent submits a budget request; coordinator allocates proportionally:
+
+$$a_i = \frac{r_i}{\sum_j r_j} \cdot B$$
+
+Where $r_i$ is agent $i$'s requested budget.
+
+- **Overhead**: $O \approx n \cdot 200$ tokens (one request per agent)
+- **Quality**: Incorporates agent self-assessment
+- **Limitation**: Agents may over-request strategically
+
+**Strategy 4: Multi-Round Negotiation**
+
+Iterative refinement with counter-proposals:
+
+```
+Round 1: Agents submit requests → 600 tokens
+Round 2: Coordinator proposes allocation → 300 tokens
+Round 3: Agents accept or counter-propose → 300 tokens
+Round 4: Final allocation → 200 tokens
+Total overhead: ~1400 tokens
+```
+
+- **Overhead**: $O \approx 1000-2000$ tokens
+- **Quality**: Most sophisticated allocation
+- **Limitation**: Diminishing returns after ~2-3 rounds
+
+**Optimal Coordination Depth**:
+
+The optimal number of negotiation rounds $n^*$ satisfies:
+
+$$\frac{\partial \phi}{\partial n}\bigg|_{n=n^*} = \frac{\phi(n^*)}{B - O(n^*)}$$
+
+Empirically, $n^* \leq 2$ for most practical scenarios.
+
+**Theoretical Result - Heuristic Near-Optimality**:
+
+**Proposition**: For tasks with well-defined structure, zero-overhead heuristic allocation achieves $\geq 90\%$ of optimal coordinated quality.
+
+**Implication**: Sophisticated coordination is only justified when:
+1. Total budget is large ($B > 50K$ tokens)
+2. Task structure is highly variable or unknown
+3. Quality requirements are stringent
+
+**Coordination Protocol Design Principles**:
+
+1. **Minimize rounds**: Each round has fixed overhead; prefer fewer, richer exchanges
+2. **Front-load information**: Put most analytical effort in first round
+3. **Use heuristics as fallback**: Default to zero-overhead strategy when budget is tight
+4. **Set overhead caps**: Limit coordination to $\alpha_{max} \cdot B$ (typically 5%)
+
 ---
 
 ## 5. Implementation Architecture
@@ -573,25 +852,25 @@ def collaborative_ensemble(task, total_budget):
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                 Contract Manager                     │
-│  - Contract Registry                                 │
-│  - Lifecycle Management                              │
-│  - Resource Pool                                     │
+│                 Contract Manager                    │
+│  - Contract Registry                                │
+│  - Lifecycle Management                             │
+│  - Resource Pool                                    │
 └──────────────┬──────────────────────────────────────┘
                │
     ┌──────────┴──────────┬──────────────┬──────────┐
     ↓                     ↓              ↓          ↓
 ┌─────────┐      ┌──────────────┐  ┌────────┐  ┌──────────┐
-│ Agent   │      │   Resource   │  │ Temporal│  │Contract  │
+│ Agent   │      │   Resource   │  │Temporal│  │Contract  │
 │ Runtime │←────→│   Monitor    │  │Monitor │  │Enforcer  │
 └─────────┘      └──────────────┘  └────────┘  └──────────┘
     │                     │              │          │
     ↓                     ↓              ↓          ↓
 ┌─────────────────────────────────────────────────────────┐
-│                    Metrics & Logging                     │
-│  - Resource consumption logs                             │
-│  - Performance metrics                                   │
-│  - Contract violation events                             │
+│                    Metrics & Logging                    │
+│  - Resource consumption logs                            │
+│  - Performance metrics                                  │
+│  - Contract violation events                            │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -1603,7 +1882,7 @@ Planned modules:
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: October 29, 2025
+**Document Version**: 1.1
+**Last Updated**: November 16, 2025
 **Authors**: Qing Ye (with assistance from Claude, Anthropic)
 **License**: CC BY 4.0
