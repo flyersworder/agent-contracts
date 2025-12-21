@@ -356,12 +356,12 @@ def demo_4_live_execution() -> None:
 
 
 def demo_5_paper_example() -> None:
-    """Demo 5: Paper Example (Section 8).
+    """Demo 5: Paper Example (Section 4.5).
 
     Reproduces the whitepaper example: orchestrator delegates to
     researcher (50K), analyzer (40K), reporter (45K), with 15K reserve.
     """
-    print_section("Demo 5: Whitepaper Section 8 Example")
+    print_section("Demo 5: Whitepaper Section 4.5 Example")
 
     print("Reproducing the paper example:")
     print("  Orchestrator: 150K tokens")
@@ -468,7 +468,7 @@ def main() -> None:
     print("  ✅ Explicit budget allocation per agent")
     print("  ✅ Conservation law: Σ child_budgets ≤ parent_budget - used")
     print("  ✅ Budget pooling for dynamic reallocation")
-    print("  ✅ Hierarchical delegation (Section 6.2: contracting as capability)")
+    print("  ✅ Hierarchical delegation (Section 4.5: contracting as capability)")
     print("  ✅ Mathematical guarantees on resource bounds")
     print()
     print("Use Cases:")

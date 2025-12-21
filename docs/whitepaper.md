@@ -866,6 +866,151 @@ Empirically, $n^* \leq 2$ for most practical scenarios.
 3. **Use heuristics as fallback**: Default to zero-overhead strategy when budget is tight
 4. **Set overhead caps**: Limit coordination to $\alpha_{max} \cdot B$ (typically 5%)
 
+### 4.5 Contracting as a Capability
+
+A powerful extension of Agent Contracts is treating **contracting itself as a capability**. Rather than all contracts being defined externally, agents with this capability can dynamically create subcontracts for delegated work.
+
+**Formal Definition**:
+
+An agent $A$ with the **contracting capability** can spawn child agents $A_1, A_2, ..., A_k$ with their own contracts $C_1, C_2, ..., C_k$, subject to **conservation laws** that ensure hierarchical budget discipline.
+
+**The Conservation Law**:
+
+For any parent contract $C$ with budget $B$, if it creates child contracts with budgets $b_1, b_2, ..., b_k$, the following must hold:
+
+$$\sum_{i=1}^{k} b_i \leq B - u$$
+
+Where $u$ is the parent's own resource consumption.
+
+**Key Properties**:
+
+1. **Budget Integrity**: Total delegated resources cannot exceed available resources
+2. **Prevention of Over-allocation**: Conservation violations are caught at allocation time, not execution time
+3. **Dynamic Reallocation**: When a child completes early, its unused allocation returns to the pool (budget pooling)
+
+**Implementation Pattern**:
+
+```python
+class ContractingCapability:
+    def __init__(self, parent_contract: Contract, reserve_ratio: float = 0.0):
+        self.parent_contract = parent_contract
+        self.reserve_ratio = reserve_ratio  # Reserve for coordination overhead
+        self.allocations: dict[str, AllocationRecord] = {}
+
+    @property
+    def remaining_tokens(self) -> int:
+        """Tokens available for delegation (conservation-aware)."""
+        return (
+            self.parent_budget_tokens
+            - self.parent_used_tokens
+            - self.total_allocated_tokens
+            - self.reserved_tokens
+        )
+
+    def create_subcontract(self, name: str, tokens: int) -> Contract:
+        """Create child contract with conservation law enforcement."""
+        if tokens > self.remaining_tokens:
+            raise ConservationViolationError(
+                requested=tokens,
+                available=self.remaining_tokens,
+                parent_id=self.parent_contract.id
+            )
+
+        child = Contract(
+            id=f"{self.parent_contract.id}/{name}",
+            resources=ResourceConstraints(tokens=tokens)
+        )
+        self._record_allocation(name, tokens, child)
+        return child
+
+    def release_allocation(self, name: str) -> int:
+        """Release child allocation back to pool (budget pooling)."""
+        allocation = self.allocations.pop(name)
+        return allocation.tokens_allocated  # Returns to remaining_tokens
+```
+
+**Verified Example: Report Generation Orchestrator**
+
+The following example demonstrates hierarchical delegation with conservation law enforcement, verified through live execution with Gemini 3 Flash:
+
+```
+Orchestrator Contract: 150,000 tokens
+├─ Reserve (coordination): 15,000 tokens
+├─ Researcher Agent:      50,000 tokens
+├─ Analyzer Agent:        40,000 tokens
+└─ Reporter Agent:        45,000 tokens
+─────────────────────────────────────────
+   Total:                150,000 tokens ✓
+   Remaining:                  0 tokens
+   Conservation Satisfied: True
+```
+
+**Execution Log** (from live demo):
+```
+Reserved 15K for coordination | Remaining: 135,000
+Researcher: 50K | Remaining: 85,000
+Analyzer: 40K | Remaining: 45,000
+Reporter: 45K | Remaining: 0
+
+📊 Allocation Complete:
+   Total Delegated:    150,000 tokens
+   Remaining:          0 tokens
+   Conservation OK:    True
+
+Verification: 15K + 50K + 40K + 45K = 150,000 = parent budget ✓
+```
+
+**Conservation Violation Prevention**:
+
+When attempting to over-allocate, the system prevents the violation:
+
+```
+Parent Budget: 50,000 tokens
+Worker A allocated: 40,000 tokens | Remaining: 10,000
+
+Attempting to allocate 15,000 more tokens...
+(This exceeds remaining 10,000 tokens)
+
+🛑 Conservation Violation Caught!
+   Requested: 15,000 tokens
+   Available: 10,000 tokens
+```
+
+**Budget Pooling (Dynamic Reallocation)**:
+
+When an agent finishes early, its budget returns to the pool:
+
+```
+Initial:
+  Worker A: 40,000 tokens | Remaining: 60,000
+  Worker B: 40,000 tokens | Remaining: 20,000
+
+Worker A finishes early - releasing allocation...
+  Released: 40,000 tokens
+  New remaining: 60,000 tokens
+
+Now Worker C can receive larger allocation:
+  Worker C: 55,000 tokens | Remaining: 5,000
+```
+
+**Comparison with Existing Frameworks**:
+
+| Framework | Budget Model | Per-Agent Guarantees | Conservation Enforcement |
+|-----------|--------------|---------------------|-------------------------|
+| LangGraph | Shared pool | ❌ None | ❌ No |
+| CrewAI | Shared pool | ❌ None | ❌ No |
+| AutoGen | Shared pool | ❌ None | ❌ No |
+| **Agent Contracts** | **Allocated budgets** | **✓ Guaranteed** | **✓ Mathematical** |
+
+**Value Proposition**:
+
+Contracting as a capability enables:
+
+1. **Multi-agent SLAs**: Each agent has a guaranteed budget allocation
+2. **Fair resource sharing**: No agent can starve others by consuming the shared pool
+3. **Predictable costs**: Budget allocation happens before execution, not after
+4. **Enterprise governance**: Explicit contracts with audit trails for each delegation
+
 ---
 
 ## 5. Implementation Architecture
@@ -1739,6 +1884,7 @@ We propose that the AI community:
 3. **Develop benchmarks** for contract-aware agent performance
 4. **Create contract marketplaces** where agents advertise capabilities
 5. **Research optimal contract design** through empirical studies and theoretical analysis
+6. **Implement conservation laws** for hierarchical delegation with mathematical guarantees
 
 Agent Contracts are not the final answer to agentic AI governance, but they provide a concrete, implementable framework that addresses real production challenges. As the field matures from research prototypes to production systems, such formal mechanisms will become increasingly essential.
 
@@ -1904,7 +2050,7 @@ Planned modules:
 
 ---
 
-**Document Version**: 1.1
-**Last Updated**: November 16, 2025
+**Document Version**: 1.2
+**Last Updated**: December 21, 2025
 **Authors**: Qing Ye (with assistance from Claude, Anthropic)
 **License**: CC BY 4.0
