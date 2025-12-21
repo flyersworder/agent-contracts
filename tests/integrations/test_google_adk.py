@@ -9,6 +9,13 @@ from unittest.mock import Mock, patch
 import pytest
 
 from agent_contracts.core.contract import Contract, ResourceConstraints
+from agent_contracts.integrations import GOOGLE_ADK_AVAILABLE
+
+# Skip all tests in this module if google-adk is not available
+pytestmark = pytest.mark.skipif(
+    not GOOGLE_ADK_AVAILABLE,
+    reason="google-adk not installed",
+)
 
 
 class TestGoogleAdkIntegration:
@@ -18,7 +25,7 @@ class TestGoogleAdkIntegration:
         """Test checking if Google ADK is available."""
         from agent_contracts.integrations import GOOGLE_ADK_AVAILABLE
 
-        # Should be available since we installed it
+        # Should be available since these tests run only if available
         assert isinstance(GOOGLE_ADK_AVAILABLE, bool)
         assert GOOGLE_ADK_AVAILABLE is True
 

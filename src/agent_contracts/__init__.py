@@ -21,6 +21,12 @@ from agent_contracts.core.contract import (
     TemporalConstraints,
     TerminationCondition,
 )
+from agent_contracts.core.delegation import (
+    AllocationRecord,
+    ConservationViolationError,
+    ContractingCapability,
+    DelegationSummary,
+)
 
 # Monitoring and enforcement
 from agent_contracts.core.enforcement import (
@@ -91,7 +97,9 @@ except ImportError:
 
 __all__ = [
     "LANGCHAIN_AVAILABLE",
+    "AllocationRecord",
     "CodeReviewContract",
+    "ConservationViolationError",
     "Contract",
     "ContractAgent",
     "ContractEnforcer",
@@ -100,10 +108,12 @@ __all__ = [
     "ContractViolationError",
     "ContractedChain",
     "ContractedLLM",
+    "ContractingCapability",
     "CostEstimate",
     "CustomerSupportContract",
     "DataAnalysisContract",
     "DeadlineType",
+    "DelegationSummary",
     "EnforcementAction",
     "EnforcementCallback",
     "EnforcementEvent",

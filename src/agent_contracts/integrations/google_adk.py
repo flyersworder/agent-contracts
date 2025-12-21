@@ -469,3 +469,282 @@ def create_contracted_adk_agent(
     return ContractedAdkAgent(
         contract=contract, agent=agent, strict_mode=strict_mode, runner=runner
     )
+
+
+class DelegatingAdkAgent(ContractedAdkAgent):
+    """Contract-aware Google ADK agent with hierarchical delegation support.
+
+    This class extends ContractedAdkAgent to support explicit budget delegation
+    to sub-agents, with conservation law enforcement ensuring no sub-agent can
+    receive more budget than is available from the parent.
+
+    The key insight (from Whitepaper Section 6.2) is that **contracting is itself
+    a capability**: this agent can spawn sub-agents with their own contracts,
+    enabling recursive delegation and dynamic team formation.
+
+    Conservation Law:
+        For any parent contract with budget B, if it creates child contracts
+        with budgets b_1, b_2, ..., b_k, the following must hold:
+
+            Σ b_i ≤ B - used
+
+        where 'used' is the parent's own consumption.
+
+    This class enables the paper's example (Section 8) where an orchestrator
+    with 150K tokens allocates to researcher (50K), analyzer (40K), and
+    reporter (45K), while reserving 15K for coordination.
+
+    Example:
+        >>> from google.adk.agents import LlmAgent
+        >>> from agent_contracts import Contract, ResourceConstraints
+        >>> from agent_contracts.integrations.google_adk import DelegatingAdkAgent
+        >>>
+        >>> # Create parent contract for orchestrator
+        >>> parent_contract = Contract(
+        ...     id="orchestrator",
+        ...     resources=ResourceConstraints(tokens=150_000, cost_usd=5.0)
+        ... )
+        >>>
+        >>> # Create orchestrator agent
+        >>> orchestrator = LlmAgent(
+        ...     name="orchestrator",
+        ...     model="gemini-2.0-flash",
+        ...     instruction="Coordinate research workflow"
+        ... )
+        >>>
+        >>> # Create delegating agent
+        >>> delegating_agent = DelegatingAdkAgent(
+        ...     contract=parent_contract,
+        ...     agent=orchestrator,
+        ...     reserve_ratio=0.1  # Reserve 10% for coordination
+        ... )
+        >>>
+        >>> # Delegate to sub-agents with budget allocation
+        >>> researcher_agent = LlmAgent(name="researcher", ...)
+        >>> researcher = delegating_agent.delegate(
+        ...     name="researcher",
+        ...     agent=researcher_agent,
+        ...     tokens=50_000,
+        ...     description="Research the topic"
+        ... )
+        >>>
+        >>> # Conservation law enforced - this would fail if tokens exceed remaining
+        >>> analyzer_agent = LlmAgent(name="analyzer", ...)
+        >>> analyzer = delegating_agent.delegate(
+        ...     name="analyzer",
+        ...     agent=analyzer_agent,
+        ...     tokens=40_000  # OK: 50K + 40K = 90K < 135K remaining
+        ... )
+    """
+
+    def __init__(
+        self,
+        contract: Contract,
+        agent: Any,  # Google ADK LlmAgent type
+        strict_mode: bool = True,
+        enable_logging: bool = True,
+        runner: Any | None = None,
+        reserve_ratio: float = 0.0,
+    ) -> None:
+        """Initialize delegating Google ADK agent.
+
+        Args:
+            contract: Contract to enforce for this agent
+            agent: Google ADK LlmAgent to wrap
+            strict_mode: If True, violations cause immediate termination
+            enable_logging: If True, log execution for audit trail
+            runner: Optional custom Runner (defaults to InMemoryRunner)
+            reserve_ratio: Fraction of budget to reserve for coordination (0.0-0.5)
+
+        Raises:
+            ImportError: If google-adk is not installed
+            ValueError: If reserve_ratio is out of valid range
+        """
+        super().__init__(
+            contract=contract,
+            agent=agent,
+            strict_mode=strict_mode,
+            enable_logging=enable_logging,
+            runner=runner,
+        )
+
+        # Import delegation capability
+        from agent_contracts.core.delegation import ContractingCapability
+
+        # Create contracting capability with this agent's monitor
+        self.contracting = ContractingCapability(
+            parent_contract=contract,
+            parent_monitor=self.resource_monitor,
+            reserve_ratio=reserve_ratio,
+        )
+
+        # Track delegated agents for lifecycle management
+        self._delegated_agents: dict[str, ContractedAdkAgent] = {}
+
+    def delegate(
+        self,
+        name: str,
+        agent: Any,  # Google ADK LlmAgent type
+        tokens: int = 0,
+        cost_usd: float = 0.0,
+        api_calls: int | None = None,
+        description: str = "",
+        strict_mode: bool = True,
+        runner: Any | None = None,
+    ) -> "ContractedAdkAgent":
+        """Delegate to a sub-agent with budget allocation.
+
+        Creates a new ContractedAdkAgent for the sub-agent with a contract
+        that has budget allocated from this agent's remaining budget.
+        Conservation laws are enforced: the allocation will fail if there
+        isn't enough remaining budget.
+
+        Args:
+            name: Name for the delegated agent (used in ID generation)
+            agent: Google ADK LlmAgent to delegate to
+            tokens: Token budget to allocate to delegated agent
+            cost_usd: Cost budget to allocate to delegated agent
+            api_calls: Optional API call limit for delegated agent
+            description: Description of the delegated task
+            strict_mode: If True, violations cause immediate termination
+            runner: Optional custom Runner for the delegated agent
+
+        Returns:
+            ContractedAdkAgent for the delegated agent
+
+        Raises:
+            ConservationViolationError: If allocation would exceed remaining budget
+            ValueError: If name is empty or already used
+        """
+        # Create subcontract (enforces conservation law)
+        child_contract = self.contracting.create_subcontract(
+            name=name,
+            tokens=tokens,
+            cost_usd=cost_usd,
+            api_calls=api_calls,
+            description=description,
+        )
+
+        # Wrap sub-agent with the allocated contract
+        delegated = ContractedAdkAgent(
+            contract=child_contract,
+            agent=agent,
+            strict_mode=strict_mode,
+            enable_logging=self.enable_logging,
+            runner=runner,
+        )
+
+        # Track for lifecycle management
+        self._delegated_agents[name] = delegated
+
+        return delegated
+
+    def can_delegate(self, tokens: int = 0, cost_usd: float = 0.0) -> bool:
+        """Check if a delegation is possible without violating conservation.
+
+        Args:
+            tokens: Number of tokens to allocate
+            cost_usd: Cost budget to allocate
+
+        Returns:
+            True if delegation would satisfy conservation law
+        """
+        return self.contracting.can_allocate(tokens=tokens, cost_usd=cost_usd)
+
+    def release_delegation(self, name: str) -> int:
+        """Release a delegation's budget back to the pool.
+
+        Call this when a delegated agent completes early and returns
+        unused budget. The budget becomes available for other delegations.
+
+        Args:
+            name: Name of the delegated agent
+
+        Returns:
+            Number of tokens released back to pool
+
+        Raises:
+            KeyError: If delegation not found
+        """
+        # Remove from tracking
+        if name in self._delegated_agents:
+            del self._delegated_agents[name]
+
+        # Release allocation (returns tokens to pool)
+        return self.contracting.release_allocation(name)
+
+    def get_delegated_agent(self, name: str) -> "ContractedAdkAgent | None":
+        """Get a delegated agent by name.
+
+        Args:
+            name: Name of the delegated agent
+
+        Returns:
+            ContractedAdkAgent if found, None otherwise
+        """
+        return self._delegated_agents.get(name)
+
+    @property
+    def remaining_delegation_tokens(self) -> int:
+        """Tokens available for further delegation."""
+        return self.contracting.remaining_tokens
+
+    @property
+    def remaining_delegation_cost(self) -> float:
+        """Cost budget available for further delegation."""
+        return self.contracting.remaining_cost
+
+    @property
+    def delegated_agents(self) -> list["ContractedAdkAgent"]:
+        """List of all delegated agents."""
+        return list(self._delegated_agents.values())
+
+    def get_delegation_summary(self) -> dict[str, Any]:
+        """Get summary of all delegations.
+
+        Returns:
+            Dictionary with delegation summary including:
+            - parent_id: ID of the parent contract
+            - parent_budget: Total parent budget
+            - parent_used: Parent's own usage
+            - total_delegated: Total budget delegated to children
+            - remaining: Budget available for further delegation
+            - delegations: List of individual delegation details
+            - conservation_satisfied: Whether conservation law holds
+        """
+        summary = self.contracting.get_summary()
+
+        return {
+            "parent_id": summary.parent_id,
+            "parent_budget_tokens": summary.parent_budget_tokens,
+            "parent_budget_cost": summary.parent_budget_cost,
+            "parent_used_tokens": summary.parent_used_tokens,
+            "parent_used_cost": summary.parent_used_cost,
+            "total_delegated_tokens": summary.total_allocated_tokens,
+            "total_delegated_cost": summary.total_allocated_cost,
+            "remaining_tokens": summary.remaining_tokens,
+            "remaining_cost": summary.remaining_cost,
+            "delegations": [
+                {
+                    "name": alloc.child_name,
+                    "id": alloc.child_id,
+                    "tokens": alloc.tokens_allocated,
+                    "cost": alloc.cost_allocated,
+                    "created_at": alloc.created_at.isoformat(),
+                }
+                for alloc in summary.allocations
+            ],
+            "conservation_satisfied": summary.conservation_satisfied,
+        }
+
+    def __repr__(self) -> str:
+        """String representation of delegating agent state."""
+        return (
+            f"DelegatingAdkAgent("
+            f"contract='{self.contract.id}', "
+            f"budget={self.contracting.parent_budget_tokens:,} tokens, "
+            f"used={self.contracting.parent_used_tokens:,}, "
+            f"delegated={self.contracting._total_allocated_tokens:,}, "
+            f"remaining={self.contracting.remaining_tokens:,}, "
+            f"children={len(self._delegated_agents)})"
+        )

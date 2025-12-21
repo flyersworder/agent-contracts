@@ -41,16 +41,21 @@ except ImportError:
 # Google ADK integration (optional, requires google-adk package)
 try:
     from agent_contracts.integrations.google_adk import (
+        GOOGLE_ADK_AVAILABLE,
         ContractedAdkAgent,
         ContractedAdkMultiAgent,
+        DelegatingAdkAgent,
         create_contracted_adk_agent,
     )
 
-    GOOGLE_ADK_AVAILABLE = True
+    # Re-check: the module may load but google.adk may not be available
+    if not GOOGLE_ADK_AVAILABLE:
+        raise ImportError("google-adk not installed")
 except ImportError:
     GOOGLE_ADK_AVAILABLE = False
     ContractedAdkAgent = None  # type: ignore
     ContractedAdkMultiAgent = None  # type: ignore
+    DelegatingAdkAgent = None  # type: ignore
     create_contracted_adk_agent = None  # type: ignore
 
 __all__ = [
@@ -63,6 +68,7 @@ __all__ = [
     "ContractedChain",
     "ContractedGraph",
     "ContractedLLM",
+    "DelegatingAdkAgent",
     "create_contracted_adk_agent",
     "create_contracted_chain",
     "create_contracted_graph",

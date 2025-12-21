@@ -16,6 +16,12 @@ from agent_contracts.core.contract import (
     TemporalConstraints,
     TerminationCondition,
 )
+from agent_contracts.core.delegation import (
+    AllocationRecord,
+    ConservationViolationError,
+    ContractingCapability,
+    DelegationSummary,
+)
 from agent_contracts.core.enforcement import (
     ContractEnforcer,
     EnforcementAction,
@@ -58,14 +64,18 @@ from agent_contracts.core.wrapper import (
 )
 
 __all__ = [
+    "AllocationRecord",
+    "ConservationViolationError",
     "Contract",
     "ContractAgent",
     "ContractEnforcer",
     "ContractMode",
     "ContractState",
     "ContractViolationError",
+    "ContractingCapability",
     "CostEstimate",
     "DeadlineType",
+    "DelegationSummary",
     "EnforcementAction",
     "EnforcementCallback",
     "EnforcementEvent",
