@@ -23,10 +23,18 @@ class ContractedLLM:
     This class wraps litellm's completion API and automatically enforces
     contract constraints, tracking tokens, costs, and API calls in real-time.
 
+    Key features:
+    - Automatic resource tracking (tokens, cost, API calls)
+    - Constraint enforcement before and after each call
+    - Structured output support via OutputSpecification
+    - Reasoning effort auto-selection based on budget
+
     Attributes:
         contract: The contract to enforce
         enforcer: Contract enforcer instance
         auto_start: Whether to automatically start enforcement on first call
+        auto_structured_output: If True, auto-apply contract's output schema
+        validate_output: If True, validate response against output schema
     """
 
     def __init__(
@@ -34,6 +42,8 @@ class ContractedLLM:
         contract: Contract,
         strict_mode: bool = True,
         auto_start: bool = True,
+        auto_structured_output: bool = True,
+        validate_output: bool = False,
     ) -> None:
         """Initialize contracted LLM wrapper.
 
@@ -41,10 +51,16 @@ class ContractedLLM:
             contract: Contract to enforce
             strict_mode: If True, violations immediately raise errors
             auto_start: If True, automatically start enforcement on first call
+            auto_structured_output: If True, automatically apply contract's
+                output schema as response_format when not already specified
+            validate_output: If True, validate LLM response against output schema
+                and raise ContractViolationError if invalid
         """
         self.contract = contract
         self.enforcer = ContractEnforcer(contract, strict_mode=strict_mode)
         self.auto_start = auto_start
+        self.auto_structured_output = auto_structured_output
+        self.validate_output = validate_output
         self._started = False
 
     def start(self) -> None:
@@ -70,8 +86,10 @@ class ContractedLLM:
 
         This wraps litellm.completion() and automatically:
         - Checks constraints before the call
+        - Applies response_format from contract.output (if configured)
         - Tracks tokens and costs
         - Updates resource usage
+        - Validates output against schema (if validate_output=True)
         - Checks constraints after the call
         - Raises ContractViolationError if violated in strict mode
 
@@ -96,6 +114,12 @@ class ContractedLLM:
             effort = self._get_reasoning_effort()
             if effort is not None:
                 kwargs["reasoning_effort"] = effort
+
+        # Auto-apply response_format from contract.output if not already specified
+        if self.auto_structured_output and "response_format" not in kwargs:
+            response_format = self._get_response_format()
+            if response_format is not None:
+                kwargs["response_format"] = response_format
 
         # Make the LLM call
         try:
@@ -174,6 +198,22 @@ class ContractedLLM:
                 },
             )
         )
+
+        # Validate output against schema if enabled
+        if self.validate_output and self.contract.outputs.has_structured_output():
+            output_content = self._extract_response_content(response)
+            is_valid, error_msg = self.contract.outputs.validate_output(output_content)
+            if not is_valid:
+                self.enforcer._emit_event(
+                    EnforcementEvent(
+                        event_type="output_validation_failed",
+                        contract=self.contract,
+                        message=f"Output validation failed: {error_msg}",
+                        data={"output": output_content, "error": error_msg},
+                    )
+                )
+                if self.enforcer.strict_mode:
+                    raise ContractViolationError(f"Output validation failed: {error_msg}")
 
         # Check constraints after call
         self._check_constraints_after_call()
@@ -313,6 +353,35 @@ class ContractedLLM:
 
         # Otherwise, auto-select based on budget
         return self.contract.resources.recommended_reasoning_effort
+
+    def _get_response_format(self) -> dict[str, Any] | type | None:
+        """Get response_format from contract's output specification.
+
+        Returns:
+            LiteLLM-compatible response_format, or None if not configured
+        """
+        if self.contract.outputs.has_structured_output():
+            return self.contract.outputs.to_response_format()
+        return None
+
+    def _extract_response_content(self, response: Any) -> str:
+        """Extract the content string from an LLM response.
+
+        Args:
+            response: The response from litellm.completion()
+
+        Returns:
+            The text content of the response
+        """
+        try:
+            choices = response.get("choices", [])
+            if choices:
+                message = choices[0].get("message", {})
+                content = message.get("content", "")
+                return str(content) if content else ""
+        except (AttributeError, IndexError):
+            pass
+        return ""
 
     def _check_constraints_before_call(self) -> None:
         """Check constraints before making an LLM call.

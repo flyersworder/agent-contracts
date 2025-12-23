@@ -17,6 +17,7 @@ from agent_contracts.core.contract import (
     ResourceConstraints,
 )
 from agent_contracts.core.executor import ContractExecutor, ExecutionResult
+from agent_contracts.integrations.litellm_wrapper import ContractViolationError
 
 
 class TestExecutionResult:
@@ -228,7 +229,11 @@ class TestContractExecutor:
         assert "Original system" in result[0]["content"]
 
     def test_build_llm_params(self) -> None:
-        """Test building LLM parameters."""
+        """Test building LLM parameters.
+
+        Note: After refactoring, ContractedLLM handles max_tokens and
+        response_format. The executor only passes temperature.
+        """
         contract = Contract(
             id="test",
             name="Test",
@@ -240,7 +245,8 @@ class TestContractExecutor:
         params = executor._build_llm_params()
 
         assert params["temperature"] == 0.5
-        assert "max_tokens" in params
+        # max_tokens is now handled by ContractedLLM, not executor
+        assert "max_tokens" not in params
 
     def test_get_usage_dict(self) -> None:
         """Test getting usage dictionary."""
@@ -273,36 +279,6 @@ class TestContractExecutor:
         assert isinstance(instruction, str)
         assert len(instruction) > 0
 
-    def test_estimate_cost_gpt4o(self) -> None:
-        """Test cost estimation for GPT-4o."""
-        contract = Contract(
-            id="test",
-            name="Test",
-            capabilities=Capabilities(),
-            execution=ExecutionConfig(model="gpt-4o"),
-        )
-        executor = ContractExecutor(contract)
-        cost = executor._estimate_cost(1000, 500)
-
-        # GPT-4o: $2.50/1M input, $10/1M output
-        expected = (1000 * 2.50 / 1_000_000) + (500 * 10.00 / 1_000_000)
-        assert abs(cost - expected) < 0.0001
-
-    def test_estimate_cost_claude(self) -> None:
-        """Test cost estimation for Claude."""
-        contract = Contract(
-            id="test",
-            name="Test",
-            capabilities=Capabilities(),
-            execution=ExecutionConfig(model="claude-sonnet-4-20250514"),
-        )
-        executor = ContractExecutor(contract)
-        cost = executor._estimate_cost(1000, 500)
-
-        # Claude: $3/1M input, $15/1M output
-        expected = (1000 * 3.00 / 1_000_000) + (500 * 15.00 / 1_000_000)
-        assert abs(cost - expected) < 0.0001
-
     def test_logging(self) -> None:
         """Test that execution logging works."""
         contract = Contract(
@@ -321,19 +297,24 @@ class TestContractExecutor:
 
 
 class TestContractExecutorWithMock:
-    """Tests for ContractExecutor with mocked LLM calls."""
+    """Tests for ContractExecutor with mocked LLM calls.
 
-    @patch("litellm.completion")
+    Note: We patch the completion function inside litellm_wrapper since
+    ContractExecutor now uses ContractedLLM internally.
+    """
+
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
     def test_run_successful_execution(self, mock_completion: MagicMock) -> None:
         """Test successful execution with mocked LiteLLM."""
-        # Setup mock response
+        # Setup mock response - ContractedLLM uses dict-style .get() access
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "The answer is 4"
-        mock_response.usage = MagicMock()
-        mock_response.usage.total_tokens = 50
-        mock_response.usage.prompt_tokens = 30
-        mock_response.usage.completion_tokens = 20
+        # Mock dict-style access for usage
+        mock_response.get.side_effect = lambda k, d=None: {
+            "usage": {"prompt_tokens": 30, "completion_tokens": 20, "total_tokens": 50},
+            "_hidden_params": {"response_cost": 0.001},
+        }.get(k, d)
         mock_completion.return_value = mock_response
 
         # Execute
@@ -354,16 +335,17 @@ class TestContractExecutorWithMock:
         assert result.tokens_used > 0
         assert len(result.execution_log) > 0
 
-    @patch("litellm.completion")
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
     def test_run_with_messages(self, mock_completion: MagicMock) -> None:
         """Test execution with messages input."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Hello!"
-        mock_response.usage = MagicMock()
-        mock_response.usage.total_tokens = 20
-        mock_response.usage.prompt_tokens = 10
-        mock_response.usage.completion_tokens = 10
+        # Mock dict-style access for usage
+        mock_response.get.side_effect = lambda k, d=None: {
+            "usage": {"prompt_tokens": 10, "completion_tokens": 10, "total_tokens": 20},
+            "_hidden_params": {"response_cost": 0.0005},
+        }.get(k, d)
         mock_completion.return_value = mock_response
 
         contract = Contract(
@@ -382,17 +364,18 @@ class TestContractExecutorWithMock:
         assert result.success is True
         assert result.output == "Hello!"
 
-    @patch("litellm.completion")
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
     def test_run_with_violation(self, mock_completion: MagicMock) -> None:
         """Test execution that results in violation."""
         # Setup mock response with high token usage
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Long response"
-        mock_response.usage = MagicMock()
-        mock_response.usage.total_tokens = 2000  # Over budget
-        mock_response.usage.prompt_tokens = 1000
-        mock_response.usage.completion_tokens = 1000
+        # Mock dict-style access - high token usage to trigger violation
+        mock_response.get.side_effect = lambda k, d=None: {
+            "usage": {"prompt_tokens": 1000, "completion_tokens": 1000, "total_tokens": 2000},
+            "_hidden_params": {"response_cost": 0.05},
+        }.get(k, d)
         mock_completion.return_value = mock_response
 
         contract = Contract(
@@ -410,16 +393,17 @@ class TestContractExecutorWithMock:
         assert result.contract_state == ContractState.VIOLATED
         assert len(result.violations) > 0
 
-    @patch("litellm.completion")
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
     def test_run_strict_mode_raises(self, mock_completion: MagicMock) -> None:
         """Test that strict mode raises on violation."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Response"
-        mock_response.usage = MagicMock()
-        mock_response.usage.total_tokens = 2000
-        mock_response.usage.prompt_tokens = 1000
-        mock_response.usage.completion_tokens = 1000
+        # Mock dict-style access - high token usage to trigger violation
+        mock_response.get.side_effect = lambda k, d=None: {
+            "usage": {"prompt_tokens": 1000, "completion_tokens": 1000, "total_tokens": 2000},
+            "_hidden_params": {"response_cost": 0.05},
+        }.get(k, d)
         mock_completion.return_value = mock_response
 
         contract = Contract(
@@ -431,10 +415,11 @@ class TestContractExecutorWithMock:
         )
         executor = ContractExecutor(contract, strict_mode=True)
 
-        with pytest.raises(RuntimeError, match="Contract violated"):
+        # ContractedLLM raises ContractViolationError (not RuntimeError)
+        with pytest.raises(ContractViolationError, match="Contract violated"):
             executor.run(query="Write something")
 
-    @patch("litellm.completion")
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
     def test_run_with_error(self, mock_completion: MagicMock) -> None:
         """Test execution that results in error."""
         mock_completion.side_effect = Exception("API Error")
@@ -452,16 +437,17 @@ class TestContractExecutorWithMock:
         assert result.error == "API Error"
         assert result.contract_state == ContractState.VIOLATED
 
-    @patch("litellm.completion")
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
     def test_run_strategy_in_result(self, mock_completion: MagicMock) -> None:
         """Test that strategy recommendation is included in result."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "Response"
-        mock_response.usage = MagicMock()
-        mock_response.usage.total_tokens = 50
-        mock_response.usage.prompt_tokens = 30
-        mock_response.usage.completion_tokens = 20
+        # Mock dict-style access for usage
+        mock_response.get.side_effect = lambda k, d=None: {
+            "usage": {"prompt_tokens": 30, "completion_tokens": 20, "total_tokens": 50},
+            "_hidden_params": {"response_cost": 0.001},
+        }.get(k, d)
         mock_completion.return_value = mock_response
 
         contract = Contract(
@@ -482,16 +468,17 @@ class TestContractExecutorWithMock:
 class TestContractExecute:
     """Tests for Contract.execute() method."""
 
-    @patch("litellm.completion")
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
     def test_contract_execute_method(self, mock_completion: MagicMock) -> None:
         """Test the Contract.execute() convenience method."""
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
         mock_response.choices[0].message.content = "42"
-        mock_response.usage = MagicMock()
-        mock_response.usage.total_tokens = 30
-        mock_response.usage.prompt_tokens = 20
-        mock_response.usage.completion_tokens = 10
+        # Mock dict-style access for usage
+        mock_response.get.side_effect = lambda k, d=None: {
+            "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+            "_hidden_params": {"response_cost": 0.0005},
+        }.get(k, d)
         mock_completion.return_value = mock_response
 
         contract = Contract(

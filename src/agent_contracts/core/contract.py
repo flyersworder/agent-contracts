@@ -311,20 +311,181 @@ class InputSpecification:
 class OutputSpecification:
     """Schema and quality criteria for outputs (O in whitepaper).
 
+    This class supports structured output enforcement through LiteLLM's
+    response_format parameter. You can specify either:
+    - A JSON Schema dict (schema parameter)
+    - A Pydantic BaseModel class (pydantic_model parameter)
+
+    The to_response_format() method converts to LiteLLM's format.
+
     Attributes:
-        schema: JSON schema or type definition for outputs
-        quality_criteria: Measurable quality requirements
+        schema: JSON schema dict for output structure (use for raw JSON Schema)
+        pydantic_model: Pydantic BaseModel class for structured output
+        strict: If True, enforce strict schema adherence (default: True)
+        quality_criteria: Measurable quality requirements (e.g., {"accuracy": 0.9})
         min_quality: Minimum acceptable quality score (0-1)
+        name: Optional name for the schema (used in response_format)
+
+    Example:
+        # Using JSON Schema:
+        output = OutputSpecification(
+            schema={
+                "type": "object",
+                "properties": {
+                    "answer": {"type": "string"},
+                    "confidence": {"type": "number"}
+                },
+                "required": ["answer", "confidence"]
+            },
+            name="answer_response"
+        )
+
+        # Using Pydantic (preferred):
+        from pydantic import BaseModel
+
+        class Answer(BaseModel):
+            answer: str
+            confidence: float
+
+        output = OutputSpecification(pydantic_model=Answer)
     """
 
     schema: dict[str, Any] | None = None
+    pydantic_model: type | None = None  # Pydantic BaseModel class
+    strict: bool = True
     quality_criteria: dict[str, Any] = field(default_factory=dict)
     min_quality: float = 0.0
+    name: str | None = None
 
     def __post_init__(self) -> None:
         """Validate output specification."""
         if not 0 <= self.min_quality <= 1:
             raise ValueError(f"min_quality must be in [0, 1], got {self.min_quality}")
+
+        # Validate that at most one of schema/pydantic_model is provided
+        if self.schema is not None and self.pydantic_model is not None:
+            raise ValueError(
+                "Cannot specify both 'schema' and 'pydantic_model'. Use one or the other."
+            )
+
+        # Validate pydantic_model is actually a Pydantic model
+        if self.pydantic_model is not None:
+            try:
+                from pydantic import BaseModel
+
+                if not (
+                    isinstance(self.pydantic_model, type)
+                    and issubclass(self.pydantic_model, BaseModel)
+                ):
+                    raise ValueError(
+                        f"pydantic_model must be a Pydantic BaseModel class, "
+                        f"got {type(self.pydantic_model)}"
+                    )
+            except ImportError as err:
+                raise ValueError(
+                    "pydantic_model requires the 'pydantic' package. "
+                    "Install with: pip install pydantic"
+                ) from err
+
+    def has_structured_output(self) -> bool:
+        """Check if structured output is configured.
+
+        Returns:
+            True if schema or pydantic_model is specified
+        """
+        return self.schema is not None or self.pydantic_model is not None
+
+    def to_response_format(self) -> dict[str, Any] | type | None:
+        """Convert to LiteLLM response_format parameter.
+
+        This method returns the appropriate format for use with LiteLLM's
+        completion() function. LiteLLM supports:
+        - Pydantic BaseModel class (preferred - auto-converts to JSON Schema)
+        - Raw JSON Schema dict with type="json_schema"
+
+        Returns:
+            response_format value for LiteLLM, or None if no schema specified
+
+        Example:
+            contract = Contract(
+                id="my-contract",
+                output=OutputSpecification(pydantic_model=MyModel)
+            )
+            response = litellm.completion(
+                model="gpt-4o",
+                messages=[...],
+                response_format=contract.output.to_response_format()
+            )
+        """
+        # Pydantic model - LiteLLM handles conversion automatically
+        if self.pydantic_model is not None:
+            return self.pydantic_model
+
+        # JSON Schema - wrap in LiteLLM's expected format
+        if self.schema is not None:
+            schema_name = self.name or "response"
+            return {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema_name,
+                    "strict": self.strict,
+                    "schema": self.schema,
+                },
+            }
+
+        return None
+
+    def validate_output(self, output: str | dict[str, Any]) -> tuple[bool, str | None]:
+        """Validate output against the schema.
+
+        Args:
+            output: The output to validate (JSON string or dict)
+
+        Returns:
+            Tuple of (is_valid, error_message)
+            If valid, error_message is None
+        """
+        import json
+
+        # No schema to validate against
+        if not self.has_structured_output():
+            return True, None
+
+        # Parse output if string
+        if isinstance(output, str):
+            try:
+                output = json.loads(output)
+            except json.JSONDecodeError as e:
+                return False, f"Invalid JSON: {e}"
+
+        # Validate with Pydantic model
+        if self.pydantic_model is not None:
+            try:
+                # model_validate is available on all Pydantic BaseModel classes
+                # We already validated it's a BaseModel subclass in __post_init__
+                validate_fn = getattr(self.pydantic_model, "model_validate", None)
+                if validate_fn is not None:
+                    validate_fn(output)
+                    return True, None
+                return True, None  # Skip if method not found
+            except Exception as e:
+                return False, f"Pydantic validation failed: {e}"
+
+        # Validate with JSON Schema
+        if self.schema is not None:
+            try:
+                import jsonschema
+
+                jsonschema.validate(output, self.schema)
+                return True, None
+            except ImportError:
+                # jsonschema not installed - skip validation
+                return True, None
+            except Exception as e:
+                # Catch all jsonschema errors (ValidationError, etc.)
+                return False, f"JSON Schema validation failed: {e}"
+
+        return True, None
 
 
 @dataclass

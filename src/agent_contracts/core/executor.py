@@ -4,11 +4,33 @@ This module provides the ContractExecutor class that orchestrates contract execu
 by integrating all core modules:
 - prompts.py: Budget-aware prompt generation
 - planning.py: Resource allocation and strategy
-- monitor.py: Resource tracking
-- enforcement.py: Constraint enforcement
-- LiteLLM: LLM execution
+- ContractedLLM: LLM execution with built-in monitoring and enforcement
 
 The executor is the "conductor" that enables Contract.execute() to work seamlessly.
+
+Architecture:
+    ContractExecutor uses ContractedLLM internally, creating a clean layered design:
+
+    ┌─────────────────────────────────────────────┐
+    │  ContractExecutor (high-level orchestration)│
+    │  - Strategy planning                        │
+    │  - Budget-aware prompts                     │
+    │  - Contract state management                │
+    └─────────────────────────────────────────────┘
+                        │ uses
+                        ▼
+    ┌─────────────────────────────────────────────┐
+    │  ContractedLLM (low-level LLM wrapper)      │
+    │  - Structured output (response_format)      │
+    │  - Reasoning effort auto-selection          │
+    │  - Token/cost tracking                      │
+    │  - Constraint enforcement                   │
+    └─────────────────────────────────────────────┘
+                        │ uses
+                        ▼
+    ┌─────────────────────────────────────────────┐
+    │  litellm.completion()                       │
+    └─────────────────────────────────────────────┘
 """
 
 from dataclasses import dataclass, field
@@ -21,7 +43,6 @@ from agent_contracts.core.contract import (
     ContractState,
     ExecutionConfig,
 )
-from agent_contracts.core.enforcement import ContractEnforcer
 from agent_contracts.core.monitor import TemporalMonitor
 from agent_contracts.core.planning import StrategyRecommendation, recommend_strategy
 from agent_contracts.core.prompts import generate_adaptive_instruction, generate_budget_prompt
@@ -114,13 +135,18 @@ class ContractExecutor:
         self,
         contract: Contract,
         strict_mode: bool = False,
+        validate_output: bool = True,
     ) -> None:
         """Initialize the executor.
 
         Args:
             contract: The contract to execute
             strict_mode: If True, violations raise RuntimeError; else return result with violations
+            validate_output: If True, validate LLM responses against contract.outputs schema
         """
+        # Import here to avoid circular imports
+        from agent_contracts.integrations.litellm_wrapper import ContractedLLM
+
         self.contract = contract
         self.capabilities: Capabilities = contract.capabilities  # type: ignore[assignment]
         self.strict_mode = strict_mode
@@ -132,13 +158,18 @@ class ContractExecutor:
             # Use default execution config
             self.execution_config = ExecutionConfig()
 
-        # Initialize enforcer (which creates its own monitor)
-        self.enforcer = ContractEnforcer(
+        # Initialize ContractedLLM - the single source of truth for LLM calls
+        # We use auto_start=False so executor controls the lifecycle
+        self._contracted_llm = ContractedLLM(
             contract=contract,
             strict_mode=strict_mode,
+            auto_start=False,
+            auto_structured_output=True,  # Use contract.outputs for response_format
+            validate_output=validate_output,
         )
 
-        # Use the enforcer's monitor for resource tracking
+        # Use ContractedLLM's enforcer as the source of truth
+        self.enforcer = self._contracted_llm.enforcer
         self.resource_monitor = self.enforcer.monitor
 
         # Initialize temporal monitor separately
@@ -168,9 +199,9 @@ class ContractExecutor:
 
         try:
             # Step 1: Start monitoring and activate contract
-            # Note: enforcer.start() activates the contract
+            # ContractedLLM.start() -> enforcer.start() -> activates contract
             self.temporal_monitor.start()
-            self.enforcer.start()
+            self._contracted_llm.start()
             self._log("contract_activated", {"state": self.contract.state.value})
 
             # Step 3: Generate strategy recommendation
@@ -331,7 +362,7 @@ class ContractExecutor:
     def _execute_chat(self, system_prompt: str, messages: list[dict[str, Any]]) -> str:
         """Execute a chat completion request.
 
-        Uses LiteLLM as the universal LLM interface.
+        Uses ContractedLLM which wraps LiteLLM with contract enforcement.
 
         Args:
             system_prompt: System prompt (may be prepended to messages)
@@ -340,20 +371,13 @@ class ContractExecutor:
         Returns:
             Chat response text
         """
-        try:
-            import litellm
-        except ImportError as e:
-            raise ImportError(
-                "litellm is required for contract execution. Install with: pip install litellm"
-            ) from e
-
         # Prepare messages with system prompt
         full_messages = self._prepare_messages(system_prompt, messages)
 
-        # Build LiteLLM parameters
+        # Build parameters for LLM call
         params = self._build_llm_params()
 
-        # Execute with tracking
+        # Execute with tracking via ContractedLLM
         self._log(
             "llm_call_started",
             {
@@ -362,14 +386,16 @@ class ContractExecutor:
             },
         )
 
-        response = litellm.completion(
+        # Use ContractedLLM for the actual call - it handles:
+        # - Structured output (response_format from contract.outputs)
+        # - Reasoning effort auto-selection
+        # - Token/cost tracking
+        # - Output validation (if enabled)
+        response = self._contracted_llm.completion(
             model=self.execution_config.model,
             messages=full_messages,
             **params,
         )
-
-        # Track usage
-        self._track_usage(response)
 
         # Extract response text
         content = response.choices[0].message.content or ""
@@ -411,85 +437,17 @@ class ContractExecutor:
     def _build_llm_params(self) -> dict[str, Any]:
         """Build parameters for LiteLLM call.
 
+        Note: ContractedLLM handles:
+        - response_format (from contract.outputs)
+        - reasoning_effort (from contract.resources)
+        - Token/cost tracking
+
         Returns:
-            Dict of LiteLLM parameters
+            Dict of LiteLLM parameters (temperature only, rest handled by ContractedLLM)
         """
-        params: dict[str, Any] = {
+        return {
             "temperature": self.execution_config.temperature,
         }
-
-        # Add max_tokens if specified
-        if self.contract.resources.tokens is not None:
-            # Use remaining tokens as max
-            remaining = self.resource_monitor.get_remaining_tokens()
-            if remaining > 0:
-                params["max_tokens"] = min(remaining, 4096)  # Cap at reasonable max
-
-        return params
-
-    def _track_usage(self, response: Any) -> None:
-        """Track resource usage from LLM response.
-
-        Args:
-            response: LiteLLM response object
-        """
-        usage = getattr(response, "usage", None)
-        if usage:
-            total_tokens = getattr(usage, "total_tokens", 0)
-            prompt_tokens = getattr(usage, "prompt_tokens", 0)
-            completion_tokens = getattr(usage, "completion_tokens", 0)
-
-            # Track tokens
-            self.resource_monitor.usage.add_tokens(total_tokens)
-
-            # Estimate cost (simplified)
-            cost = self._estimate_cost(prompt_tokens, completion_tokens)
-            self.resource_monitor.usage.add_api_call(cost=cost, tokens=0)
-
-            self._log(
-                "usage_tracked",
-                {
-                    "total_tokens": total_tokens,
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "cost_usd": cost,
-                },
-            )
-
-    def _estimate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
-        """Estimate cost based on model and token counts.
-
-        Args:
-            prompt_tokens: Input token count
-            completion_tokens: Output token count
-
-        Returns:
-            Estimated cost in USD
-        """
-        # Simplified pricing (per 1M tokens)
-        model = self.execution_config.model.lower()
-
-        if "gpt-4o" in model:
-            prompt_price = 2.50 / 1_000_000  # $2.50/1M input
-            completion_price = 10.00 / 1_000_000  # $10/1M output
-        elif "gpt-4" in model:
-            prompt_price = 30.00 / 1_000_000
-            completion_price = 60.00 / 1_000_000
-        elif "gpt-3.5" in model:
-            prompt_price = 0.50 / 1_000_000
-            completion_price = 1.50 / 1_000_000
-        elif "claude" in model:
-            prompt_price = 3.00 / 1_000_000
-            completion_price = 15.00 / 1_000_000
-        elif "gemini" in model:
-            prompt_price = 0.075 / 1_000_000
-            completion_price = 0.30 / 1_000_000
-        else:
-            # Default conservative estimate
-            prompt_price = 10.00 / 1_000_000
-            completion_price = 30.00 / 1_000_000
-
-        return (prompt_tokens * prompt_price) + (completion_tokens * completion_price)
 
     def _get_usage_dict(self) -> dict[str, Any]:
         """Get current resource usage as a dictionary.
