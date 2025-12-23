@@ -340,7 +340,14 @@ print(skill.instructions)
 - ✅ 11 comprehensive tests, 90% coverage
 - ✅ Real-world demos (multi-turn, multi-agent)
 
-**Total**: 522+ tests, 91%+ coverage
+**Evaluation Pipelines** ✅ Complete
+- ✅ Research Pipeline: Multi-agent report generation (25 topics)
+- ✅ Code Review Pipeline: Coder↔Reviewer loop (175 LiveCodeBench problems)
+- ✅ CONTRACTED vs UNCONTRACTED comparison framework
+- ✅ Conservation law enforcement in multi-agent delegation
+- ✅ Iteration limits prevent runaway agent loops
+
+**Total**: 609+ tests, 91%+ coverage
 
 ## Use Cases
 
@@ -400,6 +407,9 @@ agent-contracts/
 │   ├── langchain/                # LangChain demos
 │   ├── langgraph/                # LangGraph demos (multi-agent)
 │   └── google_adk/               # Google ADK demos (multi-turn, multi-agent)
+├── evaluation/                    # Experimental evaluations
+│   ├── research_pipeline/        # Multi-agent research experiment
+│   └── code_review_pipeline/     # Coder↔Reviewer experiment
 ├── docs/
 │   ├── whitepaper.md             # Complete theoretical framework
 │   └── testing-strategy.md       # Testing & validation plan

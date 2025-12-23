@@ -21,9 +21,10 @@ This document tracks development progress and key decisions for the Agent Contra
 **SkillSpec**: agentskills.io Standard (Dec 23) ✅
 **Per-Tool Limits**: Fine-grained resource control (Dec 23) ✅
 **Indeterminacy Evaluator**: NeurIPS 2025 LLM-as-Judge (Dec 23) ✅
+**Evaluation Pipelines**: Research & Code Review experiments (Dec 23) ✅
 
 **Metrics**:
-- **Tests**: 522+ passing
+- **Tests**: 609+ passing
 - **Coverage**: 91%+
 - **Integrations**: LiteLLM, LangChain, LangGraph, Google ADK
 
@@ -133,6 +134,38 @@ have inherent ambiguity.
 
 **Reference**: https://github.com/lguerdan/indeterminacy
 
+### Evaluation Pipelines (Dec 23)
+**Value**: Systematic comparison of CONTRACTED vs UNCONTRACTED execution
+
+Two complementary evaluation experiments demonstrating Agent Contracts' governance value:
+
+**1. Research Pipeline** (`evaluation/research_pipeline/`)
+- Multi-agent report generation (Researcher → Analyzer → Reporter)
+- 25 curated research topics across 5 categories
+- Conservation law enforcement for budget delegation
+- Success criteria: sections complete, word count, citations
+
+**2. Code Review Pipeline** (`evaluation/code_review_pipeline/`)
+- Coder ↔ Reviewer iterative loop (Gemini 2.0 Flash)
+- 175 LiveCodeBench problems (post-Feb 2025, contamination-free)
+- Iteration limits prevent runaway agent loops
+- Per-agent token and LLM call tracking
+
+**Key Metrics Collected**:
+- Total tokens consumed (contracted vs uncontracted)
+- Iteration counts (runaway prevention)
+- Success rates by difficulty
+- Conservation law compliance
+
+**Usage**:
+```bash
+# Research pipeline
+python -m evaluation.research_pipeline.run_experiment --quick
+
+# Code review pipeline
+python -m evaluation.code_review_pipeline.run_experiment --n-problems 10
+```
+
 ## Validation & Benchmarks
 
 ### Governance Validation (Nov 2)
@@ -220,13 +253,16 @@ agent-contracts/
 │       ├── langchain.py         # LangChain
 │       ├── langgraph.py         # LangGraph
 │       └── google_adk.py        # Google ADK
-├── tests/                       # 522+ tests, 91% coverage
+├── tests/                       # 609+ tests, 91% coverage
 ├── benchmarks/                  # Live demonstrations
 │   ├── langchain/              # LangChain demos
 │   ├── langgraph/              # LangGraph demos
 │   ├── google_adk/             # Google ADK demos
 │   ├── governance/             # Governance validation
-│   └── quality_validation/     # Quality evaluator validation
+│   └── research_agent/         # Research agent demos
+├── evaluation/                  # Experimental evaluations
+│   ├── research_pipeline/      # Multi-agent research experiment
+│   └── code_review_pipeline/   # Coder↔Reviewer experiment
 └── docs/
     ├── whitepaper.md           # Theoretical foundation
     └── testing-strategy.md     # Test plan
@@ -271,7 +307,7 @@ agent-contracts/
 ---
 
 *Last Updated: December 23, 2025*
-*Status: Production-ready, 555+ tests, 91%+ coverage*
+*Status: Production-ready, 609+ tests, 91%+ coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK*
-*Features: SkillSpec, Per-Tool Limits, Indeterminacy-Aware Evaluator*
-*Next: Package for PyPI (v0.1.0) or additional integrations*
+*Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines*
+*Next: Run experiments, package for PyPI (v0.1.0)*

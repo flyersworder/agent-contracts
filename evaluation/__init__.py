@@ -1,12 +1,19 @@
-"""Evaluation experiments for COINE 2026 paper.
+"""Evaluation experiments for Agent Contracts framework validation.
 
-This package contains the evaluation experiments designed to validate
-the Agent Contracts framework for the COINE 2026 submission.
+This package contains evaluation experiments designed to validate
+the Agent Contracts framework through CONTRACTED vs UNCONTRACTED comparisons.
 
-Primary Experiment: Multi-Agent Research Report Generation
-- Validates core claims about budget enforcement and conservation laws
-- Uses 25 research topics across 5 categories
-- Compares UNCONTRACTED vs CONTRACTED conditions
+Evaluation Pipelines:
+
+1. Research Pipeline (`research_pipeline/`)
+   - Multi-agent report generation (Researcher → Analyzer → Reporter)
+   - 25 research topics across 5 categories
+   - Validates budget enforcement and conservation laws
+
+2. Code Review Pipeline (`code_review_pipeline/`)
+   - Coder ↔ Reviewer iterative loop
+   - 175 LiveCodeBench problems (post-Feb 2025)
+   - Validates iteration limits and runaway prevention
 
 Indeterminacy-Aware Evaluator:
 - Implements NeurIPS 2025 framework for rating ambiguity
