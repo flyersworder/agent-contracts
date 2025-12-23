@@ -20,6 +20,7 @@ This document tracks development progress and key decisions for the Agent Contra
 **Google ADK**: Google AI Integration (Nov 6) ✅
 **SkillSpec**: agentskills.io Standard (Dec 23) ✅
 **Per-Tool Limits**: Fine-grained resource control (Dec 23) ✅
+**Indeterminacy Evaluator**: NeurIPS 2025 LLM-as-Judge (Dec 23) ✅
 
 **Metrics**:
 - **Tests**: 522+ passing
@@ -100,6 +101,38 @@ This document tracks development progress and key decisions for the Agent Contra
 - `core/monitor.py` - `ResourceUsage.tool_usage_by_name: dict[str, int]`
 - `core/monitor.py` - Per-tool limit checking in `check_constraints()`
 
+### Indeterminacy-Aware LLM-as-Judge (Dec 23) ⭐
+**Value**: Robust quality evaluation accounting for rating ambiguity
+
+Implements the NeurIPS 2025 framework from "Validating LLM-as-a-Judge Systems
+under Rating Indeterminacy" (Guerdan et al.). Standard LLM-as-judge approaches
+can select suboptimal judges up to 31% worse than optimal when rating tasks
+have inherent ambiguity.
+
+**Key Concepts**:
+- **Response Set Elicitation**: Ask judges "select ALL ranges that reasonably apply"
+  instead of forcing single choice
+- **Multi-label Vector (ω)**: P(option_k is reasonable) for each rating option
+- **Indeterminacy Signal**: Judge disagreement indicates genuine ambiguity, not noise
+- **MSE(srs/srs)**: Recommended metric (30% better than Hit Rate under ambiguity)
+
+**Components**:
+- `ResponseSet`: Set of options a judge deems reasonable
+- `MultiLabelScore`: Probability vector + point estimate + indeterminacy level
+- `IndeterminacyAwareScore`: Full score with response sets for all dimensions
+- `IndeterminacyAwareEvaluator`: Main evaluator class
+
+**Metrics**:
+- `mse_srs_srs()`: MSE between soft response set vectors
+- `decision_consistency()`: Agreement on downstream decisions at threshold τ
+- `prevalence_bias()`: Systematic over/underestimation vs reference
+
+**Files**:
+- `benchmarks/research_agent/indeterminacy_evaluator.py` - Full implementation
+- `tests/benchmarks/test_indeterminacy_evaluator.py` - 33 tests
+
+**Reference**: https://github.com/lguerdan/indeterminacy
+
 ## Validation & Benchmarks
 
 ### Governance Validation (Nov 2)
@@ -117,11 +150,14 @@ This document tracks development progress and key decisions for the Agent Contra
 
 **Value Proposition**: Organizational control over AI resources, not individual optimization
 
-### Quality Framework (Nov 4)
-- **Evaluator**: Gemini 2.5 Flash
-- **Reliability**: CV=5.2% (exceeds SOTA 10-15%)
+### Quality Framework (Nov 4, Enhanced Dec 23)
+- **Original Evaluator**: Gemini 2.5 Flash, CV=5.2% (exceeds SOTA 10-15%)
 - **Known Limitation**: Bimodal behavior at high quality (Q>90)
-- **Status**: Production-ready with documented limitations
+- **New**: `IndeterminacyAwareEvaluator` implements NeurIPS 2025 framework
+  - Response set elicitation captures rating ambiguity
+  - MSE(srs/srs) metric is 30% better than Hit Rate under indeterminacy
+  - Judge disagreement treated as signal, not noise
+- **Status**: Both evaluators production-ready
 
 ### Strategic Modes (Nov 3)
 **H2 Hypothesis Validated**: Contract modes enable quality-cost-time tradeoffs
@@ -235,7 +271,7 @@ agent-contracts/
 ---
 
 *Last Updated: December 23, 2025*
-*Status: Production-ready, 522+ tests, 91%+ coverage*
+*Status: Production-ready, 555+ tests, 91%+ coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK*
-*Features: SkillSpec (agentskills.io), Per-Tool Limits*
+*Features: SkillSpec, Per-Tool Limits, Indeterminacy-Aware Evaluator*
 *Next: Package for PyPI (v0.1.0) or additional integrations*
