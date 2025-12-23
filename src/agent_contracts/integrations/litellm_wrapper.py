@@ -44,6 +44,8 @@ class ContractedLLM:
         auto_start: bool = True,
         auto_structured_output: bool = True,
         validate_output: bool = False,
+        auto_capabilities: bool = True,
+        tool_definitions: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         """Initialize contracted LLM wrapper.
 
@@ -55,12 +57,19 @@ class ContractedLLM:
                 output schema as response_format when not already specified
             validate_output: If True, validate LLM response against output schema
                 and raise ContractViolationError if invalid
+            auto_capabilities: If True, automatically apply contract's capabilities
+                (MCP servers, tools, skills) to LLM calls
+            tool_definitions: Optional dict mapping tool names to their full definitions
+                for function calling. Required if contract.capabilities.tools contains
+                tool names that need definitions.
         """
         self.contract = contract
         self.enforcer = ContractEnforcer(contract, strict_mode=strict_mode)
         self.auto_start = auto_start
         self.auto_structured_output = auto_structured_output
         self.validate_output = validate_output
+        self.auto_capabilities = auto_capabilities
+        self.tool_definitions = tool_definitions
         self._started = False
 
     def start(self) -> None:
@@ -120,6 +129,10 @@ class ContractedLLM:
             response_format = self._get_response_format()
             if response_format is not None:
                 kwargs["response_format"] = response_format
+
+        # Auto-apply capabilities (tools, MCP servers, skills)
+        if self.auto_capabilities and self.contract.capabilities:
+            self._apply_capabilities(kwargs)
 
         # Make the LLM call
         try:
@@ -363,6 +376,41 @@ class ContractedLLM:
         if self.contract.outputs.has_structured_output():
             return self.contract.outputs.to_response_format()
         return None
+
+    def _apply_capabilities(self, kwargs: dict[str, Any]) -> None:
+        """Apply contract capabilities to LLM call kwargs.
+
+        This method modifies kwargs in-place to add:
+        - tools: MCP tools and function tools from capabilities
+        - container.skills: Anthropic skills (for Anthropic models)
+
+        Args:
+            kwargs: The kwargs dict being built for litellm.completion()
+        """
+        caps = self.contract.capabilities
+        if caps is None:
+            return
+
+        # Apply tools if not already specified
+        if "tools" not in kwargs:
+            tools = caps.to_litellm_tools(tool_definitions=self.tool_definitions)
+
+            # Add code execution tool for Anthropic if requested
+            code_exec_tool = caps.get_code_execution_tool()
+            if code_exec_tool:
+                tools.append(code_exec_tool)
+
+            if tools:
+                kwargs["tools"] = tools
+
+        # Apply Anthropic skills if using Anthropic model
+        model = kwargs.get("model", "")
+        is_anthropic = "anthropic" in model.lower() or "claude" in model.lower()
+
+        if is_anthropic and "container" not in kwargs:
+            anthropic_skills = caps.to_anthropic_skills()
+            if anthropic_skills:
+                kwargs["container"] = {"skills": anthropic_skills}
 
     def _extract_response_content(self, response: Any) -> str:
         """Extract the content string from an LLM response.

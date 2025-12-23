@@ -1024,6 +1024,183 @@ class Capabilities:
             skill.instruction_tokens for skill in self.skills if isinstance(skill, SkillSpec)
         )
 
+    # --- LiteLLM Integration Methods ---
+
+    def to_mcp_tools(self) -> list[dict[str, Any]]:
+        """Convert MCP servers to LiteLLM MCP tool format.
+
+        LiteLLM supports MCP tools via the `tools` parameter with type="mcp".
+        This method converts our mcp_servers list to the format LiteLLM expects.
+
+        Returns:
+            List of LiteLLM MCP tool definitions
+
+        Example:
+            >>> caps = Capabilities(mcp_servers=["https://mcp.example.com/api"])
+            >>> caps.to_mcp_tools()
+            [{"type": "mcp", "server_label": "mcp-server-0",
+              "server_url": "https://mcp.example.com/api", "require_approval": "never"}]
+        """
+        mcp_tools = []
+        for i, server_url in enumerate(self.mcp_servers):
+            # Extract a label from the URL or use index-based name
+            label = f"mcp-server-{i}"
+            if "://" in server_url:
+                # Try to extract domain as label
+                try:
+                    from urllib.parse import urlparse
+
+                    parsed = urlparse(server_url)
+                    if parsed.netloc:
+                        # Use domain without TLD as label (e.g., "mcp" from "mcp.example.com")
+                        label = parsed.netloc.split(".")[0]
+                except Exception:
+                    pass
+
+            mcp_tools.append(
+                {
+                    "type": "mcp",
+                    "server_label": label,
+                    "server_url": server_url,
+                    "require_approval": "never",  # Default to no approval
+                }
+            )
+        return mcp_tools
+
+    def to_litellm_tools(
+        self,
+        tool_definitions: dict[str, dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Get all tools in LiteLLM-compatible format.
+
+        Combines:
+        1. Tool definitions (if provided) - for tools listed in self.tools
+        2. MCP server tools
+
+        Args:
+            tool_definitions: Optional dict mapping tool names to their full definitions.
+                Each definition should follow the OpenAI function calling format:
+                {"type": "function", "function": {"name": ..., "parameters": ...}}
+
+        Returns:
+            List of LiteLLM-compatible tool definitions
+
+        Example:
+            >>> caps = Capabilities(
+            ...     tools=["get_weather", "search"],
+            ...     mcp_servers=["https://mcp.example.com/api"]
+            ... )
+            >>> definitions = {
+            ...     "get_weather": {
+            ...         "type": "function",
+            ...         "function": {
+            ...             "name": "get_weather",
+            ...             "description": "Get weather for a location",
+            ...             "parameters": {"type": "object", "properties": {...}}
+            ...         }
+            ...     }
+            ... }
+            >>> tools = caps.to_litellm_tools(tool_definitions=definitions)
+        """
+        all_tools: list[dict[str, Any]] = []
+
+        # Add function tools if definitions are provided
+        if tool_definitions:
+            for tool_name in self.tools:
+                if tool_name in tool_definitions:
+                    all_tools.append(tool_definitions[tool_name])
+
+        # Add MCP tools
+        all_tools.extend(self.to_mcp_tools())
+
+        return all_tools
+
+    def has_tools(self) -> bool:
+        """Check if any tools or MCP servers are configured.
+
+        Returns:
+            True if tools or mcp_servers are defined
+        """
+        return len(self.tools) > 0 or len(self.mcp_servers) > 0
+
+    def get_code_execution_tool(self) -> dict[str, Any] | None:
+        """Get Anthropic code execution tool if applicable.
+
+        This is a convenience method for Anthropic's code_execution capability.
+        Only returns a tool definition if "code_execution" is in the tools list.
+
+        Returns:
+            Code execution tool definition for Anthropic, or None
+        """
+        if "code_execution" in self.tools:
+            return {
+                "type": "code_execution_20250825",
+                "name": "code_execution",
+            }
+        return None
+
+    def to_anthropic_skills(self) -> list[dict[str, Any]]:
+        """Convert SkillSpecs to Anthropic container.skills format.
+
+        Anthropic supports skills via the `container.skills` parameter.
+        This method converts our SkillSpec objects to Anthropic's format.
+
+        Note: This only works with Anthropic models. For other models,
+        skill instructions should be included in the system prompt.
+
+        Returns:
+            List of Anthropic skill definitions (for container.skills parameter)
+
+        Example:
+            >>> skill = SkillSpec(name="code-reviewer", ...)
+            >>> caps = Capabilities(skills=[skill])
+            >>> caps.to_anthropic_skills()
+            [{"type": "anthropic", "skill_id": "code-reviewer", "version": "latest"}]
+        """
+        anthropic_skills = []
+        for skill in self.skills:
+            if isinstance(skill, SkillSpec):
+                anthropic_skills.append(
+                    {
+                        "type": "anthropic",
+                        "skill_id": skill.name,
+                        "version": skill.version or "latest",
+                    }
+                )
+        return anthropic_skills
+
+    def get_skill_instructions(self, active_skills: list[str] | None = None) -> str:
+        """Get skill instructions for prompt injection.
+
+        For models that don't support native skills, this method generates
+        a formatted string of skill instructions to include in the system prompt.
+
+        Args:
+            active_skills: Optional list of skill names to include.
+                If None, includes all skills with instructions.
+
+        Returns:
+            Formatted skill instructions string
+        """
+        instructions_parts = []
+
+        for skill in self.skills:
+            # Check if this skill should be included (is SkillSpec, matches filter, has instructions)
+            if (
+                isinstance(skill, SkillSpec)
+                and (active_skills is None or skill.name in active_skills)
+                and skill.instructions
+            ):
+                instructions_parts.append(
+                    f"## Skill: {skill.name}\n"
+                    f"Description: {skill.description or 'No description'}\n"
+                    f"Instructions:\n{skill.instructions}"
+                )
+
+        if instructions_parts:
+            return "\n\n".join(instructions_parts)
+        return ""
+
 
 @dataclass
 class Contract:
