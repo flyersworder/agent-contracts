@@ -277,6 +277,7 @@ class ContractingCapability:
         tokens: int = 0,
         cost_usd: float = 0.0,
         api_calls: int | None = None,
+        iterations: int | None = None,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Contract:
@@ -290,6 +291,7 @@ class ContractingCapability:
             tokens: Token budget to allocate to child
             cost_usd: Cost budget to allocate to child
             api_calls: Optional API call limit for child
+            iterations: Optional iteration limit for child (maps to ADK max_llm_calls)
             description: Description of the child's task
             metadata: Optional metadata for the child contract
 
@@ -345,6 +347,7 @@ class ContractingCapability:
             tokens=tokens if tokens > 0 else None,
             cost_usd=cost_usd if cost_usd > 0 else None,
             api_calls=api_calls,
+            iterations=iterations,
         )
 
         child_metadata = metadata or {}

@@ -697,6 +697,7 @@ class DelegatingAdkAgent(ContractedAdkAgent):
         tokens: int = 0,
         cost_usd: float = 0.0,
         api_calls: int | None = None,
+        iterations: int | None = None,
         description: str = "",
         strict_mode: bool = True,
         runner: Any | None = None,
@@ -714,6 +715,8 @@ class DelegatingAdkAgent(ContractedAdkAgent):
             tokens: Token budget to allocate to delegated agent
             cost_usd: Cost budget to allocate to delegated agent
             api_calls: Optional API call limit for delegated agent
+            iterations: Optional iteration limit for delegated agent
+                (maps to Google ADK RunConfig.max_llm_calls)
             description: Description of the delegated task
             strict_mode: If True, violations cause immediate termination
             runner: Optional custom Runner for the delegated agent
@@ -731,6 +734,7 @@ class DelegatingAdkAgent(ContractedAdkAgent):
             tokens=tokens,
             cost_usd=cost_usd,
             api_calls=api_calls,
+            iterations=iterations,
             description=description,
         )
 

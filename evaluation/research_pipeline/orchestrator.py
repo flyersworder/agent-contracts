@@ -342,11 +342,15 @@ class ContractedPipeline:
     PARENT_TOKENS = 100_000
     PARENT_COST = 2.0
     PARENT_DURATION = timedelta(minutes=15)
+    PARENT_ITERATIONS = 50  # Max LLM calls to prevent runaway loops
 
     ORCHESTRATOR_TOKENS = 10_000
     RESEARCHER_TOKENS = 40_000
+    RESEARCHER_ITERATIONS = 15  # Researcher may need multiple search iterations
     ANALYZER_TOKENS = 25_000
+    ANALYZER_ITERATIONS = 10
     REPORTER_TOKENS = 25_000
+    REPORTER_ITERATIONS = 10
 
     def __init__(self, verbose: bool = False, strict_mode: bool = True) -> None:
         """Initialize contracted pipeline.
@@ -378,13 +382,14 @@ class ContractedPipeline:
         start_time = time.time()
 
         try:
-            # Create parent contract
+            # Create parent contract with iteration limit to prevent runaway loops
             parent_contract = Contract(
                 id=f"report-{topic.id}",
                 name=f"Research Report: {topic.title}",
                 resources=ResourceConstraints(
                     tokens=self.PARENT_TOKENS,
                     cost_usd=self.PARENT_COST,
+                    iterations=self.PARENT_ITERATIONS,  # Prevents runaway agent loops
                 ),
                 temporal=TemporalConstraints(
                     max_duration=self.PARENT_DURATION,
@@ -404,11 +409,13 @@ class ContractedPipeline:
             )
 
             # Delegate to sub-agents with conservation law enforcement
+            # Each agent gets its own iteration limit to prevent runaway loops
             researcher_agent = create_researcher_agent()
             researcher = delegating.delegate(
                 name="researcher",
                 agent=researcher_agent,
                 tokens=self.RESEARCHER_TOKENS,
+                iterations=self.RESEARCHER_ITERATIONS,
                 description="Research the topic",
             )
 
@@ -417,6 +424,7 @@ class ContractedPipeline:
                 name="analyzer",
                 agent=analyzer_agent,
                 tokens=self.ANALYZER_TOKENS,
+                iterations=self.ANALYZER_ITERATIONS,
                 description="Analyze findings",
             )
 
@@ -425,6 +433,7 @@ class ContractedPipeline:
                 name="reporter",
                 agent=reporter_agent,
                 tokens=self.REPORTER_TOKENS,
+                iterations=self.REPORTER_ITERATIONS,
                 description="Write report",
             )
 
