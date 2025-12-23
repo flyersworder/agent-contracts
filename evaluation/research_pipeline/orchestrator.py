@@ -371,6 +371,7 @@ class ContractedPipeline:
             PipelineResult with execution details
         """
         from agent_contracts import Contract, ResourceConstraints, TemporalConstraints
+        from agent_contracts.core.prompts import generate_budget_prompt
         from agent_contracts.integrations.google_adk import DelegatingAdkAgent
 
         result = PipelineResult(topic=topic, mode="CONTRACTED")
@@ -437,7 +438,8 @@ class ContractedPipeline:
             if self.verbose:
                 print(f"  [Researcher] Researching: {topic.title}")
 
-            research_prompt = f"""Research the following topic thoroughly:
+            # Generate budget-aware prompt with specific token information
+            research_task = f"""Research the following topic thoroughly:
 
 Topic: {topic.title}
 Description: {topic.description}
@@ -446,9 +448,13 @@ Key aspects to cover:
 {chr(10).join(f"- {aspect}" for aspect in topic.key_aspects)}
 
 Find current information, facts, statistics, and expert opinions.
-Cite your sources with URLs.
+Cite your sources with URLs."""
 
-IMPORTANT: You have a limited token budget. Be focused and efficient."""
+            research_prompt = generate_budget_prompt(
+                contract=researcher.contract,
+                task_description=research_task,
+                current_usage=None,  # Starting fresh
+            )
 
             research_output = researcher.run(
                 user_id="eval_user",
@@ -462,7 +468,8 @@ IMPORTANT: You have a limited token budget. Be focused and efficient."""
             if self.verbose:
                 print("  [Analyzer] Analyzing findings...")
 
-            analysis_prompt = f"""Analyze the following research findings:
+            # Generate budget-aware prompt for analyzer
+            analysis_task = f"""Analyze the following research findings:
 
 {research_output["response"]}
 
@@ -472,9 +479,13 @@ Identify:
 3. Connections between sources
 4. Most significant findings
 
-Structure your analysis into clear themes.
+Structure your analysis into clear themes."""
 
-IMPORTANT: You have a limited token budget. Be focused and efficient."""
+            analysis_prompt = generate_budget_prompt(
+                contract=analyzer.contract,
+                task_description=analysis_task,
+                current_usage=None,  # Starting fresh
+            )
 
             analysis_output = analyzer.run(
                 user_id="eval_user",
@@ -488,7 +499,8 @@ IMPORTANT: You have a limited token budget. Be focused and efficient."""
             if self.verbose:
                 print("  [Reporter] Writing report...")
 
-            report_prompt = f"""Write a comprehensive research report on:
+            # Generate budget-aware prompt for reporter
+            report_task = f"""Write a comprehensive research report on:
 
 Topic: {topic.title}
 
@@ -499,9 +511,13 @@ Requirements:
 - At least 2,000 words
 - Include Introduction, Main Body (with sections), and Conclusion
 - Include at least 5 citations with URLs
-- Be professional and well-organized
+- Be professional and well-organized"""
 
-IMPORTANT: You have a limited token budget. Be focused and efficient."""
+            report_prompt = generate_budget_prompt(
+                contract=reporter.contract,
+                task_description=report_task,
+                current_usage=None,  # Starting fresh
+            )
 
             report_output = reporter.run(
                 user_id="eval_user",
