@@ -57,6 +57,27 @@ class TestResourceConstraints:
         with pytest.raises(AttributeError):
             constraints.tokens = 2000  # type: ignore
 
+    def test_iterations_field(self) -> None:
+        """Test iterations field for agent loop limits."""
+        # Default is None (unlimited)
+        constraints = ResourceConstraints()
+        assert constraints.iterations is None
+
+        # Can set a specific limit
+        constraints = ResourceConstraints(iterations=10)
+        assert constraints.iterations == 10
+
+        # Works with other constraints
+        constraints = ResourceConstraints(tokens=10000, iterations=50, cost_usd=2.0)
+        assert constraints.tokens == 10000
+        assert constraints.iterations == 50
+        assert constraints.cost_usd == 2.0
+
+    def test_iterations_negative_raises_error(self) -> None:
+        """Test that negative iterations raises ValueError."""
+        with pytest.raises(ValueError, match="iterations must be non-negative"):
+            ResourceConstraints(iterations=-1)
+
 
 class TestContractMode:
     """Tests for ContractMode enum and strategic modes."""

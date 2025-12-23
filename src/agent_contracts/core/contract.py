@@ -133,6 +133,9 @@ class ResourceConstraints:
         text_tokens: Maximum tokens for text output (None = unlimited)
         reasoning_effort: How deeply model should think ("low"/"medium"/"high") (None = auto)
         api_calls: Maximum API calls allowed (None = unlimited)
+        iterations: Maximum agent loop iterations (None = unlimited).
+            For Google ADK, this maps to RunConfig.max_llm_calls.
+            For LangGraph, this maps to recursion_limit.
         web_searches: Maximum web searches allowed (None = unlimited)
         tool_invocations: Maximum tool uses allowed (None = unlimited)
         per_tool_limits: Per-tool invocation limits (tool_name -> max_calls)
@@ -146,6 +149,7 @@ class ResourceConstraints:
     text_tokens: int | None = None
     reasoning_effort: str | None = None
     api_calls: int | None = None
+    iterations: int | None = None
     web_searches: int | None = None
     tool_invocations: int | None = None
     per_tool_limits: dict[str, int] = field(default_factory=dict)

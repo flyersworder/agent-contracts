@@ -343,3 +343,223 @@ class TestMultiAgentSupport:
         assert contracted is not None
         assert contracted.agent == coordinator
         assert len(contracted.agent.sub_agents) == 2
+
+
+class TestIterationLimits:
+    """Test iteration limits via ResourceConstraints.iterations."""
+
+    def test_iterations_applied_to_run_config(self) -> None:
+        """Test that contract iterations limit is applied to RunConfig."""
+
+        from google.adk.agents import LlmAgent
+        from google.genai.types import Content, GenerateContentResponseUsageMetadata, Part
+
+        from agent_contracts.integrations.google_adk import ContractedAdkAgent
+
+        contract = Contract(
+            id="test-iterations",
+            name="test-iterations",
+            resources=ResourceConstraints(tokens=10000, iterations=10),  # Limit to 10 iterations
+        )
+
+        agent = LlmAgent(
+            name="test_agent",
+            model="gemini-2.0-flash",
+            instruction="You are a helpful assistant.",
+        )
+
+        contracted = ContractedAdkAgent(contract=contract, agent=agent)
+
+        # Mock event
+        mock_event = Mock()
+        mock_event.usage_metadata = GenerateContentResponseUsageMetadata(
+            total_token_count=100,
+            prompt_token_count=50,
+            candidates_token_count=50,
+            thoughts_token_count=0,
+            cached_content_token_count=0,
+        )
+        mock_event.content = Content(parts=[Part(text="Hello!")])
+
+        # Mock session service
+        mock_session_service = Mock()
+        mock_session_service.create_session = AsyncMock()
+
+        with (
+            patch.object(contracted.runner, "run", return_value=iter([mock_event])) as mock_run,
+            patch.object(contracted.runner, "session_service", mock_session_service),
+        ):
+            contracted.run(user_id="test_user", session_id="test_session", message="Hello")
+
+            # Verify RunConfig was passed with max_llm_calls=10
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args
+            run_config = call_args.kwargs.get("run_config")
+            assert run_config is not None
+            assert run_config.max_llm_calls == 10
+
+    def test_iterations_enforces_more_restrictive_limit(self) -> None:
+        """Test that contract iterations limit enforces the more restrictive limit."""
+        from google.adk.agents import LlmAgent
+        from google.adk.runners import RunConfig
+        from google.genai.types import Content, GenerateContentResponseUsageMetadata, Part
+
+        from agent_contracts.integrations.google_adk import ContractedAdkAgent
+
+        # Contract says 10 iterations max
+        contract = Contract(
+            id="test-restrictive",
+            name="test-restrictive",
+            resources=ResourceConstraints(tokens=10000, iterations=10),
+        )
+
+        agent = LlmAgent(
+            name="test_agent",
+            model="gemini-2.0-flash",
+            instruction="You are a helpful assistant.",
+        )
+
+        contracted = ContractedAdkAgent(contract=contract, agent=agent)
+
+        # Mock event
+        mock_event = Mock()
+        mock_event.usage_metadata = GenerateContentResponseUsageMetadata(
+            total_token_count=100,
+            prompt_token_count=50,
+            candidates_token_count=50,
+            thoughts_token_count=0,
+            cached_content_token_count=0,
+        )
+        mock_event.content = Content(parts=[Part(text="Hello!")])
+
+        # Mock session service
+        mock_session_service = Mock()
+        mock_session_service.create_session = AsyncMock()
+
+        # User tries to pass a higher limit (100), but contract should win
+        user_config = RunConfig(max_llm_calls=100)
+
+        with (
+            patch.object(contracted.runner, "run", return_value=iter([mock_event])) as mock_run,
+            patch.object(contracted.runner, "session_service", mock_session_service),
+        ):
+            contracted.run(
+                user_id="test_user",
+                session_id="test_session",
+                message="Hello",
+                run_config=user_config,
+            )
+
+            # Contract limit (10) should override user's higher limit (100)
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args
+            run_config = call_args.kwargs.get("run_config")
+            assert run_config.max_llm_calls == 10
+
+    def test_user_can_be_more_restrictive(self) -> None:
+        """Test that user can set a more restrictive limit than contract."""
+        from google.adk.agents import LlmAgent
+        from google.adk.runners import RunConfig
+        from google.genai.types import Content, GenerateContentResponseUsageMetadata, Part
+
+        from agent_contracts.integrations.google_adk import ContractedAdkAgent
+
+        # Contract allows up to 50 iterations
+        contract = Contract(
+            id="test-user-restrictive",
+            name="test-user-restrictive",
+            resources=ResourceConstraints(tokens=10000, iterations=50),
+        )
+
+        agent = LlmAgent(
+            name="test_agent",
+            model="gemini-2.0-flash",
+            instruction="You are a helpful assistant.",
+        )
+
+        contracted = ContractedAdkAgent(contract=contract, agent=agent)
+
+        # Mock event
+        mock_event = Mock()
+        mock_event.usage_metadata = GenerateContentResponseUsageMetadata(
+            total_token_count=100,
+            prompt_token_count=50,
+            candidates_token_count=50,
+            thoughts_token_count=0,
+            cached_content_token_count=0,
+        )
+        mock_event.content = Content(parts=[Part(text="Hello!")])
+
+        # Mock session service
+        mock_session_service = Mock()
+        mock_session_service.create_session = AsyncMock()
+
+        # User sets a lower limit (5), which should be respected
+        user_config = RunConfig(max_llm_calls=5)
+
+        with (
+            patch.object(contracted.runner, "run", return_value=iter([mock_event])) as mock_run,
+            patch.object(contracted.runner, "session_service", mock_session_service),
+        ):
+            contracted.run(
+                user_id="test_user",
+                session_id="test_session",
+                message="Hello",
+                run_config=user_config,
+            )
+
+            # User's more restrictive limit (5) should be kept since 5 < 50
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args
+            run_config = call_args.kwargs.get("run_config")
+            # User's config passes through since 5 < 50 (contract doesn't override)
+            assert run_config.max_llm_calls == 5
+
+    def test_no_iterations_limit_no_run_config_created(self) -> None:
+        """Test that no RunConfig is created when iterations is not set."""
+        from google.adk.agents import LlmAgent
+        from google.genai.types import Content, GenerateContentResponseUsageMetadata, Part
+
+        from agent_contracts.integrations.google_adk import ContractedAdkAgent
+
+        # No iterations limit
+        contract = Contract(
+            id="test-no-iterations",
+            name="test-no-iterations",
+            resources=ResourceConstraints(tokens=10000),  # No iterations specified
+        )
+
+        agent = LlmAgent(
+            name="test_agent",
+            model="gemini-2.0-flash",
+            instruction="You are a helpful assistant.",
+        )
+
+        contracted = ContractedAdkAgent(contract=contract, agent=agent)
+
+        # Mock event
+        mock_event = Mock()
+        mock_event.usage_metadata = GenerateContentResponseUsageMetadata(
+            total_token_count=100,
+            prompt_token_count=50,
+            candidates_token_count=50,
+            thoughts_token_count=0,
+            cached_content_token_count=0,
+        )
+        mock_event.content = Content(parts=[Part(text="Hello!")])
+
+        # Mock session service
+        mock_session_service = Mock()
+        mock_session_service.create_session = AsyncMock()
+
+        with (
+            patch.object(contracted.runner, "run", return_value=iter([mock_event])) as mock_run,
+            patch.object(contracted.runner, "session_service", mock_session_service),
+        ):
+            contracted.run(user_id="test_user", session_id="test_session", message="Hello")
+
+            # No RunConfig should be passed
+            mock_run.assert_called_once()
+            call_args = mock_run.call_args
+            run_config = call_args.kwargs.get("run_config")
+            assert run_config is None

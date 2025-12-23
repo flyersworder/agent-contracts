@@ -182,6 +182,23 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
         message = inputs.get("message", "")
         run_config = inputs.get("run_config")
 
+        # Apply contract's iterations limit via RunConfig.max_llm_calls
+        # This prevents runaway agent loops by limiting LLM calls
+        if self.contract.resources.iterations is not None:
+            from google.adk.runners import RunConfig
+
+            contract_limit = self.contract.resources.iterations
+
+            if run_config is None:
+                # Create new RunConfig with contract's iteration limit
+                run_config = RunConfig(max_llm_calls=contract_limit)
+            elif hasattr(run_config, "max_llm_calls"):
+                # If user provided run_config, use the more restrictive limit
+                # This ensures contract governance cannot be bypassed
+                user_limit = run_config.max_llm_calls
+                if user_limit is None or contract_limit < user_limit:
+                    run_config = RunConfig(max_llm_calls=contract_limit)
+
         # Convert message to Content if it's a string
         if isinstance(message, str):
             from google.genai.types import Content, Part
