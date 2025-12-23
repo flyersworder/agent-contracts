@@ -91,7 +91,7 @@ Explanation:
         scores_list = []
         for _ in range(3):
             response = completion(
-                model="gemini/gemini-2.5-flash-preview-09-2025",
+                model="gemini/gemini-3-flash-preview",
                 messages=[{"role": "user", "content": prompt}],
                 reasoning_effort=reasoning_effort,
                 temperature=0,

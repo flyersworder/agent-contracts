@@ -51,7 +51,7 @@ def demo_1_token_tracking() -> None:
     """
     print_section("Demo 1: Token Tracking & Cost Monitoring")
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
     prompt = PromptTemplate.from_template("Explain {topic} in 2-3 sentences")
     chain = prompt | llm
 
@@ -84,7 +84,7 @@ def demo_2_audit_trail() -> None:
     """
     print_section("Demo 2: Complete Audit Trails")
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
     prompt = PromptTemplate.from_template("Summarize {topic}")
     chain = prompt | llm
 
@@ -124,7 +124,7 @@ def demo_3_multi_call_protection() -> None:
     """
     print_section("Demo 3: Multi-Call Budget Protection")
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
     prompt = PromptTemplate.from_template("Write one sentence about {topic}")
     chain = prompt | llm
 
@@ -178,7 +178,7 @@ def demo_4_organizational_policy() -> None:
 
     print("Scenario: Company policy limits AI operations to $0.01 per request\n")
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
     prompt = PromptTemplate.from_template("{query}")
     chain = prompt | llm
 

@@ -100,7 +100,7 @@ class BudgetViolationTest:
 
     def __init__(
         self,
-        model: str = "gemini/gemini-2.5-flash-preview-09-2025",
+        model: str = "gemini/gemini-3-flash-preview",
         output_dir: str = "benchmarks/governance/results",
     ) -> None:
         """Initialize budget violation test.
@@ -471,7 +471,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run budget violation test")
     parser.add_argument(
         "--model",
-        default="gemini/gemini-2.5-flash-preview-09-2025",
+        default="gemini/gemini-3-flash-preview",
         help="LLM model to use",
     )
     parser.add_argument(

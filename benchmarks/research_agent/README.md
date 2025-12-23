@@ -115,7 +115,7 @@ benchmarks/research_agent/
 
 ```
 Running benchmark on 1 questions...
-Model: gemini/gemini-2.5-flash-preview-09-2025
+Model: gemini/gemini-3-flash-preview
 
 ================================================================================
 Question 1/1: q1_transformers_vs_ssm

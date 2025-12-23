@@ -9,7 +9,7 @@ What Works:
 ✅ Complete audit trails for compliance
 ✅ Multi-turn conversation budget protection
 ✅ Multi-agent system governance
-✅ Tool execution monitoring
+✅ Per-tool usage tracking and limits
 ✅ Organizational policy enforcement
 
 What Doesn't Work (Yet):
@@ -61,7 +61,7 @@ def demo_1_token_tracking() -> None:
     # Create simple agent
     agent = LlmAgent(
         name="explainer",
-        model="gemini-2.0-flash",
+        model="gemini-3-flash-preview",
         instruction="You are a helpful assistant. Keep responses brief (2-3 sentences).",
     )
 
@@ -109,7 +109,7 @@ def demo_2_multi_turn_protection() -> None:
 
     agent = LlmAgent(
         name="chat_agent",
-        model="gemini-2.0-flash",
+        model="gemini-3-flash-preview",
         instruction="You are a brief conversational assistant. Keep all responses to 1 sentence.",
     )
 
@@ -177,20 +177,20 @@ def demo_3_multi_agent_governance() -> None:
     # Create sub-agents
     researcher = LlmAgent(
         name="researcher",
-        model="gemini-2.0-flash",
+        model="gemini-3-flash-preview",
         instruction="You research topics. Keep responses to 1 sentence.",
     )
 
     summarizer = LlmAgent(
         name="summarizer",
-        model="gemini-2.0-flash",
+        model="gemini-3-flash-preview",
         instruction="You summarize information in 1 sentence.",
     )
 
     # Create coordinator
     coordinator = LlmAgent(
         name="coordinator",
-        model="gemini-2.0-flash",
+        model="gemini-3-flash-preview",
         instruction="You coordinate research and summarization. Be very brief.",
         sub_agents=[researcher, summarizer],
     )
@@ -245,7 +245,7 @@ def demo_4_audit_trail() -> None:
 
     agent = LlmAgent(
         name="audited_agent",
-        model="gemini-2.0-flash",
+        model="gemini-3-flash-preview",
         instruction="You are a helpful assistant. Be brief.",
     )
 
@@ -288,16 +288,112 @@ def demo_4_audit_trail() -> None:
         print("   • Historical analysis and reporting")
 
 
-def demo_5_convenience_api() -> None:
-    """Demo 5: Convenience API for Quick Setup.
+def demo_5_per_tool_tracking() -> None:
+    """Demo 5: Per-Tool Usage Tracking & Limits.
+
+    Shows how Agent Contracts tracks usage per-tool and can enforce
+    per-tool limits to prevent abuse of expensive or risky tools.
+    """
+    print_section("Demo 5: Per-Tool Usage Tracking & Limits")
+
+    # Define simple tools
+    def calculator(expression: str) -> str:
+        """Evaluate a mathematical expression."""
+        try:
+            return str(eval(expression))
+        except Exception as e:
+            return f"Error: {e}"
+
+    def weather(city: str) -> str:
+        """Get weather for a city (simulated)."""
+        return f"Weather in {city}: 72°F, Sunny"
+
+    def web_search(query: str) -> str:
+        """Search the web (simulated)."""
+        return f"Search results for '{query}': [Sample result 1, Sample result 2]"
+
+    # Create agent with tools
+    agent = LlmAgent(
+        name="tool_agent",
+        model="gemini-3-flash-preview",
+        instruction="You are a helpful assistant with tools. Use them to help users.",
+        tools=[calculator, weather, web_search],
+    )
+
+    # Create contract with per-tool limits set in ResourceConstraints
+    # Per-tool limits are immutable and set at contract creation time
+    contract = Contract(
+        id="per-tool-tracking",
+        name="Per-Tool Tracking Demo",
+        resources=ResourceConstraints(
+            tokens=10000,
+            api_calls=10,
+            per_tool_limits={
+                "calculator": 5,
+                "web_search": 3,
+                "weather": 2,
+            },
+        ),
+    )
+
+    contracted_agent = ContractedAdkAgent(contract=contract, agent=agent, strict_mode=False)
+
+    print("Tools configured with per-tool limits:")
+    print("  - calculator: max 5 invocations")
+    print("  - web_search: max 3 invocations")
+    print("  - weather: max 2 invocations")
+    print()
+
+    # Execute a query that might use multiple tools
+    print("Asking: 'What's 15*7, and what's the weather in Paris?'\n")
+
+    try:
+        result = contracted_agent.run(
+            user_id="demo_user",
+            session_id="demo_session",
+            message="What's 15*7, and what's the weather in Paris?",
+        )
+
+        print("✅ Execution successful")
+        print(f"\n📝 Response: {result['response'][:150]}...")
+
+        # Show per-tool usage breakdown from ResourceUsage
+        tool_usage = contracted_agent.resource_monitor.usage.tool_usage_by_name
+        if tool_usage:
+            print("\n📊 Per-Tool Usage Breakdown:")
+            for tool_name, count in tool_usage.items():
+                limit = contract.resources.per_tool_limits.get(tool_name, "∞")
+                print(f"   {tool_name}: {count} / {limit} invocations")
+        else:
+            print("\n📊 No tool invocations tracked (tools may not have been called)")
+
+        # Show remaining per-tool budget using the correct API
+        print("\n💰 Remaining Per-Tool Budget:")
+        for tool in ["calculator", "web_search", "weather"]:
+            remaining = contracted_agent.resource_monitor.get_remaining_tool_calls(tool)
+            remaining_str = str(int(remaining)) if remaining != float("inf") else "∞"
+            print(f"   {tool}: {remaining_str} uses remaining")
+
+    except RuntimeError as e:
+        print(f"❌ Execution failed: {e}")
+
+    print("\n💡 Value: Per-Tool Tracking & Limits")
+    print("   • Track which tools are used and how often")
+    print("   • Set limits on expensive/risky tools (e.g., code execution)")
+    print("   • Prevent tool abuse in multi-turn conversations")
+    print("   • Audit trail shows tool-level granularity")
+
+
+def demo_6_convenience_api() -> None:
+    """Demo 6: Convenience API for Quick Setup.
 
     Shows simplified API for creating contracted agents.
     """
-    print_section("Demo 5: Simplified Convenience API")
+    print_section("Demo 6: Simplified Convenience API")
 
     agent = LlmAgent(
         name="simple_agent",
-        model="gemini-2.0-flash",
+        model="gemini-3-flash-preview",
         instruction="You are helpful and brief.",
     )
 
@@ -334,7 +430,7 @@ def main() -> None:
     print("  Agent Contracts: Google ADK Integration Demo")
     print("=" * 80)
     print("\nDemonstrating governance and compliance capabilities")
-    print("Model: Google Gemini 2.0 Flash")
+    print("Model: Google Gemini 3 Flash")
     print("Framework: Google Agent Development Kit (ADK)")
     print("=" * 80)
 
@@ -343,7 +439,8 @@ def main() -> None:
         ("Multi-Turn Protection", demo_2_multi_turn_protection),
         ("Multi-Agent Governance", demo_3_multi_agent_governance),
         ("Audit Trails", demo_4_audit_trail),
-        ("Convenience API", demo_5_convenience_api),
+        ("Per-Tool Tracking", demo_5_per_tool_tracking),
+        ("Convenience API", demo_6_convenience_api),
     ]
 
     for name, demo_func in demos:
@@ -371,7 +468,10 @@ def main() -> None:
     print("4. ✅ AUDIT TRAILS")
     print("   Complete execution logs for compliance")
     print()
-    print("5. ✅ ZERO-EFFORT INTEGRATION")
+    print("5. ✅ PER-TOOL TRACKING & LIMITS")
+    print("   Track and limit usage of individual tools")
+    print()
+    print("6. ✅ ZERO-EFFORT INTEGRATION")
     print("   Wrap existing agents with 2-3 lines of code")
     print()
     print("⚠️  Limitation: Single-turn prevention not possible")

@@ -19,7 +19,7 @@ class ContractedResearchAgent(ResearchAgent):
 
     def __init__(
         self,
-        model: str = "gemini/gemini-2.5-flash-preview-09-2025",
+        model: str = "gemini/gemini-3-flash-preview",
         strict_mode: bool = False,
     ) -> None:
         """Initialize contracted research agent.

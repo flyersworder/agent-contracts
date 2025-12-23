@@ -1,178 +1,203 @@
 # Agent Contracts Benchmarks
 
-This directory contains comprehensive benchmarks and performance validation for the Agent Contracts framework.
+This directory contains comprehensive benchmarks and demonstrations for the Agent Contracts framework.
 
-## Phase 1 Benchmarks
+## Quick Reference
 
-### 1. Infrastructure Benchmark (`benchmark_phase1.py`)
+| Benchmark | Purpose | Command |
+|-----------|---------|---------|
+| Research Agent | Multi-step agent comparison | `uv run python -m benchmarks.research_agent.benchmark` |
+| Governance | Budget enforcement validation | `uv run python -m benchmarks.governance.budget_violation_test` |
+| Strategic Modes | Pareto frontier testing | `uv run python -m benchmarks.strategic.strategic_optimization_test` |
+| LangChain | LangChain integration demo | `uv run python benchmarks/langchain/demo_integration.py` |
+| LangGraph | LangGraph integration demo | `uv run python benchmarks/langgraph/demo_integration.py` |
+| Google ADK | Google ADK integration demo | `uv run python benchmarks/google_adk/demo_integration.py` |
 
-Tests the contract enforcement infrastructure:
+## Benchmark Categories
+
+### 1. Research Agent Benchmark (`research_agent/`)
+
+The core benchmark comparing contracted vs uncontracted multi-step research agents:
 
 ```bash
-# Ensure you have your GOOGLE_API_KEY in .env
-uv run python benchmarks/benchmark_phase1.py
+# Quick test (1 question)
+uv run python -m benchmarks.research_agent.benchmark --max-questions 1
+
+# Full benchmark (5 questions)
+uv run python -m benchmarks.research_agent.benchmark
 ```
 
-### 2. Value Demonstration Benchmark (`benchmark_phase1_qa.py`)
+**What It Tests:**
+- Decompose-research-synthesize workflow
+- Strategic resource allocation per step
+- Quality vs cost efficiency tradeoffs
 
-Demonstrates efficiency gains through strategic prioritization:
+**Key Result:** Contracted agents achieve **+7.3% better quality** with similar cost by strategically allocating reasoning effort.
+
+See `research_agent/README.md` for detailed documentation.
+
+### 2. Governance Validation (`governance/`)
+
+Tests organizational governance capabilities:
 
 ```bash
-uv run python benchmarks/benchmark_phase1_qa.py
+# Budget violation test
+uv run python -m benchmarks.governance.budget_violation_test
+
+# Cost governance test
+uv run python -m benchmarks.governance.cost_governance_test
+
+# Variance reduction test
+uv run python -m benchmarks.governance.variance_reduction_test
 ```
 
-### What It Tests
+**What It Tests:**
+- **Budget Violation**: Hard budget enforcement with graceful failure
+- **Cost Governance**: Organization-wide policy compliance
+- **Variance Reduction**: Predictability improvement
 
-The Phase 1 benchmark provides a comprehensive performance comparison:
+**Key Result:** 100% budget enforcement compliance, preventing runaway costs.
 
-1. **Baseline Test** - Raw litellm calls without contract wrapper (establishes baseline)
-2. **Contracted LLM - No Limits** - Measures pure wrapper overhead
-3. **Strict Enforcement** - Validates hard budget limits with enforcement
-4. **Lenient Monitoring** - Validates soft limits with warnings only
+### 3. Strategic Optimization (`strategic/`)
 
-### Metrics Tracked
-
-**Performance Metrics:**
-- Total execution time
-- Average time per API call
-- Individual call latencies
-- Contract enforcement overhead
-
-**Accuracy Metrics:**
-- Token counting accuracy
-- API call tracking
-- Cost estimation
-
-**Functional Metrics:**
-- Budget enforcement correctness
-- Event callback performance
-- Contract state transitions
-- Violation detection
-
-### Benchmark Results (Gemini 2.5 Flash Preview 09-2025)
-
-**Performance Overhead:** ~-12.1% average (within network variance, actually faster)
-- Baseline: 1.044s per call
-- Contracted (no limits): 0.887s per call (-15.0%)
-- Strict enforcement: 0.972s per call (-6.9%)
-- Lenient monitoring: 0.895s per call (-14.3%)
-
-**Token Tracking Accuracy:** 100% (322 tokens tracked correctly)
-
-**Enforcement Validation:**
-- ✅ Strict mode: Stopped at exactly 2 calls (limit: 2)
-- ✅ Lenient mode: Detected violations (1), allowed continuation
-- ✅ Event callbacks: 4-7 events per test, all firing correctly
-- ✅ API key loading: python-dotenv successfully loads .env
-
-**Reasoning Token Support:**
-- ✅ Framework supports separate reasoning/text token tracking
-- ✅ Handles both lumpsum (total only) and separate budgets
-- ℹ️ Gemini 2.5 Flash didn't return reasoning token breakdown for these simple queries (may require more complex reasoning tasks)
-- ✅ Framework gracefully handles models with and without reasoning token details
-- ✅ Infrastructure ready for o1, Claude extended thinking, and future reasoning models
-
-**Key Finding:** Contract overhead is **negligible** and within normal network variance. The framework adds comprehensive monitoring and enforcement with effectively **zero performance penalty**.
-
-### Requirements
-
-- Python 3.12+
-- GOOGLE_API_KEY environment variable (for Gemini access)
-- Dependencies installed via `uv sync`
-
-### Output
-
-The benchmark provides:
-- Comprehensive performance comparison
-- Detailed latency breakdown per API call
-- Token tracking accuracy validation
-- Budget enforcement validation
-- Event callback performance metrics
-- Side-by-side comparison of all modes
-
-## Phase 1 QA Benchmark Results
-
-### Key Learnings
-
-**Reasoning Model Support**:
-- ✅ Successfully handles Gemini 2.5 Flash's reasoning tokens
-- ✅ Framework separates internal reasoning from text output tokens
-- ✅ Properly tracks both reasoning_tokens and text_tokens
-- ⚠️ Reasoning models need generous max_tokens for both thinking + output phases
-
-**Benchmark Design Insights**:
-- Task difficulty must be calibrated to model capabilities
-- Current QA task (15 questions, quantum computing) is easily solved with 2000 tokens
-- Both baseline and budget-aware strategies achieve 100% accuracy
-- Need tighter constraints or more complex tasks to demonstrate ≥30% efficiency gains
-
-**Infrastructure Validation**:
-- ✅ ContractedLLM wrapper works correctly with reasoning models
-- ✅ Answer parsing and evaluation pipeline functional
-- ✅ Weighted accuracy metrics implemented correctly
-- ✅ Quality-per-token efficiency calculation works
-
-**Future Improvements**:
-- Design tasks that force trade-offs (e.g., summarization length vs. detail)
-- Test with non-reasoning models (Claude, GPT-4) for comparison
-- Implement dynamic budget allocation based on question importance
-- Add multi-turn conversation scenarios
-
-## LangChain Integration Benchmarks
-
-### Overview (`langchain/`)
-
-The LangChain integration demonstrates Agent Contracts' **governance and compliance** capabilities when wrapping LangChain chains and agents.
-
-**Key Finding**: Agent Contracts adds organizational governance that LangChain's token tracking doesn't provide.
-
-### What Agent Contracts Provides
-
-**✅ What Works:**
-1. **Token Tracking & Cost Monitoring** - Automatic extraction from LangChain responses
-2. **Organizational Policy Enforcement** - Company-wide cost policies and budget violation detection
-3. **Multi-Call Protection** - Cumulative budget tracking across multiple operations
-4. **Audit Trails** - Complete execution logs for compliance documentation
-
-**⚠️ Current Limitation:**
-- **Single-Call Prevention**: Cannot prevent a SINGLE LLM call from exceeding budget because token count is unknown until AFTER the API call completes
-- Money is already spent by the time we detect violations
-- Focus: Detection + multi-call protection, not single-call prevention
-
-### Value Proposition
-
-| LangChain Provides | Agent Contracts Adds |
-|-------------------|---------------------|
-| ✓ Token usage metadata | ✓✓✓ Governance: Organization-wide policy enforcement |
-| ✓ Model response tracking | ✓✓✓ Compliance: Complete audit trails for regulatory requirements |
-|  | ✓✓✓ Protection: Multi-call budget enforcement |
-|  | ✓✓✓ Detection: Budget violation logging and alerting |
-
-**Perfect for:**
-- Enterprises with AI cost policies
-- Teams needing budget accountability
-- Compliance and audit requirements
-- Multi-agent systems with shared budgets
-
-### Running the Demo
+Tests the Pareto frontier of quality-cost-time tradeoffs:
 
 ```bash
-# Ensure you have your GOOGLE_API_KEY in .env
+uv run python -m benchmarks.strategic.strategic_optimization_test
+```
+
+**Contract Modes:**
+- **URGENT**: Minimize time (fast execution)
+- **BALANCED**: Balance quality, cost, and time
+- **ECONOMICAL**: Minimize cost
+
+**Key Result:** Pareto-optimal frontier validated - no mode strictly dominates another.
+
+### 4. Quality Validation (`quality_validation/`)
+
+Tests the LLM-as-judge evaluator reliability:
+
+```bash
+# Test-retest reliability
+uv run python benchmarks/quality_validation/test_harness.py
+
+# Reasoning effort impact
+uv run python benchmarks/quality_validation/test_reasoning_effort.py
+```
+
+**Key Result:** CV=5.2% reliability (exceeds SOTA 10-15%).
+
+See `quality_validation/study_design.md` for methodology.
+
+## Integration Demos
+
+### LangChain (`langchain/`)
+
+Demonstrates governance for LangChain chains and agents:
+
+```bash
 uv run python benchmarks/langchain/demo_integration.py
 ```
 
-**Demonstrations:**
-1. Token Tracking & Cost Monitoring
-2. Complete Audit Trails for Compliance
-3. Multi-Call Budget Protection (the REAL value)
-4. Organizational Policy Enforcement
+**What It Provides:**
+- ✅ Token tracking & cost monitoring
+- ✅ Multi-call budget protection
+- ✅ Complete audit trails
+- ✅ Organizational policy enforcement
 
-**Documentation**: See `benchmarks/langchain/README.md` for detailed explanation of capabilities and limitations.
+### LangGraph (`langgraph/`)
 
-## Future Benchmarks
+Demonstrates governance for complex LangGraph workflows:
 
-Additional benchmarks will be added as we progress through the roadmap:
+```bash
+uv run python benchmarks/langgraph/demo_integration.py
+```
 
-- **Phase 2**: Quality metrics benchmarks, skill verification tests
-- **Phase 3**: Framework integration benchmarks (AutoGen, CrewAI)
-- **Phase 4**: Scalability tests, production performance benchmarks
+**What It Provides:**
+- ✅ Per-node token tracking
+- ✅ Cycle/loop protection (prevents runaway costs)
+- ✅ Multi-agent coordination governance
+- ✅ State-aware budget enforcement
+
+### Google ADK (`google_adk/`)
+
+Demonstrates governance for Google Agent Development Kit:
+
+```bash
+uv run python benchmarks/google_adk/demo_integration.py
+```
+
+**What It Provides:**
+- ✅ Detailed token tracking (prompt/response/thinking)
+- ✅ Multi-turn conversation protection
+- ✅ Multi-agent system governance
+- ✅ Per-tool usage tracking & limits
+- ✅ Hierarchical delegation with budget conservation
+
+## Requirements
+
+- Python 3.12+
+- `GOOGLE_API_KEY` environment variable (for Gemini models)
+- Dependencies installed via `uv sync`
+
+For optional integrations:
+```bash
+# LangChain
+uv sync --extra langchain
+
+# LangGraph
+uv sync --extra langgraph
+
+# Google ADK
+uv sync --extra google-adk
+```
+
+## Configuration
+
+All benchmarks use the Gemini 3 Flash model by default:
+- Model: `gemini/gemini-3-flash-preview` (LiteLLM format)
+- API Key: Set `GOOGLE_API_KEY` in `.env` or environment
+
+## Output
+
+Results are saved to `results/` directories within each benchmark folder:
+- JSON files with detailed metrics
+- Console output with summaries
+- Visualization scripts where applicable
+
+## Directory Structure
+
+```
+benchmarks/
+├── README.md                    # This file
+├── research_agent/              # Multi-step research benchmark
+│   ├── README.md
+│   ├── benchmark.py
+│   ├── agent.py
+│   ├── contracted_agent.py
+│   ├── uncontracted_agent.py
+│   ├── evaluator.py
+│   └── questions.py
+├── governance/                  # Governance validation
+│   ├── README.md
+│   ├── budget_violation_test.py
+│   ├── cost_governance_test.py
+│   └── variance_reduction_test.py
+├── strategic/                   # Strategic mode testing
+│   ├── strategic_optimization_test.py
+│   └── pareto_visualization.py
+├── quality_validation/          # Evaluator reliability
+│   ├── study_design.md
+│   ├── test_harness.py
+│   └── test_reasoning_effort.py
+├── langchain/                   # LangChain integration
+│   ├── README.md
+│   └── demo_integration.py
+├── langgraph/                   # LangGraph integration
+│   ├── README.md
+│   └── demo_integration.py
+└── google_adk/                  # Google ADK integration
+    ├── README.md
+    ├── demo_integration.py
+    └── demo_delegation.py
+```

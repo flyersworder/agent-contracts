@@ -16,7 +16,7 @@ Example:
     >>> # Create standard ADK agent
     >>> agent = LlmAgent(
     ...     name="research_agent",
-    ...     model="gemini-2.0-flash",
+    ...     model="gemini-3-flash-preview",
     ...     instruction="You are a research assistant.",
     ...     tools=[...]
     ... )
@@ -94,7 +94,7 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
         ... )
         >>> agent = LlmAgent(
         ...     name="researcher",
-        ...     model="gemini-2.0-flash",
+        ...     model="gemini-3-flash-preview",
         ...     instruction="Research assistant",
         ...     tools=[search_tool, calculator_tool]
         ... )
@@ -420,7 +420,7 @@ class ContractedAdkMultiAgent(ContractedAdkAgent):
         >>> # Create coordinator with sub-agents
         >>> coordinator = LlmAgent(
         ...     name="coordinator",
-        ...     model="gemini-2.0-flash",
+        ...     model="gemini-3-flash-preview",
         ...     instruction="Coordinate research, planning, and execution",
         ...     sub_agents=[researcher, planner, executor]
         ... )
@@ -478,7 +478,7 @@ def create_contracted_adk_agent(
 
     Example:
         >>> from google.adk.agents import LlmAgent
-        >>> agent = LlmAgent(name="my_agent", model="gemini-2.0-flash", ...)
+        >>> agent = LlmAgent(name="my_agent", model="gemini-3-flash-preview", ...)
         >>>
         >>> contracted = create_contracted_adk_agent(
         ...     agent=agent,
@@ -542,7 +542,7 @@ class DelegatingAdkAgent(ContractedAdkAgent):
         >>> # Create orchestrator agent
         >>> orchestrator = LlmAgent(
         ...     name="orchestrator",
-        ...     model="gemini-2.0-flash",
+        ...     model="gemini-3-flash-preview",
         ...     instruction="Coordinate research workflow"
         ... )
         >>>

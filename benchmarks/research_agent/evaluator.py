@@ -37,7 +37,7 @@ class QualityEvaluator:
 
     def __init__(
         self,
-        judge_model: str = "gemini/gemini-2.5-flash-preview-09-2025",
+        judge_model: str = "gemini/gemini-3-flash-preview",
         use_multiple_judges: bool = True,
         use_hybrid_scoring: bool = True,
     ) -> None:

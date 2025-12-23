@@ -55,7 +55,7 @@ class ResearchBenchmark:
 
     def __init__(
         self,
-        model: str = "gemini/gemini-2.5-flash-preview-09-2025",
+        model: str = "gemini/gemini-3-flash-preview",
         output_dir: str = "benchmarks/research_agent/results",
     ) -> None:
         """Initialize benchmark.
@@ -385,7 +385,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run research agent benchmark")
     parser.add_argument(
         "--model",
-        default="gemini/gemini-2.5-flash-preview-09-2025",
+        default="gemini/gemini-3-flash-preview",
         help="LLM model to use",
     )
     parser.add_argument(

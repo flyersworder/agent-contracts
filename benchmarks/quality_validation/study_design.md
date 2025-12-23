@@ -9,7 +9,7 @@
 ## Cost Analysis
 
 ### Current Evaluator Configuration
-- **Model**: `gemini/gemini-2.5-flash-preview-09-2025`
+- **Model**: `gemini/gemini-3-flash-preview`
 - **Reasoning effort**: `"medium"`
 - **Temperature**: 0
 
@@ -374,7 +374,7 @@ benchmarks/quality_validation/
       "coherence": 9.5,
       "total": 93.3,
       "explanation": "...",
-      "model": "gemini/gemini-2.5-flash-preview-09-2025",
+      "model": "gemini/gemini-3-flash-preview",
       "reasoning_effort": "medium",
       "tokens": {"input": 650, "output": 180, "reasoning": 1200}
     }

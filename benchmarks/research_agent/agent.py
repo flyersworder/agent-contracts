@@ -79,7 +79,7 @@ class ResearchAgent:
     - _call_llm() to control how LLM calls are made
     """
 
-    def __init__(self, model: str = "gemini/gemini-2.5-flash-preview-09-2025") -> None:
+    def __init__(self, model: str = "gemini/gemini-3-flash-preview") -> None:
         """Initialize research agent.
 
         Args:

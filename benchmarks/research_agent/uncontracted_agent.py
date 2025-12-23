@@ -18,7 +18,7 @@ class UncontractedResearchAgent(ResearchAgent):
     This serves as the baseline to demonstrate the value of contracts.
     """
 
-    def __init__(self, model: str = "gemini/gemini-2.5-flash-preview-09-2025") -> None:
+    def __init__(self, model: str = "gemini/gemini-3-flash-preview") -> None:
         """Initialize uncontracted research agent.
 
         Args:

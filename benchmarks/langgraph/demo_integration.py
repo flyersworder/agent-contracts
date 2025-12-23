@@ -67,7 +67,7 @@ def demo_1_simple_graph() -> None:
     print_section("Demo 1: Simple Sequential Graph")
 
     # Create LLM
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
 
     # Define nodes
     def step_1(state: SimpleState) -> SimpleState:
@@ -143,7 +143,7 @@ def demo_2_validation_cycle() -> None:
     """
     print_section("Demo 2: Validation Cycle (Loop Protection)")
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
 
     # Define nodes
     def generate_answer(state: ValidationState) -> ValidationState:
@@ -247,7 +247,7 @@ def demo_3_multi_agent() -> None:
     """Demo 3: Multi-Agent Coordination with Shared Budget."""
     print_section("Demo 3: Multi-Agent Coordination")
 
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0)
 
     # Define agent nodes
     def research_agent(state: MultiAgentState) -> MultiAgentState:

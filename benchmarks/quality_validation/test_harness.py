@@ -266,7 +266,7 @@ def main() -> None:
 
     # Initialize evaluator (same configuration as research benchmark)
     evaluator = QualityEvaluator(
-        judge_model="gemini/gemini-2.5-flash-preview-09-2025",
+        judge_model="gemini/gemini-3-flash-preview",
         use_multiple_judges=True,  # 3 judges → median
         use_hybrid_scoring=True,  # 60% LLM + 40% rules
     )
