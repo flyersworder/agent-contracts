@@ -245,6 +245,7 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
             "thoughts_tokens": 0,
         }
         tool_invocations: dict[str, int] = {}  # Track per-tool usage
+        llm_call_count = 0  # Track number of LLM calls (iterations)
 
         # Execute agent via runner
         event_generator = self.runner.run(
@@ -294,6 +295,9 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
 
                 # Track tokens in resource monitor
                 if event_tokens > 0:
+                    # Count this as an LLM call (iteration)
+                    llm_call_count += 1
+
                     # Track tokens with breakdown
                     reasoning_tokens = thoughts_tokens
                     text_tokens = event_tokens - reasoning_tokens
@@ -362,6 +366,7 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
             "total_tokens": cumulative_usage["total_tokens"],
             "usage_metadata": cumulative_usage,
             "tool_invocations": tool_invocations,  # Per-tool usage breakdown
+            "llm_calls": llm_call_count,  # Number of LLM calls (iterations)
         }
 
     def _monitored_execution(self, input_data: dict[str, Any]) -> dict[str, Any]:

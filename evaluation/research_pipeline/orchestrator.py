@@ -56,6 +56,8 @@ class PipelineResult:
         citation_count: Number of citations found
         total_tokens: Total tokens consumed
         tokens_by_agent: Token breakdown by agent
+        total_llm_calls: Total LLM calls (iterations) across all agents
+        llm_calls_by_agent: LLM call breakdown by agent
         execution_time_seconds: Total execution time
         budget_compliant: Whether execution stayed within budget
         conservation_violations: Number of conservation law violations
@@ -71,6 +73,8 @@ class PipelineResult:
     citation_count: int = 0
     total_tokens: int = 0
     tokens_by_agent: dict[str, int] = field(default_factory=dict)
+    total_llm_calls: int = 0
+    llm_calls_by_agent: dict[str, int] = field(default_factory=dict)
     execution_time_seconds: float = 0.0
     budget_compliant: bool = True
     conservation_violations: int = 0
@@ -472,6 +476,7 @@ Cite your sources with URLs."""
             )
             result.raw_outputs["researcher"] = research_output["response"]
             result.tokens_by_agent["researcher"] = research_output["total_tokens"]
+            result.llm_calls_by_agent["researcher"] = research_output.get("llm_calls", 0)
 
             # Phase 2: Analysis (with contract)
             if self.verbose:
@@ -503,6 +508,7 @@ Structure your analysis into clear themes."""
             )
             result.raw_outputs["analyzer"] = analysis_output["response"]
             result.tokens_by_agent["analyzer"] = analysis_output["total_tokens"]
+            result.llm_calls_by_agent["analyzer"] = analysis_output.get("llm_calls", 0)
 
             # Phase 3: Report (with contract)
             if self.verbose:
@@ -535,12 +541,14 @@ Requirements:
             )
             result.raw_outputs["reporter"] = report_output["response"]
             result.tokens_by_agent["reporter"] = report_output["total_tokens"]
+            result.llm_calls_by_agent["reporter"] = report_output.get("llm_calls", 0)
 
             # Compile results
             result.report = report_output["response"]
             result.word_count = len(result.report.split())
             result.citation_count = self._count_citations(result.report)
             result.total_tokens = sum(result.tokens_by_agent.values())
+            result.total_llm_calls = sum(result.llm_calls_by_agent.values())
             result.success = True
 
             # Check budget compliance
