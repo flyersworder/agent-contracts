@@ -69,6 +69,7 @@ __all__ = [
     "ContractedGraph",
     "ContractedLLM",
     "DelegatingAdkAgent",
+    "LangChainContractedLLM",
     "create_contracted_adk_agent",
     "create_contracted_chain",
     "create_contracted_graph",

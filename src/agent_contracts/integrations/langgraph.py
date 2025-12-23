@@ -159,6 +159,11 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
 
         self.graph = graph
 
+        # Track node and tool executions
+        self._node_executions: dict[str, int] = {}  # node_name -> execution count
+        self._tool_invocations: dict[str, int] = {}  # tool_name -> invocation count
+        self._active_nodes: list[str] = []  # Stack of currently executing nodes
+
         # Set up interception for node-level token tracking
         self._setup_node_tracking()
 
@@ -201,11 +206,58 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
                 from langchain.callbacks.base import BaseCallbackHandler
 
             class GraphTokenTrackingCallback(BaseCallbackHandler):  # type: ignore[misc]
-                """Callback to track token usage across all graph nodes."""
+                """Callback to track token usage, node executions, and tool calls."""
 
-                def __init__(self, monitor: Any) -> None:
-                    """Initialize with resource monitor."""
+                def __init__(
+                    self,
+                    monitor: Any,
+                    node_executions: dict[str, int],
+                    tool_invocations: dict[str, int],
+                    active_nodes: list[str],
+                ) -> None:
+                    """Initialize with resource monitor and tracking dicts."""
                     self.monitor = monitor
+                    self.node_executions = node_executions
+                    self.tool_invocations = tool_invocations
+                    self.active_nodes = active_nodes
+
+                def on_chain_start(
+                    self,
+                    serialized: dict[str, Any],
+                    inputs: dict[str, Any],
+                    **kwargs: Any,
+                ) -> None:
+                    """Track when a node/chain starts executing."""
+                    # Get node name from serialized data or kwargs
+                    name = serialized.get("name", "") or kwargs.get("name", "unknown")
+                    # Filter out internal LangChain chains, focus on graph nodes
+                    if name and not name.startswith("RunnableLambda"):
+                        self.active_nodes.append(name)
+                        self.node_executions[name] = self.node_executions.get(name, 0) + 1
+
+                def on_chain_end(self, outputs: dict[str, Any], **kwargs: Any) -> None:
+                    """Track when a node/chain finishes executing."""
+                    if self.active_nodes:
+                        self.active_nodes.pop()
+
+                def on_tool_start(
+                    self,
+                    serialized: dict[str, Any],
+                    input_str: str,
+                    **kwargs: Any,
+                ) -> None:
+                    """Track tool invocations within nodes."""
+                    tool_name = serialized.get("name", "") or kwargs.get("name", "unknown")
+                    if tool_name:
+                        self.tool_invocations[tool_name] = (
+                            self.tool_invocations.get(tool_name, 0) + 1
+                        )
+                        # Track in resource monitor for per-tool limits
+                        self.monitor.usage.add_tool_invocation(tool_name)
+
+                def on_tool_end(self, output: str, **kwargs: Any) -> None:
+                    """Track tool completion (for future timing metrics)."""
+                    pass  # Could add timing metrics here
 
                 def on_llm_end(self, response: Any, **kwargs: Any) -> None:
                     """Track tokens when any LLM call completes in any node."""
@@ -238,8 +290,13 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
                         cost_estimate = total_tokens * 0.00000015
                         self.monitor.usage.add_api_call(cost=cost_estimate, tokens=0)
 
-            # Add callback to config
-            callback = GraphTokenTrackingCallback(self.resource_monitor)
+            # Add callback to config with tracking data
+            callback = GraphTokenTrackingCallback(
+                monitor=self.resource_monitor,
+                node_executions=self._node_executions,
+                tool_invocations=self._tool_invocations,
+                active_nodes=self._active_nodes,
+            )
             config["callbacks"] = [callback]
 
         except ImportError:
@@ -251,10 +308,21 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
     def _setup_node_tracking(self) -> None:
         """Set up tracking for individual node executions.
 
-        This wraps node functions to track budget at the node level,
-        enabling fine-grained monitoring and early termination if needed.
+        Node tracking is implemented via LangChain callbacks in _build_config().
+        The GraphTokenTrackingCallback tracks:
+        - Node executions via on_chain_start/on_chain_end
+        - Tool invocations via on_tool_start/on_tool_end
+        - Token usage via on_llm_end
+
+        Results are stored in:
+        - self._node_executions: Dict mapping node names to execution counts
+        - self._tool_invocations: Dict mapping tool names to invocation counts
+
+        Access via properties: node_executions, tool_invocations
+        Or use get_execution_summary() for comprehensive breakdown.
         """
-        # For now, rely on callbacks. Future enhancement could wrap individual nodes.
+        # Tracking is set up via callbacks in _build_config()
+        # Instance variables are initialized in __init__
         pass
 
     def _monitored_execution(self, input_data: dict[str, Any]) -> dict[str, Any]:
@@ -346,6 +414,54 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
         except Exception as e:
             self.contract.state = self.contract.state  # Keep current state
             raise RuntimeError(f"Streaming execution failed: {e}") from e
+
+    @property
+    def node_executions(self) -> dict[str, int]:
+        """Get node execution counts.
+
+        Returns:
+            Dictionary mapping node names to execution counts.
+            Useful for identifying hot spots and loop iterations.
+        """
+        return self._node_executions.copy()
+
+    @property
+    def tool_invocations(self) -> dict[str, int]:
+        """Get tool invocation counts.
+
+        Returns:
+            Dictionary mapping tool names to invocation counts.
+        """
+        return self._tool_invocations.copy()
+
+    def get_execution_summary(self) -> dict[str, Any]:
+        """Get comprehensive execution summary.
+
+        Returns:
+            Dictionary with node executions, tool invocations,
+            and resource usage breakdown.
+        """
+        return {
+            "node_executions": self._node_executions.copy(),
+            "tool_invocations": self._tool_invocations.copy(),
+            "total_nodes_executed": sum(self._node_executions.values()),
+            "total_tools_invoked": sum(self._tool_invocations.values()),
+            "resource_usage": {
+                "tokens": self.resource_monitor.usage.tokens,
+                "api_calls": self.resource_monitor.usage.api_calls,
+                "cost_usd": self.resource_monitor.usage.cost_usd,
+            },
+        }
+
+    def reset_tracking(self) -> None:
+        """Reset node and tool tracking counters.
+
+        Call this before a new execution if reusing the same
+        ContractedGraph instance.
+        """
+        self._node_executions.clear()
+        self._tool_invocations.clear()
+        self._active_nodes.clear()
 
     def __call__(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """Make the contracted graph callable like a regular graph.
