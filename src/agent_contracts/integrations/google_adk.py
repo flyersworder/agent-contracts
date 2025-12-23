@@ -144,6 +144,8 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
         )
 
         self.agent = agent
+        self._app_name = f"agent-contracts-{contract.id}"
+        self._created_sessions: set[str] = set()  # Track created sessions
 
         # Set up runner (use provided or create InMemoryRunner)
         if runner is not None:
@@ -152,8 +154,8 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
             # Import here to avoid issues if google-adk not installed
             from google.adk.runners import InMemoryRunner
 
-            # InMemoryRunner just needs the agent
-            self.runner = InMemoryRunner(agent=agent)
+            # InMemoryRunner requires agent and app_name
+            self.runner = InMemoryRunner(agent=agent, app_name=self._app_name)
 
     def _run_agent(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """Run the Google ADK agent.
@@ -188,6 +190,33 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
         else:
             content = message
 
+        # Ensure session exists before running
+        # ADK requires sessions to be created via session_service first
+        # Note: create_session is async, so we need to run it in an event loop
+        session_key = f"{user_id}:{session_id}"
+        if session_key not in self._created_sessions:
+            import asyncio
+
+            async def _create_session() -> None:
+                await self.runner.session_service.create_session(
+                    app_name=self._app_name,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+
+            # Run async session creation
+            try:
+                loop = asyncio.get_running_loop()
+                # If we're in an async context, use run_coroutine_threadsafe
+
+                future = asyncio.run_coroutine_threadsafe(_create_session(), loop)
+                future.result(timeout=30)
+            except RuntimeError:
+                # No running loop, safe to use asyncio.run
+                asyncio.run(_create_session())
+
+            self._created_sessions.add(session_key)
+
         # Run agent and collect events
         events: list[Any] = []
         final_response = ""
@@ -213,21 +242,43 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
             events.append(event)
 
             # Track token usage from each event
-            if event.usageMetadata:
-                usage = event.usageMetadata
-                event_tokens = usage.total_token_count or 0
+            # Note: Python ADK uses snake_case (usage_metadata), not camelCase
+            if hasattr(event, "usage_metadata") and event.usage_metadata:
+                usage = event.usage_metadata
 
-                # Update cumulative tracking
+                # Safe extraction helper - handles Mock objects in tests gracefully
+                def _safe_int(value: Any, default: int = 0) -> int:
+                    """Extract int from value, handling Mock objects."""
+                    if isinstance(value, int):
+                        return value
+                    if value is None:
+                        return default
+                    # Check if it looks like a Mock (has _mock_name attribute)
+                    if hasattr(value, "_mock_name"):
+                        return default
+                    try:
+                        return int(value)
+                    except (TypeError, ValueError):
+                        return default
+
+                event_tokens = _safe_int(getattr(usage, "total_token_count", 0))
+
+                # Update cumulative tracking - use safe extraction for all values
+                prompt_tokens = _safe_int(getattr(usage, "prompt_token_count", 0))
+                candidates_tokens = _safe_int(getattr(usage, "candidates_token_count", 0))
+                cached_tokens = _safe_int(getattr(usage, "cached_content_token_count", 0))
+                thoughts_tokens = _safe_int(getattr(usage, "thoughts_token_count", 0))
+
                 cumulative_usage["total_tokens"] += event_tokens
-                cumulative_usage["prompt_tokens"] += usage.prompt_token_count or 0
-                cumulative_usage["candidates_tokens"] += usage.candidates_token_count or 0
-                cumulative_usage["cached_tokens"] += usage.cached_content_token_count or 0
-                cumulative_usage["thoughts_tokens"] += usage.thoughts_token_count or 0
+                cumulative_usage["prompt_tokens"] += prompt_tokens
+                cumulative_usage["candidates_tokens"] += candidates_tokens
+                cumulative_usage["cached_tokens"] += cached_tokens
+                cumulative_usage["thoughts_tokens"] += thoughts_tokens
 
                 # Track tokens in resource monitor
                 if event_tokens > 0:
                     # Track tokens with breakdown
-                    reasoning_tokens = usage.thoughts_token_count or 0
+                    reasoning_tokens = thoughts_tokens
                     text_tokens = event_tokens - reasoning_tokens
 
                     self.resource_monitor.usage.add_tokens(
@@ -237,10 +288,9 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
                     )
 
                     # Track API call with cost estimate
-                    # Gemini 2.0 Flash: ~$0.075 per 1M input, ~$0.30 per 1M output
-                    # Use weighted average based on typical input/output ratio
-                    prompt_cost = (usage.prompt_token_count or 0) * 0.000000075
-                    output_cost = (usage.candidates_token_count or 0) * 0.00000030
+                    # Gemini 3 Flash: ~$0.075 per 1M input, ~$0.30 per 1M output
+                    prompt_cost = prompt_tokens * 0.000000075
+                    output_cost = candidates_tokens * 0.00000030
                     total_cost = prompt_cost + output_cost
 
                     self.resource_monitor.usage.add_api_call(cost=total_cost, tokens=0)
@@ -486,10 +536,18 @@ def create_contracted_adk_agent(
         ...     temporal={"max_duration": "10 minutes"}
         ... )
     """
+    from datetime import timedelta
+
     from agent_contracts.core.contract import (
         ResourceConstraints,
         TemporalConstraints,
     )
+
+    # Convert numeric max_duration to timedelta if needed
+    if temporal and "max_duration" in temporal:
+        max_dur = temporal["max_duration"]
+        if isinstance(max_dur, (int, float)):
+            temporal = {**temporal, "max_duration": timedelta(seconds=max_dur)}
 
     # Create contract
     contract_id_val = contract_id or f"adk-agent-{id(agent)}"

@@ -4,7 +4,7 @@ Note: These tests use the real google-adk package since it's installed
 as an optional dependency. We mock the actual LLM calls to avoid API costs.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -125,8 +125,9 @@ class TestContractedAdkAgent:
         contracted = ContractedAdkAgent(contract=contract, agent=agent)
 
         # Mock the runner's run method to return fake events
+        # Note: Python ADK uses snake_case (usage_metadata), not camelCase
         mock_event = Mock()
-        mock_event.usageMetadata = GenerateContentResponseUsageMetadata(
+        mock_event.usage_metadata = GenerateContentResponseUsageMetadata(
             total_token_count=100,
             prompt_token_count=50,
             candidates_token_count=50,
@@ -136,7 +137,15 @@ class TestContractedAdkAgent:
         mock_event.content = Content(parts=[Part(text="Hello! How can I help you?")])
         mock_event.turnComplete = True
 
-        with patch.object(contracted.runner, "run", return_value=iter([mock_event])):
+        # Mock session service to avoid actual session creation
+        # Use AsyncMock for create_session since it's an async method
+        mock_session_service = Mock()
+        mock_session_service.create_session = AsyncMock()
+
+        with (
+            patch.object(contracted.runner, "run", return_value=iter([mock_event])),
+            patch.object(contracted.runner, "session_service", mock_session_service),
+        ):
             result = contracted.run(user_id="test_user", session_id="test_session", message="Hello")
 
             assert result is not None
@@ -170,11 +179,12 @@ class TestContractedAdkAgent:
         contracted = ContractedAdkAgent(contract=contract, agent=agent, strict_mode=True)
 
         # Mock events that exceed budget
+        # Note: Python ADK uses snake_case (usage_metadata), not camelCase
         def create_mock_events() -> list[Mock]:
             events = []
             # First event: 30 tokens (within budget)
             event1 = Mock()
-            event1.usageMetadata = GenerateContentResponseUsageMetadata(
+            event1.usage_metadata = GenerateContentResponseUsageMetadata(
                 total_token_count=30,
                 prompt_token_count=15,
                 candidates_token_count=15,
@@ -186,7 +196,7 @@ class TestContractedAdkAgent:
 
             # Second event: 30 more tokens (would exceed budget of 50)
             event2 = Mock()
-            event2.usageMetadata = GenerateContentResponseUsageMetadata(
+            event2.usage_metadata = GenerateContentResponseUsageMetadata(
                 total_token_count=30,
                 prompt_token_count=15,
                 candidates_token_count=15,
@@ -198,8 +208,14 @@ class TestContractedAdkAgent:
 
             return events
 
+        # Mock session service to avoid actual session creation
+        # Use AsyncMock for create_session since it's an async method
+        mock_session_service = Mock()
+        mock_session_service.create_session = AsyncMock()
+
         with (
             patch.object(contracted.runner, "run", return_value=iter(create_mock_events())),
+            patch.object(contracted.runner, "session_service", mock_session_service),
             pytest.raises(RuntimeError, match="Contract violated"),
         ):
             # Should raise RuntimeError due to budget violation
@@ -226,9 +242,9 @@ class TestContractedAdkAgent:
 
         contracted = ContractedAdkAgent(contract=contract, agent=agent)
 
-        # Mock event
+        # Mock event - Python ADK uses snake_case (usage_metadata)
         mock_event = Mock()
-        mock_event.usageMetadata = GenerateContentResponseUsageMetadata(
+        mock_event.usage_metadata = GenerateContentResponseUsageMetadata(
             total_token_count=50,
             prompt_token_count=25,
             candidates_token_count=25,
@@ -237,7 +253,15 @@ class TestContractedAdkAgent:
         )
         mock_event.content = Content(parts=[Part(text="Debug response")])
 
-        with patch.object(contracted.runner, "run", return_value=iter([mock_event])):
+        # Mock session service to avoid actual session creation
+        # Use AsyncMock for create_session since it's an async method
+        mock_session_service = Mock()
+        mock_session_service.create_session = AsyncMock()
+
+        with (
+            patch.object(contracted.runner, "run", return_value=iter([mock_event])),
+            patch.object(contracted.runner, "session_service", mock_session_service),
+        ):
             result = contracted.run_debug("Test message")
 
             assert result["response"] == "Debug response"
@@ -249,6 +273,8 @@ class TestConvenienceFunctions:
 
     def test_create_contracted_adk_agent(self) -> None:
         """Test create_contracted_adk_agent convenience function."""
+        from datetime import timedelta
+
         from google.adk.agents import LlmAgent
 
         from agent_contracts.integrations.google_adk import create_contracted_adk_agent
@@ -262,7 +288,7 @@ class TestConvenienceFunctions:
         contracted = create_contracted_adk_agent(
             agent=agent,
             resources={"tokens": 50000, "cost_usd": 2.0, "api_calls": 25},
-            temporal={"max_duration": 600},  # 10 minutes
+            temporal={"max_duration": 600},  # 10 minutes (converted to timedelta)
             contract_id="my-agent",
         )
 
@@ -271,7 +297,8 @@ class TestConvenienceFunctions:
         assert contracted.contract.resources.tokens == 50000
         assert contracted.contract.resources.cost_usd == 2.0
         assert contracted.contract.resources.api_calls == 25
-        assert contracted.contract.temporal.max_duration == 600
+        # Numeric max_duration is automatically converted to timedelta
+        assert contracted.contract.temporal.max_duration == timedelta(seconds=600)
 
 
 class TestMultiAgentSupport:

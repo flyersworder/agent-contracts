@@ -223,13 +223,18 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
 
                 def on_chain_start(
                     self,
-                    serialized: dict[str, Any],
-                    inputs: dict[str, Any],
+                    serialized: dict[str, Any] | None,
+                    inputs: dict[str, Any] | None,
                     **kwargs: Any,
                 ) -> None:
                     """Track when a node/chain starts executing."""
                     # Get node name from serialized data or kwargs
-                    name = serialized.get("name", "") or kwargs.get("name", "unknown")
+                    # Note: serialized can be None in some LangChain contexts
+                    name = ""
+                    if serialized is not None:
+                        name = serialized.get("name", "")
+                    if not name:
+                        name = kwargs.get("name", "unknown")
                     # Filter out internal LangChain chains, focus on graph nodes
                     if name and not name.startswith("RunnableLambda"):
                         self.active_nodes.append(name)
@@ -242,12 +247,17 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
 
                 def on_tool_start(
                     self,
-                    serialized: dict[str, Any],
+                    serialized: dict[str, Any] | None,
                     input_str: str,
                     **kwargs: Any,
                 ) -> None:
                     """Track tool invocations within nodes."""
-                    tool_name = serialized.get("name", "") or kwargs.get("name", "unknown")
+                    # Note: serialized can be None in some LangChain contexts
+                    tool_name = ""
+                    if serialized is not None:
+                        tool_name = serialized.get("name", "")
+                    if not tool_name:
+                        tool_name = kwargs.get("name", "unknown")
                     if tool_name:
                         self.tool_invocations[tool_name] = (
                             self.tool_invocations.get(tool_name, 0) + 1
@@ -264,23 +274,47 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
                     total_tokens = 0
 
                     # Try multiple locations for token usage
-                    if response.llm_output and "token_usage" in response.llm_output:
-                        usage = response.llm_output["token_usage"]
-                        total_tokens = usage.get("total_tokens", 0)
-                    elif response.llm_output and "usage_metadata" in response.llm_output:
-                        usage = response.llm_output["usage_metadata"]
-                        total_tokens = usage.get("total_tokens", 0)
-                    elif (
-                        response.generations
-                        and len(response.generations) > 0
-                        and len(response.generations[0]) > 0
-                    ):
-                        gen = response.generations[0][0]
-                        if hasattr(gen, "message") and hasattr(gen.message, "response_metadata"):
-                            metadata = gen.message.response_metadata
-                            if "usage_metadata" in metadata:
-                                usage = metadata["usage_metadata"]
-                                total_tokens = usage.get("total_tokens", 0)
+                    # Location 1: response.llm_output (classic LangChain)
+                    llm_output = getattr(response, "llm_output", None)
+                    if llm_output is not None and isinstance(llm_output, dict):
+                        if "token_usage" in llm_output:
+                            usage = llm_output["token_usage"]
+                            if isinstance(usage, dict):
+                                total_tokens = usage.get("total_tokens", 0) or 0
+                        elif "usage_metadata" in llm_output:
+                            usage = llm_output["usage_metadata"]
+                            if isinstance(usage, dict):
+                                total_tokens = usage.get("total_tokens", 0) or 0
+
+                    # Location 2: response.generations[0][0].message.response_metadata
+                    if total_tokens == 0:
+                        generations = getattr(response, "generations", None)
+                        if generations and len(generations) > 0 and len(generations[0]) > 0:
+                            gen = generations[0][0]
+                            message = getattr(gen, "message", None)
+                            if message is not None:
+                                metadata = getattr(message, "response_metadata", None)
+                                if metadata is not None and isinstance(metadata, dict):
+                                    if "usage_metadata" in metadata:
+                                        usage = metadata["usage_metadata"]
+                                        if isinstance(usage, dict):
+                                            total_tokens = usage.get("total_tokens", 0) or 0
+                                    # Also check token_usage in metadata
+                                    elif "token_usage" in metadata:
+                                        usage = metadata["token_usage"]
+                                        if isinstance(usage, dict):
+                                            total_tokens = usage.get("total_tokens", 0) or 0
+
+                                # Location 3: message.usage_metadata (Google models)
+                                if total_tokens == 0:
+                                    usage_meta = getattr(message, "usage_metadata", None)
+                                    if usage_meta is not None:
+                                        if isinstance(usage_meta, dict):
+                                            total_tokens = usage_meta.get("total_tokens", 0) or 0
+                                        elif hasattr(usage_meta, "total_tokens"):
+                                            total_tokens = (
+                                                getattr(usage_meta, "total_tokens", 0) or 0
+                                            )
 
                     # Track tokens cumulatively across all nodes
                     if total_tokens > 0:
