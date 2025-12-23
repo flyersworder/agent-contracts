@@ -27,6 +27,12 @@ Usage:
 
     # Contracted only
     python run_experiment.py --mode contracted
+
+    # With LLM-as-judge evaluation (IndeterminacyAwareEvaluator)
+    python run_experiment.py --quick --evaluate
+
+    # Custom evaluation settings
+    python run_experiment.py --evaluate --judge-model gemini/gemini-2.0-flash --num-judges 5
 """
 
 import argparse
@@ -35,7 +41,7 @@ import random
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 # Add project root to path for imports
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -47,6 +53,65 @@ from dotenv import load_dotenv  # noqa: E402
 # Load environment
 load_dotenv()
 
+if TYPE_CHECKING:
+    from evaluation.research_pipeline.evaluator import (
+        ReportQualityScore,
+        ResearchReportEvaluator,
+    )
+    from evaluation.research_pipeline.topics import ResearchTopic
+
+
+def _evaluate_report(
+    evaluator: "ResearchReportEvaluator",
+    topic: "ResearchTopic",
+    report: str,
+    verbose: bool = True,
+) -> dict[str, Any]:
+    """Run LLM evaluation on a report and return metrics.
+
+    Args:
+        evaluator: ResearchReportEvaluator instance
+        topic: Research topic
+        report: Generated report text
+        verbose: Print evaluation progress
+
+    Returns:
+        Dictionary with evaluation metrics
+    """
+    try:
+        if verbose:
+            print("    📊 Running LLM evaluation...")
+
+        quality: ReportQualityScore = evaluator.evaluate(topic, report)
+
+        # Extract key metrics from indeterminacy score
+        ind_score = quality.indeterminacy_score
+
+        # Calculate average indeterminacy across dimensions
+        avg_indeterminacy = (
+            ind_score.accuracy.indeterminacy
+            + ind_score.completeness.indeterminacy
+            + ind_score.coherence.indeterminacy
+        ) / 3
+
+        return {
+            "llm_overall_score": quality.overall_score,
+            "llm_accuracy": ind_score.accuracy.point_estimate,
+            "llm_accuracy_indeterminacy": ind_score.accuracy.indeterminacy,
+            "llm_completeness": ind_score.completeness.point_estimate,
+            "llm_completeness_indeterminacy": ind_score.completeness.indeterminacy,
+            "llm_coherence": ind_score.coherence.point_estimate,
+            "llm_coherence_indeterminacy": ind_score.coherence.indeterminacy,
+            "llm_total": ind_score.total,
+            "llm_judge_agreement": ind_score.judge_agreement,
+            "llm_avg_indeterminacy": avg_indeterminacy,
+            "covers_key_aspects": quality.covers_key_aspects,
+        }
+    except Exception as e:
+        if verbose:
+            print(f"    ⚠️ LLM evaluation failed: {e}")
+        return {"llm_error": str(e)}
+
 
 def run_experiment(
     n_topics: int = 25,
@@ -55,6 +120,9 @@ def run_experiment(
     seed: int = 42,
     verbose: bool = True,
     output_dir: Path | None = None,
+    evaluate: bool = False,
+    judge_model: str = "gemini/gemini-2.5-flash",
+    num_judges: int = 3,
 ) -> dict[str, Any]:
     """Run the evaluation experiment.
 
@@ -65,16 +133,30 @@ def run_experiment(
         seed: Random seed for reproducibility
         verbose: Print progress messages
         output_dir: Directory for results (default: evaluation/results)
+        evaluate: Use LLM-as-judge evaluation (IndeterminacyAwareEvaluator)
+        judge_model: LLM model for quality evaluation
+        num_judges: Number of independent LLM evaluations to aggregate
 
     Returns:
         Dictionary with experiment results
     """
+    from evaluation.research_pipeline.evaluator import ResearchReportEvaluator
     from evaluation.research_pipeline.orchestrator import (
         ContractedPipeline,
         SuccessCriteria,
         UncontractedPipeline,
     )
     from evaluation.research_pipeline.topics import ALL_TOPICS, get_topic
+
+    # Initialize LLM evaluator if requested
+    evaluator: ResearchReportEvaluator | None = None
+    if evaluate:
+        evaluator = ResearchReportEvaluator(
+            judge_model=judge_model,
+            num_judges=num_judges,
+        )
+        if verbose:
+            print(f"📊 LLM Evaluation enabled: {judge_model} x {num_judges} judges")
 
     # Set random seed
     random.seed(seed)
@@ -97,6 +179,7 @@ def run_experiment(
         print(f"\nTopics: {len(topics)}")
         print(f"Mode: {mode}")
         print(f"Seed: {seed}")
+        print(f"LLM Evaluation: {'✅ Enabled' if evaluate else '❌ Disabled'}")
         print(f"{'=' * 70}\n")
 
     # Initialize pipelines
@@ -115,6 +198,9 @@ def run_experiment(
             "n_topics": len(topics),
             "mode": mode,
             "seed": seed,
+            "llm_evaluation": evaluate,
+            "judge_model": judge_model if evaluate else None,
+            "num_judges": num_judges if evaluate else None,
         },
         "topics": [t.id for t in topics],
         "trials": [],
@@ -161,6 +247,14 @@ def run_experiment(
                     print(f"    Citations: {unc_result.citation_count}")
                     print(f"    Quality: {score:.2f} ({'✅' if success else '❌'})")
 
+                # Run LLM evaluation if enabled and report was generated
+                if evaluator and unc_result.success and unc_result.report:
+                    llm_metrics = _evaluate_report(evaluator, topic, unc_result.report, verbose)
+                    trial_result["uncontracted"].update(llm_metrics)
+                    if verbose and "llm_overall_score" in llm_metrics:
+                        print(f"    LLM Score: {llm_metrics['llm_overall_score']:.1f}")
+                        print(f"    Indeterminacy: {llm_metrics['llm_avg_indeterminacy']:.2f}")
+
             except Exception as e:
                 trial_result["uncontracted"] = {"error": str(e), "success": False}
                 if verbose:
@@ -195,6 +289,14 @@ def run_experiment(
                     print(f"    Words: {con_result.word_count:,}")
                     print(f"    Citations: {con_result.citation_count}")
                     print(f"    Quality: {score:.2f} ({'✅' if success else '❌'})")
+
+                # Run LLM evaluation if enabled and report was generated
+                if evaluator and con_result.success and con_result.report:
+                    llm_metrics = _evaluate_report(evaluator, topic, con_result.report, verbose)
+                    trial_result["contracted"].update(llm_metrics)
+                    if verbose and "llm_overall_score" in llm_metrics:
+                        print(f"    LLM Score: {llm_metrics['llm_overall_score']:.1f}")
+                        print(f"    Indeterminacy: {llm_metrics['llm_avg_indeterminacy']:.2f}")
 
             except Exception as e:
                 trial_result["contracted"] = {"error": str(e), "success": False}
@@ -258,10 +360,28 @@ def calculate_summary(trials: list[dict[str, Any]], mode: str) -> dict[str, Any]
             summary[f"{condition}_min_tokens"] = min(tokens)
             summary[f"{condition}_max_tokens"] = max(tokens)
 
-        # Quality scores
+        # Quality scores (rule-based)
         scores = [r.get("quality_score", 0) for r in successes]
         if scores:
             summary[f"{condition}_avg_quality"] = sum(scores) / len(scores)
+
+        # LLM quality scores (if available)
+        llm_scores = [r.get("llm_overall_score", 0) for r in successes if "llm_overall_score" in r]
+        if llm_scores:
+            summary[f"{condition}_avg_llm_quality"] = sum(llm_scores) / len(llm_scores)
+
+            # Individual dimension scores
+            for dim in ["accuracy", "completeness", "coherence"]:
+                dim_scores = [r.get(f"llm_{dim}", 0) for r in successes if f"llm_{dim}" in r]
+                if dim_scores:
+                    summary[f"{condition}_avg_llm_{dim}"] = sum(dim_scores) / len(dim_scores)
+
+            # Average indeterminacy
+            indeterminacy = [
+                r.get("llm_avg_indeterminacy", 0) for r in successes if "llm_avg_indeterminacy" in r
+            ]
+            if indeterminacy:
+                summary[f"{condition}_avg_indeterminacy"] = sum(indeterminacy) / len(indeterminacy)
 
         # Criteria met rate
         meets = [r for r in successes if r.get("meets_criteria", False)]
@@ -287,23 +407,31 @@ def print_summary(summary: dict[str, Any]) -> None:
     print(f"{'=' * 70}")
     print(f"\nTrials: {summary.get('n_trials', 0)}")
 
-    if "uncontracted_success_rate" in summary:
-        print("\n  UNCONTRACTED:")
-        print(f"    Success Rate: {summary['uncontracted_success_rate']:.1%}")
-        print(f"    Avg Tokens: {summary.get('uncontracted_avg_tokens', 0):,.0f}")
-        print(f"    Avg Quality: {summary.get('uncontracted_avg_quality', 0):.2f}")
-        print(f"    Criteria Met: {summary.get('uncontracted_criteria_met_rate', 0):.1%}")
+    for condition in ["uncontracted", "contracted"]:
+        if f"{condition}_success_rate" not in summary:
+            continue
 
-    if "contracted_success_rate" in summary:
-        print("\n  CONTRACTED:")
-        print(f"    Success Rate: {summary['contracted_success_rate']:.1%}")
-        print(f"    Avg Tokens: {summary.get('contracted_avg_tokens', 0):,.0f}")
-        print(f"    Avg Quality: {summary.get('contracted_avg_quality', 0):.2f}")
-        print(f"    Criteria Met: {summary.get('contracted_criteria_met_rate', 0):.1%}")
-        print(f"    Budget Compliance: {summary.get('contracted_budget_compliance', 0):.1%}")
-        print(
-            f"    Conservation Violations: {summary.get('contracted_conservation_violations', 0)}"
-        )
+        print(f"\n  {condition.upper()}:")
+        print(f"    Success Rate: {summary[f'{condition}_success_rate']:.1%}")
+        print(f"    Avg Tokens: {summary.get(f'{condition}_avg_tokens', 0):,.0f}")
+        print(f"    Avg Quality (rule-based): {summary.get(f'{condition}_avg_quality', 0):.2f}")
+        print(f"    Criteria Met: {summary.get(f'{condition}_criteria_met_rate', 0):.1%}")
+
+        # LLM quality scores (if available)
+        if f"{condition}_avg_llm_quality" in summary:
+            print("    --- LLM Evaluation ---")
+            print(f"    Avg LLM Quality: {summary[f'{condition}_avg_llm_quality']:.1f}")
+            print(f"      Accuracy: {summary.get(f'{condition}_avg_llm_accuracy', 0):.1f}")
+            print(f"      Completeness: {summary.get(f'{condition}_avg_llm_completeness', 0):.1f}")
+            print(f"      Coherence: {summary.get(f'{condition}_avg_llm_coherence', 0):.1f}")
+            print(f"    Avg Indeterminacy: {summary.get(f'{condition}_avg_indeterminacy', 0):.2f}")
+
+        # Contracted-specific metrics
+        if condition == "contracted":
+            print(f"    Budget Compliance: {summary.get('contracted_budget_compliance', 0):.1%}")
+            print(
+                f"    Conservation Violations: {summary.get('contracted_conservation_violations', 0)}"
+            )
 
     print(f"\n{'=' * 70}\n")
 
@@ -349,6 +477,23 @@ def main() -> None:
         action="store_true",
         help="Suppress progress output",
     )
+    parser.add_argument(
+        "--evaluate",
+        action="store_true",
+        help="Enable LLM-as-judge evaluation (IndeterminacyAwareEvaluator)",
+    )
+    parser.add_argument(
+        "--judge-model",
+        type=str,
+        default="gemini/gemini-2.5-flash",
+        help="LLM model for evaluation (default: gemini/gemini-2.5-flash)",
+    )
+    parser.add_argument(
+        "--num-judges",
+        type=int,
+        default=3,
+        help="Number of LLM evaluations to aggregate (default: 3)",
+    )
 
     args = parser.parse_args()
 
@@ -360,6 +505,9 @@ def main() -> None:
         topic_id=args.topic,
         seed=args.seed,
         verbose=not args.quiet,
+        evaluate=args.evaluate,
+        judge_model=args.judge_model,
+        num_judges=args.num_judges,
     )
 
 

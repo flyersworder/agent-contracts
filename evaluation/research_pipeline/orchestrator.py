@@ -24,7 +24,6 @@ from datetime import timedelta
 from typing import Any
 
 from .agents import (
-    create_all_agents,
     create_analyzer_agent,
     create_reporter_agent,
     create_researcher_agent,
@@ -34,13 +33,15 @@ from .topics import ResearchTopic
 # Type checking imports
 try:
     from google.adk.agents import LlmAgent
-    from google.adk.runners import InMemoryRunner
+    from google.adk.runners import Runner
+    from google.adk.sessions import InMemorySessionService
 
     GOOGLE_ADK_AVAILABLE = True
 except ImportError:
     GOOGLE_ADK_AVAILABLE = False
     LlmAgent = Any
-    InMemoryRunner = Any
+    Runner = Any
+    InMemorySessionService = Any
 
 
 @dataclass
@@ -152,12 +153,18 @@ class UncontractedPipeline:
 
         Args:
             verbose: If True, print progress messages
+
+        Note:
+            We create fresh agents for each pipeline run rather than reusing
+            agents from create_all_agents(). This is because when an agent is
+            registered as a sub_agent of another agent, it becomes incompatible
+            with the google_search grounding tool (switches from grounding to AFC).
         """
         if not GOOGLE_ADK_AVAILABLE:
             raise ImportError("google-adk is required. Install with: uv sync --extra google-adk")
 
         self.verbose = verbose
-        self._agents = create_all_agents()
+        self._session_service = InMemorySessionService()
 
     def run(self, topic: ResearchTopic) -> PipelineResult:
         """Execute research pipeline without contracts.
@@ -173,11 +180,16 @@ class UncontractedPipeline:
 
         try:
             # Phase 1: Research
+            # Create fresh agent (not reused from sub_agents to avoid google_search issues)
             if self.verbose:
                 print(f"  [Researcher] Researching: {topic.title}")
 
-            researcher = self._agents["researcher"]
-            runner = InMemoryRunner(agent=researcher, app_name="uncontracted-researcher")
+            researcher = create_researcher_agent()
+            runner = Runner(
+                agent=researcher,
+                app_name="uncontracted-researcher",
+                session_service=self._session_service,
+            )
 
             research_prompt = f"""Research the following topic thoroughly:
 
@@ -197,11 +209,16 @@ Cite your sources with URLs."""
             result.tokens_by_agent["researcher"] = research_output["tokens"]
 
             # Phase 2: Analysis
+            # Create fresh agent for analysis
             if self.verbose:
                 print("  [Analyzer] Analyzing findings...")
 
-            analyzer = self._agents["analyzer"]
-            runner = InMemoryRunner(agent=analyzer, app_name="uncontracted-analyzer")
+            analyzer = create_analyzer_agent()
+            runner = Runner(
+                agent=analyzer,
+                app_name="uncontracted-analyzer",
+                session_service=self._session_service,
+            )
 
             analysis_prompt = f"""Analyze the following research findings:
 
@@ -222,11 +239,16 @@ Structure your analysis into clear themes."""
             result.tokens_by_agent["analyzer"] = analysis_output["tokens"]
 
             # Phase 3: Report Generation
+            # Create fresh agent for reporting
             if self.verbose:
                 print("  [Reporter] Writing report...")
 
-            reporter = self._agents["reporter"]
-            runner = InMemoryRunner(agent=reporter, app_name="uncontracted-reporter")
+            reporter = create_reporter_agent()
+            runner = Runner(
+                agent=reporter,
+                app_name="uncontracted-reporter",
+                session_service=self._session_service,
+            )
 
             report_prompt = f"""Write a comprehensive research report on:
 
@@ -262,12 +284,12 @@ Requirements:
         return result
 
     def _run_agent(
-        self, runner: "InMemoryRunner", message: str, agent_name: str, app_name: str = ""
+        self, runner: "Runner", message: str, agent_name: str, app_name: str = ""
     ) -> dict[str, Any]:
         """Run an agent and collect output.
 
         Args:
-            runner: InMemoryRunner for the agent
+            runner: Runner for the agent
             message: Message to send
             agent_name: Name of agent (for session ID)
             app_name: App name for session creation
@@ -281,45 +303,37 @@ Requirements:
 
         # Use provided app_name or construct from agent_name
         session_app_name = app_name or f"uncontracted-{agent_name}"
+        session_id = f"eval_{agent_name}"
 
-        # Create session
-        async def create_session() -> None:
-            await runner.session_service.create_session(
+        async def run_agent_async() -> dict[str, Any]:
+            # Create session
+            await self._session_service.create_session(
                 app_name=session_app_name,
                 user_id="eval_user",
-                session_id=f"eval_{agent_name}",
+                session_id=session_id,
             )
 
-        try:
-            loop = asyncio.get_running_loop()
-            future = asyncio.run_coroutine_threadsafe(create_session(), loop)
-            future.result(timeout=30)
-        except RuntimeError:
-            asyncio.run(create_session())
+            # Run agent
+            content = Content(role="user", parts=[Part(text=message)])
+            response = ""
+            total_tokens = 0
 
-        # Run agent
-        content = Content(parts=[Part(text=message)])
-        events = list(
-            runner.run(
+            async for event in runner.run_async(
                 user_id="eval_user",
-                session_id=f"eval_{agent_name}",
+                session_id=session_id,
                 new_message=content,
-            )
-        )
+            ):
+                if hasattr(event, "usage_metadata") and event.usage_metadata:
+                    total_tokens += getattr(event.usage_metadata, "total_token_count", 0)
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            response = part.text
 
-        # Extract response and tokens
-        response = ""
-        total_tokens = 0
+            return {"response": response, "tokens": total_tokens}
 
-        for event in events:
-            if hasattr(event, "usage_metadata") and event.usage_metadata:
-                total_tokens += getattr(event.usage_metadata, "total_token_count", 0)
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    if hasattr(part, "text") and part.text:
-                        response = part.text
-
-        return {"response": response, "tokens": total_tokens}
+        # Run the async function
+        return asyncio.run(run_agent_async())
 
     def _count_citations(self, text: str) -> int:
         """Count citations in text (URLs or [n] references)."""

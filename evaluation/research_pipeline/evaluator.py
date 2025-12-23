@@ -63,7 +63,7 @@ class ResearchReportEvaluator:
 
     def __init__(
         self,
-        judge_model: str = "gemini/gemini-2.0-flash",
+        judge_model: str = "gemini/gemini-2.5-flash",
         num_judges: int = 3,
         min_words: int = 2000,
         min_citations: int = 5,
@@ -71,7 +71,7 @@ class ResearchReportEvaluator:
         """Initialize the research report evaluator.
 
         Args:
-            judge_model: LLM model for quality evaluation
+            judge_model: LLM model for quality evaluation (default: gemini-2.5-flash)
             num_judges: Number of independent evaluations to aggregate
             min_words: Target word count for full score
             min_citations: Target citation count for full score

@@ -51,7 +51,7 @@ class AgentConfig:
 # Agent configurations matching SUBMISSION_PLAN.md
 ORCHESTRATOR_CONFIG = AgentConfig(
     name="orchestrator",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     instruction="""You are a research report orchestrator. Your job is to:
 1. Understand the research topic
 2. Delegate tasks to specialized agents (researcher, analyzer, reporter)
@@ -65,7 +65,7 @@ Be efficient with your coordination. Focus on high-level guidance.""",
 
 RESEARCHER_CONFIG = AgentConfig(
     name="researcher",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     instruction="""You are a research specialist. Your job is to:
 1. Search for relevant information on the given topic
 2. Find factual data, statistics, and expert opinions
@@ -80,7 +80,7 @@ Cite your sources with URLs when possible.""",
 
 ANALYZER_CONFIG = AgentConfig(
     name="analyzer",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     instruction="""You are a research analyst. Your job is to:
 1. Analyze the research findings provided
 2. Identify patterns, trends, and key insights
@@ -95,7 +95,7 @@ Highlight what's most important for the final report.""",
 
 REPORTER_CONFIG = AgentConfig(
     name="reporter",
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     instruction="""You are a report writer. Your job is to:
 1. Synthesize the analysis into a coherent report
 2. Write clear, professional prose
@@ -121,13 +121,13 @@ AGENT_CONFIGS = {
 
 
 def create_researcher_agent() -> "LlmAgent":
-    """Create a researcher agent for data gathering.
+    """Create a researcher agent for data gathering with Google Search.
 
-    Note: Web search tool removed due to API compatibility issues.
-    The researcher relies on model knowledge instead.
+    The researcher uses the google_search tool to find current information,
+    facts, statistics, and expert opinions on research topics.
 
     Returns:
-        LlmAgent configured for research tasks
+        LlmAgent configured for research tasks with web search capability
 
     Raises:
         ImportError: If google-adk is not installed
@@ -139,8 +139,7 @@ def create_researcher_agent() -> "LlmAgent":
         name=RESEARCHER_CONFIG.name,
         model=RESEARCHER_CONFIG.model,
         instruction=RESEARCHER_CONFIG.instruction,
-        # Note: google_search tool removed due to API compatibility issues
-        # The researcher uses model knowledge instead
+        tools=[google_search],  # Enable web search for current information
     )
 
 
