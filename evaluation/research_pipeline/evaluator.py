@@ -11,8 +11,8 @@ The evaluator assesses:
 
 from dataclasses import dataclass
 
-# Import the IndeterminacyAwareEvaluator from research_agent
-from benchmarks.research_agent.indeterminacy_evaluator import (
+# Import the IndeterminacyAwareEvaluator from parent evaluation module
+from ..indeterminacy_evaluator import (
     IndeterminacyAwareEvaluator,
     IndeterminacyAwareScore,
     MultiLabelScore,
@@ -21,7 +21,6 @@ from benchmarks.research_agent.indeterminacy_evaluator import (
     mse_srs_srs,
     prevalence_bias,
 )
-
 from .topics import ResearchTopic
 
 

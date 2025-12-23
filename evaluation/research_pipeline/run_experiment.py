@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any
 
 # Add project root to path for imports
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -64,17 +64,17 @@ def run_experiment(
         topic_id: Specific topic ID to run (overrides n_topics)
         seed: Random seed for reproducibility
         verbose: Print progress messages
-        output_dir: Directory for results (default: benchmarks/results)
+        output_dir: Directory for results (default: evaluation/results)
 
     Returns:
         Dictionary with experiment results
     """
-    from benchmarks.evaluation.research_pipeline.orchestrator import (
+    from evaluation.research_pipeline.orchestrator import (
         ContractedPipeline,
         SuccessCriteria,
         UncontractedPipeline,
     )
-    from benchmarks.evaluation.research_pipeline.topics import ALL_TOPICS, get_topic
+    from evaluation.research_pipeline.topics import ALL_TOPICS, get_topic
 
     # Set random seed
     random.seed(seed)

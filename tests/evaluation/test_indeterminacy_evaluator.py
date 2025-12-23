@@ -10,11 +10,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-# Add benchmarks to path for imports
-benchmarks_path = Path(__file__).parent.parent.parent / "benchmarks"
-sys.path.insert(0, str(benchmarks_path.parent))
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
-from benchmarks.research_agent.indeterminacy_evaluator import (  # noqa: E402
+from evaluation.indeterminacy_evaluator import (  # noqa: E402
     ACCURACY_RANGES,
     COHERENCE_RANGES,
     COMPLETENESS_RANGES,
