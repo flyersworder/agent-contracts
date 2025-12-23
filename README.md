@@ -60,6 +60,28 @@ with ContractedLLM(contract) as llm:
 # ✅ Violations trigger warnings or stops
 ```
 
+### Per-Tool Resource Limits
+
+Fine-grained control over individual tool usage:
+
+```python
+from agent_contracts import Contract, ResourceConstraints
+
+contract = Contract(
+    id="research-agent",
+    name="Research Agent",
+    resources=ResourceConstraints(
+        tokens=10000,
+        tool_invocations=20,  # Total limit across all tools
+        per_tool_limits={
+            "web_search": 5,   # Max 5 web searches
+            "code_exec": 3,    # Max 3 code executions
+            # Other tools limited only by aggregate
+        }
+    )
+)
+```
+
 ### LangGraph Multi-Agent Workflows ⭐
 
 For complex workflows with cycles and multi-agent coordination:
@@ -225,6 +247,51 @@ Agents can optimize along multiple dimensions:
 DRAFTED → ACTIVE → {FULFILLED, VIOLATED, EXPIRED, TERMINATED}
 ```
 
+### Agent Skills (agentskills.io Standard)
+
+Agent Contracts supports the **agentskills.io** open standard for defining reusable agent behaviors:
+
+```python
+from agent_contracts import SkillSpec, Capabilities, Contract
+
+# Define a rich skill with full instructions
+code_review = SkillSpec(
+    name="code-reviewer",
+    description="Review code for best practices, security issues, and test coverage.",
+    instructions="""
+    ## Instructions
+    1. Read the target files
+    2. Check for common issues:
+       - Error handling
+       - Security vulnerabilities
+       - Test coverage
+    3. Provide detailed feedback
+    """,
+    allowed_tools=["Read", "Grep", "Glob"],
+    version="1.0.0",
+)
+
+# Use in capabilities (mix strings and SkillSpec)
+contract = Contract(
+    id="review-task",
+    name="Code Review",
+    capabilities=Capabilities(
+        skills=[code_review, "simple-skill"],  # Both types work
+        tools=["web_search"],
+    ),
+)
+
+# Access skills programmatically
+skill = contract.capabilities.get_skill("code-reviewer")
+print(skill.instructions)
+```
+
+**Features:**
+- ✅ Compatible with Microsoft, OpenAI, Cursor, and other adopters
+- ✅ SKILL.md import/export (`to_skill_md()`, `from_skill_md()`)
+- ✅ Progressive disclosure (metadata vs full instructions)
+- ✅ Backward compatible (string skills still work)
+
 ## Repository Status
 
 🎉 **Ready for Release** (November 2025)
@@ -273,7 +340,7 @@ DRAFTED → ACTIVE → {FULFILLED, VIOLATED, EXPIRED, TERMINATED}
 - ✅ 11 comprehensive tests, 90% coverage
 - ✅ Real-world demos (multi-turn, multi-agent)
 
-**Total**: 247+ tests (209 core + 27 LangGraph + 11 Google ADK), 94%+ coverage
+**Total**: 522+ tests, 91%+ coverage
 
 ## Use Cases
 
@@ -459,4 +526,4 @@ If you use this framework in your research, please cite:
 
 ---
 
-**Version**: 0.1.0 | **Last Updated**: November 6, 2025 | **Status**: Production Ready ⭐
+**Version**: 0.1.0 | **Last Updated**: December 23, 2025 | **Status**: Production Ready ⭐

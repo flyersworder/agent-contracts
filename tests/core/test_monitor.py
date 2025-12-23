@@ -428,3 +428,249 @@ class TestResourceMonitor:
         assert percentages["tokens"] == 50.0
         assert percentages["api_calls"] == 20.0
         assert percentages["cost_usd"] == 20.0
+
+
+class TestPerToolLimits:
+    """Tests for per-tool limit functionality."""
+
+    def test_resource_constraints_with_per_tool_limits(self) -> None:
+        """Test creating ResourceConstraints with per-tool limits."""
+        constraints = ResourceConstraints(
+            tool_invocations=20,
+            per_tool_limits={
+                "web_search": 5,
+                "calculator": 10,
+            },
+        )
+        assert constraints.per_tool_limits["web_search"] == 5
+        assert constraints.per_tool_limits["calculator"] == 10
+        assert constraints.tool_invocations == 20
+
+    def test_per_tool_limits_validation_non_integer(self) -> None:
+        """Test that non-integer per-tool limits raise ValueError."""
+        with pytest.raises(ValueError, match="must be an integer"):
+            ResourceConstraints(
+                per_tool_limits={"web_search": 5.5}  # type: ignore
+            )
+
+    def test_per_tool_limits_validation_negative(self) -> None:
+        """Test that negative per-tool limits raise ValueError."""
+        with pytest.raises(ValueError, match="must be non-negative"):
+            ResourceConstraints(per_tool_limits={"web_search": -1})
+
+    def test_add_tool_invocation_with_name(self) -> None:
+        """Test adding tool invocation with a specific tool name."""
+        usage = ResourceUsage()
+        usage.add_tool_invocation("web_search")
+        usage.add_tool_invocation("web_search")
+        usage.add_tool_invocation("calculator")
+
+        assert usage.tool_invocations == 3
+        assert usage.get_tool_usage("web_search") == 2
+        assert usage.get_tool_usage("calculator") == 1
+        assert usage.get_tool_usage("unknown_tool") == 0
+
+    def test_add_tool_invocation_without_name(self) -> None:
+        """Test adding tool invocation without a tool name (backward compat)."""
+        usage = ResourceUsage()
+        usage.add_tool_invocation()
+        usage.add_tool_invocation()
+
+        assert usage.tool_invocations == 2
+        assert usage.tool_usage_by_name == {}  # No per-tool tracking
+
+    def test_add_tool_invocation_mixed(self) -> None:
+        """Test mixing named and unnamed tool invocations."""
+        usage = ResourceUsage()
+        usage.add_tool_invocation("web_search")
+        usage.add_tool_invocation()  # No name
+        usage.add_tool_invocation("calculator")
+
+        assert usage.tool_invocations == 3
+        assert usage.get_tool_usage("web_search") == 1
+        assert usage.get_tool_usage("calculator") == 1
+
+    def test_to_dict_includes_tool_usage_by_name(self) -> None:
+        """Test that to_dict includes per-tool usage."""
+        usage = ResourceUsage()
+        usage.add_tool_invocation("web_search")
+        usage.add_tool_invocation("calculator")
+
+        usage_dict = usage.to_dict()
+        assert "tool_usage_by_name" in usage_dict
+        assert usage_dict["tool_usage_by_name"]["web_search"] == 1
+        assert usage_dict["tool_usage_by_name"]["calculator"] == 1
+
+    def test_check_constraints_per_tool_no_violation(self) -> None:
+        """Test per-tool limit checking with no violations."""
+        constraints = ResourceConstraints(per_tool_limits={"web_search": 5, "calculator": 10})
+        monitor = ResourceMonitor(constraints)
+
+        for _ in range(3):
+            monitor.usage.add_tool_invocation("web_search")
+        for _ in range(5):
+            monitor.usage.add_tool_invocation("calculator")
+
+        violations = monitor.check_constraints()
+        assert len(violations) == 0
+
+    def test_check_constraints_per_tool_violation(self) -> None:
+        """Test detecting per-tool limit violation."""
+        constraints = ResourceConstraints(per_tool_limits={"web_search": 3})
+        monitor = ResourceMonitor(constraints)
+
+        for _ in range(5):
+            monitor.usage.add_tool_invocation("web_search")
+
+        violations = monitor.check_constraints()
+        assert len(violations) == 1
+        assert violations[0].resource == "tool:web_search"
+        assert violations[0].limit == 3
+        assert violations[0].actual == 5
+
+    def test_check_constraints_per_tool_and_aggregate_violation(self) -> None:
+        """Test both per-tool and aggregate violations."""
+        constraints = ResourceConstraints(tool_invocations=10, per_tool_limits={"web_search": 3})
+        monitor = ResourceMonitor(constraints)
+
+        # Use web_search 5 times (violates per-tool limit of 3)
+        for _ in range(5):
+            monitor.usage.add_tool_invocation("web_search")
+        # Use calculator 8 times (total now 13, violates aggregate of 10)
+        for _ in range(8):
+            monitor.usage.add_tool_invocation("calculator")
+
+        violations = monitor.check_constraints()
+        violation_resources = {v.resource for v in violations}
+
+        assert "tool:web_search" in violation_resources
+        assert "tool_invocations" in violation_resources
+        assert len(violations) == 2
+
+    def test_get_remaining_tool_calls_with_limit(self) -> None:
+        """Test getting remaining calls for a limited tool."""
+        constraints = ResourceConstraints(per_tool_limits={"web_search": 5})
+        monitor = ResourceMonitor(constraints)
+
+        assert monitor.get_remaining_tool_calls("web_search") == 5
+
+        monitor.usage.add_tool_invocation("web_search")
+        monitor.usage.add_tool_invocation("web_search")
+
+        assert monitor.get_remaining_tool_calls("web_search") == 3
+
+    def test_get_remaining_tool_calls_without_limit(self) -> None:
+        """Test getting remaining calls for an unlimited tool."""
+        constraints = ResourceConstraints(per_tool_limits={"web_search": 5})
+        monitor = ResourceMonitor(constraints)
+
+        # calculator has no per-tool limit
+        remaining = monitor.get_remaining_tool_calls("calculator")
+        assert remaining == float("inf")
+
+    def test_get_remaining_tool_calls_exhausted(self) -> None:
+        """Test remaining calls when limit is exhausted."""
+        constraints = ResourceConstraints(per_tool_limits={"web_search": 3})
+        monitor = ResourceMonitor(constraints)
+
+        for _ in range(5):
+            monitor.usage.add_tool_invocation("web_search")
+
+        assert monitor.get_remaining_tool_calls("web_search") == 0
+
+    def test_can_use_tool_per_tool_limit(self) -> None:
+        """Test can_use_tool with per-tool limits."""
+        constraints = ResourceConstraints(per_tool_limits={"web_search": 2})
+        monitor = ResourceMonitor(constraints)
+
+        assert monitor.can_use_tool("web_search") is True
+        assert monitor.can_use_tool("calculator") is True  # No limit
+
+        monitor.usage.add_tool_invocation("web_search")
+        assert monitor.can_use_tool("web_search") is True
+
+        monitor.usage.add_tool_invocation("web_search")
+        assert monitor.can_use_tool("web_search") is False  # Limit reached
+        assert monitor.can_use_tool("calculator") is True  # Still OK
+
+    def test_can_use_tool_aggregate_limit(self) -> None:
+        """Test can_use_tool with aggregate limit only."""
+        constraints = ResourceConstraints(tool_invocations=3)
+        monitor = ResourceMonitor(constraints)
+
+        assert monitor.can_use_tool("web_search") is True
+
+        for _ in range(3):
+            monitor.usage.add_tool_invocation("web_search")
+
+        # Aggregate limit reached
+        assert monitor.can_use_tool("web_search") is False
+        assert monitor.can_use_tool("calculator") is False  # All tools blocked
+
+    def test_can_use_tool_combined_limits(self) -> None:
+        """Test can_use_tool with both per-tool and aggregate limits."""
+        constraints = ResourceConstraints(tool_invocations=10, per_tool_limits={"web_search": 2})
+        monitor = ResourceMonitor(constraints)
+
+        # Use web_search until per-tool limit
+        monitor.usage.add_tool_invocation("web_search")
+        monitor.usage.add_tool_invocation("web_search")
+
+        assert monitor.can_use_tool("web_search") is False  # Per-tool limit
+        assert monitor.can_use_tool("calculator") is True  # Still OK
+
+        # Use other tools until aggregate limit
+        for _ in range(8):
+            monitor.usage.add_tool_invocation("calculator")
+
+        assert monitor.can_use_tool("calculator") is False  # Aggregate limit
+
+    def test_per_tool_zero_limit(self) -> None:
+        """Test per-tool limit of zero (tool disabled)."""
+        constraints = ResourceConstraints(
+            per_tool_limits={"web_search": 0}  # Tool is disabled
+        )
+        monitor = ResourceMonitor(constraints)
+
+        assert monitor.can_use_tool("web_search") is False  # Immediately blocked
+        assert monitor.get_remaining_tool_calls("web_search") == 0
+
+    def test_realistic_multi_tool_scenario(self) -> None:
+        """Test realistic scenario with multiple tools and limits."""
+        constraints = ResourceConstraints(
+            tool_invocations=20,
+            per_tool_limits={
+                "web_search": 5,
+                "code_execution": 3,
+                "file_read": 10,
+            },
+        )
+        monitor = ResourceMonitor(constraints)
+
+        # Simulate agent using tools
+        for _ in range(4):
+            monitor.usage.add_tool_invocation("web_search")
+        for _ in range(2):
+            monitor.usage.add_tool_invocation("code_execution")
+        for _ in range(6):
+            monitor.usage.add_tool_invocation("file_read")
+
+        # No violations yet
+        assert not monitor.is_violated()
+        assert monitor.can_use_tool("web_search") is True  # 1 left
+        assert monitor.can_use_tool("code_execution") is True  # 1 left
+        assert monitor.can_use_tool("file_read") is True  # 4 left
+
+        # Use one more of each
+        monitor.usage.add_tool_invocation("web_search")
+        monitor.usage.add_tool_invocation("code_execution")
+
+        # Now web_search and code_execution are at limit
+        assert monitor.can_use_tool("web_search") is False
+        assert monitor.can_use_tool("code_execution") is False
+        assert monitor.can_use_tool("file_read") is True
+
+        # Verify violation detection
+        monitor.usage.add_tool_invocation("web_search")  # Over limit
+        violations = monitor.check_constraints()
+        assert any(v.resource == "tool:web_search" for v in violations)

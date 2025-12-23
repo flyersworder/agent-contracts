@@ -19,6 +19,7 @@ class ResourceUsage:
     methods to check if usage exceeds contract constraints.
 
     Supports separate tracking of reasoning vs text tokens for reasoning models.
+    Supports per-tool usage tracking for granular monitoring.
 
     Attributes:
         tokens: Total tokens consumed (reasoning + text)
@@ -27,6 +28,7 @@ class ResourceUsage:
         api_calls: Total API calls made
         web_searches: Total web searches performed
         tool_invocations: Total tool invocations
+        tool_usage_by_name: Per-tool invocation counts (tool_name -> count)
         memory_mb: Peak memory usage in MB
         compute_seconds: Total CPU time in seconds
         cost_usd: Total cost in USD
@@ -41,6 +43,7 @@ class ResourceUsage:
     api_calls: int = 0
     web_searches: int = 0
     tool_invocations: int = 0
+    tool_usage_by_name: dict[str, int] = field(default_factory=dict)
     memory_mb: float = 0.0
     compute_seconds: float = 0.0
     cost_usd: float = 0.0
@@ -119,10 +122,29 @@ class ResourceUsage:
         self.web_searches += 1
         self.last_updated = datetime.now()
 
-    def add_tool_invocation(self) -> None:
-        """Record a tool invocation."""
+    def add_tool_invocation(self, tool_name: str | None = None) -> None:
+        """Record a tool invocation.
+
+        Args:
+            tool_name: Optional name of the tool being invoked.
+                       If provided, per-tool usage is tracked in addition
+                       to the aggregate count.
+        """
         self.tool_invocations += 1
+        if tool_name:
+            self.tool_usage_by_name[tool_name] = self.tool_usage_by_name.get(tool_name, 0) + 1
         self.last_updated = datetime.now()
+
+    def get_tool_usage(self, tool_name: str) -> int:
+        """Get usage count for a specific tool.
+
+        Args:
+            tool_name: Name of the tool to query
+
+        Returns:
+            Number of times the tool was invoked (0 if never used)
+        """
+        return self.tool_usage_by_name.get(tool_name, 0)
 
     def update_memory(self, memory_mb: float) -> None:
         """Update memory usage (tracks peak).
@@ -187,6 +209,7 @@ class ResourceUsage:
             "api_calls": self.api_calls,
             "web_searches": self.web_searches,
             "tool_invocations": self.tool_invocations,
+            "tool_usage_by_name": dict(self.tool_usage_by_name),  # Copy for safety
             "memory_mb": self.memory_mb,
             "compute_seconds": self.compute_seconds,
             "cost_usd": self.cost_usd,
@@ -343,6 +366,18 @@ class ResourceMonitor:
                 )
             )
 
+        # Check per-tool limits
+        for tool_name, limit in self.constraints.per_tool_limits.items():
+            actual = self.usage.get_tool_usage(tool_name)
+            if actual > limit:
+                violations.append(
+                    ViolationInfo(
+                        resource=f"tool:{tool_name}",
+                        limit=limit,
+                        actual=actual,
+                    )
+                )
+
         if (
             self.constraints.memory_mb is not None
             and self.usage.memory_mb > self.constraints.memory_mb
@@ -488,6 +523,45 @@ class ResourceMonitor:
         if self.constraints.api_calls is None:
             return float("inf")
         return max(0.0, self.constraints.api_calls - self.usage.api_calls)
+
+    def get_remaining_tool_calls(self, tool_name: str) -> float:
+        """Get remaining calls for a specific tool.
+
+        Args:
+            tool_name: Name of the tool to check
+
+        Returns:
+            Remaining calls for this tool, or float('inf') if no limit set
+        """
+        if tool_name not in self.constraints.per_tool_limits:
+            return float("inf")
+        limit = self.constraints.per_tool_limits[tool_name]
+        actual = self.usage.get_tool_usage(tool_name)
+        return max(0.0, limit - actual)
+
+    def can_use_tool(self, tool_name: str) -> bool:
+        """Check if a specific tool can still be used.
+
+        This checks both the per-tool limit and the aggregate tool_invocations limit.
+
+        Args:
+            tool_name: Name of the tool to check
+
+        Returns:
+            True if the tool can still be used, False if limit reached
+        """
+        # Check per-tool limit
+        if (
+            tool_name in self.constraints.per_tool_limits
+            and self.usage.get_tool_usage(tool_name) >= self.constraints.per_tool_limits[tool_name]
+        ):
+            return False
+
+        # Check aggregate limit
+        return not (
+            self.constraints.tool_invocations is not None
+            and self.usage.tool_invocations >= self.constraints.tool_invocations
+        )
 
     def reset(self) -> None:
         """Reset usage tracking and clear violations."""

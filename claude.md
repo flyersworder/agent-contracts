@@ -18,10 +18,12 @@ This document tracks development progress and key decisions for the Agent Contra
 **Phase 2B**: Governance & Validation (Nov 5) ✅
 **LangGraph**: Premium Multi-Agent (Nov 6) ✅
 **Google ADK**: Google AI Integration (Nov 6) ✅
+**SkillSpec**: agentskills.io Standard (Dec 23) ✅
+**Per-Tool Limits**: Fine-grained resource control (Dec 23) ✅
 
 **Metrics**:
-- **Tests**: 500+ passing
-- **Coverage**: 94%+
+- **Tests**: 522+ passing
+- **Coverage**: 91%+
 - **Integrations**: LiteLLM, LangChain, LangGraph, Google ADK
 
 ## Core Framework (Phase 1)
@@ -70,6 +72,33 @@ This document tracks development progress and key decisions for the Agent Contra
 - Gemini model support
 - Google AI Studio integration
 - Vertex AI support
+
+## Recent Additions (December 2025)
+
+### SkillSpec (agentskills.io Standard)
+**Value**: Industry-standard skill definitions for reusable agent behaviors
+- Full compliance with agentskills.io open standard (Microsoft, OpenAI, Cursor, etc.)
+- SKILL.md import/export (`to_skill_md()`, `from_skill_md()`)
+- Progressive disclosure (metadata ~100 tokens, full instructions on activation)
+- Name validation: 1-64 chars, lowercase alphanumeric + hyphens
+- Backward compatible: `list[str | SkillSpec]` union type
+
+**Files**:
+- `core/contract.py` - `SkillSpec` dataclass (lines 395-612)
+- `core/contract.py` - `Capabilities.skills` updated to accept union type
+- Helper methods: `get_skill()`, `has_skill()`, `skill_names`, `skill_specs`
+
+### Per-Tool Limits
+**Value**: Fine-grained control over individual tool usage
+- Individual limits per tool name: `per_tool_limits={"web_search": 5}`
+- Aggregate limit still applies: `tool_invocations=20`
+- Enforcement priority: per-tool checked first, then aggregate
+- Helper methods: `can_use_tool()`, `get_remaining_tool_calls()`
+
+**Files**:
+- `core/contract.py` - `ResourceConstraints.per_tool_limits: dict[str, int]`
+- `core/monitor.py` - `ResourceUsage.tool_usage_by_name: dict[str, int]`
+- `core/monitor.py` - Per-tool limit checking in `check_constraints()`
 
 ## Validation & Benchmarks
 
@@ -155,7 +184,7 @@ agent-contracts/
 │       ├── langchain.py         # LangChain
 │       ├── langgraph.py         # LangGraph
 │       └── google_adk.py        # Google ADK
-├── tests/                       # 500+ tests, 94% coverage
+├── tests/                       # 522+ tests, 91% coverage
 ├── benchmarks/                  # Live demonstrations
 │   ├── langchain/              # LangChain demos
 │   ├── langgraph/              # LangGraph demos
@@ -202,11 +231,11 @@ agent-contracts/
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`
 - **Repository**: https://github.com/flyersworder/agent-contracts
-- **Latest Commit**: `bac3c7a` (Nov 6, 2025)
 
 ---
 
-*Last Updated: November 6, 2025*
-*Status: Production-ready, 500+ tests, 94%+ coverage*
+*Last Updated: December 23, 2025*
+*Status: Production-ready, 522+ tests, 91%+ coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK*
+*Features: SkillSpec (agentskills.io), Per-Tool Limits*
 *Next: Package for PyPI (v0.1.0) or additional integrations*

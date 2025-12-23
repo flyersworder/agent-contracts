@@ -5,10 +5,14 @@ for Agent Contracts.
 """
 
 from agent_contracts.core.contract import (
+    AgentSpec,
+    Capabilities,
     Contract,
     ContractMode,
     ContractState,
+    CoordinationPattern,
     DeadlineType,
+    ExecutionConfig,
     InputSpecification,
     OutputSpecification,
     ResourceConstraints,
@@ -27,6 +31,10 @@ from agent_contracts.core.enforcement import (
     EnforcementAction,
     EnforcementCallback,
     EnforcementEvent,
+)
+from agent_contracts.core.executor import (
+    ContractExecutor,
+    ExecutionResult,  # Primary ExecutionResult from executor
 )
 from agent_contracts.core.monitor import (
     ResourceMonitor,
@@ -60,25 +68,32 @@ from agent_contracts.core.wrapper import (
     ContractAgent,
     ContractViolationError,
     ExecutionLog,
-    ExecutionResult,
+)
+from agent_contracts.core.wrapper import (
+    ExecutionResult as WrapperExecutionResult,  # Aliased to avoid conflict with executor
 )
 
 __all__ = [
+    "AgentSpec",
     "AllocationRecord",
+    "Capabilities",
     "ConservationViolationError",
     "Contract",
     "ContractAgent",
     "ContractEnforcer",
+    "ContractExecutor",
     "ContractMode",
     "ContractState",
     "ContractViolationError",
     "ContractingCapability",
+    "CoordinationPattern",
     "CostEstimate",
     "DeadlineType",
     "DelegationSummary",
     "EnforcementAction",
     "EnforcementCallback",
     "EnforcementEvent",
+    "ExecutionConfig",
     "ExecutionLog",
     "ExecutionResult",
     "InputSpecification",
@@ -97,6 +112,7 @@ __all__ = [
     "TokenCount",
     "TokenCounter",
     "ViolationInfo",
+    "WrapperExecutionResult",
     "estimate_cost",
     "estimate_prompt_tokens",
     "estimate_quality_cost_time",

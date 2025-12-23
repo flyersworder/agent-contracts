@@ -10,13 +10,18 @@ __license__ = "CC BY 4.0"
 
 # Core contract components
 from agent_contracts.core.contract import (
+    AgentSpec,
+    Capabilities,
     Contract,
     ContractMode,
     ContractState,
+    CoordinationPattern,
     DeadlineType,
+    ExecutionConfig,
     InputSpecification,
     OutputSpecification,
     ResourceConstraints,
+    SkillSpec,
     SuccessCriterion,
     TemporalConstraints,
     TerminationCondition,
@@ -97,7 +102,9 @@ except ImportError:
 
 __all__ = [
     "LANGCHAIN_AVAILABLE",
+    "AgentSpec",
     "AllocationRecord",
+    "Capabilities",
     "CodeReviewContract",
     "ConservationViolationError",
     "Contract",
@@ -109,6 +116,7 @@ __all__ = [
     "ContractedChain",
     "ContractedLLM",
     "ContractingCapability",
+    "CoordinationPattern",
     "CostEstimate",
     "CustomerSupportContract",
     "DataAnalysisContract",
@@ -117,6 +125,7 @@ __all__ = [
     "EnforcementAction",
     "EnforcementCallback",
     "EnforcementEvent",
+    "ExecutionConfig",
     "ExecutionLog",
     "ExecutionResult",
     "InputSpecification",
@@ -126,6 +135,7 @@ __all__ = [
     "ResourceConstraints",
     "ResourceMonitor",
     "ResourceUsage",
+    "SkillSpec",
     "StrategyRecommendation",
     "SuccessCriterion",
     "Task",
