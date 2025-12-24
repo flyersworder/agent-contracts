@@ -1,7 +1,9 @@
 # Evaluation Experiments for Agent Contracts
 
 This folder contains the evaluation pipelines for the **COINE 2026** conference paper:
-*"Agent Contracts: A Formal Framework for Governing Multi-Agent AI Systems"*
+*"Agent Contracts: A Formal Framework for Resource-Bounded Autonomous AI Systems"*
+
+**Paper location**: `paper/paper.qmd` (Quarto source) → `paper/output/paper.pdf` (compiled)
 
 ## Overview
 
@@ -39,12 +41,12 @@ This experiment demonstrates **ContractExecutor**, the core execution engine tha
 
 ### What It Tests
 
-| Whitepaper Section | Concept | How Tested |
-|-------------------|---------|------------|
-| §5.4 | Budget-aware prompting | `generate_budget_prompt()` creates mode-specific prompts |
-| §5.2 | Strategic modes | URGENT vs ECONOMICAL vs BALANCED comparison |
-| §3.2 | Resource monitoring | Token tracking per mode |
-| §2.1 | Contract definition | Full C = (I,O,S,R,T,Φ,Ψ) with all fields |
+| Paper Section | Concept | How Tested |
+|---------------|---------|------------|
+| §4.1 | Contract definition C = (I,O,S,R,T,Φ,Ψ) | Full contract with all fields |
+| §4.2 | Resource constraints R | Token budgets per mode |
+| §5.2 | Runtime monitoring | Real-time token tracking |
+| §7.2 | Enforcement capabilities | Multi-call budget enforcement |
 
 ### The Three Modes
 
@@ -152,12 +154,12 @@ Orchestrator (Parent Contract: 100K tokens)
 
 ### What It Tests
 
-| Whitepaper Section | Concept | How Tested |
-|-------------------|---------|------------|
-| §2.1 | Formal contract definition C = (I,O,S,R,T,Φ,Ψ) | Full Contract with resources, temporal, success criteria |
-| §4.5 | Conservation laws: Σbᵢ ≤ B | DelegatingAdkAgent enforces budget delegation |
-| §5.4 | Budget-aware prompting | `generate_budget_prompt()` informs agents of constraints |
-| §6.2 | Contracting as a capability | Parent agent spawns child contracts dynamically |
+| Paper Section | Concept | How Tested |
+|---------------|---------|------------|
+| §4.1 | Formal contract definition C = (I,O,S,R,T,Φ,Ψ) | Full Contract with resources, temporal, success criteria |
+| §6.1 | Conservation laws: Σbᵢ ≤ B | DelegatingAdkAgent enforces budget delegation |
+| §6.2 | Orchestrator-Workers pattern | Parent agent spawns child contracts dynamically |
+| §8 | Research report example | Multi-agent pipeline with budget allocation |
 
 ### Agent Contracts Components Used
 
@@ -249,11 +251,12 @@ python -m evaluation.research_pipeline.run_experiment \
 
 ### What It Tests
 
-| Whitepaper Section | Concept | How Tested |
-|-------------------|---------|------------|
-| §5.3 | Iteration limits | `iterations` constraint prevents infinite loops |
-| §4.5 | Conservation laws | Coder + Reviewer budgets ≤ Parent budget |
-| §3.1 | Strict mode enforcement | Violations halt execution immediately |
+| Paper Section | Concept | How Tested |
+|---------------|---------|------------|
+| §4.2 | Resource constraints (iterations) | `r_iter` constraint prevents infinite loops |
+| §6.1 | Conservation laws | Coder + Reviewer budgets ≤ Parent budget |
+| §7.2 | Enforcement capabilities | Iteration limits halt execution at threshold |
+| §4.3 | Contract lifecycle | VIOLATED state when limits exceeded |
 
 ### The Runaway Problem
 
@@ -475,15 +478,15 @@ Each experiment will generate publication-ready figures:
 
 ## Paper Claims Validated
 
-| Claim | Experiment | Evidence |
-|-------|------------|----------|
-| **Strategy modes enable tradeoffs** | Strategy Modes | URGENT/ECONOMICAL/BALANCED produce different resource profiles |
-| **Budget-aware prompts work** | Strategy Modes | Agents adjust behavior based on mode-specific prompts |
-| **Conservation laws work** | Research Pipeline | Budget delegation respects Σbᵢ ≤ B |
-| **Runaway prevention** | Code Review Pipeline | Iteration limits stop infinite loops |
-| **No quality loss** | All three | Governance maintains output quality |
-| **Predictable costs** | All three | CONTRACTED has lower token variance |
-| **Hierarchical delegation** | Research Pipeline | Parent agents spawn child contracts |
+| Claim | Paper Section | Experiment | Evidence |
+|-------|---------------|------------|----------|
+| Contract definition enables governance | §4.1 | All three | C = (I,O,S,R,T,Φ,Ψ) with all fields |
+| Resource constraints are enforceable | §4.2, §7.2 | Strategy Modes | Token tracking per mode |
+| Conservation laws preserve budgets | §6.1 | Research Pipeline | Budget delegation respects Σbᵢ ≤ B |
+| Iteration limits prevent runaway | §4.2, §7.2 | Code Review Pipeline | Loops stop at threshold |
+| Orchestrator-Workers pattern works | §6.2 | Research Pipeline | Parent spawns child contracts |
+| Multi-call enforcement is valuable | §7.2 | All three | Cumulative budget protection |
+| Quality maintained under governance | §4.2 (Φ) | All three | ROUGE-L scores comparable |
 
 ---
 
@@ -523,7 +526,18 @@ evaluation/
 
 ## References
 
-- **Whitepaper**: `docs/whitepaper.md`
+- **Conference Paper**: `paper/paper.qmd` (source) → `paper/output/paper.pdf` (compiled)
 - **CLAUDE.md**: Project context and development history
 - **Indeterminacy Paper**: Guerdan et al. "Validating LLM-as-a-Judge Systems under Rating Indeterminacy" (NeurIPS 2025)
 - **LiveCodeBench**: https://livecodebench.github.io/
+
+## Paper Section Quick Reference
+
+| Section | Title | Key Concepts |
+|---------|-------|--------------|
+| §4 | The Agent Contract Framework | C = (I,O,S,R,T,Φ,Ψ), lifecycle states |
+| §5 | Resource Tracking and Monitoring | Token decomposition, runtime monitoring |
+| §6 | Multi-Agent Coordination | Conservation laws, orchestrator-workers |
+| §7 | Limitations and Enforcement | Single-call constraints, multi-call value |
+| §8 | Example: Research Report | End-to-end multi-agent demonstration |
+| Appendix A | Formal Properties | Conservation invariant, termination, exclusivity |
