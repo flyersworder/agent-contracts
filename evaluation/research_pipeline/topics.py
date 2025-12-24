@@ -1,6 +1,6 @@
 """Research topics for COINE 2026 evaluation experiment.
 
-This module defines 25 research topics across 5 categories for validating
+This module defines 50 research topics across 5 categories for validating
 the Agent Contracts framework. Topics are designed to:
 1. Require actual web research (not pure knowledge recall)
 2. Have verifiable facts for quality evaluation
@@ -8,11 +8,11 @@ the Agent Contracts framework. Topics are designed to:
 4. Have potential for runaway (iterative refinement)
 
 Categories:
-- Technology (5 topics): Current tech trends and comparisons
-- Business (5 topics): Market analysis and industry trends
-- Policy (5 topics): Regulatory and governance issues
-- Science (5 topics): Scientific advances and discoveries
-- Economics (5 topics): Economic trends and analysis
+- Technology (10 topics): Current tech trends and comparisons
+- Business (10 topics): Market analysis and industry trends
+- Policy (10 topics): Regulatory and governance issues
+- Science (10 topics): Scientific advances and discoveries
+- Economics (10 topics): Economic trends and analysis
 """
 
 from dataclasses import dataclass, field
@@ -42,7 +42,7 @@ class ResearchTopic:
 
 
 # ============================================================================
-# TECHNOLOGY TOPICS (5)
+# TECHNOLOGY TOPICS (10)
 # ============================================================================
 TECHNOLOGY_TOPICS = [
     ResearchTopic(
@@ -150,10 +150,115 @@ TECHNOLOGY_TOPICS = [
         ],
         difficulty=2,
     ),
+    ResearchTopic(
+        id="tech_06",
+        title="AI Code Assistants: GitHub Copilot vs Competitors",
+        category="Technology",
+        description=(
+            "Compare major AI code assistant tools including GitHub Copilot, "
+            "Cursor, Codeium, and others in terms of capabilities and adoption."
+        ),
+        key_aspects=[
+            "Feature comparison across tools",
+            "Enterprise adoption rates",
+            "Developer productivity studies",
+            "Privacy and security considerations",
+        ],
+        verification_facts=[
+            "GitHub Copilot subscriber count",
+            "Cursor funding and valuation",
+            "Developer productivity study results",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="tech_07",
+        title="Kubernetes Evolution: 2024-2025 Trends",
+        category="Technology",
+        description=(
+            "Analyze recent developments in Kubernetes ecosystem, including "
+            "new features, security improvements, and emerging patterns."
+        ),
+        key_aspects=[
+            "Kubernetes 1.30+ new features",
+            "Service mesh adoption trends",
+            "GitOps and platform engineering",
+            "Security and compliance improvements",
+        ],
+        verification_facts=[
+            "Kubernetes version release timeline",
+            "CNCF survey adoption statistics",
+            "Major platform engineering tool adoption",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="tech_08",
+        title="Open Source AI Models: Llama, Mistral, and Beyond",
+        category="Technology",
+        description=(
+            "Survey the landscape of open-source large language models, "
+            "comparing capabilities, licensing, and enterprise adoption."
+        ),
+        key_aspects=[
+            "Llama 3 capabilities and licensing",
+            "Mistral model family comparison",
+            "Fine-tuning and deployment options",
+            "Enterprise use cases and adoption",
+        ],
+        verification_facts=[
+            "Llama 3 parameter counts and benchmarks",
+            "Mistral funding and valuation",
+            "Open source model benchmark rankings",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="tech_09",
+        title="5G and 6G Networks: Current State and Future",
+        category="Technology",
+        description=(
+            "Examine 5G deployment status globally and early 6G research "
+            "initiatives, including use cases and infrastructure investments."
+        ),
+        key_aspects=[
+            "Global 5G coverage statistics",
+            "5G use cases beyond mobile",
+            "6G research initiatives",
+            "Infrastructure investment trends",
+        ],
+        verification_facts=[
+            "5G subscriber numbers by region",
+            "Major 6G research programs",
+            "Telecom infrastructure investments",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="tech_10",
+        title="Video Generation AI: Sora, Runway, and Competitors",
+        category="Technology",
+        description=(
+            "Analyze the current state of AI video generation technology, "
+            "comparing major players and examining commercial applications."
+        ),
+        key_aspects=[
+            "OpenAI Sora capabilities and availability",
+            "Runway Gen-3 and competitor features",
+            "Commercial video production adoption",
+            "Content moderation challenges",
+        ],
+        verification_facts=[
+            "Sora release status and capabilities",
+            "Runway funding and customer count",
+            "Major brand AI video campaigns",
+        ],
+        difficulty=2,
+    ),
 ]
 
 # ============================================================================
-# BUSINESS TOPICS (5)
+# BUSINESS TOPICS (10)
 # ============================================================================
 BUSINESS_TOPICS = [
     ResearchTopic(
@@ -261,10 +366,115 @@ BUSINESS_TOPICS = [
         ],
         difficulty=3,
     ),
+    ResearchTopic(
+        id="bus_06",
+        title="AI Chip Wars: NVIDIA, AMD, and Custom Silicon",
+        category="Business",
+        description=(
+            "Analyze the competitive landscape of AI accelerator chips, "
+            "including NVIDIA dominance, AMD competition, and custom chips."
+        ),
+        key_aspects=[
+            "NVIDIA H100/H200/B100 market position",
+            "AMD MI300 competitive analysis",
+            "Google TPU and custom silicon efforts",
+            "China AI chip development",
+        ],
+        verification_facts=[
+            "NVIDIA data center revenue",
+            "AMD AI chip market share",
+            "Major tech company custom chip investments",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="bus_07",
+        title="Streaming Wars 2025: Market Consolidation Trends",
+        category="Business",
+        description=(
+            "Examine the current state of video streaming competition, "
+            "including market consolidation, bundling, and profitability."
+        ),
+        key_aspects=[
+            "Streaming service subscriber counts",
+            "Profitability and content spending",
+            "Bundling and partnership strategies",
+            "Ad-supported tier growth",
+        ],
+        verification_facts=[
+            "Netflix, Disney+, Max subscriber numbers",
+            "Streaming service profitability reports",
+            "Major content deal values",
+        ],
+        difficulty=1,
+    ),
+    ResearchTopic(
+        id="bus_08",
+        title="Autonomous Vehicle Business Models: Waymo, Cruise, Tesla",
+        category="Business",
+        description=(
+            "Compare business strategies and progress of major autonomous "
+            "vehicle companies, including deployment status and revenue models."
+        ),
+        key_aspects=[
+            "Waymo commercial operations status",
+            "Cruise restructuring aftermath",
+            "Tesla FSD revenue and strategy",
+            "Regulatory approval landscape",
+        ],
+        verification_facts=[
+            "Waymo ride counts and expansion cities",
+            "Tesla FSD subscription numbers",
+            "Autonomous vehicle regulatory approvals",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="bus_09",
+        title="Cloud Computing Market Share: AWS, Azure, GCP Trends",
+        category="Business",
+        description=(
+            "Analyze current cloud computing market dynamics, including "
+            "market share trends, AI services, and pricing strategies."
+        ),
+        key_aspects=[
+            "Cloud market share by provider",
+            "AI and ML service offerings",
+            "Multi-cloud adoption trends",
+            "Enterprise spending patterns",
+        ],
+        verification_facts=[
+            "AWS, Azure, GCP revenue and growth rates",
+            "Gartner cloud market share data",
+            "Major enterprise cloud migrations",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="bus_10",
+        title="Space Economy: Commercial Launch and Satellite Markets",
+        category="Business",
+        description=(
+            "Examine the commercial space industry economics, including "
+            "launch services, satellite constellations, and space tourism."
+        ),
+        key_aspects=[
+            "SpaceX Starship development status",
+            "Satellite internet market (Starlink, OneWeb)",
+            "Commercial launch market competition",
+            "Space tourism economics",
+        ],
+        verification_facts=[
+            "SpaceX launch count and revenue",
+            "Starlink subscriber count",
+            "Commercial space investment totals",
+        ],
+        difficulty=2,
+    ),
 ]
 
 # ============================================================================
-# POLICY TOPICS (5)
+# POLICY TOPICS (10)
 # ============================================================================
 POLICY_TOPICS = [
     ResearchTopic(
@@ -372,10 +582,115 @@ POLICY_TOPICS = [
         ],
         difficulty=2,
     ),
+    ResearchTopic(
+        id="pol_06",
+        title="Social Media Platform Regulation: Global Approaches",
+        category="Policy",
+        description=(
+            "Compare regulatory frameworks for social media platforms across "
+            "jurisdictions, including content moderation and child safety."
+        ),
+        key_aspects=[
+            "EU Digital Services Act implementation",
+            "US Section 230 reform debates",
+            "UK Online Safety Act requirements",
+            "Child safety regulations globally",
+        ],
+        verification_facts=[
+            "DSA designated platforms list",
+            "Major platform content moderation changes",
+            "Child safety legislation status",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="pol_07",
+        title="Right to Repair: Legislation and Industry Response",
+        category="Policy",
+        description=(
+            "Examine right to repair legislation progress and technology "
+            "industry responses, including manufacturer policy changes."
+        ),
+        key_aspects=[
+            "US state right to repair laws",
+            "EU repair regulations",
+            "Manufacturer policy changes (Apple, etc.)",
+            "Environmental implications",
+        ],
+        verification_facts=[
+            "States with right to repair laws",
+            "Apple self-service repair program status",
+            "EU repairability requirements",
+        ],
+        difficulty=1,
+    ),
+    ResearchTopic(
+        id="pol_08",
+        title="Critical Minerals Policy: Supply Chain Security",
+        category="Policy",
+        description=(
+            "Analyze policies to secure critical mineral supply chains for "
+            "clean energy and technology, including mining and processing."
+        ),
+        key_aspects=[
+            "US critical minerals strategy",
+            "EU Critical Raw Materials Act",
+            "China's rare earth dominance",
+            "Alternative sourcing initiatives",
+        ],
+        verification_facts=[
+            "Critical minerals list by jurisdiction",
+            "New mining project approvals",
+            "Processing capacity investments",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="pol_09",
+        title="AI Copyright and IP: Legal Developments",
+        category="Policy",
+        description=(
+            "Survey legal developments around AI and intellectual property, "
+            "including training data rights and AI-generated content ownership."
+        ),
+        key_aspects=[
+            "AI training data lawsuits",
+            "AI-generated content copyright status",
+            "Artist and creator rights movements",
+            "International IP framework differences",
+        ],
+        verification_facts=[
+            "Major AI copyright lawsuits and outcomes",
+            "US Copyright Office AI guidance",
+            "Creative industry licensing deals",
+        ],
+        difficulty=3,
+    ),
+    ResearchTopic(
+        id="pol_10",
+        title="Biosecurity Regulation: Dual-Use Research Governance",
+        category="Policy",
+        description=(
+            "Examine regulatory frameworks for dual-use research of concern, "
+            "including AI in biology and pandemic preparedness."
+        ),
+        key_aspects=[
+            "Dual-use research oversight mechanisms",
+            "AI biosecurity concerns",
+            "International coordination efforts",
+            "Gain-of-function research policies",
+        ],
+        verification_facts=[
+            "NIH dual-use research policies",
+            "WHO pandemic preparedness updates",
+            "Major biosecurity policy changes",
+        ],
+        difficulty=3,
+    ),
 ]
 
 # ============================================================================
-# SCIENCE TOPICS (5)
+# SCIENCE TOPICS (10)
 # ============================================================================
 SCIENCE_TOPICS = [
     ResearchTopic(
@@ -483,10 +798,115 @@ SCIENCE_TOPICS = [
         ],
         difficulty=2,
     ),
+    ResearchTopic(
+        id="sci_06",
+        title="CRISPR Gene Editing: Clinical Applications 2024-2025",
+        category="Science",
+        description=(
+            "Examine clinical progress of CRISPR-based therapies, including "
+            "approved treatments and ongoing trials."
+        ),
+        key_aspects=[
+            "FDA-approved CRISPR therapies",
+            "Ongoing clinical trials",
+            "Safety profile and monitoring",
+            "Accessibility and cost considerations",
+        ],
+        verification_facts=[
+            "CRISPR therapy approvals (Casgevy, etc.)",
+            "Major clinical trial milestones",
+            "Treatment costs and coverage",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="sci_07",
+        title="Battery Technology: Solid-State and Beyond",
+        category="Science",
+        description=(
+            "Analyze progress in next-generation battery technologies, "
+            "including solid-state batteries and alternative chemistries."
+        ),
+        key_aspects=[
+            "Solid-state battery development status",
+            "Sodium-ion battery commercialization",
+            "EV battery technology roadmaps",
+            "Manufacturing scale-up challenges",
+        ],
+        verification_facts=[
+            "Toyota solid-state battery timeline",
+            "CATL sodium-ion announcements",
+            "Battery energy density improvements",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="sci_08",
+        title="Carbon Capture Technologies: Direct Air Capture Progress",
+        category="Science",
+        description=(
+            "Survey direct air capture technology development and deployment, "
+            "including costs, capacity, and commercial projects."
+        ),
+        key_aspects=[
+            "Operating DAC facilities worldwide",
+            "Cost per ton of CO2 captured",
+            "Technology approaches comparison",
+            "Government and corporate investments",
+        ],
+        verification_facts=[
+            "Climeworks and Carbon Engineering capacity",
+            "DOE DAC hub projects",
+            "Carbon removal credit prices",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="sci_09",
+        title="Psychedelic Medicine: FDA Approval Progress",
+        category="Science",
+        description=(
+            "Examine the clinical development of psychedelic-assisted therapy, "
+            "including MDMA and psilocybin treatment progress."
+        ),
+        key_aspects=[
+            "MDMA therapy FDA review status",
+            "Psilocybin clinical trials",
+            "State-level legalization efforts",
+            "Research institution programs",
+        ],
+        verification_facts=[
+            "MAPS MDMA trial results",
+            "FDA advisory committee decisions",
+            "States with legal psychedelic therapy",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="sci_10",
+        title="Protein Structure Prediction: Post-AlphaFold Applications",
+        category="Science",
+        description=(
+            "Analyze the impact of AlphaFold and protein structure prediction "
+            "on drug discovery and biological research."
+        ),
+        key_aspects=[
+            "AlphaFold database statistics",
+            "Drug discovery applications",
+            "Competitor models (ESMFold, etc.)",
+            "Limitations and ongoing research",
+        ],
+        verification_facts=[
+            "AlphaFold structures predicted count",
+            "Drug development using AlphaFold",
+            "Major research publications using AlphaFold",
+        ],
+        difficulty=3,
+    ),
 ]
 
 # ============================================================================
-# ECONOMICS TOPICS (5)
+# ECONOMICS TOPICS (10)
 # ============================================================================
 ECONOMICS_TOPICS = [
     ResearchTopic(
@@ -591,6 +1011,111 @@ ECONOMICS_TOPICS = [
             "California AB5 and Prop 22 outcomes",
             "EU Platform Work Directive status",
             "UK Uber driver classification ruling",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="econ_06",
+        title="Global Trade Fragmentation: Reshoring and Friend-shoring",
+        category="Economics",
+        description=(
+            "Analyze trends in supply chain restructuring, including reshoring "
+            "to domestic production and friend-shoring to allied nations."
+        ),
+        key_aspects=[
+            "Manufacturing reshoring statistics",
+            "Friend-shoring policy initiatives",
+            "Supply chain resilience investments",
+            "Trade pattern changes",
+        ],
+        verification_facts=[
+            "US manufacturing investment announcements",
+            "EU supply chain diversification measures",
+            "China+1 strategy adoption rates",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="econ_07",
+        title="Housing Affordability Crisis: Policy Responses Compared",
+        category="Economics",
+        description=(
+            "Compare policy responses to housing affordability challenges "
+            "across major economies, including supply-side and demand-side measures."
+        ),
+        key_aspects=[
+            "Zoning reform efforts",
+            "Rent control policies",
+            "First-time buyer assistance programs",
+            "Social housing investment",
+        ],
+        verification_facts=[
+            "Home price-to-income ratios by city",
+            "Major zoning reform legislation",
+            "Housing starts vs household formation",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="econ_08",
+        title="Wealth Inequality Trends: Post-Pandemic Analysis",
+        category="Economics",
+        description=(
+            "Examine wealth distribution changes since the COVID-19 pandemic, "
+            "including asset price effects and policy responses."
+        ),
+        key_aspects=[
+            "Wealth concentration statistics",
+            "Asset price inflation effects",
+            "Wealth tax proposals and implementation",
+            "Intergenerational wealth transfer",
+        ],
+        verification_facts=[
+            "Top 1% wealth share by country",
+            "Billionaire wealth growth rates",
+            "Wealth tax implementations globally",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="econ_09",
+        title="Green Hydrogen Economics: Cost Trajectory and Adoption",
+        category="Economics",
+        description=(
+            "Analyze the economics of green hydrogen production, including "
+            "cost reductions, subsidies, and industrial adoption."
+        ),
+        key_aspects=[
+            "Green hydrogen production costs",
+            "Government subsidy programs",
+            "Industrial adoption commitments",
+            "Infrastructure investment",
+        ],
+        verification_facts=[
+            "Hydrogen production cost per kg",
+            "IRA hydrogen production credits",
+            "EU hydrogen strategy investments",
+        ],
+        difficulty=2,
+    ),
+    ResearchTopic(
+        id="econ_10",
+        title="Aging Populations: Economic Impacts and Policy Responses",
+        category="Economics",
+        description=(
+            "Examine economic implications of demographic aging in developed "
+            "nations, including labor markets, healthcare, and pensions."
+        ),
+        key_aspects=[
+            "Dependency ratio projections",
+            "Labor force participation trends",
+            "Pension system sustainability",
+            "Healthcare cost implications",
+        ],
+        verification_facts=[
+            "Old-age dependency ratios by country",
+            "Retirement age changes",
+            "Pension fund solvency assessments",
         ],
         difficulty=2,
     ),

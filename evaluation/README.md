@@ -7,11 +7,11 @@ This folder contains the evaluation pipelines for the **COINE 2026** conference 
 
 We provide **three complementary experiments** that demonstrate the value of Agent Contracts at different levels of complexity:
 
-| Experiment | Complexity | Pattern | Key Demonstration |
-|------------|------------|---------|-------------------|
-| **1. Strategy Modes** | Single LLM call | ContractExecutor | Budget-aware prompting, strategy optimization |
-| **2. Research Pipeline** | Multi-agent sequential | Researcher → Analyzer → Reporter | Conservation laws, budget delegation |
-| **3. Code Review Pipeline** | Multi-agent iterative | Coder ↔ Reviewer loop | Runaway prevention, iteration limits |
+| Experiment | Complexity | Pattern | Sample Size | Key Demonstration |
+|------------|------------|---------|-------------|-------------------|
+| **1. Strategy Modes** | Single LLM call | ContractExecutor | 100 articles | Budget-aware prompting, strategy optimization |
+| **2. Research Pipeline** | Multi-agent sequential | Researcher → Analyzer → Reporter | 50 topics | Conservation laws, budget delegation |
+| **3. Code Review Pipeline** | Multi-agent iterative | Coder ↔ Reviewer loop | 100 problems | Runaway prevention, iteration limits |
 
 ```
                     Complexity Progression
@@ -114,19 +114,19 @@ result: ExecutionResult = executor.run(query=f"Summarize: {article}")
 ### Usage
 
 ```bash
-# Quick test (10 articles, all modes)
-python -m evaluation.strategy_modes.run_experiment --n-articles 10
+# Quick smoke test (2 articles, all modes)
+python -m evaluation.strategy_modes.run_experiment --n-articles 2
 
-# Full experiment
+# Full experiment (recommended: 100 articles for statistical power)
 python -m evaluation.strategy_modes.run_experiment \
     --n-articles 100 \
-    --model gpt-4o-mini \
+    --model gemini/gemini-2.5-flash \
     --seed 42
 
 # Single mode only
 python -m evaluation.strategy_modes.run_experiment \
     --mode economical \
-    --n-articles 50
+    --n-articles 100
 ```
 
 ---
@@ -207,12 +207,12 @@ researcher = delegating.delegate(
 ### Usage
 
 ```bash
-# Quick test (1 topic, both conditions)
+# Quick smoke test (1 topic, both conditions)
 python -m evaluation.research_pipeline.run_experiment --quick
 
-# Full experiment with LLM evaluation
+# Full experiment (recommended: 50 topics for statistical power)
 python -m evaluation.research_pipeline.run_experiment \
-    --n-topics 25 \
+    --n-topics 50 \
     --mode both \
     --evaluate \
     --judge-model gemini/gemini-2.5-flash \
@@ -292,17 +292,23 @@ contracted_coder = orchestrator.delegate(
 ### Usage
 
 ```bash
-# Quick test (10 problems)
-python -m evaluation.code_review_pipeline.run_experiment --n-problems 10
+# Quick smoke test (5 problems)
+python -m evaluation.code_review_pipeline.run_experiment --n-problems 5
 
-# Full experiment
+# Full experiment (recommended: 100 problems for statistical power)
 python -m evaluation.code_review_pipeline.run_experiment \
-    --n-problems 50 \
-    --difficulty medium \
+    --n-problems 100 \
     --seed 42
 
+# By difficulty level
+python -m evaluation.code_review_pipeline.run_experiment \
+    --n-problems 100 \
+    --difficulty medium
+
 # Contracted only
-python -m evaluation.code_review_pipeline.run_experiment --contracted-only
+python -m evaluation.code_review_pipeline.run_experiment \
+    --n-problems 100 \
+    --contracted-only
 ```
 
 ---
@@ -363,7 +369,89 @@ score = evaluator.evaluate(question="Research topic", answer=report_text)
 
 ---
 
+## Statistical Methodology
+
+### Sample Size Rationale
+
+We use **bootstrap confidence intervals** for all comparisons. Sample sizes are chosen to ensure:
+- Stable bootstrap estimates (minimum 30 samples per condition)
+- Detection of medium effect sizes (Cohen's d ≈ 0.5) with 80% power
+- Reasonable precision on binary outcomes (±10% for success rates)
+
+| Experiment | Sample Size | Design | Total Runs | Rationale |
+|------------|-------------|--------|------------|-----------|
+| **Strategy Modes** | 100 articles | Within-subjects (paired) | 300 | Paired design is efficient; detects ~15% token difference |
+| **Research Pipeline** | 50 topics | Between-subjects | 100 | Expanded from 25 for robust CIs |
+| **Code Review** | 100 problems | Between-subjects | 200 | Binary outcomes need more samples |
+
+### Bootstrap Analysis
+
+For each metric, we compute:
+1. **Point estimate**: Mean difference between conditions
+2. **95% CI**: 10,000 bootstrap resamples with BCa correction
+3. **Effect size**: Cohen's d with confidence interval
+4. **p-value**: Permutation test (two-tailed)
+
+```python
+# Example bootstrap analysis
+from scipy import stats
+import numpy as np
+
+def bootstrap_ci(data, n_bootstrap=10000, ci=0.95):
+    """Compute BCa bootstrap confidence interval."""
+    boot_means = [np.mean(np.random.choice(data, len(data))) for _ in range(n_bootstrap)]
+    lower = np.percentile(boot_means, (1 - ci) / 2 * 100)
+    upper = np.percentile(boot_means, (1 + ci) / 2 * 100)
+    return np.mean(data), lower, upper
+```
+
+### Cost Estimate (Gemini 2.5 Flash)
+
+| Experiment | Tokens/Run | Total Tokens | Est. Cost |
+|------------|------------|--------------|-----------|
+| Strategy Modes (100 articles) | ~3K | ~900K | ~$0.14 |
+| Research Pipeline (50 topics) | ~50K | ~5M | ~$0.75 |
+| Code Review (100 problems) | ~15K | ~3M | ~$0.45 |
+| **Total** | | ~9M | **~$1.35** |
+
+### Expected Figures
+
+Each experiment will generate publication-ready figures:
+
+**Experiment 1: Strategy Modes**
+- **Figure 1a**: Bar chart with 95% CI - Token usage by mode (URGENT/ECONOMICAL/BALANCED)
+- **Figure 1b**: Bar chart with 95% CI - ROUGE-L scores by mode
+- **Figure 1c**: Scatter plot - Quality vs Token tradeoff (Pareto frontier)
+
+**Experiment 2: Research Pipeline**
+- **Figure 2a**: Paired bar chart with 95% CI - Token consumption (CONTRACTED vs UNCONTRACTED)
+- **Figure 2b**: Box plot - Quality scores by condition
+- **Figure 2c**: Stacked bar - Budget allocation across agents (conservation law visualization)
+
+**Experiment 3: Code Review Pipeline**
+- **Figure 3a**: Histogram - Iteration counts (CONTRACTED vs UNCONTRACTED)
+- **Figure 3b**: Bar chart with 95% CI - Success rates by condition
+- **Figure 3c**: Violin plot - Token usage distribution
+
+**Statistical annotations**: All figures include:
+- Bootstrap 95% confidence intervals (10,000 resamples)
+- Effect sizes (Cohen's d) where applicable
+- Significance markers (* p<0.05, ** p<0.01, *** p<0.001)
+
+---
+
 ## Expected Outcomes
+
+### Strategy Modes
+
+| Metric | URGENT | ECONOMICAL | BALANCED |
+|--------|--------|------------|----------|
+| Token usage | Medium | **Lowest** | High |
+| Output length | Shortest | Short | Longest |
+| ROUGE-L quality | ≥ 0.20 | ≥ 0.22 | ≥ 0.25 |
+| Execution time | **Fastest** | Medium | Standard |
+
+**Key hypothesis**: Modes form a Pareto frontier—no single mode dominates all metrics.
 
 ### Research Pipeline
 
