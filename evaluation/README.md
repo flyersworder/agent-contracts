@@ -11,15 +11,15 @@ We provide **three complementary experiments** that demonstrate the value of Age
 
 | Experiment | Complexity | Pattern | Sample Size | Key Demonstration |
 |------------|------------|---------|-------------|-------------------|
-| **1. Strategy Modes** | Single LLM call | ContractExecutor | 100 articles | Budget-aware prompting, strategy optimization |
-| **2. Research Pipeline** | Multi-agent sequential | Researcher → Analyzer → Reporter | 50 topics | Conservation laws, budget delegation |
-| **3. Code Review Pipeline** | Multi-agent iterative | Coder ↔ Reviewer loop | 100 problems | Runaway prevention, iteration limits |
+| **1. Contract Modes** | Single LLM call | ContractExecutor | 100 articles | Satisficing, strategic adaptation (§2, §5.2) |
+| **2. Research Pipeline** | Multi-agent sequential | Researcher → Analyzer → Reporter | 50 topics | Conservation laws, budget delegation (§6) |
+| **3. Code Review Pipeline** | Multi-agent iterative | Coder ↔ Reviewer loop | 100 problems | Runaway prevention, iteration limits (§7) |
 
 ```
                     Complexity Progression
     ┌─────────────────────────────────────────────────────┐
     │                                                     │
-    │   Strategy     Research        Code Review          │
+    │   Contract     Research        Code Review          │
     │    Modes       Pipeline         Pipeline            │
     │      │            │                │                │
     │   Single       Multi-Agent     Multi-Agent          │
@@ -33,36 +33,48 @@ We provide **three complementary experiments** that demonstrate the value of Age
 
 ---
 
-## Experiment 1: Strategy Modes
+## Experiment 1: Contract Modes and Satisficing
 
 **Location:** `strategy_modes/`
 
-This experiment demonstrates **ContractExecutor**, the core execution engine that provides the most comprehensive set of Agent Contracts features for single LLM calls.
+This experiment validates the paper's core claim that **contracts enable quality-resource tradeoffs** (§2: satisficing). By comparing three contract modes, we demonstrate that agents can maintain acceptable quality while adapting their strategy to different resource priorities.
+
+### Theoretical Background
+
+The paper establishes two key principles this experiment tests:
+
+1. **Satisficing** (§2, lines 130-134): "Agents with limited cognitive resources must *satisfice* rather than maximize. Agent Contracts operationalize satisficing by defining acceptable quality thresholds within resource budgets."
+
+2. **Strategic Adaptation** (§5.2, line 437): "The agent can query these values at any time to adapt its strategy as constraints tighten."
+
+Contract modes operationalize these principles by providing different optimization targets.
 
 ### What It Tests
 
 | Paper Section | Concept | How Tested |
 |---------------|---------|------------|
-| §4.1 | Contract definition C = (I,O,S,R,T,Φ,Ψ) | Full contract with all fields |
-| §4.2 | Resource constraints R | Token budgets per mode |
-| §5.2 | Runtime monitoring | Real-time token tracking |
-| §7.2 | Enforcement capabilities | Multi-call budget enforcement |
+| §2 | Satisficing (bounded rationality) | All modes maintain acceptable quality (ROUGE-L ≥ threshold) |
+| §4.1 | Contract definition C = (I,O,S,R,T,Φ,Ψ) | Full contract with resources, temporal, success criteria |
+| §4.2 | Resource constraints R | Token budgets enforced per mode |
+| §5.2 | Strategic adaptation | Modes guide different resource-quality tradeoffs |
 
-### The Three Modes
+### The Three Contract Modes
 
-| Mode | Prompt Guidance | Expected Behavior |
-|------|----------------|-------------------|
-| **URGENT** ⚡ | "Optimize for speed, accept 85% accuracy" | Faster, brief output, may use more tokens |
-| **ECONOMICAL** 💰 | "Minimize tokens, use parametric knowledge" | Concise output, fewest tokens |
-| **BALANCED** ⚖️ | "Work thoroughly, comprehensive results" | Standard quality, baseline tokens |
+These modes implement the paper's satisficing principle with different priorities:
+
+| Mode | Satisficing Strategy | Prompt Guidance |
+|------|---------------------|-----------------|
+| **URGENT** ⚡ | Prioritize time, accept "good enough" | "Optimize for speed, accept 85% accuracy" |
+| **ECONOMICAL** 💰 | Minimize resource consumption | "Minimize tokens, use parametric knowledge" |
+| **BALANCED** ⚖️ | Standard quality-resource tradeoff | "Work thoroughly, comprehensive results" |
 
 ### Task: CNN/DailyMail Summarization
 
-We use the [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) dataset because summarization has a natural **quality-effort tradeoff**:
+We use the [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) dataset because summarization has a natural **quality-effort tradeoff** that makes satisficing observable:
 
-- **URGENT**: Quick summary, key points only
-- **ECONOMICAL**: Concise but complete
-- **BALANCED**: Comprehensive coverage
+- **URGENT**: Quick summary, key points only (satisfices on speed)
+- **ECONOMICAL**: Concise but complete (satisfices on tokens)
+- **BALANCED**: Comprehensive coverage (baseline for comparison)
 
 ### Agent Contracts Components Used
 
@@ -102,16 +114,20 @@ result: ExecutionResult = executor.run(query=f"Summarize: {article}")
 - **Execution time**
 - **Strategy recommendations** (from `recommend_strategy()`)
 
-### Hypothesis
+### Hypothesis: Satisficing in Action
 
 | Metric | URGENT | ECONOMICAL | BALANCED |
 |--------|--------|------------|----------|
 | Token usage | Medium-High | **Lowest** | Medium |
 | Output length | Shortest | Short | Longest |
-| ROUGE-L quality | ≥ 0.20 | ≥ 0.25 | ≥ 0.30 |
-| Speed | Fastest | Medium | Standard |
+| ROUGE-L quality | ≥ 0.20 | ≥ 0.22 | ≥ 0.25 |
+| Speed | **Fastest** | Medium | Standard |
 
-**Key claim**: All three modes maintain acceptable quality while demonstrating different resource tradeoffs.
+**Key claims** (validating paper §2 and §5.2):
+
+1. **Satisficing works**: All modes maintain acceptable quality (ROUGE-L above threshold) while respecting different constraints
+2. **Modes form a Pareto frontier**: No single mode dominates all metrics—each represents a valid tradeoff
+3. **Strategic adaptation is observable**: Different modes produce measurably different resource-quality profiles
 
 ### Usage
 
@@ -383,7 +399,7 @@ We use **bootstrap confidence intervals** for all comparisons. Sample sizes are 
 
 | Experiment | Sample Size | Design | Total Runs | Rationale |
 |------------|-------------|--------|------------|-----------|
-| **Strategy Modes** | 100 articles | Within-subjects (paired) | 300 | Paired design is efficient; detects ~15% token difference |
+| **Contract Modes** | 100 articles | Within-subjects (paired) | 300 | Paired design is efficient; detects ~15% token difference |
 | **Research Pipeline** | 50 topics | Between-subjects | 100 | Expanded from 25 for robust CIs |
 | **Code Review** | 100 problems | Between-subjects | 200 | Binary outcomes need more samples |
 
@@ -412,7 +428,7 @@ def bootstrap_ci(data, n_bootstrap=10000, ci=0.95):
 
 | Experiment | Tokens/Run | Total Tokens | Est. Cost |
 |------------|------------|--------------|-----------|
-| Strategy Modes (100 articles) | ~3K | ~900K | ~$0.14 |
+| Contract Modes (100 articles) | ~3K | ~900K | ~$0.14 |
 | Research Pipeline (50 topics) | ~50K | ~5M | ~$0.75 |
 | Code Review (100 problems) | ~15K | ~3M | ~$0.45 |
 | **Total** | | ~9M | **~$1.35** |
@@ -421,10 +437,10 @@ def bootstrap_ci(data, n_bootstrap=10000, ci=0.95):
 
 Each experiment will generate publication-ready figures:
 
-**Experiment 1: Strategy Modes**
-- **Figure 1a**: Bar chart with 95% CI - Token usage by mode (URGENT/ECONOMICAL/BALANCED)
-- **Figure 1b**: Bar chart with 95% CI - ROUGE-L scores by mode
-- **Figure 1c**: Scatter plot - Quality vs Token tradeoff (Pareto frontier)
+**Experiment 1: Contract Modes (Satisficing)**
+- **Figure 1a**: Bar chart with 95% CI - Token usage by mode (validates §5.2 strategic adaptation)
+- **Figure 1b**: Bar chart with 95% CI - ROUGE-L scores by mode (validates §2 satisficing)
+- **Figure 1c**: Scatter plot - Quality vs Token tradeoff (**Pareto frontier** demonstrating satisficing)
 
 **Experiment 2: Research Pipeline**
 - **Figure 2a**: Paired bar chart with 95% CI - Token consumption (CONTRACTED vs UNCONTRACTED)
@@ -445,16 +461,16 @@ Each experiment will generate publication-ready figures:
 
 ## Expected Outcomes
 
-### Strategy Modes
+### Contract Modes (Satisficing Validation)
 
 | Metric | URGENT | ECONOMICAL | BALANCED |
 |--------|--------|------------|----------|
-| Token usage | Medium | **Lowest** | High |
+| Token usage | Medium | **Lowest** | Higher |
 | Output length | Shortest | Short | Longest |
 | ROUGE-L quality | ≥ 0.20 | ≥ 0.22 | ≥ 0.25 |
 | Execution time | **Fastest** | Medium | Standard |
 
-**Key hypothesis**: Modes form a Pareto frontier—no single mode dominates all metrics.
+**Key hypothesis**: Modes form a **Pareto frontier**—each represents a valid satisficing strategy where no single mode dominates all metrics. This validates the paper's claim that contracts operationalize bounded rationality (§2).
 
 ### Research Pipeline
 
@@ -480,13 +496,14 @@ Each experiment will generate publication-ready figures:
 
 | Claim | Paper Section | Experiment | Evidence |
 |-------|---------------|------------|----------|
+| Satisficing enables quality-resource tradeoffs | §2 | Contract Modes | All modes maintain acceptable ROUGE-L |
+| Agents can adapt strategy to constraints | §5.2 | Contract Modes | Different modes → different profiles |
 | Contract definition enables governance | §4.1 | All three | C = (I,O,S,R,T,Φ,Ψ) with all fields |
-| Resource constraints are enforceable | §4.2, §7.2 | Strategy Modes | Token tracking per mode |
+| Resource constraints are enforceable | §4.2, §7.2 | All three | Token tracking and enforcement |
 | Conservation laws preserve budgets | §6.1 | Research Pipeline | Budget delegation respects Σbᵢ ≤ B |
-| Iteration limits prevent runaway | §4.2, §7.2 | Code Review Pipeline | Loops stop at threshold |
+| Iteration limits prevent runaway | §4.2, §7.2 | Code Review | Loops stop at threshold |
 | Orchestrator-Workers pattern works | §6.2 | Research Pipeline | Parent spawns child contracts |
-| Multi-call enforcement is valuable | §7.2 | All three | Cumulative budget protection |
-| Quality maintained under governance | §4.2 (Φ) | All three | ROUGE-L scores comparable |
+| Quality maintained under governance | §4.2 (Φ) | All three | ROUGE-L and quality scores comparable |
 
 ---
 
@@ -498,7 +515,7 @@ evaluation/
 ├── __init__.py
 ├── indeterminacy_evaluator.py      # NeurIPS 2025 LLM-as-Judge
 │
-├── strategy_modes/                 # Experiment 1: Single-call governance
+├── strategy_modes/                 # Experiment 1: Contract Modes (Satisficing)
 │   ├── __init__.py
 │   ├── tasks.py                    # CNN/DailyMail loader
 │   ├── orchestrator.py             # ContractExecutor wrapper
@@ -510,7 +527,7 @@ evaluation/
 │   ├── agents.py                   # Agent definitions (google_search)
 │   ├── orchestrator.py             # Contracted/Uncontracted pipelines
 │   ├── evaluator.py                # Report quality evaluation
-│   ├── topics.py                   # 25 research topics
+│   ├── topics.py                   # 50 research topics
 │   └── run_experiment.py           # Experiment runner
 │
 └── code_review_pipeline/           # Experiment 3: Multi-agent iterative
