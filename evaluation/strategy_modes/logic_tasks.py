@@ -37,6 +37,7 @@ class LogicTask:
         answer: The correct answer (numeric)
         source: Original source of the problem
         is_simple_numeric: Whether the answer is a simple integer or decimal
+        correctness_count: Number of times model solved correctly (lower = harder)
     """
 
     task_id: str
@@ -44,6 +45,7 @@ class LogicTask:
     answer: str
     source: str = ""
     is_simple_numeric: bool = True
+    correctness_count: int = 0
 
     @classmethod
     def from_dataset_row(cls, row: dict[str, Any], idx: int) -> "LogicTask":
@@ -59,6 +61,7 @@ class LogicTask:
         question = row.get("problem", "")
         answer = str(row.get("answer", ""))
         source = row.get("source", "")
+        correctness_count = row.get("correctness_count", 0)
 
         # Check if answer is a simple numeric value
         is_simple = _is_simple_numeric(answer)
@@ -69,6 +72,7 @@ class LogicTask:
             answer=answer,
             source=source,
             is_simple_numeric=is_simple,
+            correctness_count=correctness_count,
         )
 
     def get_prompt(self) -> str:
@@ -206,6 +210,10 @@ def check_logic_answer(predicted: str, expected: str) -> bool:
 def load_logic_tasks(
     limit: int | None = None,
     numeric_only: bool = True,
+    difficulty: str | None = None,
+    min_length: int | None = None,
+    max_length: int | None = None,
+    sources: list[str] | None = None,
     random_seed: int = 42,
 ) -> list[LogicTask]:
     """Load logic reasoning tasks from OpenR1 dataset.
@@ -213,10 +221,25 @@ def load_logic_tasks(
     Args:
         limit: Maximum number of tasks to return
         numeric_only: If True, only return problems with simple numeric answers
+        difficulty: Filter by difficulty level based on correctness_count:
+            - "hard": correctness_count=1 (model solved only once, 233 problems)
+            - "medium": correctness_count=2 (model solved twice, 757 problems)
+            - "easy": correctness_count>=4 (model solved multiple times, 10 problems)
+            - None: All difficulties (default)
+        min_length: Minimum problem length in characters
+        max_length: Maximum problem length in characters (shorter = simpler)
+        sources: Filter by source (e.g., ["olympiads"]). None = all sources.
         random_seed: Seed for random sampling
 
     Returns:
         List of LogicTask objects
+
+    Example:
+        # Load hard problems (sweet spot for mode differentiation)
+        tasks = load_logic_tasks(limit=20, difficulty="hard")
+
+        # Load medium difficulty problems
+        tasks = load_logic_tasks(limit=20, difficulty="medium")
     """
     from datasets import load_dataset as hf_load_dataset
 
@@ -230,6 +253,24 @@ def load_logic_tasks(
 
         # Filter by numeric answer if requested
         if numeric_only and not task.is_simple_numeric:
+            continue
+
+        # Filter by difficulty (based on correctness_count)
+        if difficulty is not None and (
+            (difficulty == "hard" and task.correctness_count != 1)
+            or (difficulty == "medium" and task.correctness_count != 2)
+            or (difficulty == "easy" and task.correctness_count < 4)
+        ):
+            continue
+
+        # Filter by problem length
+        if min_length is not None and len(task.question) < min_length:
+            continue
+        if max_length is not None and len(task.question) > max_length:
+            continue
+
+        # Filter by source
+        if sources is not None and task.source not in sources:
             continue
 
         tasks.append(task)

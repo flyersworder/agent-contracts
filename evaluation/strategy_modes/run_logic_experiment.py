@@ -36,7 +36,10 @@ def run_experiment(
     n_problems: int = 20,
     modes: list[str] | None = None,
     model: str = "gemini/gemini-2.5-flash",
-    token_budget: int = 8000,
+    token_budget: int = 20000,
+    difficulty: str | None = None,
+    min_length: int | None = None,
+    max_length: int | None = None,
     random_seed: int = 42,
     output_dir: str = "results/strategy_modes",
     verbose: bool = True,
@@ -49,6 +52,13 @@ def run_experiment(
         modes: List of modes to test (default: all three)
         model: LLM model to use
         token_budget: Token budget per task
+        difficulty: Filter by difficulty based on correctness_count:
+            - "hard": correctness_count=1 (model barely solved, 233 problems)
+            - "medium": correctness_count=2 (model solved twice, 757 problems)
+            - "easy": correctness_count>=4 (model solved easily, 10 problems)
+            - None: All difficulties (default)
+        min_length: Minimum problem length (filters out trivial problems).
+        max_length: Maximum problem length (shorter = simpler). None = no limit.
         random_seed: Random seed for reproducibility
         output_dir: Directory for results
         verbose: If True, print progress
@@ -73,15 +83,18 @@ def run_experiment(
             "dataset": "openr1_logic_puzzles",
             "timestamp": datetime.now().isoformat(),
             "n_problems": n_problems,
+            "difficulty": difficulty,
+            "min_length": min_length,
+            "max_length": max_length,
             "modes": modes,
             "model": model,
             "token_budget": token_budget,
             "seed": random_seed,
             "enable_timeout": enable_timeout,
             "timeout_config": {
-                "urgent": 15.0,
-                "economical": 30.0,
-                "balanced": 45.0,
+                "urgent": 30.0,
+                "economical": 60.0,
+                "balanced": 90.0,
             }
             if enable_timeout
             else None,
@@ -96,15 +109,31 @@ def run_experiment(
     }
 
     # Load tasks
-    print(f"Loading {n_problems} logic problems...")
+    filter_info = []
+    if difficulty:
+        filter_info.append(f"difficulty={difficulty}")
+    if min_length and max_length:
+        filter_info.append(f"{min_length}-{max_length} chars")
+    elif max_length:
+        filter_info.append(f"max {max_length} chars")
+    elif min_length:
+        filter_info.append(f"min {min_length} chars")
+    filter_str = f" ({', '.join(filter_info)})" if filter_info else ""
+    print(f"Loading {n_problems} logic problems{filter_str}...")
     tasks = load_logic_tasks(
         limit=n_problems,
         numeric_only=True,
+        difficulty=difficulty,
+        min_length=min_length,
+        max_length=max_length,
         random_seed=random_seed,
     )
     stats = get_logic_task_statistics(tasks)
     print(f"Loaded {stats['total']} problems")
     print(f"  Sources: {stats.get('sources', {})}")
+    if tasks:
+        lengths = [len(t.question) for t in tasks]
+        print(f"  Problem lengths: {min(lengths)}-{max(lengths)} chars")
     print()
 
     # Update results with actual count
@@ -281,8 +310,14 @@ def main() -> None:
     parser.add_argument(
         "--token-budget",
         type=int,
-        default=8000,
-        help="Token budget per task (default: 8000)",
+        default=20000,
+        help="Token budget per task (default: 20000)",
+    )
+    parser.add_argument(
+        "--difficulty",
+        choices=["hard", "medium", "easy"],
+        default=None,
+        help="Filter by difficulty: hard (correctness=1), medium (correctness=2), easy (correctness>=4)",
     )
     parser.add_argument(
         "--seed",
@@ -305,6 +340,18 @@ def main() -> None:
         action="store_true",
         help="Disable mode-specific timeout enforcement",
     )
+    parser.add_argument(
+        "--min-length",
+        type=int,
+        default=None,
+        help="Min problem length in chars (filters trivial problems). Try 200 for medium+.",
+    )
+    parser.add_argument(
+        "--max-length",
+        type=int,
+        default=None,
+        help="Max problem length in chars (shorter=simpler). Try 400 for medium.",
+    )
 
     args = parser.parse_args()
 
@@ -315,6 +362,9 @@ def main() -> None:
         modes=modes,
         model=args.model,
         token_budget=args.token_budget,
+        difficulty=args.difficulty,
+        min_length=args.min_length,
+        max_length=args.max_length,
         random_seed=args.seed,
         output_dir=args.output_dir,
         verbose=not args.quiet,

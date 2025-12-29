@@ -220,3 +220,6 @@ benchmarks/quality_validation/extended_samples/
 paper/
 .DS_Store
 results/
+
+# Generated figures (PDFs can be regenerated from code)
+*.pdf

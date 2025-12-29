@@ -125,16 +125,19 @@ class LogicModesRunner:
     comparing behavior across URGENT, ECONOMICAL, and BALANCED modes.
     """
 
-    # Default budgets - moderate for logic problems
-    DEFAULT_TOKEN_BUDGET = 8000
+    # Default budgets - generous for logic problems with deep reasoning
+    # BALANCED mode with "medium" reasoning effort can use 15,000+ tokens
+    DEFAULT_TOKEN_BUDGET = 20000
     DEFAULT_COST_BUDGET = 0.50
     DEFAULT_TIME_BUDGET = timedelta(minutes=5)
 
-    # Mode-specific timeout configuration (shorter for logic vs competition math)
+    # Mode-specific timeout configuration
+    # Note: These are API response timeouts, not total execution time limits.
+    # Reasoning models need more time for internal thinking.
     MODE_TIMEOUTS: ClassVar[dict[str, float]] = {
-        "urgent": 15.0,
-        "economical": 30.0,
-        "balanced": 45.0,
+        "urgent": 30.0,  # Fast response, minimal reasoning
+        "economical": 60.0,  # Moderate reasoning allowed
+        "balanced": 90.0,  # Full reasoning depth
     }
 
     # Mode-specific reasoning effort
@@ -285,6 +288,19 @@ class LogicModesRunner:
                 print(f"  [Error] {e}")
 
         result.execution_time = time.time() - start_time
+
+        # Heuristic timeout detection: if tokens=0 and execution time is near timeout,
+        # the API likely timed out without raising an exception
+        if (
+            not result.success
+            and result.tokens_used == 0
+            and timeout is not None
+            and result.execution_time >= timeout * 0.95  # Within 5% of timeout
+        ):
+            result.timed_out = True
+            if verbose and not result.error:
+                print(f"  [Timeout] API returned empty response at {result.execution_time:.1f}s")
+
         return result
 
 
