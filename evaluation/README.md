@@ -5,13 +5,21 @@ This folder contains the evaluation pipelines for the **COINE 2026** conference 
 
 **Paper location**: `paper/paper.qmd` (Quarto source) → `paper/output/paper.pdf` (compiled)
 
+**Target Venue**: [COINE 2026](https://coin-workshop.github.io/coine-2026-paphos/) @ AAMAS 2026, Paphos, Cyprus
+
+**COINE Topics Addressed**:
+- Normative multi-agent systems (resource constraints as enforceable norms)
+- LLMs and generative AI governance
+- Experimental validation of coordination technologies
+- Tools, prototypes, and working systems
+
 ## Overview
 
 We provide **three complementary experiments** that demonstrate the value of Agent Contracts at different levels of complexity:
 
 | Experiment | Complexity | Pattern | Sample Size | Key Demonstration |
 |------------|------------|---------|-------------|-------------------|
-| **1. Contract Modes** | Single LLM call | ContractExecutor | 100 articles | Satisficing, strategic adaptation (§2, §5.2) |
+| **1. Contract Modes** | Single LLM call | ContractExecutor | 100 articles | Contract governance, runtime monitoring (§4, §5) |
 | **2. Research Pipeline** | Multi-agent sequential | Researcher → Analyzer → Reporter | 50 topics | Conservation laws, budget delegation (§6) |
 | **3. Code Review Pipeline** | Multi-agent iterative | Coder ↔ Reviewer loop | 100 problems | Runaway prevention, iteration limits (§7) |
 
@@ -33,48 +41,78 @@ We provide **three complementary experiments** that demonstrate the value of Age
 
 ---
 
-## Experiment 1: Contract Modes and Satisficing
+## Claim-Evidence Mapping
+
+The paper makes specific claims that these experiments validate. This matrix provides reviewers with a clear mapping:
+
+| # | Paper Claim | Section | Experiment | Expected Evidence |
+|---|-------------|---------|------------|-------------------|
+| 1 | **Contract definition is operational** | §4.1 | Contract Modes | Different `C = (I,O,S,R,T,Φ,Ψ)` configs → different behaviors |
+| 2 | **Resource constraints are enforceable** | §4.2 | All three | Token budgets tracked and respected |
+| 3 | **Runtime monitoring enables adaptation** | §5.2 | Contract Modes | Modes produce distinct resource profiles |
+| 4 | **Conservation laws preserve budgets** | §6.1 | Research Pipeline | Σbᵢ ≤ B enforced; 0 violations |
+| 5 | **Orchestrator-Workers pattern works** | §6.2 | Research Pipeline | 3-agent hierarchy with delegation |
+| 6 | **Iteration limits prevent runaway** | §7.2 | Code Review | Contracted stops at limit; uncontracted may spiral |
+| 7 | **Contracts address the $47K problem** | §1 | Code Review | 100% contracted compliance vs ~60% uncontracted |
+| 8 | **Quality maintained under governance** | §4.2 | All three | ROUGE-L / quality scores comparable across conditions |
+
+### Normative Governance Perspective
+
+Agent Contracts implement resource constraints as **enforceable norms** (directly relevant to COINE):
+
+| Norm Type | Contract Component | Example | Enforcement |
+|-----------|-------------------|---------|-------------|
+| **Prohibition** | Resource constraint R | "Agent MUST NOT exceed 100K tokens" | Hard limit, VIOLATED state |
+| **Obligation** | Conservation law | "Orchestrator MUST ensure Σbᵢ ≤ B" | Allocation-time check |
+| **Permission** | Skill set S | "Agent MAY use web_search tool" | Tool access control |
+| **Goal** | Success criteria Φ | "Agent SHOULD achieve accuracy ≥ 0.8" | Fulfillment evaluation |
+
+The experiments validate that these norms are enforceable in practice with LLM-based agents.
+
+---
+
+## Experiment 1: Contract Definition Operationalization
 
 **Location:** `strategy_modes/`
 
-This experiment validates the paper's core claim that **contracts enable quality-resource tradeoffs** (§2: satisficing). By comparing three contract modes, we demonstrate that agents can maintain acceptable quality while adapting their strategy to different resource priorities.
+This experiment validates that the **formal contract definition is operationally meaningful**—that different contract configurations `C = (I,O,S,R,T,Φ,Ψ)` produce measurably different agent behaviors. By comparing three contract modes (URGENT, ECONOMICAL, BALANCED), we demonstrate that the framework successfully governs LLM agent execution through explicit normative constraints.
 
 ### Theoretical Background
 
-The paper establishes two key principles this experiment tests:
+The paper's core contribution is the formal contract definition (§4). This experiment tests whether that formalism translates to observable governance:
 
-1. **Satisficing** (§2, lines 130-134): "Agents with limited cognitive resources must *satisfice* rather than maximize. Agent Contracts operationalize satisficing by defining acceptable quality thresholds within resource budgets."
+1. **Contract as Normative Specification** (§4.1): The 7-tuple `C = (I,O,S,R,T,Φ,Ψ)` defines enforceable norms. Different configurations should produce different behaviors—if they don't, the formalism is vacuous.
 
-2. **Strategic Adaptation** (§5.2, line 437): "The agent can query these values at any time to adapt its strategy as constraints tighten."
+2. **Runtime Monitoring** (§5.2, line 437): "The agent can query these values at any time to adapt its strategy as constraints tighten." Contract modes provide different resource-quality guidance that agents can observe and respond to.
 
-Contract modes operationalize these principles by providing different optimization targets.
+3. **Bounded Rationality Context** (§2): The framework operationalizes Simon's satisficing principle—agents work within constraints rather than optimizing unboundedly.
 
 ### What It Tests
 
 | Paper Section | Concept | How Tested |
 |---------------|---------|------------|
-| §2 | Satisficing (bounded rationality) | All modes maintain acceptable quality (ROUGE-L ≥ threshold) |
-| §4.1 | Contract definition C = (I,O,S,R,T,Φ,Ψ) | Full contract with resources, temporal, success criteria |
-| §4.2 | Resource constraints R | Token budgets enforced per mode |
-| §5.2 | Strategic adaptation | Modes guide different resource-quality tradeoffs |
+| §4.1 | Contract definition C = (I,O,S,R,T,Φ,Ψ) | Full contract instantiated with all components per mode |
+| §4.2 | Resource constraints R | Token budgets tracked and reported |
+| §5.2 | Runtime monitoring | Different modes → different utilization patterns |
+| §2 | Bounded rationality (theoretical context) | Quality maintained under explicit constraints |
 
 ### The Three Contract Modes
 
-These modes implement the paper's satisficing principle with different priorities:
+These modes represent different normative configurations—each defines distinct success criteria Φ and resource priorities R:
 
-| Mode | Satisficing Strategy | Prompt Guidance |
-|------|---------------------|-----------------|
-| **URGENT** ⚡ | Prioritize time, accept "good enough" | "Optimize for speed, accept 85% accuracy" |
-| **ECONOMICAL** 💰 | Minimize resource consumption | "Minimize tokens, use parametric knowledge" |
-| **BALANCED** ⚖️ | Standard quality-resource tradeoff | "Work thoroughly, comprehensive results" |
+| Mode | Normative Configuration | Governance Effect |
+|------|------------------------|-------------------|
+| **URGENT** ⚡ | Φ prioritizes speed; R permits higher token use | Agent optimizes for rapid completion |
+| **ECONOMICAL** 💰 | Φ prioritizes efficiency; R emphasizes token conservation | Agent minimizes resource consumption |
+| **BALANCED** ⚖️ | Φ weights quality and efficiency equally | Agent balances thoroughness with cost |
 
 ### Task: CNN/DailyMail Summarization
 
-We use the [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) dataset because summarization has a natural **quality-effort tradeoff** that makes satisficing observable:
+We use the [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) dataset because summarization provides clear, measurable outcomes for validating that **contracts govern behavior**:
 
-- **URGENT**: Quick summary, key points only (satisfices on speed)
-- **ECONOMICAL**: Concise but complete (satisfices on tokens)
-- **BALANCED**: Comprehensive coverage (baseline for comparison)
+- **URGENT**: Produces shorter summaries faster (governance visible in output length + time)
+- **ECONOMICAL**: Minimizes token consumption (governance visible in resource tracking)
+- **BALANCED**: Produces thorough summaries (baseline for quality comparison)
 
 ### Agent Contracts Components Used
 
@@ -114,7 +152,7 @@ result: ExecutionResult = executor.run(query=f"Summarize: {article}")
 - **Execution time**
 - **Strategy recommendations** (from `recommend_strategy()`)
 
-### Hypothesis: Satisficing in Action
+### Hypothesis: Contract Governance is Observable
 
 | Metric | URGENT | ECONOMICAL | BALANCED |
 |--------|--------|------------|----------|
@@ -123,11 +161,11 @@ result: ExecutionResult = executor.run(query=f"Summarize: {article}")
 | ROUGE-L quality | ≥ 0.20 | ≥ 0.22 | ≥ 0.25 |
 | Speed | **Fastest** | Medium | Standard |
 
-**Key claims** (validating paper §2 and §5.2):
+**Key claims** (validating paper §4 and §5):
 
-1. **Satisficing works**: All modes maintain acceptable quality (ROUGE-L above threshold) while respecting different constraints
-2. **Modes form a Pareto frontier**: No single mode dominates all metrics—each represents a valid tradeoff
-3. **Strategic adaptation is observable**: Different modes produce measurably different resource-quality profiles
+1. **Contracts govern behavior**: Different contract configurations produce statistically distinguishable behavioral profiles
+2. **The formalism is not vacuous**: Mode differences are observable in tokens, output length, and timing—the 7-tuple has real effect
+3. **Quality is maintained**: Governance doesn't degrade output quality below acceptable thresholds (bounded rationality in practice)
 
 ### Usage
 
@@ -366,16 +404,18 @@ score = evaluator.evaluate(question="Research topic", answer=report_text)
 
 ## Comparison: CONTRACTED vs UNCONTRACTED
 
+The core experimental manipulation is the presence or absence of **normative governance**. Contracted agents operate under explicit norms; uncontracted agents have only implicit safety limits.
+
 ### What Changes Between Conditions
 
 | Element | CONTRACTED | UNCONTRACTED |
 |---------|-----------|--------------|
-| Contract definition | ✅ Full contract with R, T, Φ | ❌ None |
-| Token limits | ✅ Per-agent budgets | ❌ Unlimited |
-| Iteration limits | ✅ Prevents runaway loops | ❌ Safety limit only |
-| Conservation laws | ✅ Σbᵢ ≤ B enforced | ❌ N/A |
-| Budget-aware prompts | ✅ Agents know constraints | ❌ Standard prompts |
-| Cost tracking | ✅ Real-time monitoring | ❌ Post-hoc only |
+| **Normative specification** | ✅ Full contract C = (I,O,S,R,T,Φ,Ψ) | ❌ None |
+| **Resource norms** | ✅ Per-agent token budgets (prohibition) | ❌ Unlimited |
+| **Iteration norms** | ✅ Hard limits prevent runaway (prohibition) | ❌ Soft safety limit only |
+| **Conservation norms** | ✅ Σbᵢ ≤ B enforced (obligation) | ❌ N/A |
+| **Budget awareness** | ✅ Agents know constraints | ❌ Standard prompts |
+| **Monitoring** | ✅ Real-time norm compliance tracking | ❌ Post-hoc only |
 
 ### What Stays Constant (Controls)
 
@@ -437,10 +477,10 @@ def bootstrap_ci(data, n_bootstrap=10000, ci=0.95):
 
 Each experiment will generate publication-ready figures:
 
-**Experiment 1: Contract Modes (Satisficing)**
-- **Figure 1a**: Bar chart with 95% CI - Token usage by mode (validates §5.2 strategic adaptation)
-- **Figure 1b**: Bar chart with 95% CI - ROUGE-L scores by mode (validates §2 satisficing)
-- **Figure 1c**: Scatter plot - Quality vs Token tradeoff (**Pareto frontier** demonstrating satisficing)
+**Experiment 1: Contract Modes (Governance Validation)**
+- **Figure 1a**: Bar chart with 95% CI - Token usage by mode (validates §5 runtime monitoring)
+- **Figure 1b**: Bar chart with 95% CI - ROUGE-L scores by mode (validates quality maintenance)
+- **Figure 1c**: Scatter plot - Quality vs Token tradeoff (demonstrates governance produces distinct behavioral profiles)
 
 **Experiment 2: Research Pipeline**
 - **Figure 2a**: Paired bar chart with 95% CI - Token consumption (CONTRACTED vs UNCONTRACTED)
@@ -461,7 +501,7 @@ Each experiment will generate publication-ready figures:
 
 ## Expected Outcomes
 
-### Contract Modes (Satisficing Validation)
+### Contract Modes (Governance Validation)
 
 | Metric | URGENT | ECONOMICAL | BALANCED |
 |--------|--------|------------|----------|
@@ -470,7 +510,7 @@ Each experiment will generate publication-ready figures:
 | ROUGE-L quality | ≥ 0.20 | ≥ 0.22 | ≥ 0.25 |
 | Execution time | **Fastest** | Medium | Standard |
 
-**Key hypothesis**: Modes form a **Pareto frontier**—each represents a valid satisficing strategy where no single mode dominates all metrics. This validates the paper's claim that contracts operationalize bounded rationality (§2).
+**Key hypothesis**: Different contract configurations produce **statistically distinguishable behavioral profiles**. This validates the paper's core claim that the formal contract definition `C = (I,O,S,R,T,Φ,Ψ)` provides operational governance—the formalism has measurable effect on agent behavior (§4).
 
 ### Research Pipeline
 
@@ -496,14 +536,45 @@ Each experiment will generate publication-ready figures:
 
 | Claim | Paper Section | Experiment | Evidence |
 |-------|---------------|------------|----------|
-| Satisficing enables quality-resource tradeoffs | §2 | Contract Modes | All modes maintain acceptable ROUGE-L |
-| Agents can adapt strategy to constraints | §5.2 | Contract Modes | Different modes → different profiles |
-| Contract definition enables governance | §4.1 | All three | C = (I,O,S,R,T,Φ,Ψ) with all fields |
+| Contract definition enables governance | §4.1 | All three | C = (I,O,S,R,T,Φ,Ψ) produces measurable behavior changes |
 | Resource constraints are enforceable | §4.2, §7.2 | All three | Token tracking and enforcement |
+| Runtime monitoring enables adaptation | §5.2 | Contract Modes | Different modes → different resource profiles |
 | Conservation laws preserve budgets | §6.1 | Research Pipeline | Budget delegation respects Σbᵢ ≤ B |
-| Iteration limits prevent runaway | §4.2, §7.2 | Code Review | Loops stop at threshold |
 | Orchestrator-Workers pattern works | §6.2 | Research Pipeline | Parent spawns child contracts |
+| Iteration limits prevent runaway | §4.2, §7.2 | Code Review | Loops stop at threshold |
+| Contracts prevent runaway execution | §1, §7.2 | Code Review | The $47K problem addressed |
 | Quality maintained under governance | §4.2 (Φ) | All three | ROUGE-L and quality scores comparable |
+
+---
+
+## Scope and Limitations
+
+### What These Experiments Validate
+
+These experiments focus on **resource governance**—the core contribution of Agent Contracts:
+- Token budgets, cost limits, iteration bounds
+- Conservation laws for multi-agent delegation
+- Runtime monitoring and enforcement
+
+### What Is Not Covered (Future Work)
+
+COINE's scope includes **ethics** alongside norms and institutions. This evaluation does not address:
+
+| Extension | Description | Status |
+|-----------|-------------|--------|
+| **Safety constraints** | Output filtering, harmful content prevention | Future work |
+| **Privacy constraints** | Data handling limits, PII protection | Future work |
+| **Ethical constraints** | Value alignment, fairness bounds | Future work |
+| **Institutional context** | Organizational policies, approval workflows | Future work |
+
+These extensions represent natural directions for the Agent Contracts framework but are beyond the scope of this initial empirical validation.
+
+### Experimental Limitations
+
+- **Single model family**: All experiments use Gemini models; generalization to other LLMs is untested
+- **English only**: All tasks and evaluation in English
+- **Simulated costs**: Token costs are tracked but not actual billing (would require production deployment)
+- **Limited task domains**: Summarization, research reports, and coding—other domains may differ
 
 ---
 
@@ -515,7 +586,7 @@ evaluation/
 ├── __init__.py
 ├── indeterminacy_evaluator.py      # NeurIPS 2025 LLM-as-Judge
 │
-├── strategy_modes/                 # Experiment 1: Contract Modes (Satisficing)
+├── strategy_modes/                 # Experiment 1: Contract Modes (Governance)
 │   ├── __init__.py
 │   ├── tasks.py                    # CNN/DailyMail loader
 │   ├── orchestrator.py             # ContractExecutor wrapper
