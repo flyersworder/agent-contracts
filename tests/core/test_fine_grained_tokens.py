@@ -51,7 +51,7 @@ class TestReasoningEffort:
 
     def test_valid_reasoning_efforts(self) -> None:
         """Test that valid reasoning efforts are accepted."""
-        for effort in ["low", "medium", "high"]:
+        for effort in ["none", "low", "medium", "high"]:
             constraints = ResourceConstraints(reasoning_tokens=5000, reasoning_effort=effort)
             assert constraints.reasoning_effort == effort
 

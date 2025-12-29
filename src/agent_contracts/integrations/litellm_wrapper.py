@@ -196,6 +196,24 @@ class ContractedLLM:
         # Also track input tokens
         self.enforcer.monitor.usage.add_tokens(count=input_tokens, reasoning=0, text=0)
 
+        # Extract reasoning_content from reasoning models (Gemini 2.5, Claude, o1, etc.)
+        # LiteLLM standardizes this in message.reasoning_content
+        try:
+            choices = response.get("choices", [])
+            if choices:
+                message = choices[0].get("message", {})
+                # Check for reasoning_content (standardized by LiteLLM)
+                reasoning_content = None
+                if hasattr(message, "reasoning_content"):
+                    reasoning_content = message.reasoning_content
+                elif isinstance(message, dict):
+                    reasoning_content = message.get("reasoning_content")
+
+                if reasoning_content:
+                    self.enforcer.monitor.usage.reasoning_content = str(reasoning_content)
+        except (AttributeError, IndexError, TypeError):
+            pass  # No reasoning content available
+
         # Emit completion event
         self.enforcer._emit_event(
             EnforcementEvent(

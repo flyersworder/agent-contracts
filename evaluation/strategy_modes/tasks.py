@@ -62,14 +62,19 @@ class SummarizationTask:
     def get_prompt(self) -> str:
         """Generate the summarization prompt.
 
+        Based on CNN/DailyMail official task description:
+        - 3-4 bullet points highlighting key aspects
+        - "Compact, almost telegraphic style"
+        - Significant compression through shortening and paraphrasing
+
         Returns:
             Formatted prompt string for the LLM
         """
-        return f"""Summarize the following news article:
+        return f"""Summarize the following news article in 3-4 bullet points:
 
 {self.article}
 
-Provide a clear, concise summary capturing the key points."""
+Write in a compact, telegraphic style. Each bullet should highlight one key aspect of the story."""
 
 
 def load_tasks(

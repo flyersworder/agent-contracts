@@ -188,8 +188,9 @@ class ResourceConstraints:
             )
 
         # Validate reasoning_effort values
+        # "none" disables thinking entirely (supported by Gemini 2.5 Flash)
         if self.reasoning_effort is not None:
-            valid_efforts = {"low", "medium", "high"}
+            valid_efforts = {"none", "low", "medium", "high"}
             if self.reasoning_effort not in valid_efforts:
                 raise ValueError(
                     f"reasoning_effort must be one of {valid_efforts}, "

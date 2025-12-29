@@ -443,21 +443,30 @@ class ContractExecutor:
         - Token/cost tracking
 
         Returns:
-            Dict of LiteLLM parameters (temperature only, rest handled by ContractedLLM)
+            Dict of LiteLLM parameters (temperature, timeout; rest handled by ContractedLLM)
         """
-        return {
+        params: dict[str, Any] = {
             "temperature": self.execution_config.temperature,
         }
+
+        # Add timeout if specified in execution config
+        if self.execution_config.timeout_seconds is not None:
+            params["timeout"] = self.execution_config.timeout_seconds
+
+        return params
 
     def _get_usage_dict(self) -> dict[str, Any]:
         """Get current resource usage as a dictionary.
 
         Returns:
-            Dict with usage metrics
+            Dict with usage metrics including reasoning token breakdown and content
         """
         usage = self.resource_monitor.usage
         return {
             "tokens": usage.tokens,
+            "reasoning_tokens": usage.reasoning_tokens,
+            "text_tokens": usage.text_tokens,
+            "reasoning_content": usage.reasoning_content,
             "api_calls": usage.api_calls,
             "web_searches": usage.web_searches,
             "tool_invocations": usage.tool_invocations,

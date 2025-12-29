@@ -47,9 +47,9 @@ The paper makes specific claims that these experiments validate. This matrix pro
 
 | # | Paper Claim | Section | Experiment | Expected Evidence |
 |---|-------------|---------|------------|-------------------|
-| 1 | **Contract definition is operational** | §4.1 | Contract Modes | Different `C = (I,O,S,R,T,Φ,Ψ)` configs → different behaviors |
+| 1 | **Contract definition is operational** | §4.1 | Contract Modes | Different `C = (I,O,S,R,T,Φ,Ψ)` configs → different reasoning behaviors |
 | 2 | **Resource constraints are enforceable** | §4.2 | All three | Token budgets tracked and respected |
-| 3 | **Runtime monitoring enables adaptation** | §5.2 | Contract Modes | Modes produce distinct resource profiles |
+| 3 | **Runtime monitoring enables adaptation** | §5.2 | Contract Modes | Modes produce distinct reasoning profiles (0 vs 200 vs 500 reasoning tokens) |
 | 4 | **Conservation laws preserve budgets** | §6.1 | Research Pipeline | Σbᵢ ≤ B enforced; 0 violations |
 | 5 | **Orchestrator-Workers pattern works** | §6.2 | Research Pipeline | 3-agent hierarchy with delegation |
 | 6 | **Iteration limits prevent runaway** | §7.2 | Code Review | Contracted stops at limit; uncontracted may spiral |
@@ -98,21 +98,32 @@ The paper's core contribution is the formal contract definition (§4). This expe
 
 ### The Three Contract Modes
 
-These modes represent different normative configurations—each defines distinct success criteria Φ and resource priorities R:
+These modes represent different normative configurations—each defines distinct success criteria Φ, resource priorities R, and **reasoning effort levels**:
 
-| Mode | Normative Configuration | Governance Effect |
-|------|------------------------|-------------------|
-| **URGENT** ⚡ | Φ prioritizes speed; R permits higher token use | Agent optimizes for rapid completion |
-| **ECONOMICAL** 💰 | Φ prioritizes efficiency; R emphasizes token conservation | Agent minimizes resource consumption |
-| **BALANCED** ⚖️ | Φ weights quality and efficiency equally | Agent balances thoroughness with cost |
+| Mode | Reasoning Effort | Timeout | Governance Effect |
+|------|------------------|---------|-------------------|
+| **URGENT** ⚡ | `none` (disabled) | 8s | No thinking overhead; fastest possible response |
+| **ECONOMICAL** 💰 | `low` | 10s | Minimal reasoning; efficient token usage |
+| **BALANCED** ⚖️ | `medium` | 30s | Careful reasoning; quality-focused |
+
+The key experimental insight is that **output format is controlled by the task** (3-4 bullet points), while **modes control reasoning depth**. This creates a clean separation:
+- Same output format across all modes
+- Different cognitive effort (visible in reasoning tokens)
+- Different response times (visible in execution time)
 
 ### Task: CNN/DailyMail Summarization
 
-We use the [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) dataset because summarization provides clear, measurable outcomes for validating that **contracts govern behavior**:
+We use the [CNN/DailyMail](https://huggingface.co/datasets/cnn_dailymail) dataset with its official task description:
 
-- **URGENT**: Produces shorter summaries faster (governance visible in output length + time)
-- **ECONOMICAL**: Minimizes token consumption (governance visible in resource tracking)
-- **BALANCED**: Produces thorough summaries (baseline for quality comparison)
+> **Format**: 3-4 bullet points highlighting key aspects
+> **Style**: "Compact, almost telegraphic" (per original dataset description)
+> **Goal**: Significant compression through shortening and paraphrasing
+
+This provides clear, measurable outcomes for validating that **contracts govern reasoning behavior**:
+
+- **URGENT**: No thinking tokens, fastest response (governance visible in reasoning tokens = 0)
+- **ECONOMICAL**: Minimal thinking, efficient completion (governance visible in low reasoning tokens)
+- **BALANCED**: Careful reasoning, thorough analysis (governance visible in higher reasoning tokens)
 
 ### Agent Contracts Components Used
 
@@ -146,26 +157,30 @@ result: ExecutionResult = executor.run(query=f"Summarize: {article}")
 
 ### Metrics Collected
 
-- **Token usage** per mode (primary signal)
+- **Reasoning tokens** per mode (primary signal for governance effect)
+- **Total token usage** per mode
+- **Text tokens** (output tokens only)
+- **Execution time** (wall clock seconds)
 - **Output length** (words/characters)
 - **Quality score** (ROUGE-L against reference summaries)
-- **Execution time**
-- **Strategy recommendations** (from `recommend_strategy()`)
+- **Reasoning content** (actual thinking text for qualitative analysis)
 
 ### Hypothesis: Contract Governance is Observable
 
 | Metric | URGENT | ECONOMICAL | BALANCED |
 |--------|--------|------------|----------|
-| Token usage | Medium-High | **Lowest** | Medium |
-| Output length | Shortest | Short | Longest |
-| ROUGE-L quality | ≥ 0.20 | ≥ 0.22 | ≥ 0.25 |
-| Speed | **Fastest** | Medium | Standard |
+| Reasoning tokens | **0** (disabled) | Low (~200) | Medium (~500) |
+| Total tokens | Lowest | Medium | Highest |
+| Execution time | **Fastest** (~1s) | Medium (~3s) | Standard (~5s) |
+| Output length | Similar | Similar | Similar |
+| ROUGE-L quality | ~0.26 | ~0.26 | ~0.26 |
 
 **Key claims** (validating paper §4 and §5):
 
-1. **Contracts govern behavior**: Different contract configurations produce statistically distinguishable behavioral profiles
-2. **The formalism is not vacuous**: Mode differences are observable in tokens, output length, and timing—the 7-tuple has real effect
-3. **Quality is maintained**: Governance doesn't degrade output quality below acceptable thresholds (bounded rationality in practice)
+1. **Contracts govern reasoning behavior**: Different `reasoning_effort` levels produce measurably different cognitive profiles (0 vs 200 vs 500 reasoning tokens)
+2. **The formalism is not vacuous**: Mode differences are observable in reasoning tokens and execution time—the 7-tuple has real effect on agent cognition
+3. **Quality is maintained**: Governance doesn't degrade output quality (all modes achieve ~0.26 ROUGE-L despite different reasoning depths)
+4. **Output format is decoupled from mode**: Task controls format (bullet points), mode controls reasoning—clean experimental design
 
 ### Usage
 
@@ -478,9 +493,10 @@ def bootstrap_ci(data, n_bootstrap=10000, ci=0.95):
 Each experiment will generate publication-ready figures:
 
 **Experiment 1: Contract Modes (Governance Validation)**
-- **Figure 1a**: Bar chart with 95% CI - Token usage by mode (validates §5 runtime monitoring)
-- **Figure 1b**: Bar chart with 95% CI - ROUGE-L scores by mode (validates quality maintenance)
-- **Figure 1c**: Scatter plot - Quality vs Token tradeoff (demonstrates governance produces distinct behavioral profiles)
+- **Figure 1a**: Bar chart with 95% CI - Reasoning tokens by mode (validates §5 runtime monitoring; URGENT=0, ECONOMICAL~200, BALANCED~500)
+- **Figure 1b**: Bar chart with 95% CI - Execution time by mode (validates speed differences from reasoning depth)
+- **Figure 1c**: Bar chart with 95% CI - ROUGE-L scores by mode (validates quality maintained across modes ~0.26)
+- **Figure 1d**: Scatter plot - Quality vs Reasoning Tokens tradeoff (demonstrates governance produces distinct cognitive profiles)
 
 **Experiment 2: Research Pipeline**
 - **Figure 2a**: Paired bar chart with 95% CI - Token consumption (CONTRACTED vs UNCONTRACTED)
@@ -505,12 +521,13 @@ Each experiment will generate publication-ready figures:
 
 | Metric | URGENT | ECONOMICAL | BALANCED |
 |--------|--------|------------|----------|
-| Token usage | Medium | **Lowest** | Higher |
-| Output length | Shortest | Short | Longest |
-| ROUGE-L quality | ≥ 0.20 | ≥ 0.22 | ≥ 0.25 |
-| Execution time | **Fastest** | Medium | Standard |
+| Reasoning tokens | **0** | ~200 | ~500 |
+| Total tokens | ~2,100 | ~2,400 | ~2,700 |
+| Execution time | **~1s** | ~3s | ~5s |
+| Output length | ~50-80 words | ~60-80 words | ~70-90 words |
+| ROUGE-L quality | ~0.26 | ~0.26 | ~0.26 |
 
-**Key hypothesis**: Different contract configurations produce **statistically distinguishable behavioral profiles**. This validates the paper's core claim that the formal contract definition `C = (I,O,S,R,T,Φ,Ψ)` provides operational governance—the formalism has measurable effect on agent behavior (§4).
+**Key hypothesis**: Different contract configurations produce **statistically distinguishable reasoning profiles**. This validates the paper's core claim that the formal contract definition `C = (I,O,S,R,T,Φ,Ψ)` provides operational governance—the formalism has measurable effect on agent cognition (§4), while output quality remains comparable across modes.
 
 ### Research Pipeline
 

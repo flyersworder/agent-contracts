@@ -106,24 +106,24 @@ def _generate_mode_introduction(mode: ContractMode) -> str:
     intros = {
         ContractMode.URGENT: """
 # Execution Mode: URGENT ⚡
-**Optimize for speed.** You have relaxed resource constraints to enable rapid completion.
-- Target: Complete in ≤50% of normal time while maintaining ≥85% quality
-- Prioritize: Speed over thoroughness
-- Strategy: Use parallel operations, leverage caching, provide quick approximations
+**Optimize for speed.** Complete the task as quickly as possible.
+- Priority: Fast response over deep analysis
+- Approach: Use first-pass reasoning, trust your initial judgment
+- Quality target: 85% accuracy is acceptable for faster completion
 """,
         ContractMode.BALANCED: """
 # Execution Mode: BALANCED ⚖️
-**Focus on quality.** You have adequate resources allocated for this task.
-- Approach: Work naturally and thoroughly
-- Prioritize: Comprehensive, high-quality results
-- Strategy: Standard execution without premature optimization
+**Optimize for quality.** Deliver the highest quality results.
+- Priority: Accuracy and correctness
+- Approach: Reason carefully, verify key facts before responding
+- Quality target: Aim for the best possible output
 """,
         ContractMode.ECONOMICAL: """
 # Execution Mode: ECONOMICAL 💰
-**Optimize for cost.** Minimize resource consumption while maintaining quality.
-- Target: ≥90% quality at ≤40% of normal token usage
-- Prioritize: Resource efficiency over speed
-- Strategy: Batch operations, use parametric knowledge, avoid expensive tools
+**Optimize for cost.** Minimize reasoning overhead while maintaining quality.
+- Priority: Efficient thinking, avoid over-analysis
+- Approach: Direct reasoning path, skip unnecessary deliberation
+- Quality target: 90% quality with minimal cognitive overhead
 """,
     }
     return intros[mode].strip()
@@ -182,18 +182,44 @@ def _generate_temporal_section(contract: Contract) -> str:
         Temporal section text
     """
     temporal = contract.temporal
+    execution = contract.execution
 
-    if temporal.deadline is None and temporal.max_duration is None:
+    # Check if we have any temporal constraints to report
+    has_deadline = temporal.deadline is not None
+    has_duration = temporal.max_duration is not None
+    has_timeout = execution is not None and execution.timeout_seconds is not None
+
+    if not has_deadline and not has_duration and not has_timeout:
         return ""
 
     lines = ["# Time Constraints"]
 
-    if temporal.deadline:
-        lines.append(f"- Deadline: {temporal.deadline.strftime('%Y-%m-%d %H:%M:%S')}")
+    # API response timeout (hard enforcement)
+    if has_timeout:
+        timeout_secs = execution.timeout_seconds  # type: ignore[union-attr]
+        # Add mode-aware guidance for timeout
+        if contract.mode == ContractMode.URGENT:
+            lines.append(
+                f"- ⚡ Response Timeout: {timeout_secs:.0f} seconds "
+                "(be concise to complete quickly)"
+            )
+        elif contract.mode == ContractMode.ECONOMICAL:
+            lines.append(
+                f"- 💰 Response Timeout: {timeout_secs:.0f} seconds "
+                "(keep output brief to minimize tokens)"
+            )
+        else:  # BALANCED
+            lines.append(
+                f"- ⚖️ Response Timeout: {timeout_secs:.0f} seconds "
+                "(take time for thorough, quality output)"
+            )
+
+    if has_deadline:
+        lines.append(f"- Deadline: {temporal.deadline.strftime('%Y-%m-%d %H:%M:%S')}")  # type: ignore[union-attr]
         lines.append(f"- Deadline Type: {temporal.deadline_type.value.upper()}")
 
-    if temporal.max_duration:
-        hours = temporal.max_duration.total_seconds() / 3600
+    if has_duration:
+        hours = temporal.max_duration.total_seconds() / 3600  # type: ignore[union-attr]
         lines.append(f"- Maximum Duration: {hours:.1f} hours")
 
     return "\n".join(lines)
@@ -216,19 +242,19 @@ def _generate_strategic_guidance(contract: Contract, current_usage: ResourceUsag
     if current_usage and contract.resources.tokens:
         utilization = current_usage.tokens / contract.resources.tokens
 
-    # Add mode-specific guidance
+    # Add mode-specific guidance (focused on reasoning approach, not output format)
     if contract.mode == ContractMode.URGENT:
-        lines.append("- Prioritize speed: Use fastest available methods")
-        lines.append("- Accept approximations: 85% accuracy is sufficient")
-        lines.append("- Parallelize when possible: Don't wait for sequential operations")
+        lines.append("- Think fast: Trust your first instinct")
+        lines.append("- Skip deliberation: Don't second-guess yourself")
+        lines.append("- Accept trade-offs: Speed matters more than perfection")
     elif contract.mode == ContractMode.ECONOMICAL:
-        lines.append("- Minimize API calls: Use parametric knowledge when possible")
-        lines.append("- Batch operations: Consolidate multiple queries")
-        lines.append("- Cache aggressively: Reuse results from previous calls")
+        lines.append("- Think efficiently: Take the shortest reasoning path")
+        lines.append("- Avoid over-analysis: Don't explore every angle")
+        lines.append("- Be decisive: Commit to your answer quickly")
     else:  # BALANCED
-        lines.append("- Work thoroughly to deliver comprehensive results")
-        lines.append("- Use available tools and resources as needed")
-        lines.append("- Focus on quality rather than premature optimization")
+        lines.append("- Think carefully: Verify key facts before answering")
+        lines.append("- Consider alternatives: Explore multiple angles")
+        lines.append("- Prioritize accuracy: Quality is the priority")
 
     # Add adaptive guidance based on utilization
     if utilization > 0:

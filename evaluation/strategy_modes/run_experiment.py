@@ -33,11 +33,12 @@ from .tasks import get_task_statistics, load_tasks
 def run_experiment(
     n_articles: int = 10,
     modes: list[str] | None = None,
-    model: str = "gpt-4o-mini",
+    model: str = "gemini/gemini-2.5-flash",
     token_budget: int = 4000,
     random_seed: int = 42,
     output_dir: str = "results/strategy_modes",
     verbose: bool = True,
+    enable_timeout: bool = True,
 ) -> dict[str, Any]:
     """Run the strategy modes experiment.
 
@@ -49,6 +50,7 @@ def run_experiment(
         random_seed: Random seed for reproducibility
         output_dir: Directory for results
         verbose: If True, print progress
+        enable_timeout: If True, enforce mode-specific API timeouts
 
     Returns:
         Dictionary with experiment results
@@ -71,6 +73,19 @@ def run_experiment(
             "model": model,
             "token_budget": token_budget,
             "seed": random_seed,
+            "enable_timeout": enable_timeout,
+            "timeout_config": {
+                "urgent": 8.0,
+                "balanced": 20.0,
+                "economical": 60.0,
+            }
+            if enable_timeout
+            else None,
+            "reasoning_effort_config": {
+                "urgent": "low",
+                "balanced": "medium",
+                "economical": "low",
+            },
         },
         "trials": [],
         "summary": {},
@@ -89,6 +104,7 @@ def run_experiment(
     runner = StrategyModesRunner(
         model=model,
         token_budget=token_budget,
+        enable_timeout=enable_timeout,
     )
 
     # Run trials
@@ -167,11 +183,16 @@ def print_summary(results: dict[str, Any]) -> None:
     print()
     print("-" * (25 + 18 * len(modes)))
 
-    # Metrics
-    metrics: list[tuple[str, str, Callable[[float], str]]] = [
+    # Metrics (value can be numeric or string)
+    metrics: list[tuple[str, str, Callable[[Any], str]]] = [
         ("Success Rate", "success_rate", lambda x: f"{x * 100:.1f}%"),
+        ("Timeout Rate", "timeout_rate", lambda x: f"{x * 100:.1f}%"),
+        ("Timeout Limit (s)", "timeout_seconds", lambda x: f"{x:.0f}" if x else "None"),
+        ("Reasoning Effort", "reasoning_effort", lambda x: str(x) if x else "N/A"),
         ("Avg Tokens", "avg_tokens", lambda x: f"{x:,.0f}"),
         ("Std Tokens", "std_tokens", lambda x: f"{x:,.0f}"),
+        ("Avg Reasoning Tokens", "avg_reasoning_tokens", lambda x: f"{x:,.0f}"),
+        ("Avg Text Tokens", "avg_text_tokens", lambda x: f"{x:,.0f}"),
         ("Avg Word Count", "avg_word_count", lambda x: f"{x:.0f}"),
         ("Avg ROUGE-L F1", "avg_rouge_l_f1", lambda x: f"{x:.3f}"),
         ("Std ROUGE-L F1", "std_rouge_l_f1", lambda x: f"{x:.3f}"),
@@ -278,6 +299,11 @@ def main() -> None:
         action="store_true",
         help="Reduce output verbosity",
     )
+    parser.add_argument(
+        "--no-timeout",
+        action="store_true",
+        help="Disable mode-specific timeout enforcement (default: enabled)",
+    )
 
     args = parser.parse_args()
 
@@ -293,6 +319,7 @@ def main() -> None:
         random_seed=args.seed,
         output_dir=args.output_dir,
         verbose=not args.quiet,
+        enable_timeout=not args.no_timeout,
     )
 
     print("\n" + "=" * 80)

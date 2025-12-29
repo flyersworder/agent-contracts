@@ -25,6 +25,7 @@ class ResourceUsage:
         tokens: Total tokens consumed (reasoning + text)
         reasoning_tokens: Tokens used for internal reasoning/thinking
         text_tokens: Tokens used for text output
+        reasoning_content: The actual reasoning/thinking text from reasoning models
         api_calls: Total API calls made
         web_searches: Total web searches performed
         tool_invocations: Total tool invocations
@@ -40,6 +41,7 @@ class ResourceUsage:
     tokens: int = 0
     reasoning_tokens: int = 0
     text_tokens: int = 0
+    reasoning_content: str = ""
     api_calls: int = 0
     web_searches: int = 0
     tool_invocations: int = 0

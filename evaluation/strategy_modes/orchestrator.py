@@ -13,7 +13,7 @@ Example:
 import time
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Any
+from typing import Any, ClassVar
 
 from agent_contracts import Contract, ContractMode, ResourceConstraints, TemporalConstraints
 from agent_contracts.core.executor import ContractExecutor, ExecutionResult
@@ -33,11 +33,16 @@ class TrialResult:
         generated_summary: The generated summary text
         reference_summary: The ground truth summary
         tokens_used: Total tokens consumed
+        reasoning_tokens: Tokens used for internal reasoning/thinking
+        text_tokens: Tokens used for text output
+        reasoning_content: The actual reasoning/thinking text from the model
         output_length: Length of generated summary (characters)
         word_count: Word count of generated summary
         execution_time: Wall clock time in seconds
+        timeout_seconds: Timeout limit applied (None if no limit)
+        timed_out: Whether the trial failed due to timeout
+        reasoning_effort: Reasoning effort level used (low/medium/high)
         rouge_metrics: ROUGE evaluation scores
-        strategy_recommendation: Strategy from recommend_strategy()
         contract_state: Final contract state
         error: Error message if failed
     """
@@ -48,11 +53,16 @@ class TrialResult:
     generated_summary: str = ""
     reference_summary: str = ""
     tokens_used: int = 0
+    reasoning_tokens: int = 0
+    text_tokens: int = 0
+    reasoning_content: str = ""
     output_length: int = 0
     word_count: int = 0
     execution_time: float = 0.0
+    timeout_seconds: float | None = None
+    timed_out: bool = False
+    reasoning_effort: str = ""
     rouge_metrics: RougeMetrics = field(default_factory=RougeMetrics)
-    strategy_recommendation: str = ""
     contract_state: str = ""
     error: str = ""
 
@@ -63,11 +73,17 @@ class TrialResult:
             "mode": self.mode,
             "success": self.success,
             "tokens_used": self.tokens_used,
+            "reasoning_tokens": self.reasoning_tokens,
+            "text_tokens": self.text_tokens,
+            "reasoning_content": self.reasoning_content,
+            "generated_summary": self.generated_summary,
             "output_length": self.output_length,
             "word_count": self.word_count,
             "execution_time": self.execution_time,
+            "timeout_seconds": self.timeout_seconds,
+            "timed_out": self.timed_out,
+            "reasoning_effort": self.reasoning_effort,
             "rouge_metrics": self.rouge_metrics.to_dict(),
-            "strategy_recommendation": self.strategy_recommendation,
             "contract_state": self.contract_state,
             "error": self.error,
         }
@@ -84,6 +100,7 @@ class StrategyModesRunner:
         token_budget: Maximum tokens per task
         cost_budget: Maximum cost per task in USD
         time_budget: Maximum time per task
+        enable_timeout: Whether to enforce mode-specific timeouts
     """
 
     # Default budgets (generous to allow mode differences to show)
@@ -91,12 +108,36 @@ class StrategyModesRunner:
     DEFAULT_COST_BUDGET = 0.50
     DEFAULT_TIME_BUDGET = timedelta(minutes=5)
 
+    # Mode-specific timeout configuration (in seconds)
+    # These values enforce the temporal aspect of contract modes:
+    # - URGENT: Tight timeout enforces "speed is critical" (creates real pressure)
+    # - ECONOMICAL: Tight timeout encourages brevity (shorter output = fewer tokens = lower cost)
+    # - BALANCED: Generous timeout for thoroughness (quality requires time)
+    # Values calibrated based on Gemini 2.5 Flash typical response times (1.5-5.5s)
+    MODE_TIMEOUTS: ClassVar[dict[str, float]] = {
+        "urgent": 8.0,  # 8s - speed pressure, forces fast completion
+        "economical": 10.0,  # 10s - brevity pressure, encourages concise output
+        "balanced": 30.0,  # 30s - ample time for thorough, quality responses
+    }
+
+    # Mode-specific reasoning effort configuration
+    # Controls how deeply the LLM should think before responding:
+    # - URGENT: No thinking for fastest possible response
+    # - BALANCED: Moderate thinking for quality/speed balance
+    # - ECONOMICAL: Shallow thinking to minimize token usage on reasoning
+    MODE_REASONING_EFFORT: ClassVar[dict[str, str]] = {
+        "urgent": "none",  # No thinking, fastest response (up to 96% cheaper)
+        "balanced": "medium",  # Balanced thinking (~500-2000 tokens)
+        "economical": "low",  # Minimal reasoning tokens for cost savings
+    }
+
     def __init__(
         self,
         model: str = "gemini/gemini-2.5-flash",
         token_budget: int | None = None,
         cost_budget: float | None = None,
         time_budget: timedelta | None = None,
+        enable_timeout: bool = True,
     ) -> None:
         """Initialize the strategy modes runner.
 
@@ -105,11 +146,37 @@ class StrategyModesRunner:
             token_budget: Maximum tokens per task
             cost_budget: Maximum cost per task in USD
             time_budget: Maximum time per task
+            enable_timeout: If True, enforce mode-specific API timeouts
         """
         self.model = model
         self.token_budget = token_budget or self.DEFAULT_TOKEN_BUDGET
         self.cost_budget = cost_budget or self.DEFAULT_COST_BUDGET
         self.time_budget = time_budget or self.DEFAULT_TIME_BUDGET
+        self.enable_timeout = enable_timeout
+
+    def _get_timeout_for_mode(self, mode: str) -> float | None:
+        """Get timeout value for a specific mode.
+
+        Args:
+            mode: Strategy mode (urgent/economical/balanced)
+
+        Returns:
+            Timeout in seconds, or None if timeouts disabled
+        """
+        if not self.enable_timeout:
+            return None
+        return self.MODE_TIMEOUTS.get(mode.lower(), self.MODE_TIMEOUTS["balanced"])
+
+    def _get_reasoning_effort_for_mode(self, mode: str) -> str:
+        """Get reasoning effort level for a specific mode.
+
+        Args:
+            mode: Strategy mode (urgent/economical/balanced)
+
+        Returns:
+            Reasoning effort level ("low", "medium", or "high")
+        """
+        return self.MODE_REASONING_EFFORT.get(mode.lower(), self.MODE_REASONING_EFFORT["balanced"])
 
     def _get_contract_mode(self, mode: str) -> ContractMode:
         """Convert mode string to ContractMode enum.
@@ -140,6 +207,8 @@ class StrategyModesRunner:
         from agent_contracts.core.contract import ExecutionConfig
 
         contract_mode = self._get_contract_mode(mode)
+        timeout = self._get_timeout_for_mode(mode)
+        reasoning_effort = self._get_reasoning_effort_for_mode(mode)
 
         return Contract(
             id=f"summarize-{task.task_id}-{mode}",
@@ -149,6 +218,7 @@ class StrategyModesRunner:
             resources=ResourceConstraints(
                 tokens=self.token_budget,
                 cost_usd=self.cost_budget,
+                reasoning_effort=reasoning_effort,
             ),
             temporal=TemporalConstraints(
                 max_duration=self.time_budget,
@@ -156,6 +226,7 @@ class StrategyModesRunner:
             execution=ExecutionConfig(
                 model=self.model,
                 temperature=0.3,  # Lower temperature for summarization
+                timeout_seconds=timeout,  # Mode-specific timeout enforcement
             ),
         )
 
@@ -175,10 +246,16 @@ class StrategyModesRunner:
         Returns:
             TrialResult with execution details
         """
+        # Get mode-specific configuration
+        timeout = self._get_timeout_for_mode(mode)
+        reasoning_effort = self._get_reasoning_effort_for_mode(mode)
+
         result = TrialResult(
             task_id=task.task_id,
             mode=mode,
             reference_summary=task.reference_summary,
+            timeout_seconds=timeout,
+            reasoning_effort=reasoning_effort,
         )
 
         start_time = time.time()
@@ -188,7 +265,11 @@ class StrategyModesRunner:
             contract = self._create_contract(task, mode)
 
             if verbose:
-                print(f"  [Contract] Mode: {mode.upper()}, Budget: {self.token_budget} tokens")
+                timeout_str = f", Timeout: {timeout}s" if timeout else ""
+                print(
+                    f"  [Contract] Mode: {mode.upper()}, Budget: {self.token_budget} tokens, "
+                    f"Reasoning: {reasoning_effort}{timeout_str}"
+                )
 
             # Create executor
             executor = ContractExecutor(
@@ -204,13 +285,12 @@ class StrategyModesRunner:
             result.success = execution_result.success
             result.generated_summary = str(execution_result.output or "")
             result.tokens_used = execution_result.tokens_used
+            result.reasoning_tokens = execution_result.resource_usage.get("reasoning_tokens", 0)
+            result.text_tokens = execution_result.resource_usage.get("text_tokens", 0)
+            result.reasoning_content = execution_result.resource_usage.get("reasoning_content", "")
             result.output_length = len(result.generated_summary)
             result.word_count = len(result.generated_summary.split())
             result.contract_state = execution_result.contract_state.value
-
-            # Get strategy recommendation
-            if execution_result.strategy:
-                result.strategy_recommendation = execution_result.strategy.recommended_approach
 
             # Compute ROUGE metrics
             if result.generated_summary:
@@ -220,13 +300,27 @@ class StrategyModesRunner:
                 )
 
             if verbose:
-                print(f"  [Result] Tokens: {result.tokens_used}, Words: {result.word_count}")
+                reasoning_info = f"reasoning: {result.reasoning_tokens}, text: {result.text_tokens}"
+                if result.reasoning_content:
+                    reasoning_info += f", content: {len(result.reasoning_content)} chars"
+                print(
+                    f"  [Result] Tokens: {result.tokens_used} ({reasoning_info}), "
+                    f"Words: {result.word_count}"
+                )
                 print(f"  [Quality] ROUGE-L: {result.rouge_metrics.rouge_l_f1:.3f}")
 
         except Exception as e:
             result.success = False
             result.error = str(e)
-            if verbose:
+
+            # Check if this was a timeout error
+            # LiteLLM raises openai.APITimeoutError on timeout
+            error_type = type(e).__name__
+            if "Timeout" in error_type or "timeout" in str(e).lower():
+                result.timed_out = True
+                if verbose:
+                    print(f"  [Timeout] Exceeded {timeout}s limit")
+            elif verbose:
                 print(f"  [Error] {e}")
 
         result.execution_time = time.time() - start_time
@@ -261,25 +355,39 @@ def compute_mode_statistics(results: list[TrialResult]) -> dict[str, Any]:
         results: List of TrialResult objects
 
     Returns:
-        Dictionary with aggregate statistics
+        Dictionary with aggregate statistics including timeout rates
     """
     if not results:
         return {}
 
     successful = [r for r in results if r.success]
+    timed_out = [r for r in results if r.timed_out]
     n_total = len(results)
     n_success = len(successful)
+    n_timed_out = len(timed_out)
+
+    # Get mode-specific settings from first result (all same mode have same config)
+    timeout_seconds = results[0].timeout_seconds if results else None
+    reasoning_effort = results[0].reasoning_effort if results else ""
 
     if not successful:
         return {
             "n_trials": n_total,
             "success_rate": 0.0,
+            "timeout_rate": n_timed_out / n_total if n_total > 0 else 0.0,
+            "n_timed_out": n_timed_out,
+            "timeout_seconds": timeout_seconds,
+            "reasoning_effort": reasoning_effort,
             "avg_tokens": 0,
+            "avg_reasoning_tokens": 0,
+            "avg_text_tokens": 0,
             "avg_word_count": 0,
             "avg_rouge_l_f1": 0.0,
         }
 
     tokens = [r.tokens_used for r in successful]
+    reasoning_tokens = [r.reasoning_tokens for r in successful]
+    text_tokens = [r.text_tokens for r in successful]
     word_counts = [r.word_count for r in successful]
     rouge_l_scores = [r.rouge_metrics.rouge_l_f1 for r in successful]
     execution_times = [r.execution_time for r in successful]
@@ -287,10 +395,18 @@ def compute_mode_statistics(results: list[TrialResult]) -> dict[str, Any]:
     return {
         "n_trials": n_total,
         "success_rate": n_success / n_total,
+        "timeout_rate": n_timed_out / n_total,
+        "n_timed_out": n_timed_out,
+        "timeout_seconds": timeout_seconds,
+        "reasoning_effort": reasoning_effort,
         "avg_tokens": sum(tokens) / len(tokens),
         "std_tokens": _std(tokens),
         "min_tokens": min(tokens),
         "max_tokens": max(tokens),
+        "avg_reasoning_tokens": sum(reasoning_tokens) / len(reasoning_tokens),
+        "std_reasoning_tokens": _std(reasoning_tokens),
+        "avg_text_tokens": sum(text_tokens) / len(text_tokens),
+        "std_text_tokens": _std(text_tokens),
         "avg_word_count": sum(word_counts) / len(word_counts),
         "std_word_count": _std(word_counts),
         "avg_rouge_l_f1": sum(rouge_l_scores) / len(rouge_l_scores),
