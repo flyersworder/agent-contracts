@@ -235,6 +235,8 @@ def run_experiment(
                     "tokens_by_agent": unc_result.tokens_by_agent,
                     "word_count": unc_result.word_count,
                     "citation_count": unc_result.citation_count,
+                    "web_searches": unc_result.web_searches,
+                    "grounding_data": unc_result.grounding_data,
                     "execution_time": unc_result.execution_time_seconds,
                     "quality_score": score,
                     "meets_criteria": success,
@@ -243,6 +245,7 @@ def run_experiment(
 
                 if verbose:
                     print(f"    Tokens: {unc_result.total_tokens:,}")
+                    print(f"    Web Searches: {unc_result.web_searches}")
                     print(f"    Words: {unc_result.word_count:,}")
                     print(f"    Citations: {unc_result.citation_count}")
                     print(f"    Quality: {score:.2f} ({'✅' if success else '❌'})")
@@ -275,6 +278,9 @@ def run_experiment(
                     "tokens_by_agent": con_result.tokens_by_agent,
                     "word_count": con_result.word_count,
                     "citation_count": con_result.citation_count,
+                    "web_searches": con_result.web_searches,
+                    "grounding_data": con_result.grounding_data,
+                    "tool_usage": con_result.tool_usage,
                     "execution_time": con_result.execution_time_seconds,
                     "budget_compliant": con_result.budget_compliant,
                     "conservation_violations": con_result.conservation_violations,
@@ -286,6 +292,7 @@ def run_experiment(
                 if verbose:
                     print(f"    Tokens: {con_result.total_tokens:,}")
                     print(f"    Budget: {'✅' if con_result.budget_compliant else '❌'}")
+                    print(f"    Web Searches: {con_result.web_searches}")
                     print(f"    Words: {con_result.word_count:,}")
                     print(f"    Citations: {con_result.citation_count}")
                     print(f"    Quality: {score:.2f} ({'✅' if success else '❌'})")
@@ -360,6 +367,12 @@ def calculate_summary(trials: list[dict[str, Any]], mode: str) -> dict[str, Any]
             summary[f"{condition}_min_tokens"] = min(tokens)
             summary[f"{condition}_max_tokens"] = max(tokens)
 
+        # Web search statistics (grounding tool tracking)
+        web_searches = [r.get("web_searches", 0) for r in successes]
+        if web_searches:
+            summary[f"{condition}_avg_web_searches"] = sum(web_searches) / len(web_searches)
+            summary[f"{condition}_total_web_searches"] = sum(web_searches)
+
         # Quality scores (rule-based)
         scores = [r.get("quality_score", 0) for r in successes]
         if scores:
@@ -414,6 +427,7 @@ def print_summary(summary: dict[str, Any]) -> None:
         print(f"\n  {condition.upper()}:")
         print(f"    Success Rate: {summary[f'{condition}_success_rate']:.1%}")
         print(f"    Avg Tokens: {summary.get(f'{condition}_avg_tokens', 0):,.0f}")
+        print(f"    Avg Web Searches: {summary.get(f'{condition}_avg_web_searches', 0):.1f}")
         print(f"    Avg Quality (rule-based): {summary.get(f'{condition}_avg_quality', 0):.2f}")
         print(f"    Criteria Met: {summary.get(f'{condition}_criteria_met_rate', 0):.1%}")
 

@@ -14,19 +14,111 @@ Budget Allocation (from SUBMISSION_PLAN.md):
 - Reporter: 25,000 tokens (synthesis, writing)
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 # Type checking imports
 try:
     from google.adk.agents import LlmAgent
+    from google.adk.agents.callback_context import CallbackContext
+    from google.adk.models import LlmResponse
     from google.adk.tools import google_search
 
     GOOGLE_ADK_AVAILABLE = True
 except ImportError:
     GOOGLE_ADK_AVAILABLE = False
     LlmAgent = Any
+    CallbackContext = Any
+    LlmResponse = Any
     google_search = None
+
+
+# Session state key for grounding metadata
+GROUNDING_STATE_KEY = "grounding_metadata"
+
+
+@dataclass
+class GroundingTracker:
+    """Tracks grounding metadata (web searches) from Gemini model calls.
+
+    The google_search tool in ADK is a "grounding tool" - it's built into
+    the model and doesn't appear as a function call. Instead, we track it
+    via the grounding_metadata in the LlmResponse.
+
+    Attributes:
+        web_search_queries: List of search queries performed
+        grounding_chunks: List of source URLs/titles used
+        search_count: Total number of web searches performed
+    """
+
+    web_search_queries: list[str] = field(default_factory=list)
+    grounding_chunks: list[dict[str, str]] = field(default_factory=list)
+    search_count: int = 0
+
+    def add_from_response(self, grounding_metadata: Any) -> None:
+        """Extract and store grounding data from an LlmResponse.
+
+        Args:
+            grounding_metadata: The grounding_metadata from LlmResponse
+        """
+        if grounding_metadata is None:
+            return
+
+        # Extract web search queries
+        if (
+            hasattr(grounding_metadata, "web_search_queries")
+            and grounding_metadata.web_search_queries
+        ):
+            for query in grounding_metadata.web_search_queries:
+                if query not in self.web_search_queries:
+                    self.web_search_queries.append(query)
+                    self.search_count += 1
+
+        # Extract grounding chunks (source URLs)
+        if hasattr(grounding_metadata, "grounding_chunks") and grounding_metadata.grounding_chunks:
+            for chunk in grounding_metadata.grounding_chunks:
+                if hasattr(chunk, "web") and chunk.web:
+                    chunk_info = {
+                        "uri": getattr(chunk.web, "uri", ""),
+                        "title": getattr(chunk.web, "title", ""),
+                        "domain": getattr(chunk.web, "domain", ""),
+                    }
+                    if chunk_info not in self.grounding_chunks:
+                        self.grounding_chunks.append(chunk_info)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "web_search_queries": self.web_search_queries,
+            "grounding_chunks": self.grounding_chunks,
+            "search_count": self.search_count,
+        }
+
+
+def create_grounding_callback() -> tuple[Any, GroundingTracker]:
+    """Create an after_model_callback that tracks grounding metadata.
+
+    Returns:
+        Tuple of (callback_function, tracker) where tracker accumulates
+        grounding data across all model calls.
+    """
+    tracker = GroundingTracker()
+
+    def after_model_callback(
+        callback_context: "CallbackContext",
+        llm_response: "LlmResponse",
+    ) -> "LlmResponse | None":
+        """Capture grounding metadata from each model response.
+
+        This callback is invoked after each LLM call, allowing us to
+        inspect the grounding_metadata which contains web search information.
+        """
+        if llm_response is not None and hasattr(llm_response, "grounding_metadata"):
+            tracker.add_from_response(llm_response.grounding_metadata)
+        # Return None to pass through the original response unchanged
+        return None
+
+    return after_model_callback, tracker
 
 
 @dataclass(frozen=True)
@@ -120,11 +212,17 @@ AGENT_CONFIGS = {
 }
 
 
-def create_researcher_agent() -> "LlmAgent":
+def create_researcher_agent(
+    grounding_callback: Any | None = None,
+) -> "LlmAgent":
     """Create a researcher agent for data gathering with Google Search.
 
     The researcher uses the google_search tool to find current information,
     facts, statistics, and expert opinions on research topics.
+
+    Args:
+        grounding_callback: Optional after_model_callback to track grounding
+            metadata (web searches). Create with create_grounding_callback().
 
     Returns:
         LlmAgent configured for research tasks with web search capability
@@ -135,12 +233,18 @@ def create_researcher_agent() -> "LlmAgent":
     if not GOOGLE_ADK_AVAILABLE:
         raise ImportError("google-adk is required. Install with: uv sync --extra google-adk")
 
-    return LlmAgent(
-        name=RESEARCHER_CONFIG.name,
-        model=RESEARCHER_CONFIG.model,
-        instruction=RESEARCHER_CONFIG.instruction,
-        tools=[google_search],  # Enable web search for current information
-    )
+    kwargs: dict[str, Any] = {
+        "name": RESEARCHER_CONFIG.name,
+        "model": RESEARCHER_CONFIG.model,
+        "instruction": RESEARCHER_CONFIG.instruction,
+        "tools": [google_search],  # Enable web search for current information
+    }
+
+    # Add grounding callback if provided
+    if grounding_callback is not None:
+        kwargs["after_model_callback"] = grounding_callback
+
+    return LlmAgent(**kwargs)
 
 
 def create_analyzer_agent() -> "LlmAgent":

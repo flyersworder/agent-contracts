@@ -25,6 +25,7 @@ from typing import Any
 
 from .agents import (
     create_analyzer_agent,
+    create_grounding_callback,
     create_reporter_agent,
     create_researcher_agent,
 )
@@ -76,6 +77,9 @@ class PipelineResult:
     tokens_by_agent: dict[str, int] = field(default_factory=dict)
     total_llm_calls: int = 0
     llm_calls_by_agent: dict[str, int] = field(default_factory=dict)
+    web_searches: int = 0  # Track google_search grounding tool usage
+    grounding_data: dict[str, Any] = field(default_factory=dict)  # Grounding metadata
+    tool_usage: dict[str, int] = field(default_factory=dict)  # Per-tool usage
     execution_time_seconds: float = 0.0
     budget_compliant: bool = True
     conservation_violations: int = 0
@@ -180,11 +184,13 @@ class UncontractedPipeline:
 
         try:
             # Phase 1: Research
-            # Create fresh agent (not reused from sub_agents to avoid google_search issues)
+            # Create fresh agent with grounding callback to track web searches
             if self.verbose:
                 print(f"  [Researcher] Researching: {topic.title}")
 
-            researcher = create_researcher_agent()
+            # Create grounding callback to track google_search usage
+            grounding_callback, grounding_tracker = create_grounding_callback()
+            researcher = create_researcher_agent(grounding_callback=grounding_callback)
             runner = Runner(
                 agent=researcher,
                 app_name="uncontracted-researcher",
@@ -203,10 +209,14 @@ Find current information, facts, statistics, and expert opinions.
 Cite your sources with URLs."""
 
             research_output = self._run_agent(
-                runner, research_prompt, "researcher", "uncontracted-researcher"
+                runner, research_prompt, "researcher", topic.id, "uncontracted-researcher"
             )
             result.raw_outputs["researcher"] = research_output["response"]
             result.tokens_by_agent["researcher"] = research_output["tokens"]
+
+            # Capture grounding data (web searches tracked via after_model_callback)
+            result.web_searches = grounding_tracker.search_count
+            result.grounding_data = grounding_tracker.to_dict()
 
             # Phase 2: Analysis
             # Create fresh agent for analysis
@@ -233,7 +243,7 @@ Identify:
 Structure your analysis into clear themes."""
 
             analysis_output = self._run_agent(
-                runner, analysis_prompt, "analyzer", "uncontracted-analyzer"
+                runner, analysis_prompt, "analyzer", topic.id, "uncontracted-analyzer"
             )
             result.raw_outputs["analyzer"] = analysis_output["response"]
             result.tokens_by_agent["analyzer"] = analysis_output["tokens"]
@@ -264,7 +274,7 @@ Requirements:
 - Be professional and well-organized"""
 
             report_output = self._run_agent(
-                runner, report_prompt, "reporter", "uncontracted-reporter"
+                runner, report_prompt, "reporter", topic.id, "uncontracted-reporter"
             )
             result.raw_outputs["reporter"] = report_output["response"]
             result.tokens_by_agent["reporter"] = report_output["tokens"]
@@ -284,7 +294,7 @@ Requirements:
         return result
 
     def _run_agent(
-        self, runner: "Runner", message: str, agent_name: str, app_name: str = ""
+        self, runner: "Runner", message: str, agent_name: str, topic_id: str, app_name: str = ""
     ) -> dict[str, Any]:
         """Run an agent and collect output.
 
@@ -292,6 +302,7 @@ Requirements:
             runner: Runner for the agent
             message: Message to send
             agent_name: Name of agent (for session ID)
+            topic_id: Topic ID for unique session identification
             app_name: App name for session creation
 
         Returns:
@@ -303,7 +314,8 @@ Requirements:
 
         # Use provided app_name or construct from agent_name
         session_app_name = app_name or f"uncontracted-{agent_name}"
-        session_id = f"eval_{agent_name}"
+        # Include topic_id in session_id to avoid conflicts across topics
+        session_id = f"eval_{agent_name}_{topic_id}"
 
         async def run_agent_async() -> dict[str, Any]:
             # Create session
@@ -361,10 +373,12 @@ class ContractedPipeline:
     PARENT_COST = 2.0
     PARENT_DURATION = timedelta(minutes=15)
     PARENT_ITERATIONS = 50  # Max LLM calls to prevent runaway loops
+    PARENT_WEB_SEARCHES = 20  # Total web searches allowed (paper Section 8)
 
     ORCHESTRATOR_TOKENS = 10_000
     RESEARCHER_TOKENS = 40_000
     RESEARCHER_ITERATIONS = 15  # Researcher may need multiple search iterations
+    RESEARCHER_WEB_SEARCHES = 15  # Per-tool limit for google_search
     ANALYZER_TOKENS = 25_000
     ANALYZER_ITERATIONS = 10
     REPORTER_TOKENS = 25_000
@@ -428,12 +442,16 @@ class ContractedPipeline:
 
             # Delegate to sub-agents with conservation law enforcement
             # Each agent gets its own iteration limit to prevent runaway loops
-            researcher_agent = create_researcher_agent()
+
+            # Create grounding callback to track google_search usage
+            grounding_callback, grounding_tracker = create_grounding_callback()
+            researcher_agent = create_researcher_agent(grounding_callback=grounding_callback)
             researcher = delegating.delegate(
                 name="researcher",
                 agent=researcher_agent,
                 tokens=self.RESEARCHER_TOKENS,
                 iterations=self.RESEARCHER_ITERATIONS,
+                per_tool_limits={"google_search": self.RESEARCHER_WEB_SEARCHES},
                 description="Research the topic",
             )
 
@@ -491,6 +509,15 @@ Cite your sources with URLs."""
             result.raw_outputs["researcher"] = research_output["response"]
             result.tokens_by_agent["researcher"] = research_output["total_tokens"]
             result.llm_calls_by_agent["researcher"] = research_output.get("llm_calls", 0)
+            # Track tool usage (per-tool limits enforcement)
+            researcher_tools = research_output.get("tool_invocations", {})
+            result.tool_usage.update(researcher_tools)
+
+            # Capture grounding data (web searches tracked via after_model_callback)
+            # Note: google_search is a grounding tool, not a function-calling tool,
+            # so we track it via grounding_metadata rather than tool_invocations
+            result.web_searches = grounding_tracker.search_count
+            result.grounding_data = grounding_tracker.to_dict()
 
             # Phase 2: Analysis (with contract)
             if self.verbose:

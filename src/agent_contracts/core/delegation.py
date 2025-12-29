@@ -278,6 +278,8 @@ class ContractingCapability:
         cost_usd: float = 0.0,
         api_calls: int | None = None,
         iterations: int | None = None,
+        tool_invocations: int | None = None,
+        per_tool_limits: dict[str, int] | None = None,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Contract:
@@ -292,6 +294,8 @@ class ContractingCapability:
             cost_usd: Cost budget to allocate to child
             api_calls: Optional API call limit for child
             iterations: Optional iteration limit for child (maps to ADK max_llm_calls)
+            tool_invocations: Optional total tool invocation limit for child
+            per_tool_limits: Optional per-tool invocation limits (tool_name -> max_calls)
             description: Description of the child's task
             metadata: Optional metadata for the child contract
 
@@ -348,6 +352,8 @@ class ContractingCapability:
             cost_usd=cost_usd if cost_usd > 0 else None,
             api_calls=api_calls,
             iterations=iterations,
+            tool_invocations=tool_invocations,
+            per_tool_limits=per_tool_limits or {},
         )
 
         child_metadata = metadata or {}

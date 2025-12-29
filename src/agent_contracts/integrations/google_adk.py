@@ -703,6 +703,8 @@ class DelegatingAdkAgent(ContractedAdkAgent):
         cost_usd: float = 0.0,
         api_calls: int | None = None,
         iterations: int | None = None,
+        tool_invocations: int | None = None,
+        per_tool_limits: dict[str, int] | None = None,
         description: str = "",
         strict_mode: bool = True,
         runner: Any | None = None,
@@ -722,6 +724,8 @@ class DelegatingAdkAgent(ContractedAdkAgent):
             api_calls: Optional API call limit for delegated agent
             iterations: Optional iteration limit for delegated agent
                 (maps to Google ADK RunConfig.max_llm_calls)
+            tool_invocations: Optional total tool invocation limit
+            per_tool_limits: Optional per-tool limits (e.g., {"google_search": 10})
             description: Description of the delegated task
             strict_mode: If True, violations cause immediate termination
             runner: Optional custom Runner for the delegated agent
@@ -740,6 +744,8 @@ class DelegatingAdkAgent(ContractedAdkAgent):
             cost_usd=cost_usd,
             api_calls=api_calls,
             iterations=iterations,
+            tool_invocations=tool_invocations,
+            per_tool_limits=per_tool_limits,
             description=description,
         )
 
