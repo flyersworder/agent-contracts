@@ -215,6 +215,8 @@ benchmarks/**/results/
 benchmarks/quality_validation/samples/
 benchmarks/quality_validation/extended_samples/
 *.png
+# Exception: track evaluation experiment figures for COINE 2026 paper
+!evaluation/**/figures/*.png
 paper/
 .DS_Store
 results/

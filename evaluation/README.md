@@ -186,16 +186,16 @@ result: ExecutionResult = executor.run(query=f"Summarize: {article}")
 
 ```bash
 # Quick smoke test (2 articles, all modes)
-python -m evaluation.strategy_modes.run_experiment --n-articles 2
+uv run python -m evaluation.strategy_modes.run_experiment --n-articles 2
 
 # Full experiment (recommended: 100 articles for statistical power)
-python -m evaluation.strategy_modes.run_experiment \
+uv run python -m evaluation.strategy_modes.run_experiment \
     --n-articles 100 \
     --model gemini/gemini-2.5-flash \
     --seed 42
 
 # Single mode only
-python -m evaluation.strategy_modes.run_experiment \
+uv run python -m evaluation.strategy_modes.run_experiment \
     --mode economical \
     --n-articles 100
 ```
@@ -279,10 +279,10 @@ researcher = delegating.delegate(
 
 ```bash
 # Quick smoke test (1 topic, both conditions)
-python -m evaluation.research_pipeline.run_experiment --quick
+uv run python -m evaluation.research_pipeline.run_experiment --quick
 
 # Full experiment (recommended: 50 topics for statistical power)
-python -m evaluation.research_pipeline.run_experiment \
+uv run python -m evaluation.research_pipeline.run_experiment \
     --n-topics 50 \
     --mode both \
     --evaluate \
@@ -290,7 +290,7 @@ python -m evaluation.research_pipeline.run_experiment \
     --num-judges 3
 
 # Specific topic
-python -m evaluation.research_pipeline.run_experiment \
+uv run python -m evaluation.research_pipeline.run_experiment \
     --topics tech_01 \
     --mode both
 ```
@@ -365,20 +365,20 @@ contracted_coder = orchestrator.delegate(
 
 ```bash
 # Quick smoke test (5 problems)
-python -m evaluation.code_review_pipeline.run_experiment --n-problems 5
+uv run python -m evaluation.code_review_pipeline.run_experiment --n-problems 5
 
 # Full experiment (recommended: 100 problems for statistical power)
-python -m evaluation.code_review_pipeline.run_experiment \
+uv run python -m evaluation.code_review_pipeline.run_experiment \
     --n-problems 100 \
     --seed 42
 
 # By difficulty level
-python -m evaluation.code_review_pipeline.run_experiment \
+uv run python -m evaluation.code_review_pipeline.run_experiment \
     --n-problems 100 \
     --difficulty medium
 
 # Contracted only
-python -m evaluation.code_review_pipeline.run_experiment \
+uv run python -m evaluation.code_review_pipeline.run_experiment \
     --n-problems 100 \
     --contracted-only
 ```

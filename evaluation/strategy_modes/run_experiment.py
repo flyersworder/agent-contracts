@@ -5,16 +5,16 @@ using CNN/DailyMail summarization tasks.
 
 Usage:
     # Run with default settings (10 articles, all modes)
-    python -m evaluation.strategy_modes.run_experiment
+    uv run python -m evaluation.strategy_modes.run_experiment
 
     # Run with specific settings
-    python -m evaluation.strategy_modes.run_experiment \\
+    uv run python -m evaluation.strategy_modes.run_experiment \\
         --n-articles 50 \\
         --model gemini/gemini-2.5-flash \\
         --seed 42
 
     # Run single mode only
-    python -m evaluation.strategy_modes.run_experiment --mode economical
+    uv run python -m evaluation.strategy_modes.run_experiment --mode economical
 """
 
 import argparse
@@ -76,13 +76,13 @@ def run_experiment(
             "enable_timeout": enable_timeout,
             "timeout_config": {
                 "urgent": 8.0,
-                "balanced": 20.0,
-                "economical": 60.0,
+                "economical": 10.0,
+                "balanced": 30.0,
             }
             if enable_timeout
             else None,
             "reasoning_effort_config": {
-                "urgent": "low",
+                "urgent": "none",
                 "balanced": "medium",
                 "economical": "low",
             },
