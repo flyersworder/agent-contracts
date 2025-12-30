@@ -164,7 +164,8 @@ ORCHESTRATOR_CONFIG = AgentConfig(
 Be efficient with your coordination. Focus on high-level guidance.""",
     token_budget=10_000,
     description="Coordinate research workflow and validate output",
-    thinking_budget=512,  # Light thinking for coordination
+    # Note: No thinking_budget - orchestrator is not executed as LLM in current pipeline
+    # Python code handles coordination; this agent exists for DelegatingAdkAgent structure
 )
 
 RESEARCHER_CONFIG = AgentConfig(
