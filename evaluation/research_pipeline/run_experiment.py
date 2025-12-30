@@ -31,7 +31,7 @@ Usage:
     # With LLM-as-judge evaluation (IndeterminacyAwareEvaluator)
     python run_experiment.py --quick --evaluate
 
-    # Custom evaluation settings
+    # Custom evaluation settings (default judge: gemini-2.5-flash-lite)
     python run_experiment.py --evaluate --judge-model gemini/gemini-2.0-flash --num-judges 5
 """
 
@@ -121,7 +121,7 @@ def run_experiment(
     verbose: bool = True,
     output_dir: Path | None = None,
     evaluate: bool = False,
-    judge_model: str = "gemini/gemini-2.5-flash",
+    judge_model: str = "gemini/gemini-2.5-flash-lite",
     num_judges: int = 3,
 ) -> dict[str, Any]:
     """Run the evaluation experiment.
@@ -233,10 +233,15 @@ def run_experiment(
                     "success": unc_result.success,
                     "total_tokens": unc_result.total_tokens,
                     "tokens_by_agent": unc_result.tokens_by_agent,
+                    "total_thinking_tokens": unc_result.total_thinking_tokens,
+                    "thinking_tokens_by_agent": unc_result.thinking_tokens_by_agent,
+                    "total_llm_calls": unc_result.total_llm_calls,
+                    "llm_calls_by_agent": unc_result.llm_calls_by_agent,
                     "word_count": unc_result.word_count,
                     "citation_count": unc_result.citation_count,
                     "web_searches": unc_result.web_searches,
                     "grounding_data": unc_result.grounding_data,
+                    "tool_usage": unc_result.tool_usage,
                     "execution_time": unc_result.execution_time_seconds,
                     "quality_score": score,
                     "meets_criteria": success,
@@ -245,6 +250,11 @@ def run_experiment(
 
                 if verbose:
                     print(f"    Tokens: {unc_result.total_tokens:,}")
+                    if unc_result.total_thinking_tokens > 0:
+                        ratio = unc_result.total_thinking_tokens / max(1, unc_result.total_tokens)
+                        print(
+                            f"    Thinking Tokens: {unc_result.total_thinking_tokens:,} ({ratio:.1%})"
+                        )
                     print(f"    Web Searches: {unc_result.web_searches}")
                     print(f"    Words: {unc_result.word_count:,}")
                     print(f"    Citations: {unc_result.citation_count}")
@@ -276,6 +286,10 @@ def run_experiment(
                     "success": con_result.success,
                     "total_tokens": con_result.total_tokens,
                     "tokens_by_agent": con_result.tokens_by_agent,
+                    "total_thinking_tokens": con_result.total_thinking_tokens,
+                    "thinking_tokens_by_agent": con_result.thinking_tokens_by_agent,
+                    "total_llm_calls": con_result.total_llm_calls,
+                    "llm_calls_by_agent": con_result.llm_calls_by_agent,
                     "word_count": con_result.word_count,
                     "citation_count": con_result.citation_count,
                     "web_searches": con_result.web_searches,
@@ -291,6 +305,11 @@ def run_experiment(
 
                 if verbose:
                     print(f"    Tokens: {con_result.total_tokens:,}")
+                    if con_result.total_thinking_tokens > 0:
+                        ratio = con_result.total_thinking_tokens / max(1, con_result.total_tokens)
+                        print(
+                            f"    Thinking Tokens: {con_result.total_thinking_tokens:,} ({ratio:.1%})"
+                        )
                     print(f"    Budget: {'✅' if con_result.budget_compliant else '❌'}")
                     print(f"    Web Searches: {con_result.web_searches}")
                     print(f"    Words: {con_result.word_count:,}")
@@ -367,11 +386,29 @@ def calculate_summary(trials: list[dict[str, Any]], mode: str) -> dict[str, Any]
             summary[f"{condition}_min_tokens"] = min(tokens)
             summary[f"{condition}_max_tokens"] = max(tokens)
 
+        # Thinking token statistics (Gemini 2.5+ reasoning tokens)
+        thinking_tokens = [r.get("total_thinking_tokens", 0) for r in successes]
+        if thinking_tokens and sum(thinking_tokens) > 0:
+            summary[f"{condition}_avg_thinking_tokens"] = sum(thinking_tokens) / len(
+                thinking_tokens
+            )
+            summary[f"{condition}_total_thinking_tokens"] = sum(thinking_tokens)
+            # Calculate thinking token ratio (thinking / total)
+            total_all_tokens = sum(tokens)
+            if total_all_tokens > 0:
+                summary[f"{condition}_thinking_ratio"] = sum(thinking_tokens) / total_all_tokens
+
         # Web search statistics (grounding tool tracking)
         web_searches = [r.get("web_searches", 0) for r in successes]
         if web_searches:
             summary[f"{condition}_avg_web_searches"] = sum(web_searches) / len(web_searches)
             summary[f"{condition}_total_web_searches"] = sum(web_searches)
+
+        # LLM call statistics (iteration tracking)
+        llm_calls = [r.get("total_llm_calls", 0) for r in successes]
+        if llm_calls:
+            summary[f"{condition}_avg_llm_calls"] = sum(llm_calls) / len(llm_calls)
+            summary[f"{condition}_total_llm_calls"] = sum(llm_calls)
 
         # Quality scores (rule-based)
         scores = [r.get("quality_score", 0) for r in successes]
@@ -427,6 +464,13 @@ def print_summary(summary: dict[str, Any]) -> None:
         print(f"\n  {condition.upper()}:")
         print(f"    Success Rate: {summary[f'{condition}_success_rate']:.1%}")
         print(f"    Avg Tokens: {summary.get(f'{condition}_avg_tokens', 0):,.0f}")
+        # Show thinking tokens if available (Gemini 2.5+ models)
+        if f"{condition}_avg_thinking_tokens" in summary:
+            thinking_ratio = summary.get(f"{condition}_thinking_ratio", 0)
+            print(
+                f"    Avg Thinking Tokens: {summary[f'{condition}_avg_thinking_tokens']:,.0f} ({thinking_ratio:.1%} of total)"
+            )
+        print(f"    Avg LLM Calls: {summary.get(f'{condition}_avg_llm_calls', 0):.1f}")
         print(f"    Avg Web Searches: {summary.get(f'{condition}_avg_web_searches', 0):.1f}")
         print(f"    Avg Quality (rule-based): {summary.get(f'{condition}_avg_quality', 0):.2f}")
         print(f"    Criteria Met: {summary.get(f'{condition}_criteria_met_rate', 0):.1%}")
@@ -499,8 +543,8 @@ def main() -> None:
     parser.add_argument(
         "--judge-model",
         type=str,
-        default="gemini/gemini-2.5-flash",
-        help="LLM model for evaluation (default: gemini/gemini-2.5-flash)",
+        default="gemini/gemini-2.5-flash-lite",
+        help="LLM model for evaluation (default: gemini/gemini-2.5-flash-lite)",
     )
     parser.add_argument(
         "--num-judges",

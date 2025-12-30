@@ -293,7 +293,11 @@ researcher = delegating.delegate(
 ### Metrics Collected
 
 - **Token consumption** (total and per-agent)
+- **Thinking tokens** (Gemini 2.5+ reasoning tokens, total and per-agent)
+  - Tracks `thoughts_token_count` from model responses
+  - Reported as absolute count and percentage of total tokens
 - **LLM call counts** (iteration tracking)
+- **Web search counts** (grounding tool usage)
 - **Conservation law compliance**
 - **Execution time**
 - **Quality scores** (via IndeterminacyAwareEvaluator)
@@ -303,20 +307,20 @@ researcher = delegating.delegate(
 ### Usage
 
 ```bash
-# Quick smoke test (1 topic, both conditions)
+# Quick smoke test (3 topics, both conditions)
 uv run python -m evaluation.research_pipeline.run_experiment --quick
 
 # Full experiment (recommended: 50 topics for statistical power)
 uv run python -m evaluation.research_pipeline.run_experiment \
-    --n-topics 50 \
+    --n 50 \
     --mode both \
     --evaluate \
-    --judge-model gemini/gemini-2.5-flash \
+    --judge-model gemini/gemini-2.5-flash-lite \
     --num-judges 3
 
 # Specific topic
 uv run python -m evaluation.research_pipeline.run_experiment \
-    --topics tech_01 \
+    --topic tech_01 \
     --mode both
 ```
 
@@ -564,6 +568,9 @@ Each experiment will generate publication-ready figures:
 | Conservation violations | 0 | N/A |
 | Quality score | Similar or better | Baseline |
 | Token variance | Lower (predictable) | Higher |
+| Thinking token ratio | ~27% of total | ~25% of total |
+
+**Note**: Thinking tokens (Gemini 2.5+ reasoning) are tracked for visibility into model reasoning behavior. Early results suggest contracted mode may allocate slightly more tokens to reasoning.
 
 ### Code Review Pipeline
 

@@ -58,6 +58,8 @@ class PipelineResult:
         citation_count: Number of citations found
         total_tokens: Total tokens consumed
         tokens_by_agent: Token breakdown by agent
+        total_thinking_tokens: Total reasoning/thinking tokens (Gemini 2.5+)
+        thinking_tokens_by_agent: Thinking token breakdown by agent
         total_llm_calls: Total LLM calls (iterations) across all agents
         llm_calls_by_agent: LLM call breakdown by agent
         execution_time_seconds: Total execution time
@@ -75,6 +77,8 @@ class PipelineResult:
     citation_count: int = 0
     total_tokens: int = 0
     tokens_by_agent: dict[str, int] = field(default_factory=dict)
+    total_thinking_tokens: int = 0  # Reasoning tokens (Gemini 2.5 thinking)
+    thinking_tokens_by_agent: dict[str, int] = field(default_factory=dict)
     total_llm_calls: int = 0
     llm_calls_by_agent: dict[str, int] = field(default_factory=dict)
     web_searches: int = 0  # Track google_search grounding tool usage
@@ -213,6 +217,13 @@ Cite your sources with URLs."""
             )
             result.raw_outputs["researcher"] = research_output["response"]
             result.tokens_by_agent["researcher"] = research_output["tokens"]
+            result.thinking_tokens_by_agent["researcher"] = research_output.get(
+                "thinking_tokens", 0
+            )
+            result.llm_calls_by_agent["researcher"] = research_output.get("llm_calls", 0)
+            # Track tool usage from researcher
+            researcher_tools = research_output.get("tool_invocations", {})
+            result.tool_usage.update(researcher_tools)
 
             # Capture grounding data (web searches tracked via after_model_callback)
             result.web_searches = grounding_tracker.search_count
@@ -247,6 +258,11 @@ Structure your analysis into clear themes."""
             )
             result.raw_outputs["analyzer"] = analysis_output["response"]
             result.tokens_by_agent["analyzer"] = analysis_output["tokens"]
+            result.thinking_tokens_by_agent["analyzer"] = analysis_output.get("thinking_tokens", 0)
+            result.llm_calls_by_agent["analyzer"] = analysis_output.get("llm_calls", 0)
+            # Track tool usage from analyzer
+            analyzer_tools = analysis_output.get("tool_invocations", {})
+            result.tool_usage.update(analyzer_tools)
 
             # Phase 3: Report Generation
             # Create fresh agent for reporting
@@ -278,12 +294,19 @@ Requirements:
             )
             result.raw_outputs["reporter"] = report_output["response"]
             result.tokens_by_agent["reporter"] = report_output["tokens"]
+            result.thinking_tokens_by_agent["reporter"] = report_output.get("thinking_tokens", 0)
+            result.llm_calls_by_agent["reporter"] = report_output.get("llm_calls", 0)
+            # Track tool usage from reporter
+            reporter_tools = report_output.get("tool_invocations", {})
+            result.tool_usage.update(reporter_tools)
 
             # Compile results
             result.report = report_output["response"]
             result.word_count = len(result.report.split())
             result.citation_count = self._count_citations(result.report)
             result.total_tokens = sum(result.tokens_by_agent.values())
+            result.total_thinking_tokens = sum(result.thinking_tokens_by_agent.values())
+            result.total_llm_calls = sum(result.llm_calls_by_agent.values())
             result.success = True
 
         except Exception as e:
@@ -329,6 +352,9 @@ Requirements:
             content = Content(role="user", parts=[Part(text=message)])
             response = ""
             total_tokens = 0
+            thinking_tokens = 0  # Gemini 2.5+ reasoning tokens
+            llm_calls = 0
+            tool_invocations: dict[str, int] = {}
 
             async for event in runner.run_async(
                 user_id="eval_user",
@@ -337,12 +363,27 @@ Requirements:
             ):
                 if hasattr(event, "usage_metadata") and event.usage_metadata:
                     total_tokens += getattr(event.usage_metadata, "total_token_count", 0)
+                    # Track thinking/reasoning tokens (Gemini 2.5+ models)
+                    thinking_tokens += getattr(event.usage_metadata, "thoughts_token_count", 0)
+                    llm_calls += 1  # Each event with usage_metadata is an LLM call
+
+                # Track function calls (tool invocations)
                 if event.content and event.content.parts:
                     for part in event.content.parts:
                         if hasattr(part, "text") and part.text:
                             response = part.text
+                        # Track function calls
+                        if hasattr(part, "function_call") and part.function_call:
+                            func_name = getattr(part.function_call, "name", "unknown")
+                            tool_invocations[func_name] = tool_invocations.get(func_name, 0) + 1
 
-            return {"response": response, "tokens": total_tokens}
+            return {
+                "response": response,
+                "tokens": total_tokens,
+                "thinking_tokens": thinking_tokens,
+                "llm_calls": llm_calls,
+                "tool_invocations": tool_invocations,
+            }
 
         # Run the async function
         return asyncio.run(run_agent_async())
@@ -508,6 +549,11 @@ Cite your sources with URLs."""
             )
             result.raw_outputs["researcher"] = research_output["response"]
             result.tokens_by_agent["researcher"] = research_output["total_tokens"]
+            # Extract thinking tokens from usage_metadata (Gemini 2.5+ models)
+            researcher_usage = research_output.get("usage_metadata", {})
+            result.thinking_tokens_by_agent["researcher"] = researcher_usage.get(
+                "thoughts_tokens", 0
+            )
             result.llm_calls_by_agent["researcher"] = research_output.get("llm_calls", 0)
             # Track tool usage (per-tool limits enforcement)
             researcher_tools = research_output.get("tool_invocations", {})
@@ -549,6 +595,9 @@ Structure your analysis into clear themes."""
             )
             result.raw_outputs["analyzer"] = analysis_output["response"]
             result.tokens_by_agent["analyzer"] = analysis_output["total_tokens"]
+            # Extract thinking tokens from usage_metadata (Gemini 2.5+ models)
+            analyzer_usage = analysis_output.get("usage_metadata", {})
+            result.thinking_tokens_by_agent["analyzer"] = analyzer_usage.get("thoughts_tokens", 0)
             result.llm_calls_by_agent["analyzer"] = analysis_output.get("llm_calls", 0)
 
             # Phase 3: Report (with contract)
@@ -582,6 +631,9 @@ Requirements:
             )
             result.raw_outputs["reporter"] = report_output["response"]
             result.tokens_by_agent["reporter"] = report_output["total_tokens"]
+            # Extract thinking tokens from usage_metadata (Gemini 2.5+ models)
+            reporter_usage = report_output.get("usage_metadata", {})
+            result.thinking_tokens_by_agent["reporter"] = reporter_usage.get("thoughts_tokens", 0)
             result.llm_calls_by_agent["reporter"] = report_output.get("llm_calls", 0)
 
             # Compile results
@@ -589,6 +641,7 @@ Requirements:
             result.word_count = len(result.report.split())
             result.citation_count = self._count_citations(result.report)
             result.total_tokens = sum(result.tokens_by_agent.values())
+            result.total_thinking_tokens = sum(result.thinking_tokens_by_agent.values())
             result.total_llm_calls = sum(result.llm_calls_by_agent.values())
             result.success = True
 
