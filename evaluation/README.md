@@ -627,6 +627,30 @@ These extensions represent natural directions for the Agent Contracts framework 
 - **Simulated costs**: Token costs are tracked but not actual billing (would require production deployment)
 - **Limited task domains**: Logic reasoning, summarization, research reports, and coding—other domains may differ
 
+### Budget Awareness Limitations
+
+The current implementation has two levels of budget awareness:
+
+| Level | Status | Description |
+|-------|--------|-------------|
+| **Initial awareness** | ✅ Implemented | Agent receives budget info at start (tokens, iterations, per-tool limits) |
+| **Dynamic awareness** | ❌ Not implemented | Agent does NOT receive usage updates during multi-turn execution |
+
+**What this means:**
+- Agents know their total budget when they start (e.g., "40,000 tokens, 15 LLM calls, 15 google_search calls")
+- During execution, agents do NOT receive updates like "you've used 50% of your tokens"
+- Hard enforcement still stops agents when limits are exceeded, but without warning
+
+**Why this design:**
+- Google ADK's event streaming model makes mid-execution prompt injection complex
+- Initial awareness + hard enforcement is sufficient for demonstrating governance value
+- Adding usage updates would consume additional tokens (meta-overhead)
+
+**Future work:**
+- Use ADK's `before_model_callback` to inject usage updates before each LLM call
+- Implement adaptive strategies that conserve resources as budgets tighten
+- Enable agents to proactively request partial results when approaching limits
+
 ---
 
 ## File Structure

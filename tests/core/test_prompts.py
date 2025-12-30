@@ -145,6 +145,60 @@ class TestGenerateBudgetPrompt:
         assert "BALANCED" in prompt  # Default mode
         assert "operating under a formal Agent Contract" in prompt
 
+    def test_prompt_with_iterations_limit(self) -> None:
+        """Test prompt generation with iterations (LLM calls) limit."""
+        contract = Contract(
+            id="iterations-test",
+            name="Iteration-Limited Task",
+            resources=ResourceConstraints(tokens=10000, iterations=15),
+        )
+
+        prompt = generate_budget_prompt(contract, "Multi-step task")
+
+        # Check iterations limit is displayed
+        assert "LLM Calls: 15 maximum" in prompt
+        assert "plan your reasoning steps" in prompt
+
+    def test_prompt_with_per_tool_limits(self) -> None:
+        """Test prompt generation with per-tool limits."""
+        contract = Contract(
+            id="per-tool-test",
+            name="Tool-Limited Task",
+            resources=ResourceConstraints(
+                tokens=40000,
+                per_tool_limits={"google_search": 15, "calculator": 10},
+            ),
+        )
+
+        prompt = generate_budget_prompt(contract, "Research task with tools")
+
+        # Check per-tool limits are displayed (formatted nicely)
+        assert "Google Search: 15 calls maximum" in prompt
+        assert "Calculator: 10 calls maximum" in prompt
+        # Check remaining is shown (should be full since no usage)
+        assert "15 remaining" in prompt
+        assert "10 remaining" in prompt
+
+    def test_prompt_with_per_tool_limits_and_usage(self) -> None:
+        """Test prompt generation with per-tool limits and current usage."""
+        contract = Contract(
+            id="per-tool-usage-test",
+            name="Tool Usage Task",
+            resources=ResourceConstraints(
+                tokens=40000,
+                per_tool_limits={"google_search": 15},
+            ),
+        )
+
+        # Simulate 5 google searches used
+        usage = ResourceUsage(tokens=5000)
+        usage.tool_usage_by_name["google_search"] = 5
+
+        prompt = generate_budget_prompt(contract, "Continue research", usage)
+
+        # Check remaining is calculated correctly
+        assert "Google Search: 15 calls maximum (10 remaining)" in prompt
+
 
 class TestGenerateAdaptiveInstruction:
     """Tests for generate_adaptive_instruction function."""

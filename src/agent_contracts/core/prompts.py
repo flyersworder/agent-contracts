@@ -157,12 +157,32 @@ def _generate_budget_section(contract: Contract, current_usage: ResourceUsage | 
         remaining_calls = resources.api_calls - used_calls
         lines.append(f"- API Calls: {resources.api_calls} total ({remaining_calls} remaining)")
 
+    # Iterations limit (maps to LLM calls in multi-turn execution)
+    if resources.iterations is not None:
+        # Note: We don't track iterations in ResourceUsage currently,
+        # so we show total limit without usage tracking
+        lines.append(
+            f"- LLM Calls: {resources.iterations} maximum (plan your reasoning steps accordingly)"
+        )
+
     if resources.web_searches is not None:
         used_searches = current_usage.web_searches if current_usage else 0
         remaining_searches = resources.web_searches - used_searches
         lines.append(
             f"- Web Searches: {resources.web_searches} total ({remaining_searches} remaining)"
         )
+
+    # Per-tool limits (e.g., google_search: 15)
+    if resources.per_tool_limits:
+        for tool_name, limit in resources.per_tool_limits.items():
+            # Get usage if available
+            used = 0
+            if current_usage:
+                used = current_usage.get_tool_usage(tool_name)
+            remaining = limit - used
+            # Format tool name for readability (google_search -> Google Search)
+            display_name = tool_name.replace("_", " ").title()
+            lines.append(f"- {display_name}: {limit} calls maximum ({remaining} remaining)")
 
     if resources.cost_usd is not None:
         used_cost = current_usage.cost_usd if current_usage else 0.0
