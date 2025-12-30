@@ -469,6 +469,7 @@ The core experimental manipulation is the presence or absence of **normative gov
 - Same tasks/topics
 - Same random seeds
 - Same evaluation criteria
+- Same temperature (default) — both conditions use identical model settings; we measure governance effect, not absolute performance
 
 ---
 
