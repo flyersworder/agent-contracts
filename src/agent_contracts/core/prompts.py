@@ -152,6 +152,18 @@ def _generate_budget_section(contract: Contract, current_usage: ResourceUsage | 
             f"- Tokens: {resources.tokens:,} total ({remaining_tokens:,} remaining, {pct:.0f}% used)"
         )
 
+    # Reasoning/thinking token budget (for models with extended thinking like Gemini 2.5)
+    # Check both resources.reasoning_tokens and metadata (for delegation cases)
+    reasoning_tokens = resources.reasoning_tokens
+    if reasoning_tokens is None and contract.metadata:
+        reasoning_tokens = contract.metadata.get("reasoning_tokens")
+
+    if reasoning_tokens is not None:
+        lines.append(
+            f"- Reasoning Budget: {reasoning_tokens:,} tokens allocated for internal thinking"
+        )
+        lines.append("  (Use this budget wisely for planning, analysis, and careful reasoning)")
+
     if resources.api_calls is not None:
         used_calls = current_usage.api_calls if current_usage else 0
         remaining_calls = resources.api_calls - used_calls

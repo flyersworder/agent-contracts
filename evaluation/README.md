@@ -234,15 +234,15 @@ uv run python -m evaluation.strategy_modes.run_experiment \
 ### Architecture
 
 ```
-Orchestrator (Parent Contract: 100K tokens)
+Orchestrator (Parent Contract: 100K tokens, 30 iterations, 8 web searches)
     │
-    ├── Researcher (40K tokens, 15 iterations)
-    │   └── Uses google_search for web research
+    ├── Researcher (40K tokens, 10 iterations, 6 web searches, 1K thinking)
+    │   └── Uses google_search for web research (strategic usage)
     │
-    ├── Analyzer (25K tokens, 10 iterations)
+    ├── Analyzer (25K tokens, 8 iterations, 1K thinking)
     │   └── Identifies patterns and insights
     │
-    └── Reporter (25K tokens, 10 iterations)
+    └── Reporter (25K tokens, 8 iterations, 1K thinking)
         └── Synthesizes final report
 ```
 
@@ -268,7 +268,7 @@ parent_contract = Contract(
     resources=ResourceConstraints(
         tokens=100_000,      # Token budget
         cost_usd=2.0,        # Cost cap
-        iterations=50,       # Runaway prevention
+        iterations=30,       # Runaway prevention
     ),
     temporal=TemporalConstraints(
         max_duration=timedelta(minutes=15),
@@ -286,9 +286,27 @@ delegating = DelegatingAdkAgent(
 researcher = delegating.delegate(
     name="researcher",
     tokens=40_000,
-    iterations=15,
+    iterations=10,
+    per_tool_limits={"google_search": 6},  # Strategic web search limit
+    reasoning_tokens=1024,  # Thinking budget (informational)
 )
 ```
+
+### Design Decision: Static vs Dynamic Allocation
+
+This experiment uses **static budget allocation** (predefined constants) rather than dynamic allocation for experimental control:
+
+| Approach | Description | Use Case |
+|----------|-------------|----------|
+| **Static (current)** | Fixed allocations: Researcher=40K, Analyzer=25K, Reporter=25K | Reproducible experiments, A/B testing |
+| **Dynamic (future)** | Orchestrator decides allocation based on task complexity | Production systems, adaptive workflows |
+
+**Why static for this experiment:**
+- Ensures identical execution paths between CONTRACTED and UNCONTRACTED conditions
+- Isolates budget awareness/enforcement as the only experimental variable
+- Enables reproducible comparisons across topics
+
+**Production extension:** In real-world deployments, the orchestrator could dynamically allocate budgets based on task analysis (e.g., allocating more tokens to complex research topics). The `DelegatingAdkAgent.delegate()` API supports this—simply pass computed values instead of constants. Conservation laws (Σbᵢ ≤ B) are enforced regardless of how allocations are determined.
 
 ### Metrics Collected
 
@@ -463,7 +481,7 @@ The core experimental manipulation is the presence or absence of **normative gov
 
 ### What Stays Constant (Controls)
 
-- Same LLM model (gemini-2.5-flash)
+- Same LLM model (gemini-2.5-flash-lite for Research Pipeline; gemini-2.5-flash for others)
 - Same agent architectures
 - Same prompts (minus budget info)
 - Same tasks/topics
@@ -638,7 +656,7 @@ The current implementation has two levels of budget awareness:
 | **Dynamic awareness** | ❌ Not implemented | Agent does NOT receive usage updates during multi-turn execution |
 
 **What this means:**
-- Agents know their total budget when they start (e.g., "40,000 tokens, 15 LLM calls, 15 google_search calls")
+- Agents know their total budget when they start (e.g., "40,000 tokens, 15 LLM calls, 6 google_search calls")
 - During execution, agents do NOT receive updates like "you've used 50% of your tokens"
 - Hard enforcement still stops agents when limits are exceeded, but without warning
 

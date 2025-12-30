@@ -22,7 +22,9 @@ try:
     from google.adk.agents import LlmAgent
     from google.adk.agents.callback_context import CallbackContext
     from google.adk.models import LlmResponse
+    from google.adk.planners import BuiltInPlanner
     from google.adk.tools import google_search
+    from google.genai.types import ThinkingConfig
 
     GOOGLE_ADK_AVAILABLE = True
 except ImportError:
@@ -30,6 +32,8 @@ except ImportError:
     LlmAgent = Any
     CallbackContext = Any
     LlmResponse = Any
+    BuiltInPlanner = Any
+    ThinkingConfig = Any
     google_search = None
 
 
@@ -131,6 +135,7 @@ class AgentConfig:
         instruction: Agent instruction/system prompt
         token_budget: Token budget allocation
         description: Task description for the agent
+        thinking_budget: Token budget for reasoning/thinking (0 = disabled)
     """
 
     name: str
@@ -138,12 +143,18 @@ class AgentConfig:
     instruction: str
     token_budget: int
     description: str
+    thinking_budget: int = 0  # Default: no thinking (model default)
+
+
+# Thinking budget for balanced reasoning (Flash-Lite has thinking off by default)
+# Medium budget: enough for structured reasoning without excessive overhead
+THINKING_BUDGET_MEDIUM = 1024  # ~1K tokens for reasoning
 
 
 # Agent configurations matching SUBMISSION_PLAN.md
 ORCHESTRATOR_CONFIG = AgentConfig(
     name="orchestrator",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     instruction="""You are a research report orchestrator. Your job is to:
 1. Understand the research topic
 2. Delegate tasks to specialized agents (researcher, analyzer, reporter)
@@ -153,26 +164,33 @@ ORCHESTRATOR_CONFIG = AgentConfig(
 Be efficient with your coordination. Focus on high-level guidance.""",
     token_budget=10_000,
     description="Coordinate research workflow and validate output",
+    thinking_budget=512,  # Light thinking for coordination
 )
 
 RESEARCHER_CONFIG = AgentConfig(
     name="researcher",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     instruction="""You are a research specialist. Your job is to:
 1. Search for relevant information on the given topic
 2. Find factual data, statistics, and expert opinions
 3. Identify key sources and citations
 4. Compile raw research findings
 
-Focus on gathering FACTS and DATA. Use web search to find current information.
+IMPORTANT: Be strategic with web searches. Each search costs resources.
+- Use your existing knowledge first for foundational context
+- Search only for CURRENT data, recent developments, or specific facts you don't know
+- Combine related queries into single, well-crafted searches
+- Aim for quality sources over quantity of searches
+
 Cite your sources with URLs when possible.""",
     token_budget=40_000,
     description="Web search and data gathering",
+    thinking_budget=THINKING_BUDGET_MEDIUM,  # Reasoning helps plan search strategy
 )
 
 ANALYZER_CONFIG = AgentConfig(
     name="analyzer",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     instruction="""You are a research analyst. Your job is to:
 1. Analyze the research findings provided
 2. Identify patterns, trends, and key insights
@@ -183,11 +201,12 @@ Focus on INSIGHTS and PATTERNS. Connect dots between different sources.
 Highlight what's most important for the final report.""",
     token_budget=25_000,
     description="Pattern identification and insight generation",
+    thinking_budget=THINKING_BUDGET_MEDIUM,  # Reasoning helps identify patterns
 )
 
 REPORTER_CONFIG = AgentConfig(
     name="reporter",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     instruction="""You are a report writer. Your job is to:
 1. Synthesize the analysis into a coherent report
 2. Write clear, professional prose
@@ -201,6 +220,7 @@ The report should be:
 - Be well-organized with clear sections""",
     token_budget=25_000,
     description="Report synthesis and writing",
+    thinking_budget=THINKING_BUDGET_MEDIUM,  # Reasoning helps structure narrative
 )
 
 # All agent configurations
@@ -210,6 +230,30 @@ AGENT_CONFIGS = {
     "analyzer": ANALYZER_CONFIG,
     "reporter": REPORTER_CONFIG,
 }
+
+
+def _create_thinking_planner(thinking_budget: int) -> "BuiltInPlanner | None":
+    """Create a BuiltInPlanner with thinking configuration.
+
+    Args:
+        thinking_budget: Token budget for thinking/reasoning.
+            If 0, returns None (use model default behavior).
+
+    Returns:
+        BuiltInPlanner with ThinkingConfig, or None if thinking disabled
+    """
+    if thinking_budget <= 0:
+        return None
+
+    if not GOOGLE_ADK_AVAILABLE:
+        return None
+
+    return BuiltInPlanner(
+        thinking_config=ThinkingConfig(
+            include_thoughts=True,
+            thinking_budget=thinking_budget,
+        )
+    )
 
 
 def create_researcher_agent(
@@ -240,6 +284,11 @@ def create_researcher_agent(
         "tools": [google_search],  # Enable web search for current information
     }
 
+    # Add thinking planner if configured
+    planner = _create_thinking_planner(RESEARCHER_CONFIG.thinking_budget)
+    if planner is not None:
+        kwargs["planner"] = planner
+
     # Add grounding callback if provided
     if grounding_callback is not None:
         kwargs["after_model_callback"] = grounding_callback
@@ -259,11 +308,18 @@ def create_analyzer_agent() -> "LlmAgent":
     if not GOOGLE_ADK_AVAILABLE:
         raise ImportError("google-adk is required. Install with: uv sync --extra google-adk")
 
-    return LlmAgent(
-        name=ANALYZER_CONFIG.name,
-        model=ANALYZER_CONFIG.model,
-        instruction=ANALYZER_CONFIG.instruction,
-    )
+    kwargs: dict[str, Any] = {
+        "name": ANALYZER_CONFIG.name,
+        "model": ANALYZER_CONFIG.model,
+        "instruction": ANALYZER_CONFIG.instruction,
+    }
+
+    # Add thinking planner if configured
+    planner = _create_thinking_planner(ANALYZER_CONFIG.thinking_budget)
+    if planner is not None:
+        kwargs["planner"] = planner
+
+    return LlmAgent(**kwargs)
 
 
 def create_reporter_agent() -> "LlmAgent":
@@ -278,11 +334,18 @@ def create_reporter_agent() -> "LlmAgent":
     if not GOOGLE_ADK_AVAILABLE:
         raise ImportError("google-adk is required. Install with: uv sync --extra google-adk")
 
-    return LlmAgent(
-        name=REPORTER_CONFIG.name,
-        model=REPORTER_CONFIG.model,
-        instruction=REPORTER_CONFIG.instruction,
-    )
+    kwargs: dict[str, Any] = {
+        "name": REPORTER_CONFIG.name,
+        "model": REPORTER_CONFIG.model,
+        "instruction": REPORTER_CONFIG.instruction,
+    }
+
+    # Add thinking planner if configured
+    planner = _create_thinking_planner(REPORTER_CONFIG.thinking_budget)
+    if planner is not None:
+        kwargs["planner"] = planner
+
+    return LlmAgent(**kwargs)
 
 
 def create_orchestrator_agent(
@@ -302,12 +365,19 @@ def create_orchestrator_agent(
     if not GOOGLE_ADK_AVAILABLE:
         raise ImportError("google-adk is required. Install with: uv sync --extra google-adk")
 
-    return LlmAgent(
-        name=ORCHESTRATOR_CONFIG.name,
-        model=ORCHESTRATOR_CONFIG.model,
-        instruction=ORCHESTRATOR_CONFIG.instruction,
-        sub_agents=sub_agents or [],
-    )
+    kwargs: dict[str, Any] = {
+        "name": ORCHESTRATOR_CONFIG.name,
+        "model": ORCHESTRATOR_CONFIG.model,
+        "instruction": ORCHESTRATOR_CONFIG.instruction,
+        "sub_agents": sub_agents or [],
+    }
+
+    # Add thinking planner if configured
+    planner = _create_thinking_planner(ORCHESTRATOR_CONFIG.thinking_budget)
+    if planner is not None:
+        kwargs["planner"] = planner
+
+    return LlmAgent(**kwargs)
 
 
 def create_all_agents() -> dict[str, "LlmAgent"]:

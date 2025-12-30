@@ -705,6 +705,7 @@ class DelegatingAdkAgent(ContractedAdkAgent):
         iterations: int | None = None,
         tool_invocations: int | None = None,
         per_tool_limits: dict[str, int] | None = None,
+        reasoning_tokens: int | None = None,
         description: str = "",
         strict_mode: bool = True,
         runner: Any | None = None,
@@ -726,6 +727,8 @@ class DelegatingAdkAgent(ContractedAdkAgent):
                 (maps to Google ADK RunConfig.max_llm_calls)
             tool_invocations: Optional total tool invocation limit
             per_tool_limits: Optional per-tool limits (e.g., {"google_search": 10})
+            reasoning_tokens: Optional reasoning/thinking token budget
+                (communicates to agent how much thinking budget is allocated)
             description: Description of the delegated task
             strict_mode: If True, violations cause immediate termination
             runner: Optional custom Runner for the delegated agent
@@ -745,6 +748,7 @@ class DelegatingAdkAgent(ContractedAdkAgent):
             api_calls=api_calls,
             iterations=iterations,
             tool_invocations=tool_invocations,
+            reasoning_tokens=reasoning_tokens,
             per_tool_limits=per_tool_limits,
             description=description,
         )

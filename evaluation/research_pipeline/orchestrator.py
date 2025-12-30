@@ -24,6 +24,9 @@ from datetime import timedelta
 from typing import Any
 
 from .agents import (
+    ANALYZER_CONFIG,
+    REPORTER_CONFIG,
+    RESEARCHER_CONFIG,
     create_analyzer_agent,
     create_grounding_callback,
     create_reporter_agent,
@@ -362,9 +365,10 @@ Requirements:
                 new_message=content,
             ):
                 if hasattr(event, "usage_metadata") and event.usage_metadata:
-                    total_tokens += getattr(event.usage_metadata, "total_token_count", 0)
+                    total_tokens += getattr(event.usage_metadata, "total_token_count", 0) or 0
                     # Track thinking/reasoning tokens (Gemini 2.5+ models)
-                    thinking_tokens += getattr(event.usage_metadata, "thoughts_token_count", 0)
+                    # Flash-Lite returns None for thoughts_token_count, so use `or 0` pattern
+                    thinking_tokens += getattr(event.usage_metadata, "thoughts_token_count", 0) or 0
                     llm_calls += 1  # Each event with usage_metadata is an LLM call
 
                 # Track function calls (tool invocations)
@@ -413,17 +417,17 @@ class ContractedPipeline:
     PARENT_TOKENS = 100_000
     PARENT_COST = 2.0
     PARENT_DURATION = timedelta(minutes=15)
-    PARENT_ITERATIONS = 50  # Max LLM calls to prevent runaway loops
-    PARENT_WEB_SEARCHES = 20  # Total web searches allowed (paper Section 8)
+    PARENT_ITERATIONS = 30  # Max LLM calls to prevent runaway loops (reduced from 50)
+    PARENT_WEB_SEARCHES = 8  # Total web searches allowed (reduced from 20)
 
     ORCHESTRATOR_TOKENS = 10_000
     RESEARCHER_TOKENS = 40_000
-    RESEARCHER_ITERATIONS = 15  # Researcher may need multiple search iterations
-    RESEARCHER_WEB_SEARCHES = 15  # Per-tool limit for google_search
+    RESEARCHER_ITERATIONS = 10  # Researcher iterations (reduced from 15, aligned with 6 searches)
+    RESEARCHER_WEB_SEARCHES = 6  # Per-tool limit for google_search (reduced from 15)
     ANALYZER_TOKENS = 25_000
-    ANALYZER_ITERATIONS = 10
+    ANALYZER_ITERATIONS = 8  # Analyzer iterations (reduced from 10)
     REPORTER_TOKENS = 25_000
-    REPORTER_ITERATIONS = 10
+    REPORTER_ITERATIONS = 8  # Reporter iterations (reduced from 10)
 
     def __init__(self, verbose: bool = False, strict_mode: bool = True) -> None:
         """Initialize contracted pipeline.
@@ -493,6 +497,7 @@ class ContractedPipeline:
                 tokens=self.RESEARCHER_TOKENS,
                 iterations=self.RESEARCHER_ITERATIONS,
                 per_tool_limits={"google_search": self.RESEARCHER_WEB_SEARCHES},
+                reasoning_tokens=RESEARCHER_CONFIG.thinking_budget,
                 description="Research the topic",
             )
 
@@ -502,6 +507,7 @@ class ContractedPipeline:
                 agent=analyzer_agent,
                 tokens=self.ANALYZER_TOKENS,
                 iterations=self.ANALYZER_ITERATIONS,
+                reasoning_tokens=ANALYZER_CONFIG.thinking_budget,
                 description="Analyze findings",
             )
 
@@ -511,6 +517,7 @@ class ContractedPipeline:
                 agent=reporter_agent,
                 tokens=self.REPORTER_TOKENS,
                 iterations=self.REPORTER_ITERATIONS,
+                reasoning_tokens=REPORTER_CONFIG.thinking_budget,
                 description="Write report",
             )
 

@@ -280,6 +280,7 @@ class ContractingCapability:
         iterations: int | None = None,
         tool_invocations: int | None = None,
         per_tool_limits: dict[str, int] | None = None,
+        reasoning_tokens: int | None = None,
         description: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> Contract:
@@ -296,6 +297,8 @@ class ContractingCapability:
             iterations: Optional iteration limit for child (maps to ADK max_llm_calls)
             tool_invocations: Optional total tool invocation limit for child
             per_tool_limits: Optional per-tool invocation limits (tool_name -> max_calls)
+            reasoning_tokens: Optional reasoning/thinking token budget for child
+                (communicates to agent how much thinking budget is allocated)
             description: Description of the child's task
             metadata: Optional metadata for the child contract
 
@@ -347,6 +350,9 @@ class ContractingCapability:
             )
 
         # Create child contract
+        # Note: reasoning_tokens is stored in metadata (not ResourceConstraints)
+        # because it's informational for prompts, not enforced. The actual thinking
+        # budget is controlled by the model's ThinkingConfig, not token counting.
         child_resources = ResourceConstraints(
             tokens=tokens if tokens > 0 else None,
             cost_usd=cost_usd if cost_usd > 0 else None,
@@ -358,6 +364,8 @@ class ContractingCapability:
 
         child_metadata = metadata or {}
         child_metadata["parent_id"] = self.parent_contract.id
+        if reasoning_tokens is not None:
+            child_metadata["reasoning_tokens"] = reasoning_tokens
         child_metadata["delegation_time"] = datetime.now().isoformat()
 
         child_contract = Contract(
