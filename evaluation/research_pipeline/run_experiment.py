@@ -315,13 +315,13 @@ def run_experiment(
     # Calculate summary statistics
     results["summary"] = calculate_summary(results["trials"], mode)
 
-    # Save results
+    # Save results to results/research_pipeline/ (consistent with strategy_modes)
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "results"
+        output_dir = Path(__file__).parent.parent.parent / "results" / "research_pipeline"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_file = output_dir / f"evaluation_{timestamp}.json"
+    output_file = output_dir / f"research_pipeline_{timestamp}.json"
 
     with open(output_file, "w") as f:
         json.dump(results, f, indent=2, default=str)
