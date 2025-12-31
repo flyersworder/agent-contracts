@@ -66,6 +66,7 @@ class ExecutionResult:
         started_at: When execution started
         completed_at: When execution completed
         error: Error message if execution failed
+        truncated: Whether output was truncated due to timeout/budget (soft cutoff)
     """
 
     success: bool
@@ -78,6 +79,7 @@ class ExecutionResult:
     started_at: datetime | None = None
     completed_at: datetime | None = None
     error: str | None = None
+    truncated: bool = False
 
     @property
     def duration_seconds(self) -> float | None:
@@ -136,6 +138,7 @@ class ContractExecutor:
         contract: Contract,
         strict_mode: bool = False,
         validate_output: bool = True,
+        soft_cutoff: bool = False,
     ) -> None:
         """Initialize the executor.
 
@@ -143,6 +146,9 @@ class ContractExecutor:
             contract: The contract to execute
             strict_mode: If True, violations raise RuntimeError; else return result with violations
             validate_output: If True, validate LLM responses against contract.outputs schema
+            soft_cutoff: If True, use streaming and return partial output on timeout instead
+                of failing completely. This enables graceful degradation when time/budget
+                constraints are exceeded.
         """
         # Import here to avoid circular imports
         from agent_contracts.integrations.litellm_wrapper import ContractedLLM
@@ -150,6 +156,7 @@ class ContractExecutor:
         self.contract = contract
         self.capabilities: Capabilities = contract.capabilities  # type: ignore[assignment]
         self.strict_mode = strict_mode
+        self.soft_cutoff = soft_cutoff
 
         # Get execution config (required for execution)
         if contract.execution is not None:
@@ -178,6 +185,7 @@ class ContractExecutor:
         # Execution log
         self._execution_log: list[dict[str, Any]] = []
         self._violations: list[str] = []
+        self._truncated: bool = False  # Track if output was truncated (soft cutoff)
 
     def run(self, **kwargs: Any) -> ExecutionResult:
         """Execute the contract with provided inputs.
@@ -257,8 +265,12 @@ class ContractExecutor:
                 },
             )
 
+            # With soft cutoff, truncated output is still considered successful
+            # (we got usable output, just not complete)
+            effective_success = not is_violated or (self._truncated and output)
+
             return ExecutionResult(
-                success=not is_violated,
+                success=effective_success,
                 output=output,
                 resource_usage=self._get_usage_dict(),
                 violations=self._violations,
@@ -267,6 +279,7 @@ class ContractExecutor:
                 contract_state=self.contract.state,
                 started_at=started_at,
                 completed_at=completed_at,
+                truncated=self._truncated,
             )
 
         except Exception as e:
@@ -290,6 +303,7 @@ class ContractExecutor:
                 started_at=started_at,
                 completed_at=completed_at,
                 error=str(e),
+                truncated=self._truncated,
             )
 
     def _extract_task_description(self, **kwargs: Any) -> str:
@@ -363,13 +377,15 @@ class ContractExecutor:
         """Execute a chat completion request.
 
         Uses ContractedLLM which wraps LiteLLM with contract enforcement.
+        When soft_cutoff is enabled, uses streaming to capture partial output
+        on timeout instead of failing completely.
 
         Args:
             system_prompt: System prompt (may be prepended to messages)
             messages: Chat messages
 
         Returns:
-            Chat response text
+            Chat response text (may be partial if truncated)
         """
         # Prepare messages with system prompt
         full_messages = self._prepare_messages(system_prompt, messages)
@@ -383,9 +399,27 @@ class ContractExecutor:
             {
                 "model": self.execution_config.model,
                 "message_count": len(full_messages),
+                "soft_cutoff": self.soft_cutoff,
             },
         )
 
+        if self.soft_cutoff:
+            # Use streaming to enable graceful degradation on timeout
+            return self._execute_chat_streaming(full_messages, params)
+        else:
+            # Standard non-streaming execution
+            return self._execute_chat_standard(full_messages, params)
+
+    def _execute_chat_standard(self, messages: list[dict[str, Any]], params: dict[str, Any]) -> str:
+        """Execute chat completion without streaming (standard mode).
+
+        Args:
+            messages: Prepared chat messages
+            params: LLM call parameters
+
+        Returns:
+            Complete response text
+        """
         # Use ContractedLLM for the actual call - it handles:
         # - Structured output (response_format from contract.outputs)
         # - Reasoning effort auto-selection
@@ -393,7 +427,7 @@ class ContractExecutor:
         # - Output validation (if enabled)
         response = self._contracted_llm.completion(
             model=self.execution_config.model,
-            messages=full_messages,
+            messages=messages,
             **params,
         )
 
@@ -402,6 +436,75 @@ class ContractExecutor:
         self._log("llm_call_completed", {"response_length": len(content)})
 
         return content
+
+    def _execute_chat_streaming(
+        self, messages: list[dict[str, Any]], params: dict[str, Any]
+    ) -> str:
+        """Execute chat completion with streaming for soft cutoff support.
+
+        Uses streaming to accumulate response chunks. On timeout, returns
+        whatever has been accumulated instead of failing completely.
+
+        Args:
+            messages: Prepared chat messages
+            params: LLM call parameters
+
+        Returns:
+            Response text (may be partial if truncated due to timeout)
+        """
+        accumulated_content = ""
+
+        try:
+            # Use streaming_completion from ContractedLLM
+            for chunk in self._contracted_llm.streaming_completion(
+                model=self.execution_config.model,
+                messages=messages,
+                **params,
+            ):
+                # Extract text from chunk
+                if chunk.choices and chunk.choices[0].delta:
+                    delta_content = chunk.choices[0].delta.content
+                    if delta_content:
+                        accumulated_content += delta_content
+
+            # Streaming completed successfully
+            self._log(
+                "llm_call_completed",
+                {"response_length": len(accumulated_content), "truncated": False},
+            )
+
+        except Exception as e:
+            # Check if this is a timeout error
+            error_type = type(e).__name__
+            is_timeout = "Timeout" in error_type or "timeout" in str(e).lower()
+
+            if is_timeout and accumulated_content:
+                # Soft cutoff: we have partial output, mark as truncated
+                self._truncated = True
+                self._log(
+                    "llm_call_truncated",
+                    {
+                        "response_length": len(accumulated_content),
+                        "reason": "timeout",
+                        "error": str(e),
+                    },
+                )
+            elif accumulated_content:
+                # Other error but we have partial output, still use it
+                self._truncated = True
+                self._log(
+                    "llm_call_truncated",
+                    {
+                        "response_length": len(accumulated_content),
+                        "reason": "error",
+                        "error": str(e),
+                    },
+                )
+            else:
+                # No accumulated content, re-raise the exception
+                raise
+
+        return accumulated_content
 
     def _prepare_messages(
         self,

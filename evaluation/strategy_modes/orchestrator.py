@@ -41,6 +41,7 @@ class TrialResult:
         execution_time: Wall clock time in seconds
         timeout_seconds: Timeout limit applied (None if no limit)
         timed_out: Whether the trial failed due to timeout
+        truncated: Whether output was truncated due to soft cutoff (partial result)
         reasoning_effort: Reasoning effort level used (low/medium/high)
         rouge_metrics: ROUGE evaluation scores
         contract_state: Final contract state
@@ -61,6 +62,7 @@ class TrialResult:
     execution_time: float = 0.0
     timeout_seconds: float | None = None
     timed_out: bool = False
+    truncated: bool = False  # Output was truncated due to soft cutoff
     reasoning_effort: str = ""
     rouge_metrics: RougeMetrics = field(default_factory=RougeMetrics)
     contract_state: str = ""
@@ -82,6 +84,7 @@ class TrialResult:
             "execution_time": self.execution_time,
             "timeout_seconds": self.timeout_seconds,
             "timed_out": self.timed_out,
+            "truncated": self.truncated,
             "reasoning_effort": self.reasoning_effort,
             "rouge_metrics": self.rouge_metrics.to_dict(),
             "contract_state": self.contract_state,
@@ -101,6 +104,7 @@ class StrategyModesRunner:
         cost_budget: Maximum cost per task in USD
         time_budget: Maximum time per task
         enable_timeout: Whether to enforce mode-specific timeouts
+        soft_cutoff: If True, return partial output on timeout instead of failing
     """
 
     # Default budgets (generous to allow mode differences to show)
@@ -138,6 +142,7 @@ class StrategyModesRunner:
         cost_budget: float | None = None,
         time_budget: timedelta | None = None,
         enable_timeout: bool = True,
+        soft_cutoff: bool = False,
     ) -> None:
         """Initialize the strategy modes runner.
 
@@ -147,12 +152,15 @@ class StrategyModesRunner:
             cost_budget: Maximum cost per task in USD
             time_budget: Maximum time per task
             enable_timeout: If True, enforce mode-specific API timeouts
+            soft_cutoff: If True, use streaming and return partial output on timeout
+                instead of failing completely. This enables graceful degradation.
         """
         self.model = model
         self.token_budget = token_budget or self.DEFAULT_TOKEN_BUDGET
         self.cost_budget = cost_budget or self.DEFAULT_COST_BUDGET
         self.time_budget = time_budget or self.DEFAULT_TIME_BUDGET
         self.enable_timeout = enable_timeout
+        self.soft_cutoff = soft_cutoff
 
     def _get_timeout_for_mode(self, mode: str) -> float | None:
         """Get timeout value for a specific mode.
@@ -271,10 +279,11 @@ class StrategyModesRunner:
                     f"Reasoning: {reasoning_effort}{timeout_str}"
                 )
 
-            # Create executor
+            # Create executor with soft cutoff support
             executor = ContractExecutor(
                 contract=contract,
                 strict_mode=False,  # Don't raise on violations, just report
+                soft_cutoff=self.soft_cutoff,  # Enable graceful degradation on timeout
             )
 
             # Run summarization
@@ -291,6 +300,7 @@ class StrategyModesRunner:
             result.output_length = len(result.generated_summary)
             result.word_count = len(result.generated_summary.split())
             result.contract_state = execution_result.contract_state.value
+            result.truncated = execution_result.truncated  # Track soft cutoff truncation
 
             # Compute ROUGE metrics
             if result.generated_summary:
@@ -303,9 +313,10 @@ class StrategyModesRunner:
                 reasoning_info = f"reasoning: {result.reasoning_tokens}, text: {result.text_tokens}"
                 if result.reasoning_content:
                     reasoning_info += f", content: {len(result.reasoning_content)} chars"
+                truncated_info = " [TRUNCATED]" if result.truncated else ""
                 print(
                     f"  [Result] Tokens: {result.tokens_used} ({reasoning_info}), "
-                    f"Words: {result.word_count}"
+                    f"Words: {result.word_count}{truncated_info}"
                 )
                 print(f"  [Quality] ROUGE-L: {result.rouge_metrics.rouge_l_f1:.3f}")
 
