@@ -507,6 +507,23 @@ contracted_coder = orchestrator.delegate(
 )
 ```
 
+### Dynamic Status Updates (CONTRACTED only)
+
+The CONTRACTED pipeline provides agents with real-time visibility into their resource consumption between iterations:
+
+```
+[ITERATION STATUS]
+- Attempt 3 of 5
+- Tokens used so far: 3,500
+- Budget remaining: 26,500 (88%)
+```
+
+On the final iteration, agents receive urgency warnings:
+- **Coder**: "⚠️ FINAL ATTEMPT - ensure correctness!"
+- **Reviewer**: "This is the FINAL review opportunity."
+
+This enables agents to adapt their strategy as resources deplete (e.g., attempting simpler solutions when few iterations remain). The UNCONTRACTED pipeline has no such visibility—a key experimental differentiator.
+
 ### Metrics Collected
 
 - **Iteration counts** (key metric for runaway detection)
@@ -593,11 +610,12 @@ The core experimental manipulation is the presence or absence of **normative gov
 | **Iteration norms** | ✅ Hard limits prevent runaway (prohibition) | ❌ Soft safety limit only |
 | **Conservation norms** | ✅ Σbᵢ ≤ B enforced (obligation) | ❌ N/A |
 | **Budget awareness** | ✅ Agents know constraints | ❌ Standard prompts |
+| **Dynamic status updates** | ✅ Iteration & token usage between rounds | ❌ No visibility |
 | **Monitoring** | ✅ Real-time norm compliance tracking | ❌ Post-hoc only |
 
 ### What Stays Constant (Controls)
 
-- Same LLM model (gemini-2.5-flash-lite for Research Pipeline; gemini-2.5-flash for others)
+- Same LLM model (gemini-2.5-flash-lite for Research Pipeline and Code Review; gemini-2.5-flash for Contract Modes)
 - Same agent architectures
 - Same prompts (minus budget info)
 - Same tasks/topics
@@ -762,29 +780,36 @@ These extensions represent natural directions for the Agent Contracts framework 
 - **Simulated costs**: Token costs are tracked but not actual billing (would require production deployment)
 - **Limited task domains**: Logic reasoning, summarization, research reports, and coding—other domains may differ
 
-### Budget Awareness Limitations
+### Budget Awareness
 
-The current implementation has two levels of budget awareness:
+The implementation provides two levels of budget awareness:
 
 | Level | Status | Description |
 |-------|--------|-------------|
 | **Initial awareness** | ✅ Implemented | Agent receives budget info at start (tokens, iterations, per-tool limits) |
-| **Dynamic awareness** | ❌ Not implemented | Agent does NOT receive usage updates during multi-turn execution |
+| **Dynamic awareness** | ✅ Implemented (Code Review) | Agent receives usage updates between iterations |
 
-**What this means:**
-- Agents know their total budget when they start (e.g., "40,000 tokens, 15 LLM calls, 6 google_search calls")
-- During execution, agents do NOT receive updates like "you've used 50% of your tokens"
-- Hard enforcement still stops agents when limits are exceeded, but without warning
+**What agents receive:**
+- **Initial**: Total budget when they start (e.g., "40,000 tokens, 15 LLM calls, 6 google_search calls")
+- **Dynamic** (Code Review Pipeline): Status updates between iterations showing:
+  - Current iteration number and maximum allowed (e.g., "Attempt 2 of 5")
+  - Cumulative tokens used so far (e.g., "Tokens used: 1,500")
+  - Budget remaining with percentage (e.g., "Budget remaining: 28,500 (95%)")
+  - Urgency warnings on final iteration (e.g., "⚠️ FINAL ATTEMPT - ensure correctness!")
 
-**Why this design:**
-- Google ADK's event streaming model makes mid-execution prompt injection complex
-- Initial awareness + hard enforcement is sufficient for demonstrating governance value
-- Adding usage updates would consume additional tokens (meta-overhead)
+**Example status update (Coder, iteration 3):**
+```
+[ITERATION STATUS]
+- Attempt 3 of 5
+- Tokens used so far: 3,500
+- Budget remaining: 26,500 (88%)
+```
 
-**Future work:**
-- Use ADK's `before_model_callback` to inject usage updates before each LLM call
-- Implement adaptive strategies that conserve resources as budgets tighten
-- Enable agents to proactively request partial results when approaching limits
+**Design rationale:**
+- Status updates are injected into messages at iteration boundaries (not mid-execution)
+- This approach avoids complexity of ADK callback injection while providing full visibility
+- Minimal token overhead (~50 tokens per status update)
+- Enables agents to adapt strategy as resources deplete (e.g., simpler solutions on final attempts)
 
 ---
 
@@ -833,6 +858,7 @@ evaluation/
     ├── orchestrator.py             # Contracted/Uncontracted pipelines
     ├── execution.py                # Code execution sandbox
     ├── tasks.py                    # LiveCodeBench loader
+    ├── usage_tracker.py            # Dynamic status updates & token tracking
     └── run_experiment.py           # Experiment runner
 ```
 

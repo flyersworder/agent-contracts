@@ -17,14 +17,14 @@ class AgentConfig:
 
     Attributes:
         name: Agent name
-        model: Model identifier (e.g., "gemini-2.0-flash")
+        model: Model identifier (e.g., "gemini-2.5-flash-lite")
         tokens: Token budget for this agent
         iterations: Maximum iterations (LLM calls)
         temperature: Sampling temperature
     """
 
     name: str
-    model: str = "gemini-2.0-flash"
+    model: str = "gemini-2.5-flash-lite"
     tokens: int = 30000
     iterations: int = 10
     temperature: float = 0.2
@@ -68,6 +68,22 @@ REVIEWER_CONFIGS = {
 }
 
 
+def _escape_braces(text: str) -> str:
+    """Escape curly braces to prevent ADK template substitution.
+
+    Google ADK interprets {var} as template variables. Problem descriptions
+    from LiveCodeBench often contain math notation like {K_i} which causes
+    KeyError.
+
+    We replace curly braces with Unicode lookalikes that render identically
+    but won't be parsed by ADK's template system:
+    - LEFT CURLY BRACKET to U+2774 MEDIUM LEFT CURLY BRACKET ORNAMENT
+    - RIGHT CURLY BRACKET to U+2775 MEDIUM RIGHT CURLY BRACKET ORNAMENT
+    """
+
+    return text.replace("{", "\u2774").replace("}", "\u2775")
+
+
 def get_coder_instruction(problem_description: str, budget_aware: bool = False) -> str:
     """Generate instruction for the Coder agent.
 
@@ -78,11 +94,14 @@ def get_coder_instruction(problem_description: str, budget_aware: bool = False) 
     Returns:
         Formatted instruction string
     """
+    # Escape braces in problem description to prevent ADK template errors
+    escaped_problem = _escape_braces(problem_description)
+
     base_instruction = f"""You are an expert Python programmer solving competitive programming problems.
 
 ## Problem
 
-{problem_description}
+{escaped_problem}
 
 ## Your Task
 
@@ -217,8 +236,8 @@ class PipelineConfig:
     coder_iterations: int = 10
     reviewer_tokens: int = 10000
     reviewer_iterations: int = 5
-    max_review_rounds: int = 5
-    model: str = "gemini-2.0-flash"
+    max_review_rounds: int = 3
+    model: str = "gemini-2.5-flash-lite"
     reserve_ratio: float = 0.1
 
     @classmethod
@@ -231,6 +250,7 @@ class PipelineConfig:
         Returns:
             PipelineConfig with appropriate budgets
         """
+        # All difficulties use 3 max_review_rounds to match capstone project
         configs = {
             "easy": cls(
                 parent_tokens=35000,
@@ -239,7 +259,7 @@ class PipelineConfig:
                 coder_iterations=8,
                 reviewer_tokens=5000,
                 reviewer_iterations=3,
-                max_review_rounds=4,
+                max_review_rounds=3,
             ),
             "medium": cls(
                 parent_tokens=50000,
@@ -248,7 +268,7 @@ class PipelineConfig:
                 coder_iterations=10,
                 reviewer_tokens=10000,
                 reviewer_iterations=5,
-                max_review_rounds=5,
+                max_review_rounds=3,
             ),
             "hard": cls(
                 parent_tokens=70000,
@@ -257,7 +277,7 @@ class PipelineConfig:
                 coder_iterations=12,
                 reviewer_tokens=15000,
                 reviewer_iterations=6,
-                max_review_rounds=6,
+                max_review_rounds=3,
             ),
         }
         return configs.get(difficulty, configs["medium"])

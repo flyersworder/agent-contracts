@@ -25,6 +25,12 @@ from .execution import (
     format_test_result,
 )
 from .tasks import CodeTask
+from .usage_tracker import (
+    CumulativeUsage,
+    IterationUsage,
+    generate_coder_status_prefix,
+    generate_reviewer_status_prefix,
+)
 
 
 @dataclass
@@ -121,7 +127,9 @@ class UncontractedPipeline:
     """
 
     # Safety limit to prevent actual runaway (but higher than contracted)
-    SAFETY_MAX_ITERATIONS = 20
+    # Set to 6 to keep experiment runtime reasonable while still showing runaway behavior
+    # (Contracted uses 3 iterations, matching the capstone project)
+    SAFETY_MAX_ITERATIONS = 6
 
     def __init__(self, config: PipelineConfig | None = None):
         """Initialize uncontracted pipeline.
@@ -158,6 +166,8 @@ class UncontractedPipeline:
 
         This uses Google ADK agents without Agent Contracts wrapping.
         """
+        import asyncio
+
         from google.adk.agents import LlmAgent
         from google.adk.runners import Runner
         from google.adk.sessions import InMemorySessionService
@@ -169,8 +179,22 @@ class UncontractedPipeline:
         feedback = ""
         iteration = 0
 
-        # Create session
+        # Create session service
         session_service = InMemorySessionService()
+
+        # Helper to create sessions (async API requires asyncio.run)
+        def create_session_sync(app_name: str, user_id: str, session_id: str) -> str:
+            """Create a session synchronously, returning the session ID."""
+
+            async def _create() -> str:
+                session = await session_service.create_session(
+                    app_name=app_name,
+                    user_id=user_id,
+                    session_id=session_id,
+                )
+                return str(session.id)
+
+            return asyncio.run(_create())
 
         # Storage for test results (closure)
         test_storage: dict[str, Any] = {"code": "", "task": task}
@@ -187,13 +211,14 @@ class UncontractedPipeline:
         test_tool = FunctionTool(func=test_code)
 
         # Create agents (no budget limits)
+        # Use same temperature as contracted pipeline to avoid confounding variables
         coder = LlmAgent(
             model=self.model,
             name="Coder",
             instruction=get_coder_instruction(task.get_prompt(), budget_aware=False),
             tools=[],
             generate_content_config=types.GenerateContentConfig(
-                temperature=(self.config.model == "gemini-2.0-flash" and 0.2) or 0.7,
+                temperature=0.2,
             ),
         )
 
@@ -230,9 +255,10 @@ class UncontractedPipeline:
                 else f"Previous code failed. Feedback:\n{feedback}\n\nFix the code."
             )
 
-            coder_session = session_service.create_session(
+            coder_session_id = create_session_sync(
                 app_name="code_review_uncontracted",
                 user_id="eval",
+                session_id=f"coder_{task.task_id}_{iteration}",
             )
 
             coder_tokens = 0
@@ -240,7 +266,7 @@ class UncontractedPipeline:
 
             for event in coder_runner.run(
                 user_id="eval",
-                session_id=coder_session.id,
+                session_id=coder_session_id,
                 new_message=types.Content(role="user", parts=[types.Part(text=coder_message)]),
             ):
                 if hasattr(event, "usage_metadata") and event.usage_metadata:
@@ -265,9 +291,10 @@ class UncontractedPipeline:
             test_storage["code"] = current_code
 
             # Reviewer turn
-            reviewer_session = session_service.create_session(
+            reviewer_session_id = create_session_sync(
                 app_name="code_review_uncontracted",
                 user_id="eval",
+                session_id=f"reviewer_{task.task_id}_{iteration}",
             )
 
             reviewer_tokens = 0
@@ -276,7 +303,7 @@ class UncontractedPipeline:
 
             for event in reviewer_runner.run(
                 user_id="eval",
-                session_id=reviewer_session.id,
+                session_id=reviewer_session_id,
                 new_message=types.Content(
                     role="user",
                     parts=[types.Part(text="Test the code and provide your decision.")],
@@ -454,16 +481,29 @@ class ContractedPipeline:
         # Run loop with contract enforcement
         max_rounds = self.config.max_review_rounds
 
+        # Track cumulative usage for dynamic status updates
+        cumulative_usage = CumulativeUsage()
+
         while iteration < max_rounds:
             iteration += 1
             iter_detail = IterationDetail(iteration=iteration)
+            iter_usage = IterationUsage(iteration=iteration)
 
-            # Coder turn (with contract limits)
-            coder_message = (
-                "Write code to solve the problem."
-                if iteration == 1
-                else f"Previous code failed. Feedback:\n{feedback}\n\nFix the code."
-            )
+            # Generate dynamic status prefix for Coder (iteration 2+)
+            # This gives the agent visibility into resource consumption
+            if iteration == 1:
+                coder_message = "Write code to solve the problem."
+            else:
+                # Include status update showing iteration progress and token usage
+                status_prefix = generate_coder_status_prefix(
+                    iteration=iteration,
+                    max_iterations=max_rounds,
+                    tokens_used=cumulative_usage.coder_tokens,
+                    token_budget=self.config.coder_tokens,
+                )
+                coder_message = (
+                    f"{status_prefix}Previous code failed. Feedback:\n{feedback}\n\nFix the code."
+                )
 
             try:
                 coder_result = contracted_coder.run(
@@ -477,6 +517,9 @@ class ContractedPipeline:
                 iter_detail.coder_llm_calls = coder_result.get("llm_calls", 0)
                 iter_detail.code_snippet = current_code[:200]
 
+                # Update iteration usage for status tracking
+                iter_usage.coder_total_tokens = iter_detail.coder_tokens
+
                 result.tokens_by_agent["coder"] = (
                     result.tokens_by_agent.get("coder", 0) + iter_detail.coder_tokens
                 )
@@ -484,28 +527,50 @@ class ContractedPipeline:
                     result.llm_calls_by_agent.get("coder", 0) + iter_detail.coder_llm_calls
                 )
 
+            except RuntimeError as e:
+                # Contract violation or limit reached (ADK raises RuntimeError)
+                error_str = str(e)
+                if "violated" in error_str.lower() or "limit" in error_str.lower():
+                    result.error = f"Coder contract violation: {e}"
+                    result.budget_compliant = False
+                else:
+                    result.error = f"Coder execution error: {e}"
+                result.iteration_details.append(iter_detail)
+                break
             except Exception as e:
-                # Contract violation or limit reached
-                result.error = f"Coder contract violation: {e}"
-                result.budget_compliant = False
+                # Unexpected errors (not contract violations)
+                result.error = f"Coder unexpected error: {e}"
                 result.iteration_details.append(iter_detail)
                 break
 
             # Update test storage
             test_storage["code"] = current_code
 
+            # Generate status prefix for Reviewer
+            # Reviewer also gets visibility into iteration progress
+            reviewer_status_prefix = generate_reviewer_status_prefix(
+                iteration=iteration,
+                max_iterations=max_rounds,
+                tokens_used=cumulative_usage.reviewer_tokens,
+                token_budget=self.config.reviewer_tokens,
+            )
+            reviewer_message = f"{reviewer_status_prefix}Test the code and provide your decision."
+
             # Reviewer turn (with contract limits)
             try:
                 reviewer_result = contracted_reviewer.run(
                     user_id="eval",
                     session_id=f"reviewer_{task.task_id}_{iteration}",
-                    message="Test the code and provide your decision.",
+                    message=reviewer_message,
                 )
 
                 reviewer_response = reviewer_result.get("response", "")
                 iter_detail.reviewer_tokens = reviewer_result.get("total_tokens", 0)
                 iter_detail.reviewer_llm_calls = reviewer_result.get("llm_calls", 0)
                 iter_detail.feedback_snippet = reviewer_response[:200]
+
+                # Update iteration usage for status tracking
+                iter_usage.reviewer_total_tokens = iter_detail.reviewer_tokens
 
                 result.tokens_by_agent["reviewer"] = (
                     result.tokens_by_agent.get("reviewer", 0) + iter_detail.reviewer_tokens
@@ -514,9 +579,22 @@ class ContractedPipeline:
                     result.llm_calls_by_agent.get("reviewer", 0) + iter_detail.reviewer_llm_calls
                 )
 
+                # Update cumulative usage for next iteration's status messages
+                cumulative_usage.add_iteration(iter_usage)
+
+            except RuntimeError as e:
+                # Contract violation or limit reached (ADK raises RuntimeError)
+                error_str = str(e)
+                if "violated" in error_str.lower() or "limit" in error_str.lower():
+                    result.error = f"Reviewer contract violation: {e}"
+                    result.budget_compliant = False
+                else:
+                    result.error = f"Reviewer execution error: {e}"
+                result.iteration_details.append(iter_detail)
+                break
             except Exception as e:
-                result.error = f"Reviewer contract violation: {e}"
-                result.budget_compliant = False
+                # Unexpected errors (not contract violations)
+                result.error = f"Reviewer unexpected error: {e}"
                 result.iteration_details.append(iter_detail)
                 break
 
@@ -538,7 +616,7 @@ class ContractedPipeline:
 
         # Check conservation law compliance
         summary = orchestrator.get_delegation_summary()
-        result.budget_compliant = summary.conservation_satisfied
+        result.budget_compliant = summary["conservation_satisfied"]
 
         # Check if iteration limit stopped us
         if iteration >= max_rounds and not result.success:
