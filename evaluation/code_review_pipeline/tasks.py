@@ -158,6 +158,7 @@ def load_tasks(
     after_date: str | datetime | None = None,
     limit: int | None = None,
     random_seed: int = 42,
+    exclude_hard: bool = False,
 ) -> list[CodeTask]:
     """Load coding tasks from LiveCodeBench.
 
@@ -166,6 +167,7 @@ def load_tasks(
         after_date: Only include problems after this date (for contamination-free eval)
         limit: Maximum number of tasks to return
         random_seed: Seed for random sampling
+        exclude_hard: If True, exclude hard problems (useful for running easy+medium)
 
     Returns:
         List of CodeTask objects
@@ -187,6 +189,10 @@ def load_tasks(
 
         # Apply filters
         if difficulty and task.difficulty != difficulty:
+            continue
+
+        # Exclude hard problems if requested
+        if exclude_hard and task.difficulty == TaskDifficulty.HARD:
             continue
 
         if after_date and task.contest_date < after_date:

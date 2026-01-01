@@ -22,7 +22,7 @@ We provide **four complementary experiments** that demonstrate the value of Agen
 | **0. Good Enough** | Single agent iterative | CONTRACTED vs UNCONSTRAINED | 24 crisis scenarios | **"Good Enough" principle** - agents stop when Q ≥ Q_min |
 | **1. Contract Modes** | Single LLM call | ContractExecutor | 50 logic problems | Contract governance with **quality differentiation** (§4, §5) |
 | **2. Research Pipeline** | Multi-agent sequential | Researcher → Analyzer → Reporter | 50 topics | Conservation laws, budget delegation (§6) |
-| **3. Code Review Pipeline** | Multi-agent iterative | Coder ↔ Reviewer loop | 100 problems | Runaway prevention, iteration limits (§7) |
+| **3. Code Review Pipeline** | Multi-agent iterative | Coder ↔ Reviewer loop | 70 problems (31 easy + 39 medium) | Runaway prevention, iteration limits (§7) |
 
 ```
                          Complexity Progression
@@ -547,19 +547,20 @@ This enables agents to adapt their strategy as resources deplete (e.g., attempti
 # Quick smoke test (5 problems)
 uv run python -m evaluation.code_review_pipeline.run_experiment --n-problems 5
 
-# Full experiment (recommended: 100 problems for statistical power)
+# Full experiment (recommended: 70 problems = all easy+medium after Feb 2025)
 uv run python -m evaluation.code_review_pipeline.run_experiment \
-    --n-problems 100 \
+    --n-problems 70 \
+    --exclude-hard \
     --seed 42
 
-# By difficulty level
+# By difficulty level (39 medium problems available after Feb 2025)
 uv run python -m evaluation.code_review_pipeline.run_experiment \
-    --n-problems 100 \
+    --n-problems 39 \
     --difficulty medium
 
 # Contracted only
 uv run python -m evaluation.code_review_pipeline.run_experiment \
-    --n-problems 100 \
+    --n-problems 70 \
     --contracted-only
 ```
 
@@ -638,7 +639,7 @@ We use **bootstrap confidence intervals** for all comparisons. Sample sizes are 
 |------------|-------------|--------|------------|-----------|
 | **Contract Modes** | 50 logic problems | Within-subjects (paired) | 150 | n=50 sufficient for ~15% CI width on success rates |
 | **Research Pipeline** | 50 topics | Between-subjects | 100 | Expanded from 25 for robust CIs |
-| **Code Review** | 100 problems | Between-subjects | 200 | Binary outcomes need more samples |
+| **Code Review** | 70 problems (31 easy + 39 medium) | Within-subjects (paired) | 140 | Matches capstone; detects d≥0.5 at 80% power |
 
 ### Bootstrap Analysis
 
@@ -667,8 +668,8 @@ def bootstrap_ci(data, n_bootstrap=10000, ci=0.95):
 |------------|------------|--------------|-----------|
 | Contract Modes (50 logic problems) | ~3.1K | ~465K | ~$0.07 |
 | Research Pipeline (50 topics) | ~50K | ~5M | ~$0.75 |
-| Code Review (100 problems) | ~15K | ~3M | ~$0.45 |
-| **Total** | | ~8.5M | **~$1.27** |
+| Code Review (70 problems × 2 conditions) | ~5K | ~700K | ~$0.11 |
+| **Total** | | ~6.2M | **~$0.93** |
 
 ### Expected Figures
 

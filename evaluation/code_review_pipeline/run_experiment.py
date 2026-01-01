@@ -41,6 +41,7 @@ class ExperimentConfig:
     Attributes:
         n_problems: Number of problems to test
         difficulty: Filter by difficulty (None = all)
+        exclude_hard: Exclude hard problems (run only easy + medium)
         after_date: Only problems after this date
         random_seed: Random seed for reproducibility
         conditions: Which conditions to run
@@ -49,10 +50,11 @@ class ExperimentConfig:
 
     n_problems: int = 10
     difficulty: str | None = None
+    exclude_hard: bool = False
     after_date: str = "2025-02-01"
     random_seed: int = 42
     conditions: list[str] | None = None  # ["CONTRACTED", "UNCONTRACTED"]
-    output_dir: str = "evaluation/results/code_review"
+    output_dir: str = "results/code_review"
 
     def __post_init__(self) -> None:
         if self.conditions is None:
@@ -69,6 +71,7 @@ class ExperimentResults:
         completed_at: When experiment completed
         trials: List of trial results
         summary: Summary statistics
+        output_file: Path to the output file (for intermediate saves)
     """
 
     config: dict[str, Any]
@@ -76,6 +79,7 @@ class ExperimentResults:
     completed_at: str | None = None
     trials: list[dict[str, Any]] | None = None
     summary: dict[str, Any] | None = None
+    output_file: Path | None = None
 
 
 def run_single_trial(
@@ -132,6 +136,7 @@ def run_experiment(config: ExperimentConfig) -> ExperimentResults:
         after_date=config.after_date,
         limit=config.n_problems,
         random_seed=config.random_seed,
+        exclude_hard=config.exclude_hard,
     )
 
     stats = get_task_statistics(tasks)
@@ -273,6 +278,9 @@ def save_results(
 ) -> Path:
     """Save results to JSON file.
 
+    For intermediate saves, reuses the same file path to avoid creating
+    multiple files. The final save removes the _intermediate suffix.
+
     Args:
         results: Experiment results
         intermediate: Whether this is an intermediate save
@@ -284,9 +292,17 @@ def save_results(
     output_dir = Path(config.output_dir if config else "evaluation/results/code_review")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    suffix = "_intermediate" if intermediate else ""
-    output_file = output_dir / f"experiment_{timestamp}{suffix}.json"
+    # Reuse existing output file for intermediate saves
+    if intermediate and results.output_file is not None:
+        output_file = results.output_file
+    else:
+        # Create new file path based on start time (not current time)
+        # This ensures the filename is stable across saves
+        start_dt = datetime.fromisoformat(results.started_at)
+        timestamp = start_dt.strftime("%Y%m%d_%H%M%S")
+        suffix = "_intermediate" if intermediate else ""
+        output_file = output_dir / f"experiment_{timestamp}{suffix}.json"
+        results.output_file = output_file
 
     # Convert to serializable dict
     data = {
@@ -300,7 +316,8 @@ def save_results(
     with open(output_file, "w") as f:
         json.dump(data, f, indent=2, default=str)
 
-    print(f"\nResults saved to: {output_file}")
+    if not intermediate:
+        print(f"\nResults saved to: {output_file}")
     return output_file
 
 
@@ -368,6 +385,11 @@ def main() -> None:
         help="Filter by difficulty (default: all)",
     )
     parser.add_argument(
+        "--exclude-hard",
+        action="store_true",
+        help="Exclude hard problems (run only easy + medium)",
+    )
+    parser.add_argument(
         "--after-date",
         default="2025-02-01",
         help="Only problems after this date (default: 2025-02-01)",
@@ -390,7 +412,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--output-dir",
-        default="evaluation/results/code_review",
+        default="results/code_review",
         help="Output directory for results",
     )
 
@@ -406,6 +428,7 @@ def main() -> None:
     config = ExperimentConfig(
         n_problems=args.n_problems,
         difficulty=args.difficulty,
+        exclude_hard=args.exclude_hard,
         after_date=args.after_date,
         random_seed=args.seed,
         conditions=conditions,
