@@ -215,11 +215,20 @@ benchmarks/**/results/
 benchmarks/quality_validation/samples/
 benchmarks/quality_validation/extended_samples/
 *.png
-# Exception: track evaluation experiment figures for COINE 2026 paper
-!evaluation/**/figures/*.png
+*.pdf
 paper/
 .DS_Store
-results/
 
-# Generated figures (PDFs can be regenerated from code)
-*.pdf
+# Results folder (raw experiment data)
+results/
+# Exception: track publication figures for COINE 2026 paper
+!results/code_review/
+!results/code_review/figures/
+!results/code_review/figures/*.png
+!results/code_review/figures/*.md
+!results/research_pipeline/
+!results/research_pipeline/figures/
+!results/research_pipeline/figures/*.png
+!results/research_pipeline/figures/*.md
+# Also allow evaluation figures
+!evaluation/**/figures/*.png
