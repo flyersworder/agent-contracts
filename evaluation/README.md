@@ -15,28 +15,30 @@ This folder contains the evaluation pipelines for the **COINE 2026** conference 
 
 ## Overview
 
-We provide **three complementary experiments** that demonstrate the value of Agent Contracts at different levels of complexity:
+We provide **four complementary experiments** that demonstrate the value of Agent Contracts at different levels of complexity:
 
 | Experiment | Complexity | Pattern | Sample Size | Key Demonstration |
 |------------|------------|---------|-------------|-------------------|
+| **0. Good Enough** | Single agent iterative | CONTRACTED vs UNCONSTRAINED | 24 crisis scenarios | **"Good Enough" principle** - agents stop when Q ≥ Q_min |
 | **1. Contract Modes** | Single LLM call | ContractExecutor | 50 logic problems | Contract governance with **quality differentiation** (§4, §5) |
 | **2. Research Pipeline** | Multi-agent sequential | Researcher → Analyzer → Reporter | 50 topics | Conservation laws, budget delegation (§6) |
 | **3. Code Review Pipeline** | Multi-agent iterative | Coder ↔ Reviewer loop | 100 problems | Runaway prevention, iteration limits (§7) |
 
 ```
-                    Complexity Progression
-    ┌─────────────────────────────────────────────────────┐
-    │                                                     │
-    │   Contract     Research        Code Review          │
-    │    Modes       Pipeline         Pipeline            │
-    │      │            │                │                │
-    │   Single       Multi-Agent     Multi-Agent          │
-    │    Call        Sequential       Iterative           │
-    │      │            │                │                │
-    │      ▼            ▼                ▼                │
-    │  ContractExecutor → DelegatingAdkAgent → Loops     │
-    │                                                     │
-    └─────────────────────────────────────────────────────┘
+                         Complexity Progression
+    ┌───────────────────────────────────────────────────────────────┐
+    │                                                               │
+    │   Good Enough    Contract     Research        Code Review     │
+    │   (Crisis)        Modes       Pipeline         Pipeline       │
+    │      │              │            │                │           │
+    │   Single         Single       Multi-Agent     Multi-Agent     │
+    │   Agent          Call         Sequential       Iterative      │
+    │   Iterative                                                   │
+    │      │              │            │                │           │
+    │      ▼              ▼            ▼                ▼           │
+    │  SuccessCriterion → ContractExecutor → DelegatingAdkAgent → Loops │
+    │                                                               │
+    └───────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -47,14 +49,16 @@ The paper makes specific claims that these experiments validate. This matrix pro
 
 | # | Paper Claim | Section | Experiment | Expected Evidence |
 |---|-------------|---------|------------|-------------------|
+| 0 | **"Good Enough" principle works** | §2 | Good Enough | Agents with SuccessCriterion stop at Q_min; 23% fewer tokens, same quality |
 | 1 | **Contract definition is operational** | §4.1 | Contract Modes | Different `C = (I,O,S,R,T,Φ,Ψ)` configs → different success rates (70% → 86%) |
-| 2 | **Resource constraints are enforceable** | §4.2 | All three | Token budgets tracked and respected |
+| 2 | **Resource constraints are enforceable** | §4.2 | All four | Token budgets tracked and respected |
 | 3 | **Runtime monitoring enables adaptation** | §5.2 | Contract Modes | Modes produce distinct reasoning profiles (0 vs 700 vs 1500 reasoning tokens) |
 | 4 | **Conservation laws preserve budgets** | §6.1 | Research Pipeline | Σbᵢ ≤ B enforced; 0 violations |
 | 5 | **Orchestrator-Workers pattern works** | §6.2 | Research Pipeline | 3-agent hierarchy with delegation |
-| 6 | **Iteration limits prevent runaway** | §7.2 | Code Review | Contracted stops at limit; uncontracted may spiral |
+| 6 | **Iteration limits prevent runaway** | §7.2 | Code Review, Good Enough | Contracted stops at limit; uncontracted may spiral |
 | 7 | **Contracts address the $47K problem** | §1 | Code Review | 100% contracted compliance vs ~60% uncontracted |
 | 8 | **Resource investment improves quality** | §4.2 | Contract Modes | BALANCED (+75% tokens) → +16% overall success rate |
+| 9 | **Contracts prevent agent failures** | §7.2 | Good Enough | UNCONSTRAINED agent failed (crisis-22); CONTRACTED completed |
 
 ### Normative Governance Perspective
 
@@ -68,6 +72,118 @@ Agent Contracts implement resource constraints as **enforceable norms** (directl
 | **Goal** | Success criteria Φ | "Agent SHOULD achieve accuracy ≥ 0.8" | Fulfillment evaluation |
 
 The experiments validate that these norms are enforceable in practice with LLM-based agents.
+
+---
+
+## Experiment 0: "Good Enough" Crisis Communication
+
+**Location:** `good_enough/`
+
+This experiment validates the **"Good Enough" principle**—that agents with explicit success criteria (`SuccessCriterion`) stop when quality thresholds are met, rather than over-iterating. It demonstrates that contracts enable efficient, predictable agent behavior in time-critical scenarios.
+
+### Theoretical Background
+
+The paper's bounded rationality context (§2) draws on Simon's satisficing principle: agents should recognize when output quality is "good enough" rather than pursuing endless optimization. This experiment operationalizes that principle through:
+
+1. **SuccessCriterion as Stopping Condition**: Contracts specify `quality_score >= Q_min` as a formal success criterion
+2. **Iteration Limits for Crisis Scenarios**: Time-critical tasks include `max_iterations` constraints
+3. **Dual Constraints**: Agents must satisfy EITHER quality threshold OR iteration limit (whichever comes first)
+
+### What It Tests
+
+| Paper Section | Concept | How Tested |
+|---------------|---------|------------|
+| §2 | Bounded rationality / satisficing | CONTRACTED agents stop at Q_min; UNCONSTRAINED keep iterating |
+| §4.1 | SuccessCriterion (Φ) | `quality_score >= 0.80` as formal success condition |
+| §4.2 | Iteration constraints (R) | `max_iterations` from scenario (2-3 for crisis) |
+| §7.2 | Enforcement prevents failure | Contracts prevent agents from getting stuck |
+
+### Experimental Design
+
+**Task**: Draft professional crisis communication emails (regulatory notifications, security incidents, customer communications)
+
+| Condition | Contract | Quality Threshold | Iteration Limit | Behavior |
+|-----------|----------|-------------------|-----------------|----------|
+| **UNCONSTRAINED** | ResourceConstraints only | Subjective | None | Agent decides when "good enough" |
+| **CONTRACTED** | SuccessCriterion + ResourceConstraints | Q ≥ 0.80 | 2-3 (crisis) | Stop when threshold met OR limit reached |
+
+**24 Crisis Scenarios** across 9 domains:
+
+| Domain | Examples | Urgency | Max Iterations |
+|--------|----------|---------|----------------|
+| Data Breach/GDPR | 72-hour notification | Critical | 2 |
+| Healthcare | EHR outage, medication recall | Critical | 2 |
+| Cybersecurity | Ransomware, credential exposure | Critical | 2 |
+| Financial/Legal | Fund suspension, SEC investigation | Critical/High | 2-3 |
+| Infrastructure | AWS outage, office flood | High | 3 |
+| Supply Chain | Supplier bankruptcy, customs seizure | Critical | 2 |
+| Customer Service | Product recall, shipping delay | High | 3 |
+
+### Key Results (Statistically Significant)
+
+| Metric | UNCONSTRAINED | CONTRACTED | Difference | p-value |
+|--------|---------------|------------|------------|---------|
+| **Tokens** | 697 ± 337 | 538 ± 189 | **-22.9%** | 0.005 |
+| **Iterations** | 1.29 ± 0.46 | 1.04 ± 0.20 | **-19.4%** | 0.011 |
+| **Quality** | 0.83 ± 0.18 | 0.86 ± 0.04 | +0.2% | 0.85 (ns) |
+| **Contract Compliance** | N/A | **100%** | - | - |
+
+**Effect Sizes** (Cohen's d):
+- Token reduction: d = 0.58 (medium)
+- Iteration reduction: d = 0.70 (medium)
+
+**Notable Finding**: One UNCONSTRAINED agent (crisis-22: accessibility compliance) failed entirely—got stuck in an evaluation loop and never submitted. The CONTRACTED agent completed successfully. This demonstrates that contracts **prevent agent failures**, not just improve efficiency.
+
+### Agent Contracts Components Used
+
+```python
+from agent_contracts import Contract, ResourceConstraints, SuccessCriterion
+
+# CONTRACTED agent with quality threshold AND iteration limit
+contract = Contract(
+    id="contracted-email-agent",
+    name="Contracted Email Agent",
+    resources=ResourceConstraints(iterations=30),  # Safety limit
+    success_criteria=[
+        SuccessCriterion(
+            name="quality_threshold",
+            condition="quality_score >= 0.80",
+            weight=1.0,
+            required=True,
+        ),
+        SuccessCriterion(
+            name="iteration_limit",
+            condition="iterations <= 2",  # Crisis scenario limit
+            weight=0.5,
+            required=False,  # Soft constraint
+        ),
+    ],
+)
+
+# UNCONSTRAINED agent - no success criteria
+unconstrained_contract = Contract(
+    id="unconstrained-email-agent",
+    resources=ResourceConstraints(iterations=30),  # Safety only
+    # No success_criteria - agent uses subjective judgment
+)
+```
+
+### Usage
+
+```bash
+# Run crisis experiment (24 scenarios)
+uv run python -m evaluation.good_enough.run_crisis_experiment
+
+# Analyze results with bootstrap CIs and figures
+uv run python -m evaluation.good_enough.analyze_crisis_results
+```
+
+### Output Files
+
+- `RESULTS.md` - Full statistical analysis with figures
+- `figures/crisis_comparison.png` - Bar chart comparison
+- `figures/crisis_paired_differences.png` - Per-scenario differences
+- `figures/crisis_statistics.md` - Markdown statistics table
 
 ---
 
@@ -679,6 +795,18 @@ evaluation/
 ├── README.md                       # This file
 ├── __init__.py
 ├── indeterminacy_evaluator.py      # NeurIPS 2025 LLM-as-Judge
+│
+├── good_enough/                    # Experiment 0: "Good Enough" Crisis Communication
+│   ├── __init__.py
+│   ├── DESIGN.md                   # Experimental design document
+│   ├── RESULTS.md                  # Full statistical analysis & figures
+│   ├── adk_agents.py               # CONTRACTED vs UNCONSTRAINED implementations
+│   ├── adk_tools.py                # Email evaluation tools
+│   ├── email_indeterminacy_evaluator.py  # Multi-judge quality assessment
+│   ├── scenarios.py                # 24 crisis scenarios across 9 domains
+│   ├── analyze_crisis_results.py   # Bootstrap CIs, Cohen's d, figures
+│   ├── run_crisis_experiment.py    # Experiment runner
+│   └── figures/                    # Generated visualization figures
 │
 ├── strategy_modes/                 # Experiment 1: Contract Modes (Governance)
 │   ├── __init__.py
