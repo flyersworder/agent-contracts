@@ -15,7 +15,7 @@
 | Conditions | CONTRACTED vs UNCONTRACTED |
 | Total Trials | 140 (70 × 2) |
 | Data Source | LiveCodeBench (post-Feb 2025, contamination-free) |
-| Model | Gemini 2.0 Flash (`gemini-2.0-flash-exp`) |
+| Model | Gemini 2.5 Flash Lite (`gemini-2.5-flash-lite`) |
 | Random Seed | 42 |
 
 ### Agent Configuration
