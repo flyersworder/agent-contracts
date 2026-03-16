@@ -1,5 +1,7 @@
 # Agent Contracts
 
+[![Tests](https://github.com/flyersworder/agent-contracts/actions/workflows/ci.yml/badge.svg)](https://github.com/flyersworder/agent-contracts/actions/workflows/ci.yml)
+
 A formal framework for governing autonomous AI agents through explicit resource constraints and temporal boundaries.
 
 ## Overview
