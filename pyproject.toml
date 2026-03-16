@@ -18,17 +18,18 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-[project.urls]
-Homepage = "https://github.com/flyersworder/agent-contracts"
-Repository = "https://github.com/flyersworder/agent-contracts"
-Issues = "https://github.com/flyersworder/agent-contracts/issues"
-Documentation = "https://github.com/flyersworder/agent-contracts/blob/main/docs/README.md"
 dependencies = [
     "datasets>=4.4.2",
     "litellm>=1.60.0",
     "matplotlib>=3.10.7",
     "python-dotenv>=1.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/flyersworder/agent-contracts"
+Repository = "https://github.com/flyersworder/agent-contracts"
+Issues = "https://github.com/flyersworder/agent-contracts/issues"
+Documentation = "https://github.com/flyersworder/agent-contracts/blob/main/docs/README.md"
 
 [project.optional-dependencies]
 langchain = [
