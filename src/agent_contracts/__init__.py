@@ -9,15 +9,17 @@ __author__ = "Qing Ye"
 __license__ = "CC BY 4.0"
 
 # Core contract components
-from agent_contracts.core.contract import (
+from agent_contracts.core.capabilities import (
     AgentSpec,
     Capabilities,
+    CoordinationPattern,
+    ExecutionConfig,
+)
+from agent_contracts.core.contract import (
     Contract,
     ContractMode,
     ContractState,
-    CoordinationPattern,
     DeadlineType,
-    ExecutionConfig,
     InputSpecification,
     OutputSpecification,
     ResourceConstraints,

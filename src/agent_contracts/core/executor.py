@@ -37,11 +37,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from agent_contracts.core.capabilities import Capabilities, ExecutionConfig
 from agent_contracts.core.contract import (
-    Capabilities,
     Contract,
     ContractState,
-    ExecutionConfig,
 )
 from agent_contracts.core.monitor import TemporalMonitor
 from agent_contracts.core.planning import StrategyRecommendation, recommend_strategy

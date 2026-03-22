@@ -4,15 +4,17 @@ This module contains the fundamental data structures and enforcement mechanisms
 for Agent Contracts.
 """
 
-from agent_contracts.core.contract import (
+from agent_contracts.core.capabilities import (
     AgentSpec,
     Capabilities,
+    CoordinationPattern,
+    ExecutionConfig,
+)
+from agent_contracts.core.contract import (
     Contract,
     ContractMode,
     ContractState,
-    CoordinationPattern,
     DeadlineType,
-    ExecutionConfig,
     InputSpecification,
     OutputSpecification,
     ResourceConstraints,
