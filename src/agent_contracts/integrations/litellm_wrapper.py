@@ -137,10 +137,10 @@ class ContractedLLM:
         # Make the LLM call
         try:
             response = completion(**kwargs)
-        except Exception as e:
+        except Exception:
             # Track failed API call
             self.enforcer.monitor.usage.add_api_call()
-            raise e
+            raise
 
         # Extract token usage from response
         usage = response.get("usage", {})
