@@ -367,3 +367,105 @@ class TestIntegration:
             llm.completion(model="gpt-4", messages=[{"role": "user", "content": "Question 2"}])
 
         assert contract.state == ContractState.VIOLATED
+
+
+class TestOutputValidation:
+    """Tests for structured output detection and validation paths."""
+
+    def test_structured_output_detected_with_schema(self) -> None:
+        """Contract with JSON schema should report structured output."""
+        from agent_contracts.core.contract import OutputSpecification
+
+        contract = Contract(
+            id="test-validation",
+            name="Validation Test",
+            resources=ResourceConstraints(tokens=10000),
+            outputs=OutputSpecification(
+                schema={"type": "object", "required": ["name"]},
+            ),
+        )
+        assert contract.outputs.has_structured_output()
+
+    def test_no_structured_output_by_default(self) -> None:
+        """Contract without explicit outputs should not report structured output."""
+        contract = Contract(
+            id="test-no-output",
+            name="No Output Test",
+            resources=ResourceConstraints(tokens=10000),
+        )
+        assert not contract.outputs.has_structured_output()
+
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
+    def test_validate_output_raises_on_invalid_in_strict_mode(
+        self, mock_completion: MagicMock
+    ) -> None:
+        """Output validation should raise ContractViolationError in strict mode."""
+        from agent_contracts.core.contract import OutputSpecification
+
+        mock_completion.return_value = {
+            "choices": [{"message": {"content": "not valid json"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "model": "gpt-4o-mini",
+        }
+
+        contract = Contract(
+            id="test-validate",
+            name="Validate Test",
+            resources=ResourceConstraints(tokens=10000),
+            outputs=OutputSpecification(
+                schema={
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                    "required": ["name"],
+                },
+            ),
+        )
+        llm = ContractedLLM(
+            contract,
+            strict_mode=True,
+            validate_output=True,
+            auto_structured_output=False,  # Don't auto-apply response_format
+        )
+
+        with pytest.raises(ContractViolationError, match="Output validation failed"):
+            llm.completion(
+                model="gpt-4o-mini",
+                messages=[{"role": "user", "content": "Hi"}],
+            )
+
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
+    def test_validate_output_no_raise_in_lenient_mode(self, mock_completion: MagicMock) -> None:
+        """Output validation should not raise in lenient mode."""
+        from agent_contracts.core.contract import OutputSpecification
+
+        mock_completion.return_value = {
+            "choices": [{"message": {"content": "not valid json"}}],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "model": "gpt-4o-mini",
+        }
+
+        contract = Contract(
+            id="test-validate-lenient",
+            name="Validate Lenient",
+            resources=ResourceConstraints(tokens=10000),
+            outputs=OutputSpecification(
+                schema={
+                    "type": "object",
+                    "properties": {"name": {"type": "string"}},
+                    "required": ["name"],
+                },
+            ),
+        )
+        llm = ContractedLLM(
+            contract,
+            strict_mode=False,
+            validate_output=True,
+            auto_structured_output=False,
+        )
+
+        # Should not raise, just complete
+        response = llm.completion(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": "Hi"}],
+        )
+        assert response is not None
