@@ -674,3 +674,57 @@ class TestPerToolLimits:
         monitor.usage.add_tool_invocation("web_search")  # Over limit
         violations = monitor.check_constraints()
         assert any(v.resource == "tool:web_search" for v in violations)
+
+
+class TestDuplicateViolationRecording:
+    """Tests for deduplication of violation records."""
+
+    def _check_and_record(self, monitor: ResourceMonitor) -> list[ViolationInfo]:
+        """Simulate what enforcement does: check then record."""
+        violations = monitor.check_constraints()
+        for v in violations:
+            monitor.record_violation(v)
+        return violations
+
+    def test_same_violation_not_recorded_twice(self) -> None:
+        """Repeated check_constraints calls should not duplicate violations."""
+        constraints = ResourceConstraints(tokens=100)
+        monitor = ResourceMonitor(constraints)
+        monitor.usage.add_tokens(count=150)
+
+        # Check twice — same violation should appear once
+        self._check_and_record(monitor)
+        self._check_and_record(monitor)
+
+        assert len(monitor.violations) == 1
+
+    def test_different_violations_both_recorded(self) -> None:
+        """Different violation types should each be recorded."""
+        constraints = ResourceConstraints(tokens=100, api_calls=5)
+        monitor = ResourceMonitor(constraints)
+        monitor.usage.add_tokens(count=150)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+
+        self._check_and_record(monitor)
+
+        # Token violation + API call violation = 2 distinct violations
+        assert len(monitor.violations) >= 2
+
+    def test_violation_actual_value_updated_on_recheck(self) -> None:
+        """When same violation rechecked, actual value should be updated."""
+        constraints = ResourceConstraints(tokens=100)
+        monitor = ResourceMonitor(constraints)
+        monitor.usage.add_tokens(count=150)
+        self._check_and_record(monitor)
+
+        # Add more tokens and recheck
+        monitor.usage.add_tokens(count=50)
+        self._check_and_record(monitor)
+
+        assert len(monitor.violations) == 1
+        assert monitor.violations[0].actual == 200.0  # Updated value

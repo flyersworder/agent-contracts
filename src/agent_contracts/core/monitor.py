@@ -425,11 +425,18 @@ class ResourceMonitor:
         return len(self.check_constraints()) > 0
 
     def record_violation(self, violation: ViolationInfo) -> None:
-        """Record a constraint violation.
+        """Record a constraint violation, replacing duplicates.
+
+        If a violation with the same resource and limit already exists,
+        it is replaced with the new one (updated actual value and timestamp).
 
         Args:
             violation: The violation information to record
         """
+        for i, existing in enumerate(self.violations):
+            if existing.resource == violation.resource and existing.limit == violation.limit:
+                self.violations[i] = violation
+                return
         self.violations.append(violation)
 
     def get_usage_percentage(self) -> dict[str, float]:
