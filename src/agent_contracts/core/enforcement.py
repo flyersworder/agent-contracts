@@ -94,6 +94,7 @@ class ContractEnforcer:
         contract: Contract,
         strict_mode: bool = True,
         callbacks: list[EnforcementCallback] | None = None,
+        monitor: ResourceMonitor | None = None,
     ) -> None:
         """Initialize contract enforcer.
 
@@ -101,9 +102,10 @@ class ContractEnforcer:
             contract: Contract to enforce
             strict_mode: If True, violations cause immediate termination
             callbacks: Optional list of callback functions for events
+            monitor: Optional pre-existing monitor to use (creates one if None)
         """
         self.contract = contract
-        self.monitor = ResourceMonitor(contract.resources)
+        self.monitor = monitor or ResourceMonitor(contract.resources)
         self.strict_mode = strict_mode
         self.callbacks = callbacks or []
         self._enforcement_active = False

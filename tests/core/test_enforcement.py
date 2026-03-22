@@ -65,6 +65,20 @@ class TestContractEnforcer:
         assert len(enforcer.callbacks) == 0
         assert not enforcer.is_active()
 
+    def test_enforcer_accepts_injected_monitor(self) -> None:
+        """Enforcer should use an injected monitor instead of creating its own."""
+        from agent_contracts import ResourceMonitor
+
+        contract = Contract(
+            id="test-inject",
+            name="Injection Test",
+            resources=ResourceConstraints(tokens=1000),
+        )
+        external_monitor = ResourceMonitor(contract.resources)
+        enforcer = ContractEnforcer(contract=contract, monitor=external_monitor)
+
+        assert enforcer.monitor is external_monitor
+
     def test_create_enforcer_with_callbacks(self) -> None:
         """Test creating enforcer with callbacks."""
         contract = Contract(id="test", name="Test")

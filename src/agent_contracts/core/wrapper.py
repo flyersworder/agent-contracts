@@ -150,9 +150,8 @@ class ContractAgent[TInput, TOutput]:
             contract=contract,
             strict_mode=strict_mode,
             callbacks=[self._on_enforcement_event] if enable_logging else None,
+            monitor=self.resource_monitor,
         )
-        # IMPORTANT: Make enforcer use the same resource monitor for tracking
-        self.enforcer.monitor = self.resource_monitor
 
         # Execution state
         self.execution_log: ExecutionLog | None = None
