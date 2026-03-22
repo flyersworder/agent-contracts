@@ -6,7 +6,7 @@ repos:
   # uv-specific hooks
   - repo: https://github.com/astral-sh/uv-pre-commit
     # uv version
-    rev: 0.9.18
+    rev: 0.10.12
     hooks:
       # Update uv.lock when pyproject.toml changes
       - id: uv-lock
@@ -14,7 +14,7 @@ repos:
 
   # Ruff - Fast Python linter and formatter (replaces black, isort, flake8, etc.)
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.10
+    rev: v0.15.7
     hooks:
       # Run the linter
       - id: ruff
@@ -24,20 +24,26 @@ repos:
       - id: ruff-format
         name: ruff-format
 
-  # Type checking with mypy
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
+  # Type checking with mypy (uses project venv via uv for consistent behavior with CI)
+  - repo: local
     hooks:
       - id: mypy
         name: mypy-type-check
-        additional_dependencies: []
-        args: [--strict, --ignore-missing-imports]
+        entry: uv run mypy --strict --ignore-missing-imports
+        language: system
+        types: [python]
+        files: ^src/agent_contracts/
         exclude: ^(tests/|examples/)
+        pass_filenames: false
+        args: [src/agent_contracts/]
 
   # General file quality checks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
+      # Validate Python syntax
+      - id: check-ast
+        name: check-ast
       # Remove trailing whitespace
       - id: trailing-whitespace
         name: trailing-whitespace
@@ -63,10 +69,13 @@ repos:
       # Check TOML file syntax
       - id: check-toml
         name: check-toml
+      # Prevent committing private keys
+      - id: detect-private-key
+        name: detect-private-key
 
   # Markdown linting
   - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.47.0
+    rev: v0.48.0
     hooks:
       - id: markdownlint
         name: markdownlint
