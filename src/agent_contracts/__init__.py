@@ -68,15 +68,13 @@ from agent_contracts.core.tokens import (
 )
 from agent_contracts.core.wrapper import (
     ContractAgent,
+    ContractViolationError,
     ExecutionLog,
     ExecutionResult,
 )
 
 # Integrations
-from agent_contracts.integrations.litellm_wrapper import (
-    ContractedLLM,
-    ContractViolationError,
-)
+from agent_contracts.integrations.litellm_wrapper import ContractedLLM
 
 # Contract templates
 from agent_contracts.templates import (

@@ -9,12 +9,7 @@ from typing import Any
 from litellm import completion
 
 from agent_contracts.core import Contract, ContractEnforcer, EnforcementEvent, TokenCounter
-
-
-class ContractViolationError(Exception):
-    """Raised when a contract constraint is violated during LLM execution."""
-
-    pass
+from agent_contracts.core.wrapper import ContractViolationError
 
 
 class ContractedLLM:
@@ -244,7 +239,11 @@ class ContractedLLM:
                     )
                 )
                 if self.enforcer.strict_mode:
-                    raise ContractViolationError(f"Output validation failed: {error_msg}")
+                    raise ContractViolationError(
+                        contract=self.contract,
+                        violation_type="output_validation",
+                        message=f"Output validation failed: {error_msg}",
+                    )
 
         # Check constraints after call
         self._check_constraints_after_call()
@@ -319,7 +318,9 @@ class ContractedLLM:
                     is_violated, violations = self.enforcer.check_constraints()
                     if is_violated and self.enforcer.strict_mode:
                         raise ContractViolationError(
-                            f"Contract violated during streaming: {violations}"
+                            contract=self.contract,
+                            violation_type="budget",
+                            message=f"Contract violated during streaming: {violations}",
                         )
 
                 yield chunk
@@ -461,12 +462,20 @@ class ContractedLLM:
         # Check if already violated
         is_violated, violations = self.enforcer.check_constraints()
         if is_violated and self.enforcer.strict_mode:
-            raise ContractViolationError(f"Contract already violated: {violations}")
+            raise ContractViolationError(
+                contract=self.contract,
+                violation_type="budget",
+                message=f"Contract already violated: {violations}",
+            )
 
         # Check temporal constraints
         is_exceeded = self.enforcer.check_temporal_constraints()
         if is_exceeded and self.enforcer.strict_mode:
-            raise ContractViolationError("Temporal constraints exceeded")
+            raise ContractViolationError(
+                contract=self.contract,
+                violation_type="deadline",
+                message="Temporal constraints exceeded",
+            )
 
     def _check_constraints_after_call(self) -> None:
         """Check constraints after making an LLM call.
@@ -480,12 +489,20 @@ class ContractedLLM:
         # Check resource constraints
         is_violated, violations = self.enforcer.check_constraints()
         if is_violated and self.enforcer.strict_mode:
-            raise ContractViolationError(f"Contract violated: {violations}")
+            raise ContractViolationError(
+                contract=self.contract,
+                violation_type="budget",
+                message=f"Contract violated: {violations}",
+            )
 
         # Check temporal constraints
         is_exceeded = self.enforcer.check_temporal_constraints()
         if is_exceeded and self.enforcer.strict_mode:
-            raise ContractViolationError("Temporal constraints exceeded")
+            raise ContractViolationError(
+                contract=self.contract,
+                violation_type="deadline",
+                message="Temporal constraints exceeded",
+            )
 
     def get_usage_summary(self) -> dict[str, Any]:
         """Get current resource usage summary.

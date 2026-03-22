@@ -9,6 +9,18 @@ from agent_contracts.core import Contract, ContractState, ResourceConstraints, T
 from agent_contracts.integrations import ContractedLLM, ContractViolationError
 
 
+def test_violation_error_is_same_type_as_core() -> None:
+    """ContractViolationError from integrations should be the core type."""
+    from agent_contracts.core.wrapper import (
+        ContractViolationError as CoreError,
+    )
+    from agent_contracts.integrations.litellm_wrapper import (
+        ContractViolationError as LiteLLMError,
+    )
+
+    assert CoreError is LiteLLMError
+
+
 class TestContractedLLM:
     """Tests for ContractedLLM wrapper."""
 

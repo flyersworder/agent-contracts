@@ -3,10 +3,8 @@
 This module contains adapters for popular frameworks and LLM providers.
 """
 
-from agent_contracts.integrations.litellm_wrapper import (
-    ContractedLLM,
-    ContractViolationError,
-)
+from agent_contracts.core.wrapper import ContractViolationError
+from agent_contracts.integrations.litellm_wrapper import ContractedLLM
 
 # LangChain integration (optional, requires langchain package)
 try:
