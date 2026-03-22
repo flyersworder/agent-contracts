@@ -19,7 +19,7 @@ from datetime import timedelta
 from typing import Any, ClassVar
 
 from agent_contracts import Contract, ContractMode, ResourceConstraints, TemporalConstraints
-from agent_contracts.core.executor import ContractExecutor, ExecutionResult
+from agent_contracts.core.executor import ContractExecutionResult, ContractExecutor
 
 from .logic_tasks import LogicTask, check_logic_answer, extract_logic_answer
 
@@ -183,7 +183,7 @@ class LogicModesRunner:
 
     def _create_contract(self, task: LogicTask, mode: str) -> Contract:
         """Create a contract for the task with specified mode."""
-        from agent_contracts.core.contract import ExecutionConfig
+        from agent_contracts.core.capabilities import ExecutionConfig
 
         contract_mode = self._get_contract_mode(mode)
         timeout = self._get_timeout_for_mode(mode)
@@ -246,7 +246,7 @@ class LogicModesRunner:
             )
 
             prompt = task.get_prompt()
-            execution_result: ExecutionResult = executor.run(query=prompt)
+            execution_result: ContractExecutionResult = executor.run(query=prompt)
 
             result.success = execution_result.success
             result.generated_response = str(execution_result.output or "")

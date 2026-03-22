@@ -1,4 +1,4 @@
-"""Tests for ContractExecutor and ExecutionResult.
+"""Tests for ContractExecutor and ContractExecutionResult.
 
 This module tests the execution engine that enables Contract.execute().
 """
@@ -16,17 +16,17 @@ from agent_contracts.core.contract import (
     ExecutionConfig,
     ResourceConstraints,
 )
-from agent_contracts.core.executor import ContractExecutor, ExecutionResult
+from agent_contracts.core.executor import ContractExecutionResult, ContractExecutor
 from agent_contracts.integrations.litellm_wrapper import ContractViolationError
 
 
-class TestExecutionResult:
-    """Tests for ExecutionResult dataclass."""
+class TestContractExecutionResult:
+    """Tests for ContractExecutionResult dataclass."""
 
     def test_create_successful_result(self) -> None:
-        """Test creating a successful ExecutionResult."""
+        """Test creating a successful ContractExecutionResult."""
         now = datetime.now()
-        result = ExecutionResult(
+        result = ContractExecutionResult(
             success=True,
             output="Hello, world!",
             resource_usage={"tokens": 100, "cost_usd": 0.001},
@@ -42,8 +42,8 @@ class TestExecutionResult:
         assert result.error is None
 
     def test_create_failed_result(self) -> None:
-        """Test creating a failed ExecutionResult."""
-        result = ExecutionResult(
+        """Test creating a failed ContractExecutionResult."""
+        result = ContractExecutionResult(
             success=False,
             output=None,
             resource_usage={"tokens": 50},
@@ -60,7 +60,7 @@ class TestExecutionResult:
         """Test duration_seconds property."""
         started = datetime(2024, 1, 1, 12, 0, 0)
         completed = datetime(2024, 1, 1, 12, 0, 30)
-        result = ExecutionResult(
+        result = ContractExecutionResult(
             success=True,
             output="test",
             resource_usage={},
@@ -71,7 +71,7 @@ class TestExecutionResult:
 
     def test_duration_seconds_none_when_incomplete(self) -> None:
         """Test duration_seconds is None when times not set."""
-        result = ExecutionResult(
+        result = ContractExecutionResult(
             success=True,
             output="test",
             resource_usage={},
@@ -80,7 +80,7 @@ class TestExecutionResult:
 
     def test_tokens_used_default(self) -> None:
         """Test tokens_used returns 0 when not in usage."""
-        result = ExecutionResult(
+        result = ContractExecutionResult(
             success=True,
             output="test",
             resource_usage={},
@@ -89,7 +89,7 @@ class TestExecutionResult:
 
     def test_cost_usd_default(self) -> None:
         """Test cost_usd returns 0.0 when not in usage."""
-        result = ExecutionResult(
+        result = ContractExecutionResult(
             success=True,
             output="test",
             resource_usage={},
@@ -492,7 +492,7 @@ class TestContractExecute:
 
         assert result.success is True
         assert result.output == "42"
-        assert isinstance(result, ExecutionResult)
+        assert isinstance(result, ContractExecutionResult)
 
     def test_contract_execute_no_capabilities_raises(self) -> None:
         """Test that execute() raises when no capabilities."""

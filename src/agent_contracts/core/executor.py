@@ -48,7 +48,7 @@ from agent_contracts.core.prompts import generate_adaptive_instruction, generate
 
 
 @dataclass
-class ExecutionResult:
+class ContractExecutionResult:
     """Result of contract execution.
 
     This is the unified return type for Contract.execute(), providing
@@ -106,7 +106,7 @@ class ContractExecutor:
     2. Creates budget-aware prompts (prompts.py)
     3. Executes the LLM call with monitoring
     4. Enforces constraints and handles violations
-    5. Returns a comprehensive ExecutionResult
+    5. Returns a comprehensive ContractExecutionResult
 
     This enables the simple API: contract.execute(query="...")
 
@@ -186,7 +186,7 @@ class ContractExecutor:
         self._violations: list[str] = []
         self._truncated: bool = False  # Track if output was truncated (soft cutoff)
 
-    def run(self, **kwargs: Any) -> ExecutionResult:
+    def run(self, **kwargs: Any) -> ContractExecutionResult:
         """Execute the contract with provided inputs.
 
         This is the main execution method that orchestrates the full
@@ -199,7 +199,7 @@ class ContractExecutor:
                 - context: Additional context
 
         Returns:
-            ExecutionResult with output, usage, and status
+            ContractExecutionResult with output, usage, and status
         """
         started_at = datetime.now()
         self._log("execution_started", {"inputs": list(kwargs.keys())})
@@ -268,7 +268,7 @@ class ContractExecutor:
             # (we got usable output, just not complete)
             effective_success = not is_violated or (self._truncated and output)
 
-            return ExecutionResult(
+            return ContractExecutionResult(
                 success=effective_success,
                 output=output,
                 resource_usage=self._get_usage_dict(),
@@ -292,7 +292,7 @@ class ContractExecutor:
             if self.strict_mode:
                 raise
 
-            return ExecutionResult(
+            return ContractExecutionResult(
                 success=False,
                 output=None,
                 resource_usage=self._get_usage_dict(),

@@ -41,6 +41,9 @@ from agent_contracts.core.enforcement import (
     EnforcementCallback,
     EnforcementEvent,
 )
+
+# Execution engine
+from agent_contracts.core.executor import ContractExecutionResult, ContractExecutor
 from agent_contracts.core.monitor import (
     ResourceMonitor,
     ResourceUsage,
@@ -110,6 +113,8 @@ __all__ = [
     "Contract",
     "ContractAgent",
     "ContractEnforcer",
+    "ContractExecutionResult",
+    "ContractExecutor",
     "ContractMode",
     "ContractState",
     "ContractViolationError",

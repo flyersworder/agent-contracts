@@ -28,7 +28,7 @@ from agent_contracts.core.capabilities import (  # noqa: F401
 from agent_contracts.core.skillspec import SkillSpec
 
 if TYPE_CHECKING:
-    from agent_contracts.core.executor import ExecutionResult
+    from agent_contracts.core.executor import ContractExecutionResult
 
 logger = logging.getLogger(__name__)
 
@@ -738,7 +738,7 @@ class Contract:
             f"state={self.state.value}, version='{self.version}')"
         )
 
-    def execute(self, **kwargs: Any) -> "ExecutionResult":
+    def execute(self, **kwargs: Any) -> "ContractExecutionResult":
         """Execute the contract and return the result.
 
         This is the primary entry point for contract execution. It creates
@@ -760,7 +760,7 @@ class Contract:
                 - context: Additional context for the agent
 
         Returns:
-            ExecutionResult containing:
+            ContractExecutionResult containing:
                 - success: Whether execution completed successfully
                 - output: The agent's response/output
                 - resource_usage: Tokens, cost, API calls consumed
