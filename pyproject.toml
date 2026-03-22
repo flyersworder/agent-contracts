@@ -1,5 +1,6 @@
 [project]
 name = "agent-contracts"
+# Version must match src/agent_contracts/__init__.py:__version__
 version = "0.1.0"
 description = "A formal framework for governing autonomous AI agents through explicit resource constraints and temporal boundaries"
 readme = "README.md"
