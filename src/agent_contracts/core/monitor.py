@@ -4,6 +4,7 @@ This module implements the runtime resource monitoring system that tracks actual
 resource consumption and validates it against contract constraints.
 """
 
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
@@ -56,6 +57,7 @@ class ResourceUsage:
 
     def __post_init__(self) -> None:
         """Validate resource usage values are non-negative."""
+        self._lock = threading.Lock()
         for field_name in [
             "tokens",
             "reasoning_tokens",
@@ -89,15 +91,16 @@ class ResourceUsage:
         if text < 0:
             raise ValueError(f"Text tokens must be non-negative, got {text}")
 
-        # If reasoning/text specified, use those; otherwise use total count
-        if reasoning > 0 or text > 0:
-            self.reasoning_tokens += reasoning
-            self.text_tokens += text
-            self.tokens += reasoning + text
-        else:
-            self.tokens += count
+        with self._lock:
+            # If reasoning/text specified, use those; otherwise use total count
+            if reasoning > 0 or text > 0:
+                self.reasoning_tokens += reasoning
+                self.text_tokens += text
+                self.tokens += reasoning + text
+            else:
+                self.tokens += count
 
-        self.last_updated = datetime.now()
+            self.last_updated = datetime.now()
 
     def add_api_call(self, cost: float = 0.0, tokens: int = 0) -> None:
         """Record an API call with optional cost and token information.
@@ -114,15 +117,17 @@ class ResourceUsage:
         if tokens < 0:
             raise ValueError(f"Tokens must be non-negative, got {tokens}")
 
-        self.api_calls += 1
-        self.cost_usd += cost
-        self.tokens += tokens
-        self.last_updated = datetime.now()
+        with self._lock:
+            self.api_calls += 1
+            self.cost_usd += cost
+            self.tokens += tokens
+            self.last_updated = datetime.now()
 
     def add_web_search(self) -> None:
         """Record a web search."""
-        self.web_searches += 1
-        self.last_updated = datetime.now()
+        with self._lock:
+            self.web_searches += 1
+            self.last_updated = datetime.now()
 
     def add_tool_invocation(self, tool_name: str | None = None) -> None:
         """Record a tool invocation.
@@ -132,10 +137,11 @@ class ResourceUsage:
                        If provided, per-tool usage is tracked in addition
                        to the aggregate count.
         """
-        self.tool_invocations += 1
-        if tool_name:
-            self.tool_usage_by_name[tool_name] = self.tool_usage_by_name.get(tool_name, 0) + 1
-        self.last_updated = datetime.now()
+        with self._lock:
+            self.tool_invocations += 1
+            if tool_name:
+                self.tool_usage_by_name[tool_name] = self.tool_usage_by_name.get(tool_name, 0) + 1
+            self.last_updated = datetime.now()
 
     def get_tool_usage(self, tool_name: str) -> int:
         """Get usage count for a specific tool.
@@ -159,8 +165,9 @@ class ResourceUsage:
         """
         if memory_mb < 0:
             raise ValueError(f"Memory must be non-negative, got {memory_mb}")
-        self.memory_mb = max(self.memory_mb, memory_mb)
-        self.last_updated = datetime.now()
+        with self._lock:
+            self.memory_mb = max(self.memory_mb, memory_mb)
+            self.last_updated = datetime.now()
 
     def add_compute_time(self, seconds: float) -> None:
         """Add compute time.
@@ -173,8 +180,9 @@ class ResourceUsage:
         """
         if seconds < 0:
             raise ValueError(f"Compute time must be non-negative, got {seconds}")
-        self.compute_seconds += seconds
-        self.last_updated = datetime.now()
+        with self._lock:
+            self.compute_seconds += seconds
+            self.last_updated = datetime.now()
 
     def add_cost(self, cost_usd: float) -> None:
         """Add cost.
@@ -187,8 +195,9 @@ class ResourceUsage:
         """
         if cost_usd < 0:
             raise ValueError(f"Cost must be non-negative, got {cost_usd}")
-        self.cost_usd += cost_usd
-        self.last_updated = datetime.now()
+        with self._lock:
+            self.cost_usd += cost_usd
+            self.last_updated = datetime.now()
 
     def elapsed_time(self) -> timedelta:
         """Calculate elapsed time since tracking started.
@@ -234,6 +243,17 @@ class ResourceUsage:
             f"cost_usd={self.cost_usd:.4f}, elapsed={self.elapsed_time()})"
         )
 
+    def __getstate__(self) -> dict[str, Any]:
+        """Support pickling by excluding the non-picklable lock."""
+        state = self.__dict__.copy()
+        state.pop("_lock", None)
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore state and recreate the lock after unpickling."""
+        self.__dict__.update(state)
+        self._lock = threading.Lock()
+
 
 @dataclass
 class ViolationInfo:
@@ -277,6 +297,7 @@ class ResourceMonitor:
         self.constraints = constraints
         self.usage = ResourceUsage()
         self.violations: list[ViolationInfo] = []
+        self._lock = threading.RLock()
 
     def check_constraints(self) -> list[ViolationInfo]:
         """Check if current usage violates any constraints.
@@ -433,11 +454,12 @@ class ResourceMonitor:
         Args:
             violation: The violation information to record
         """
-        for i, existing in enumerate(self.violations):
-            if existing.resource == violation.resource and existing.limit == violation.limit:
-                self.violations[i] = violation
-                return
-        self.violations.append(violation)
+        with self._lock:
+            for i, existing in enumerate(self.violations):
+                if existing.resource == violation.resource and existing.limit == violation.limit:
+                    self.violations[i] = violation
+                    return
+            self.violations.append(violation)
 
     def get_usage_percentage(self) -> dict[str, float]:
         """Calculate usage as percentage of constraints.
@@ -574,13 +596,25 @@ class ResourceMonitor:
 
     def reset(self) -> None:
         """Reset usage tracking and clear violations."""
-        self.usage = ResourceUsage()
-        self.violations = []
+        with self._lock:
+            self.usage = ResourceUsage()
+            self.violations = []
 
     def __repr__(self) -> str:
         """String representation of monitor."""
         violated = "VIOLATED" if self.is_violated() else "OK"
         return f"ResourceMonitor(status={violated}, usage={self.usage})"
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Support pickling by excluding the non-picklable lock."""
+        state = self.__dict__.copy()
+        state.pop("_lock", None)
+        return state
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        """Restore state and recreate the lock after unpickling."""
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
 
 
 class TemporalMonitor:
