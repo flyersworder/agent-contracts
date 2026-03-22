@@ -320,6 +320,28 @@ class TestModelPricing:
             assert 0.0000001 < pricing["output"] < 0.001
 
 
+class TestGeminiPricing:
+    def test_gemini_flash_in_pricing(self) -> None:
+        """Gemini Flash models should be in MODEL_PRICING."""
+        from agent_contracts.core.tokens import MODEL_PRICING
+
+        assert "gemini-2.0-flash" in MODEL_PRICING
+        assert "gemini-2.5-flash" in MODEL_PRICING
+
+    def test_gemini_pro_in_pricing(self) -> None:
+        """Gemini Pro models should be in MODEL_PRICING."""
+        from agent_contracts.core.tokens import MODEL_PRICING
+
+        assert "gemini-2.5-pro" in MODEL_PRICING
+
+    def test_gemini_prefixed_models(self) -> None:
+        """Models with models/ prefix should be in MODEL_PRICING."""
+        from agent_contracts.core.tokens import MODEL_PRICING
+
+        assert "models/gemini-2.0-flash" in MODEL_PRICING
+        assert "models/gemini-2.5-flash" in MODEL_PRICING
+
+
 class TestIntegration:
     """Integration tests for token counting and cost tracking."""
 
