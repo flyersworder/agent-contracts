@@ -4,12 +4,15 @@ This module provides a wrapper around litellm that automatically enforces
 contract constraints during LLM API calls.
 """
 
+import logging
 from typing import Any
 
 from litellm import completion
 
 from agent_contracts.core import Contract, ContractEnforcer, EnforcementEvent, TokenCounter
 from agent_contracts.core.wrapper import ContractViolationError
+
+logger = logging.getLogger(__name__)
 
 
 class ContractedLLM:
@@ -170,8 +173,8 @@ class ContractedLLM:
                 cost_estimate = TokenCounter.calculate_cost(token_count, model)
                 cost = cost_estimate.total_cost
         except Exception:
-            # If cost calculation fails, use 0
-            cost = 0
+            logger.warning("Cost calculation failed, defaulting to 0", exc_info=True)
+            cost = 0.0
 
         # Update resource usage with separate reasoning/text tracking
         # Note: Don't pass tokens to add_api_call since we track them separately below
@@ -347,7 +350,7 @@ class ContractedLLM:
                 # Update cost
                 self.enforcer.monitor.usage.add_cost(cost)
             except Exception:
-                pass
+                logger.warning("Streaming cost estimation failed", exc_info=True)
 
             # Emit completion event
             self.enforcer._emit_event(

@@ -4,6 +4,7 @@ This module implements the enforcement layer that actively monitors and enforces
 contract constraints during agent execution.
 """
 
+import logging
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
@@ -11,6 +12,8 @@ from typing import Any
 
 from agent_contracts.core.contract import Contract, ContractState
 from agent_contracts.core.monitor import ResourceMonitor, ViolationInfo
+
+logger = logging.getLogger(__name__)
 
 
 class EnforcementAction(Enum):
@@ -272,7 +275,7 @@ class ContractEnforcer:
                 callback(event)
             except Exception as e:
                 # Don't let callback errors crash enforcement
-                print(f"Error in enforcement callback: {e}")
+                logger.warning("Error in enforcement callback: %s", e, exc_info=True)
 
     def _handle_violation(self, violations: list[ViolationInfo]) -> None:
         """Handle constraint violations in strict mode.

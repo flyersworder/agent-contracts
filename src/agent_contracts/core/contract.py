@@ -13,6 +13,7 @@ Where:
     Ψ: Termination conditions - Events that end the contract
 """
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -21,6 +22,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from agent_contracts.core.executor import ExecutionResult
+
+logger = logging.getLogger(__name__)
 
 
 class ContractState(Enum):
@@ -1060,7 +1063,7 @@ class Capabilities:
                         # Use domain without TLD as label (e.g., "mcp" from "mcp.example.com")
                         label = parsed.netloc.split(".")[0]
                 except Exception:
-                    pass
+                    logger.debug("Failed to parse MCP server URL for label", exc_info=True)
 
             mcp_tools.append(
                 {
