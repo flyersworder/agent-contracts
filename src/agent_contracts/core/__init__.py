@@ -57,6 +57,7 @@ from agent_contracts.core.prompts import (
     generate_adaptive_instruction,
     generate_budget_prompt,
 )
+from agent_contracts.core.skillspec import SkillSpec
 from agent_contracts.core.tokens import (
     CostEstimate,
     TokenCount,
@@ -102,6 +103,7 @@ __all__ = [
     "ResourceConstraints",
     "ResourceMonitor",
     "ResourceUsage",
+    "SkillSpec",
     "StrategyRecommendation",
     "SuccessCriterion",
     "Task",

@@ -21,7 +21,6 @@ from agent_contracts.core.contract import (
     InputSpecification,
     OutputSpecification,
     ResourceConstraints,
-    SkillSpec,
     SuccessCriterion,
     TemporalConstraints,
     TerminationCondition,
@@ -61,6 +60,7 @@ from agent_contracts.core.prompts import (
     generate_adaptive_instruction,
     generate_budget_prompt,
 )
+from agent_contracts.core.skillspec import SkillSpec
 from agent_contracts.core.tokens import (
     CostEstimate,
     TokenCount,
