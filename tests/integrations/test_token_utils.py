@@ -52,6 +52,16 @@ class TestEstimateCost:
         )
         assert cost > 0
 
+    def test_known_model_total_tokens_only(self) -> None:
+        """Should use average rate when only total_tokens provided for known model."""
+        from agent_contracts.core.tokens import MODEL_PRICING
+
+        model = "gpt-4"
+        pricing = MODEL_PRICING[model]
+        expected_avg_rate = (pricing["input"] + pricing["output"]) / 2
+        cost = estimate_cost(total_tokens=1000, model=model)
+        assert cost == 1000 * expected_avg_rate
+
     def test_zero_tokens(self) -> None:
         """Zero tokens should return zero cost."""
         assert estimate_cost(total_tokens=0) == 0.0

@@ -422,7 +422,6 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
             self.enforcer.check_temporal_constraints()
 
         except Exception as e:
-            self.contract.state = self.contract.state  # Keep current state
             raise RuntimeError(f"Streaming execution failed: {e}") from e
 
     @property
