@@ -10,16 +10,18 @@ from agent_contracts.integrations.litellm_wrapper import ContractedLLM
 try:
     from agent_contracts.integrations.langchain import (
         ContractedChain,
+        ContractedChainLLM,
         create_contracted_chain,
     )
-    from agent_contracts.integrations.langchain import (
-        ContractedLLM as LangChainContractedLLM,
-    )
+
+    # Backward-compat alias (pre-1.0)
+    LangChainContractedLLM = ContractedChainLLM
 
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     LANGCHAIN_AVAILABLE = False
     ContractedChain = None  # type: ignore
+    ContractedChainLLM = None  # type: ignore
     LangChainContractedLLM = None  # type: ignore
     create_contracted_chain = None  # type: ignore
 
@@ -64,6 +66,7 @@ __all__ = [
     "ContractedAdkAgent",
     "ContractedAdkMultiAgent",
     "ContractedChain",
+    "ContractedChainLLM",
     "ContractedGraph",
     "ContractedLLM",
     "DelegatingAdkAgent",

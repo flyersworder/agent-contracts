@@ -278,7 +278,7 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
         return self.run(inputs)
 
 
-class ContractedLLM:
+class ContractedChainLLM:
     """Contract-aware wrapper for standalone LLM calls.
 
     This class wraps individual LLM calls (not full chains) with contract
@@ -294,7 +294,7 @@ class ContractedLLM:
         ... )
         >>>
         >>> llm = OpenAI()
-        >>> contracted_llm = ContractedLLM(contract=contract, llm=llm)
+        >>> contracted_llm = ContractedChainLLM(contract=contract, llm=llm)
         >>>
         >>> response = contracted_llm("What is 2+2?")
         >>> print(response)  # "4"
@@ -348,7 +348,7 @@ class ContractedLLM:
                 self.chain = LLMChain(llm=llm, prompt=prompt)
             except ImportError as err:
                 raise ImportError(
-                    "ContractedLLM requires either LangChain 1.0+ or LangChain <1.0. "
+                    "ContractedChainLLM requires either LangChain 1.0+ or LangChain <1.0. "
                     "Install with: pip install langchain langchain-core"
                 ) from err
 

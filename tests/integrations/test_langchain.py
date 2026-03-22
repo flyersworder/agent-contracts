@@ -214,14 +214,14 @@ class TestContractedChainMocked:
         assert contracted.enable_logging is False
 
 
-class TestContractedLLMMocked:
-    """Test ContractedLLM with mocked LangChain."""
+class TestContractedChainLLMMocked:
+    """Test ContractedChainLLM with mocked LangChain."""
 
-    def test_create_contracted_llm(self) -> None:
-        """Test creating a ContractedLLM."""
+    def test_create_contracted_chain_llm(self) -> None:
+        """Test creating a ContractedChainLLM."""
         pytest.importorskip("langchain")
 
-        from agent_contracts.integrations.langchain import ContractedLLM
+        from agent_contracts.integrations.langchain import ContractedChainLLM
 
         contract = Contract(
             id="test-llm",
@@ -231,16 +231,16 @@ class TestContractedLLMMocked:
 
         mock_llm = Mock()
 
-        contracted = ContractedLLM(contract=contract, llm=mock_llm)
+        contracted = ContractedChainLLM(contract=contract, llm=mock_llm)
 
         assert contracted.contract == contract
         assert contracted.llm == mock_llm
 
-    def test_contracted_llm_callable(self) -> None:
-        """Test ContractedLLM is callable."""
+    def test_contracted_chain_llm_callable(self) -> None:
+        """Test ContractedChainLLM is callable."""
         pytest.importorskip("langchain")
 
-        from agent_contracts.integrations.langchain import ContractedLLM
+        from agent_contracts.integrations.langchain import ContractedChainLLM
 
         contract = Contract(
             id="test-llm-call",
@@ -250,7 +250,7 @@ class TestContractedLLMMocked:
 
         mock_llm = Mock()
 
-        contracted = ContractedLLM(contract=contract, llm=mock_llm)
+        contracted = ContractedChainLLM(contract=contract, llm=mock_llm)
 
         # Mock the contracted_chain
         mock_result = Mock()
@@ -262,11 +262,11 @@ class TestContractedLLMMocked:
 
         assert response == "LLM Response"
 
-    def test_contracted_llm_execute(self) -> None:
-        """Test ContractedLLM execute() method."""
+    def test_contracted_chain_llm_execute(self) -> None:
+        """Test ContractedChainLLM execute() method."""
         pytest.importorskip("langchain")
 
-        from agent_contracts.integrations.langchain import ContractedLLM
+        from agent_contracts.integrations.langchain import ContractedChainLLM
 
         contract = Contract(
             id="test-llm-exec",
@@ -276,7 +276,7 @@ class TestContractedLLMMocked:
 
         mock_llm = Mock()
 
-        contracted = ContractedLLM(contract=contract, llm=mock_llm)
+        contracted = ContractedChainLLM(contract=contract, llm=mock_llm)
 
         # Mock the contracted_chain
         mock_result = Mock()
