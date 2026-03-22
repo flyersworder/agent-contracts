@@ -133,6 +133,16 @@ warn_unused_ignores = true
 warn_no_return = true
 strict_equality = true
 
+# Integration modules use try/except imports for optional dependencies,
+# which conflicts with strict mypy when the packages are installed.
+[[tool.mypy.overrides]]
+module = [
+    "agent_contracts.integrations.langchain",
+    "agent_contracts.integrations.langgraph",
+    "agent_contracts.integrations.google_adk",
+]
+ignore_errors = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
