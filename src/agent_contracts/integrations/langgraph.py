@@ -168,9 +168,6 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
         self._tool_invocations: dict[str, int] = {}  # tool_name -> invocation count
         self._active_nodes: list[str] = []  # Stack of currently executing nodes
 
-        # Set up interception for node-level token tracking
-        self._setup_node_tracking()
-
     def _run_graph(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """Run the LangGraph workflow.
 
@@ -337,26 +334,6 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
             pass
 
         return config
-
-    def _setup_node_tracking(self) -> None:
-        """Set up tracking for individual node executions.
-
-        Node tracking is implemented via LangChain callbacks in _build_config().
-        The GraphTokenTrackingCallback tracks:
-        - Node executions via on_chain_start/on_chain_end
-        - Tool invocations via on_tool_start/on_tool_end
-        - Token usage via on_llm_end
-
-        Results are stored in:
-        - self._node_executions: Dict mapping node names to execution counts
-        - self._tool_invocations: Dict mapping tool names to invocation counts
-
-        Access via properties: node_executions, tool_invocations
-        Or use get_execution_summary() for comprehensive breakdown.
-        """
-        # Tracking is set up via callbacks in _build_config()
-        # Instance variables are initialized in __init__
-        pass
 
     def _monitored_execution(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Execute graph with monitoring.
