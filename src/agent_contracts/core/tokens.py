@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 # Model pricing database (USD per token)
-# Prices are as of November 2025 - should be updated periodically
+# Prices as of March 2026 - should be updated periodically
 MODEL_PRICING = {
     # OpenAI models (per 1M tokens)
     "gpt-4": {"input": 30.0 / 1_000_000, "output": 60.0 / 1_000_000},
@@ -23,6 +23,13 @@ MODEL_PRICING = {
     "claude-3-haiku": {"input": 0.25 / 1_000_000, "output": 1.25 / 1_000_000},
     "claude-3.5-sonnet": {"input": 3.0 / 1_000_000, "output": 15.0 / 1_000_000},
     "claude-3.5-haiku": {"input": 0.8 / 1_000_000, "output": 4.0 / 1_000_000},
+    # Gemini models (as of March 2026)
+    "gemini-2.0-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+    "gemini-2.5-flash": {"input": 0.15 / 1_000_000, "output": 0.60 / 1_000_000},
+    "gemini-2.5-pro": {"input": 1.25 / 1_000_000, "output": 5.00 / 1_000_000},
+    "models/gemini-2.0-flash": {"input": 0.10 / 1_000_000, "output": 0.40 / 1_000_000},
+    "models/gemini-2.5-flash": {"input": 0.15 / 1_000_000, "output": 0.60 / 1_000_000},
+    "models/gemini-2.5-pro": {"input": 1.25 / 1_000_000, "output": 5.00 / 1_000_000},
 }
 
 

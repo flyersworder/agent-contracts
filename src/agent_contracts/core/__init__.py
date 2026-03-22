@@ -4,15 +4,17 @@ This module contains the fundamental data structures and enforcement mechanisms
 for Agent Contracts.
 """
 
-from agent_contracts.core.contract import (
+from agent_contracts.core.capabilities import (
     AgentSpec,
     Capabilities,
+    CoordinationPattern,
+    ExecutionConfig,
+)
+from agent_contracts.core.contract import (
     Contract,
     ContractMode,
     ContractState,
-    CoordinationPattern,
     DeadlineType,
-    ExecutionConfig,
     InputSpecification,
     OutputSpecification,
     ResourceConstraints,
@@ -33,8 +35,8 @@ from agent_contracts.core.enforcement import (
     EnforcementEvent,
 )
 from agent_contracts.core.executor import (
+    ContractExecutionResult,
     ContractExecutor,
-    ExecutionResult,  # Primary ExecutionResult from executor
 )
 from agent_contracts.core.monitor import (
     ResourceMonitor,
@@ -57,6 +59,7 @@ from agent_contracts.core.prompts import (
     generate_adaptive_instruction,
     generate_budget_prompt,
 )
+from agent_contracts.core.skillspec import SkillSpec
 from agent_contracts.core.tokens import (
     CostEstimate,
     TokenCount,
@@ -68,9 +71,7 @@ from agent_contracts.core.wrapper import (
     ContractAgent,
     ContractViolationError,
     ExecutionLog,
-)
-from agent_contracts.core.wrapper import (
-    ExecutionResult as WrapperExecutionResult,  # Aliased to avoid conflict with executor
+    ExecutionResult,
 )
 
 __all__ = [
@@ -81,6 +82,7 @@ __all__ = [
     "Contract",
     "ContractAgent",
     "ContractEnforcer",
+    "ContractExecutionResult",
     "ContractExecutor",
     "ContractMode",
     "ContractState",
@@ -102,6 +104,7 @@ __all__ = [
     "ResourceConstraints",
     "ResourceMonitor",
     "ResourceUsage",
+    "SkillSpec",
     "StrategyRecommendation",
     "SuccessCriterion",
     "Task",
@@ -112,7 +115,6 @@ __all__ = [
     "TokenCount",
     "TokenCounter",
     "ViolationInfo",
-    "WrapperExecutionResult",
     "estimate_cost",
     "estimate_prompt_tokens",
     "estimate_quality_cost_time",

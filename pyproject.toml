@@ -1,5 +1,6 @@
 [project]
 name = "agent-contracts"
+# Version must match src/agent_contracts/__init__.py:__version__
 version = "0.1.0"
 description = "A formal framework for governing autonomous AI agents through explicit resource constraints and temporal boundaries"
 readme = "README.md"
@@ -19,9 +20,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "datasets>=4.4.2",
     "litellm>=1.60.0",
-    "matplotlib>=3.10.7",
     "python-dotenv>=1.0.0",
 ]
 
@@ -32,6 +31,10 @@ Issues = "https://github.com/flyersworder/agent-contracts/issues"
 Documentation = "https://github.com/flyersworder/agent-contracts/blob/main/docs/README.md"
 
 [project.optional-dependencies]
+eval = [
+    "datasets>=4.4.2",
+    "matplotlib>=3.10.7",
+]
 langchain = [
     "langchain>=0.3.0",
     "langchain-core>=0.3.0",

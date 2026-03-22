@@ -57,6 +57,29 @@ except ImportError:
     InMemoryRunner = Any
 
 
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Extract int from value, handling Mock objects gracefully.
+
+    Args:
+        value: Value to convert to int.
+        default: Default value if conversion fails.
+
+    Returns:
+        Integer value or default.
+    """
+    if isinstance(value, int):
+        return value
+    if value is None:
+        return default
+    # Check if it looks like a Mock (has _mock_name attribute)
+    if hasattr(value, "_mock_name"):
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
     """Contract-aware wrapper for Google ADK agents.
 
@@ -264,21 +287,6 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
             if hasattr(event, "usage_metadata") and event.usage_metadata:
                 usage = event.usage_metadata
 
-                # Safe extraction helper - handles Mock objects in tests gracefully
-                def _safe_int(value: Any, default: int = 0) -> int:
-                    """Extract int from value, handling Mock objects."""
-                    if isinstance(value, int):
-                        return value
-                    if value is None:
-                        return default
-                    # Check if it looks like a Mock (has _mock_name attribute)
-                    if hasattr(value, "_mock_name"):
-                        return default
-                    try:
-                        return int(value)
-                    except (TypeError, ValueError):
-                        return default
-
                 event_tokens = _safe_int(getattr(usage, "total_token_count", 0))
 
                 # Update cumulative tracking - use safe extraction for all values
@@ -470,57 +478,14 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
 
 
 class ContractedAdkMultiAgent(ContractedAdkAgent):
-    """Contract-aware wrapper for Google ADK multi-agent systems.
+    """Type alias for ContractedAdkAgent for multi-agent scenarios.
 
-    This class extends ContractedAdkAgent to support multi-agent hierarchies
-    where a coordinator agent manages multiple sub-agents. The contract is
-    enforced across the entire multi-agent system, tracking cumulative usage.
-
-    Multi-agent systems can spiral out of control quickly as agents coordinate,
-    delegate tasks, and iterate. This wrapper ensures the total budget is
-    respected across all agents in the hierarchy.
-
-    Example:
-        >>> from google.adk.agents import LlmAgent
-        >>> from agent_contracts import Contract, ResourceConstraints
-        >>>
-        >>> # Create sub-agents
-        >>> researcher = LlmAgent(name="researcher", ...)
-        >>> planner = LlmAgent(name="planner", ...)
-        >>> executor = LlmAgent(name="executor", ...)
-        >>>
-        >>> # Create coordinator with sub-agents
-        >>> coordinator = LlmAgent(
-        ...     name="coordinator",
-        ...     model="gemini-3-flash-preview",
-        ...     instruction="Coordinate research, planning, and execution",
-        ...     sub_agents=[researcher, planner, executor]
-        ... )
-        >>>
-        >>> # Wrap with contract (enforced across ALL agents)
-        >>> contract = Contract(
-        ...     id="multi-agent-workflow",
-        ...     resources=ResourceConstraints(
-        ...         tokens=100000,  # For ENTIRE multi-agent system
-        ...         api_calls=50,
-        ...         cost_usd=5.0
-        ...     )
-        ... )
-        >>>
-        >>> contracted = ContractedAdkMultiAgent(
-        ...     contract=contract,
-        ...     agent=coordinator
-        ... )
-        >>>
-        >>> # Budget enforced across ALL agents and their interactions
-        >>> result = contracted.run(
-        ...     user_id="user1",
-        ...     session_id="session1",
-        ...     message="Research and plan a marketing campaign"
-        ... )
+    Inherits all behavior from ContractedAdkAgent without modification.
+    Kept as a subclass (rather than a plain alias) so that ``isinstance``
+    checks continue to work for code that distinguishes multi-agent usage.
     """
 
-    pass  # Inherits all behavior from ContractedAdkAgent
+    pass
 
 
 # Convenience function for creating contracted ADK agents

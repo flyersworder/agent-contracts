@@ -1,4 +1,4 @@
-"""Tests for ContractExecutor and ExecutionResult.
+"""Tests for ContractExecutor and ContractExecutionResult.
 
 This module tests the execution engine that enables Contract.execute().
 """
@@ -16,17 +16,17 @@ from agent_contracts.core.contract import (
     ExecutionConfig,
     ResourceConstraints,
 )
-from agent_contracts.core.executor import ContractExecutor, ExecutionResult
+from agent_contracts.core.executor import ContractExecutionResult, ContractExecutor
 from agent_contracts.integrations.litellm_wrapper import ContractViolationError
 
 
-class TestExecutionResult:
-    """Tests for ExecutionResult dataclass."""
+class TestContractExecutionResult:
+    """Tests for ContractExecutionResult dataclass."""
 
     def test_create_successful_result(self) -> None:
-        """Test creating a successful ExecutionResult."""
+        """Test creating a successful ContractExecutionResult."""
         now = datetime.now()
-        result = ExecutionResult(
+        result = ContractExecutionResult(
             success=True,
             output="Hello, world!",
             resource_usage={"tokens": 100, "cost_usd": 0.001},
@@ -42,8 +42,8 @@ class TestExecutionResult:
         assert result.error is None
 
     def test_create_failed_result(self) -> None:
-        """Test creating a failed ExecutionResult."""
-        result = ExecutionResult(
+        """Test creating a failed ContractExecutionResult."""
+        result = ContractExecutionResult(
             success=False,
             output=None,
             resource_usage={"tokens": 50},
@@ -60,7 +60,7 @@ class TestExecutionResult:
         """Test duration_seconds property."""
         started = datetime(2024, 1, 1, 12, 0, 0)
         completed = datetime(2024, 1, 1, 12, 0, 30)
-        result = ExecutionResult(
+        result = ContractExecutionResult(
             success=True,
             output="test",
             resource_usage={},
@@ -71,7 +71,7 @@ class TestExecutionResult:
 
     def test_duration_seconds_none_when_incomplete(self) -> None:
         """Test duration_seconds is None when times not set."""
-        result = ExecutionResult(
+        result = ContractExecutionResult(
             success=True,
             output="test",
             resource_usage={},
@@ -80,7 +80,7 @@ class TestExecutionResult:
 
     def test_tokens_used_default(self) -> None:
         """Test tokens_used returns 0 when not in usage."""
-        result = ExecutionResult(
+        result = ContractExecutionResult(
             success=True,
             output="test",
             resource_usage={},
@@ -89,7 +89,7 @@ class TestExecutionResult:
 
     def test_cost_usd_default(self) -> None:
         """Test cost_usd returns 0.0 when not in usage."""
-        result = ExecutionResult(
+        result = ContractExecutionResult(
             success=True,
             output="test",
             resource_usage={},
@@ -465,6 +465,109 @@ class TestContractExecutorWithMock:
         assert result.strategy.mode == ContractMode.ECONOMICAL
 
 
+class TestSoftCutoff:
+    """Tests for soft cutoff / truncation tracking in ContractExecutionResult."""
+
+    def test_execution_result_truncated_default(self) -> None:
+        """ContractExecutionResult.truncated should default to False."""
+        result = ContractExecutionResult(
+            success=True,
+            output="full output",
+            resource_usage={"tokens": 500},
+        )
+        assert result.truncated is False
+
+    def test_execution_result_truncated_when_set(self) -> None:
+        """ContractExecutionResult should track truncation."""
+        result = ContractExecutionResult(
+            success=True,
+            output="partial output",
+            resource_usage={"tokens": 900},
+            truncated=True,
+        )
+        assert result.truncated is True
+
+    def test_executor_initializes_soft_cutoff(self) -> None:
+        """ContractExecutor should store the soft_cutoff parameter."""
+        contract = Contract(
+            id="test",
+            name="Test",
+            capabilities=Capabilities(),
+            execution=ExecutionConfig(model="gpt-4o"),
+        )
+        executor = ContractExecutor(contract, soft_cutoff=True)
+        assert executor.soft_cutoff is True
+        assert executor._truncated is False
+
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
+    def test_soft_cutoff_streaming_timeout_returns_partial(
+        self, mock_completion: MagicMock
+    ) -> None:
+        """Soft cutoff should return partial output on timeout."""
+
+        # Simulate streaming that raises a timeout after yielding some chunks
+        class TimeoutAfterChunks:
+            def __init__(self) -> None:
+                self.count = 0
+
+            def __iter__(self):  # type: ignore[no-untyped-def]
+                return self
+
+            def __next__(self):  # type: ignore[no-untyped-def]
+                self.count += 1
+                if self.count <= 2:
+                    chunk = MagicMock()
+                    chunk.choices = [MagicMock()]
+                    chunk.choices[0].delta.content = f"chunk{self.count} "
+                    chunk.get.return_value = None
+                    return chunk
+                raise TimeoutError("Request timed out")
+
+        mock_completion.return_value = TimeoutAfterChunks()
+
+        contract = Contract(
+            id="test-soft",
+            name="Soft Cutoff Test",
+            resources=ResourceConstraints(tokens=10000),
+            capabilities=Capabilities(),
+            execution=ExecutionConfig(model="gpt-4o"),
+        )
+        executor = ContractExecutor(contract, soft_cutoff=True)
+        result = executor.run(query="Generate a long response")
+
+        # Should succeed with truncated partial output
+        assert result.truncated is True
+        assert "chunk1" in result.output
+        assert "chunk2" in result.output
+
+    @patch("agent_contracts.integrations.litellm_wrapper.completion")
+    def test_soft_cutoff_no_truncation_on_success(self, mock_completion: MagicMock) -> None:
+        """Soft cutoff should not mark truncated when streaming completes."""
+        # Simulate successful streaming
+        chunks = []
+        for i in range(3):
+            chunk = MagicMock()
+            chunk.choices = [MagicMock()]
+            chunk.choices[0].delta.content = f"word{i} "
+            chunk.get.return_value = None
+            chunks.append(chunk)
+
+        mock_completion.return_value = iter(chunks)
+
+        contract = Contract(
+            id="test-soft-ok",
+            name="Soft Cutoff No Truncation",
+            resources=ResourceConstraints(tokens=10000),
+            capabilities=Capabilities(),
+            execution=ExecutionConfig(model="gpt-4o"),
+        )
+        executor = ContractExecutor(contract, soft_cutoff=True)
+        result = executor.run(query="Short response")
+
+        assert result.truncated is False
+        assert result.success is True
+
+
 class TestContractExecute:
     """Tests for Contract.execute() method."""
 
@@ -492,7 +595,7 @@ class TestContractExecute:
 
         assert result.success is True
         assert result.output == "42"
-        assert isinstance(result, ExecutionResult)
+        assert isinstance(result, ContractExecutionResult)
 
     def test_contract_execute_no_capabilities_raises(self) -> None:
         """Test that execute() raises when no capabilities."""

@@ -1,5 +1,6 @@
 """Unit tests for resource monitoring system."""
 
+import threading
 import time
 from datetime import datetime
 
@@ -674,3 +675,178 @@ class TestPerToolLimits:
         monitor.usage.add_tool_invocation("web_search")  # Over limit
         violations = monitor.check_constraints()
         assert any(v.resource == "tool:web_search" for v in violations)
+
+
+class TestDuplicateViolationRecording:
+    """Tests for deduplication of violation records."""
+
+    def _check_and_record(self, monitor: ResourceMonitor) -> list[ViolationInfo]:
+        """Simulate what enforcement does: check then record."""
+        violations = monitor.check_constraints()
+        for v in violations:
+            monitor.record_violation(v)
+        return violations
+
+    def test_same_violation_not_recorded_twice(self) -> None:
+        """Repeated check_constraints calls should not duplicate violations."""
+        constraints = ResourceConstraints(tokens=100)
+        monitor = ResourceMonitor(constraints)
+        monitor.usage.add_tokens(count=150)
+
+        # Check twice — same violation should appear once
+        self._check_and_record(monitor)
+        self._check_and_record(monitor)
+
+        assert len(monitor.violations) == 1
+
+    def test_different_violations_both_recorded(self) -> None:
+        """Different violation types should each be recorded."""
+        constraints = ResourceConstraints(tokens=100, api_calls=5)
+        monitor = ResourceMonitor(constraints)
+        monitor.usage.add_tokens(count=150)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+        monitor.usage.add_api_call(cost=0.0, tokens=0)
+
+        self._check_and_record(monitor)
+
+        # Token violation + API call violation = 2 distinct violations
+        assert len(monitor.violations) >= 2
+
+    def test_violation_actual_value_updated_on_recheck(self) -> None:
+        """When same violation rechecked, actual value should be updated."""
+        constraints = ResourceConstraints(tokens=100)
+        monitor = ResourceMonitor(constraints)
+        monitor.usage.add_tokens(count=150)
+        self._check_and_record(monitor)
+
+        # Add more tokens and recheck
+        monitor.usage.add_tokens(count=50)
+        self._check_and_record(monitor)
+
+        assert len(monitor.violations) == 1
+        assert monitor.violations[0].actual == 200.0  # Updated value
+
+
+class TestThreadSafety:
+    """Tests for thread-safe access to ResourceUsage and ResourceMonitor."""
+
+    def test_concurrent_token_additions(self) -> None:
+        """Token counts should be accurate under concurrent access."""
+        usage = ResourceUsage()
+        num_threads = 10
+        adds_per_thread = 1000
+        barrier = threading.Barrier(num_threads)
+
+        def add_tokens() -> None:
+            barrier.wait()
+            for _ in range(adds_per_thread):
+                usage.add_tokens(count=1)
+
+        threads = [threading.Thread(target=add_tokens) for _ in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert usage.tokens == num_threads * adds_per_thread
+
+    def test_concurrent_api_call_tracking(self) -> None:
+        """API call counts should be accurate under concurrent access."""
+        usage = ResourceUsage()
+        num_threads = 10
+        adds_per_thread = 100
+        barrier = threading.Barrier(num_threads)
+
+        def add_calls() -> None:
+            barrier.wait()
+            for _ in range(adds_per_thread):
+                usage.add_api_call(cost=0.001, tokens=10)
+
+        threads = [threading.Thread(target=add_calls) for _ in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert usage.api_calls == num_threads * adds_per_thread
+
+    def test_concurrent_tool_invocation_tracking(self) -> None:
+        """Per-tool invocation counts should be accurate under concurrent access."""
+        usage = ResourceUsage()
+        num_threads = 10
+        adds_per_thread = 100
+        barrier = threading.Barrier(num_threads)
+
+        def add_invocations() -> None:
+            barrier.wait()
+            for _ in range(adds_per_thread):
+                usage.add_tool_invocation(tool_name="web_search")
+
+        threads = [threading.Thread(target=add_invocations) for _ in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert usage.tool_invocations == num_threads * adds_per_thread
+        assert usage.tool_usage_by_name["web_search"] == num_threads * adds_per_thread
+
+    def test_concurrent_monitor_record_violation(self) -> None:
+        """Concurrent violation recording should not corrupt the violations list."""
+        constraints = ResourceConstraints(tokens=100)
+        monitor = ResourceMonitor(constraints)
+        num_threads = 10
+        barrier = threading.Barrier(num_threads)
+
+        def record_violations() -> None:
+            barrier.wait()
+            for i in range(50):
+                violation = ViolationInfo(resource="tokens", limit=100, actual=150 + i)
+                monitor.record_violation(violation)
+
+        threads = [threading.Thread(target=record_violations) for _ in range(num_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # With dedup, only one "tokens" violation with limit=100 should exist
+        token_violations = [v for v in monitor.violations if v.resource == "tokens"]
+        assert len(token_violations) == 1
+
+    def test_concurrent_monitor_reset(self) -> None:
+        """Reset during concurrent access should not raise exceptions."""
+        constraints = ResourceConstraints(tokens=10000)
+        monitor = ResourceMonitor(constraints)
+        num_threads = 5
+        barrier = threading.Barrier(num_threads + 1)  # +1 for the reset thread
+        errors: list[Exception] = []
+
+        def add_usage() -> None:
+            barrier.wait()
+            try:
+                for _ in range(100):
+                    monitor.usage.add_tokens(count=1)
+            except Exception as e:
+                errors.append(e)
+
+        def do_reset() -> None:
+            barrier.wait()
+            try:
+                for _ in range(10):
+                    monitor.reset()
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=add_usage) for _ in range(num_threads)]
+        threads.append(threading.Thread(target=do_reset))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert len(errors) == 0, f"Concurrent access raised exceptions: {errors}"

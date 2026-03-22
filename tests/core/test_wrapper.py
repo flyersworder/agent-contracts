@@ -473,6 +473,44 @@ class TestContractViolationError:
         assert "Deadline exceeded" in str(exc_info.value)
 
 
+class TestStateTransitionCorrectness:
+    """Verify wrapper uses proper state transition methods."""
+
+    def test_violation_uses_state_method(self) -> None:
+        """Violations should go through contract.violate(), not direct assignment."""
+        contract = Contract(
+            id="test-state",
+            name="State Test",
+            resources=ResourceConstraints(tokens=10),
+        )
+
+        agent = ContractAgent(
+            contract=contract,
+            agent=lambda x: "output",
+            strict_mode=False,
+        )
+
+        # Simulate a violation by exhausting tokens
+        agent.resource_monitor.usage.add_tokens(count=20)
+        agent.execute({"input": "test"})
+
+        assert contract.state == ContractState.VIOLATED
+
+    def test_cannot_violate_fulfilled_contract(self) -> None:
+        """A fulfilled contract should not transition to violated."""
+        contract = Contract(
+            id="test-fulfilled",
+            name="Fulfilled Test",
+            resources=ResourceConstraints(tokens=10000),
+        )
+        contract.activate()
+        contract.fulfill()
+
+        # Direct assignment would allow this — method should not
+        with pytest.raises(ValueError, match="Cannot violate"):
+            contract.violate()
+
+
 class TestContractAgentIntegration:
     """Integration tests for ContractAgent."""
 

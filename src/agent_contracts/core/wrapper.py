@@ -27,6 +27,7 @@ Example:
     >>> result = wrapped.execute("Write a report")
 """
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -35,6 +36,8 @@ from typing import Any
 from agent_contracts.core.contract import Contract, ContractState
 from agent_contracts.core.enforcement import ContractEnforcer, EnforcementEvent
 from agent_contracts.core.monitor import ResourceMonitor, TemporalMonitor
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -147,9 +150,8 @@ class ContractAgent[TInput, TOutput]:
             contract=contract,
             strict_mode=strict_mode,
             callbacks=[self._on_enforcement_event] if enable_logging else None,
+            monitor=self.resource_monitor,
         )
-        # IMPORTANT: Make enforcer use the same resource monitor for tracking
-        self.enforcer.monitor = self.resource_monitor
 
         # Execution state
         self.execution_log: ExecutionLog | None = None
@@ -219,17 +221,24 @@ class ContractAgent[TInput, TOutput]:
             # Update contract state based on violations
             # Note: We keep it ACTIVE if successful to allow cumulative tracking
             # Only mark as VIOLATED if there were actual violations
-            if is_violated:
-                self.contract.state = ContractState.VIOLATED
-            elif not success:
-                self.contract.state = ContractState.VIOLATED
-                self._events.append(
-                    {
-                        "type": "incomplete",
-                        "message": "Success criteria not met",
-                        "timestamp": datetime.now().isoformat(),
-                    }
-                )
+            if is_violated or not success:
+                if self.contract.state == ContractState.ACTIVE:
+                    self.contract.violate()
+                else:
+                    logger.warning(
+                        "Violation detected but contract %s is in %s state, "
+                        "cannot transition to VIOLATED",
+                        self.contract.id,
+                        self.contract.state.name,
+                    )
+                if not success and not is_violated:
+                    self._events.append(
+                        {
+                            "type": "incomplete",
+                            "message": "Success criteria not met",
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                    )
             # else: keep contract in ACTIVE state for cumulative tracking
 
             violations = [
@@ -272,7 +281,14 @@ class ContractAgent[TInput, TOutput]:
             # Note: Don't stop enforcer to allow recovery and cumulative tracking
 
             # Handle execution failure
-            self.contract.state = ContractState.VIOLATED
+            if self.contract.state == ContractState.ACTIVE:
+                self.contract.violate()
+            else:
+                logger.warning(
+                    "Exception during execution but contract %s is in %s state",
+                    self.contract.id,
+                    self.contract.state.name,
+                )
             self._events.append(
                 {"type": "error", "message": str(e), "timestamp": datetime.now().isoformat()}
             )

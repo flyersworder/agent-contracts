@@ -28,6 +28,10 @@ from typing import Any
 
 from agent_contracts.core.contract import Contract
 from agent_contracts.core.wrapper import ContractAgent, ExecutionResult
+from agent_contracts.integrations._token_utils import (
+    estimate_cost,
+    extract_tokens_from_llm_result,
+)
 
 # Type checking imports
 try:
@@ -153,8 +157,7 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
                     )
 
                     # Track API call with cost
-                    # Estimate cost for Gemini 2.5 Flash (~$0.15 per 1M tokens average)
-                    cost = total_tokens * 0.00000015
+                    cost = estimate_cost(total_tokens=total_tokens)
                     self.resource_monitor.usage.add_api_call(cost=cost, tokens=0)
 
             return result  # type: ignore[no-any-return]
@@ -187,42 +190,27 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
 
                 def on_llm_end(self, response: "LLMResult", **kwargs: Any) -> None:
                     """Track tokens when LLM call completes."""
-                    total_tokens = 0
-
-                    # Try multiple locations for token usage
-                    # 1. OpenAI-style: response.llm_output["token_usage"]
-                    if response.llm_output and "token_usage" in response.llm_output:
-                        usage = response.llm_output["token_usage"]
-                        total_tokens = usage.get("total_tokens", 0)
-
-                    # 2. Google-style: response.llm_output["usage_metadata"]
-                    elif response.llm_output and "usage_metadata" in response.llm_output:
-                        usage = response.llm_output["usage_metadata"]
-                        total_tokens = usage.get("total_tokens", 0)
-
-                    # 3. Try generations metadata (some providers put it here)
-                    elif (
+                    # Extract generation metadata if available
+                    generations_metadata = None
+                    if (
                         response.generations
                         and len(response.generations) > 0
                         and len(response.generations[0]) > 0
                     ):
                         gen = response.generations[0][0]
                         if hasattr(gen, "message") and hasattr(gen.message, "response_metadata"):
-                            metadata = gen.message.response_metadata
-                            if "usage_metadata" in metadata:
-                                usage = metadata["usage_metadata"]
-                                total_tokens = usage.get("total_tokens", 0)
+                            generations_metadata = gen.message.response_metadata
+
+                    total_tokens = extract_tokens_from_llm_result(
+                        llm_output=response.llm_output,
+                        generations_metadata=generations_metadata,
+                    )
 
                     # If we found tokens, update the monitor
                     if total_tokens > 0:
-                        # Track tokens using proper API
                         self.monitor.usage.add_tokens(count=total_tokens)
-
-                        # Track API call with cost estimate
-                        # Gemini 2.5 Flash: $0.075 per 1M input, $0.30 per 1M output
-                        # Use average rate of ~$0.15 per 1M tokens
-                        cost_estimate = total_tokens * 0.00000015
-                        self.monitor.usage.add_api_call(cost=cost_estimate, tokens=0)
+                        cost_est = estimate_cost(total_tokens=total_tokens)
+                        self.monitor.usage.add_api_call(cost=cost_est, tokens=0)
 
             # Store callback handler for use in _run_chain
             self._callback_handler = TokenTrackingCallback(self.resource_monitor)
@@ -290,7 +278,7 @@ class ContractedChain(ContractAgent[dict[str, Any], dict[str, Any]]):
         return self.run(inputs)
 
 
-class ContractedLLM:
+class ContractedChainLLM:
     """Contract-aware wrapper for standalone LLM calls.
 
     This class wraps individual LLM calls (not full chains) with contract
@@ -306,7 +294,7 @@ class ContractedLLM:
         ... )
         >>>
         >>> llm = OpenAI()
-        >>> contracted_llm = ContractedLLM(contract=contract, llm=llm)
+        >>> contracted_llm = ContractedChainLLM(contract=contract, llm=llm)
         >>>
         >>> response = contracted_llm("What is 2+2?")
         >>> print(response)  # "4"
@@ -360,7 +348,7 @@ class ContractedLLM:
                 self.chain = LLMChain(llm=llm, prompt=prompt)
             except ImportError as err:
                 raise ImportError(
-                    "ContractedLLM requires either LangChain 1.0+ or LangChain <1.0. "
+                    "ContractedChainLLM requires either LangChain 1.0+ or LangChain <1.0. "
                     "Install with: pip install langchain langchain-core"
                 ) from err
 

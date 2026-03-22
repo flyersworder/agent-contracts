@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,4 +17,21 @@ jobs:
           cache-dependency-glob: "pyproject.toml"
       - run: uv python install 3.13
       - run: uv sync --all-extras --dev
-      - run: uv run pytest
+      - run: uv run ruff check src/ tests/
+      - run: uv run ruff format --check src/ tests/
+      - run: uv run mypy src/agent_contracts/ --strict --ignore-missing-imports
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "pyproject.toml"
+      - run: uv python install ${{ matrix.python-version }}
+      - run: uv sync --all-extras --dev
+      - run: uv run pytest --cov=agent_contracts --cov-report=term-missing

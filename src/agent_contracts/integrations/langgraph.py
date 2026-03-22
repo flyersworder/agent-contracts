@@ -50,6 +50,10 @@ from typing import Any, TypeVar
 
 from agent_contracts.core.contract import Contract
 from agent_contracts.core.wrapper import ContractAgent
+from agent_contracts.integrations._token_utils import (
+    estimate_cost,
+    extract_tokens_from_llm_result,
+)
 
 # Type checking imports
 try:
@@ -164,9 +168,6 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
         self._tool_invocations: dict[str, int] = {}  # tool_name -> invocation count
         self._active_nodes: list[str] = []  # Stack of currently executing nodes
 
-        # Set up interception for node-level token tracking
-        self._setup_node_tracking()
-
     def _run_graph(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """Run the LangGraph workflow.
 
@@ -271,58 +272,53 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
 
                 def on_llm_end(self, response: Any, **kwargs: Any) -> None:
                     """Track tokens when any LLM call completes in any node."""
-                    total_tokens = 0
-
-                    # Try multiple locations for token usage
-                    # Location 1: response.llm_output (classic LangChain)
+                    # Extract llm_output safely
                     llm_output = getattr(response, "llm_output", None)
-                    if llm_output is not None and isinstance(llm_output, dict):
-                        if "token_usage" in llm_output:
-                            usage = llm_output["token_usage"]
-                            if isinstance(usage, dict):
-                                total_tokens = usage.get("total_tokens", 0) or 0
-                        elif "usage_metadata" in llm_output:
-                            usage = llm_output["usage_metadata"]
-                            if isinstance(usage, dict):
-                                total_tokens = usage.get("total_tokens", 0) or 0
+                    if llm_output is not None and not isinstance(llm_output, dict):
+                        llm_output = None
 
-                    # Location 2: response.generations[0][0].message.response_metadata
-                    if total_tokens == 0:
-                        generations = getattr(response, "generations", None)
-                        if generations and len(generations) > 0 and len(generations[0]) > 0:
-                            gen = generations[0][0]
-                            message = getattr(gen, "message", None)
-                            if message is not None:
-                                metadata = getattr(message, "response_metadata", None)
-                                if metadata is not None and isinstance(metadata, dict):
-                                    if "usage_metadata" in metadata:
-                                        usage = metadata["usage_metadata"]
-                                        if isinstance(usage, dict):
-                                            total_tokens = usage.get("total_tokens", 0) or 0
-                                    # Also check token_usage in metadata
-                                    elif "token_usage" in metadata:
-                                        usage = metadata["token_usage"]
-                                        if isinstance(usage, dict):
-                                            total_tokens = usage.get("total_tokens", 0) or 0
+                    # Extract generations metadata safely
+                    generations_metadata = None
+                    generations = getattr(response, "generations", None)
+                    message = None
+                    if generations and len(generations) > 0 and len(generations[0]) > 0:
+                        gen = generations[0][0]
+                        message = getattr(gen, "message", None)
+                        if message is not None:
+                            metadata = getattr(message, "response_metadata", None)
+                            if metadata is not None and isinstance(metadata, dict):
+                                generations_metadata = metadata
 
-                                # Location 3: message.usage_metadata (Google models)
-                                if total_tokens == 0:
-                                    usage_meta = getattr(message, "usage_metadata", None)
-                                    if usage_meta is not None:
-                                        if isinstance(usage_meta, dict):
-                                            total_tokens = usage_meta.get("total_tokens", 0) or 0
-                                        elif hasattr(usage_meta, "total_tokens"):
-                                            total_tokens = (
-                                                getattr(usage_meta, "total_tokens", 0) or 0
-                                            )
+                    # Use shared extraction utility
+                    total_tokens = extract_tokens_from_llm_result(
+                        llm_output=llm_output,
+                        generations_metadata=generations_metadata,
+                    )
+
+                    # Additional location: response_metadata["token_usage"]
+                    if (
+                        total_tokens == 0
+                        and generations_metadata is not None
+                        and "token_usage" in generations_metadata
+                    ):
+                        usage = generations_metadata["token_usage"]
+                        if isinstance(usage, dict):
+                            total_tokens = usage.get("total_tokens", 0) or 0
+
+                    # Additional location: message.usage_metadata (Google models)
+                    if total_tokens == 0 and message is not None:
+                        usage_meta = getattr(message, "usage_metadata", None)
+                        if usage_meta is not None:
+                            if isinstance(usage_meta, dict):
+                                total_tokens = usage_meta.get("total_tokens", 0) or 0
+                            elif hasattr(usage_meta, "total_tokens"):
+                                total_tokens = getattr(usage_meta, "total_tokens", 0) or 0
 
                     # Track tokens cumulatively across all nodes
                     if total_tokens > 0:
                         self.monitor.usage.add_tokens(count=total_tokens)
-
-                        # Track API call with cost estimate
-                        cost_estimate = total_tokens * 0.00000015
-                        self.monitor.usage.add_api_call(cost=cost_estimate, tokens=0)
+                        cost_est = estimate_cost(total_tokens=total_tokens)
+                        self.monitor.usage.add_api_call(cost=cost_est, tokens=0)
 
             # Add callback to config with tracking data
             callback = GraphTokenTrackingCallback(
@@ -338,26 +334,6 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
             pass
 
         return config
-
-    def _setup_node_tracking(self) -> None:
-        """Set up tracking for individual node executions.
-
-        Node tracking is implemented via LangChain callbacks in _build_config().
-        The GraphTokenTrackingCallback tracks:
-        - Node executions via on_chain_start/on_chain_end
-        - Tool invocations via on_tool_start/on_tool_end
-        - Token usage via on_llm_end
-
-        Results are stored in:
-        - self._node_executions: Dict mapping node names to execution counts
-        - self._tool_invocations: Dict mapping tool names to invocation counts
-
-        Access via properties: node_executions, tool_invocations
-        Or use get_execution_summary() for comprehensive breakdown.
-        """
-        # Tracking is set up via callbacks in _build_config()
-        # Instance variables are initialized in __init__
-        pass
 
     def _monitored_execution(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """Execute graph with monitoring.
