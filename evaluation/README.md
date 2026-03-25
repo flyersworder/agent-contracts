@@ -645,7 +645,7 @@ We use **bootstrap confidence intervals** for all comparisons. Sample sizes are 
 
 For each metric, we compute:
 1. **Point estimate**: Mean difference between conditions
-2. **95% CI**: 10,000 bootstrap resamples with BCa correction
+2. **95% CI**: 10,000 bootstrap resamples using the percentile method
 3. **Effect size**: Cohen's d with confidence interval
 4. **p-value**: Permutation test (two-tailed)
 
@@ -655,7 +655,7 @@ from scipy import stats
 import numpy as np
 
 def bootstrap_ci(data, n_bootstrap=10000, ci=0.95):
-    """Compute BCa bootstrap confidence interval."""
+    """Compute bootstrap confidence interval using the percentile method."""
     boot_means = [np.mean(np.random.choice(data, len(data))) for _ in range(n_bootstrap)]
     lower = np.percentile(boot_means, (1 - ci) / 2 * 100)
     upper = np.percentile(boot_means, (1 + ci) / 2 * 100)

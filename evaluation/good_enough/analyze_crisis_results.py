@@ -43,7 +43,7 @@ def bootstrap_ci(
     confidence: float = 0.95,
     random_state: int = 42,
 ) -> BootstrapCI:
-    """Compute bootstrap confidence interval using BCa method.
+    """Compute bootstrap confidence interval using the percentile method.
 
     Args:
         data: Array of observations
