@@ -1,6 +1,8 @@
 # Agent Contracts
 
+[![PyPI version](https://img.shields.io/pypi/v/ai-agent-contracts.svg)](https://pypi.org/project/ai-agent-contracts/)
 [![Tests](https://github.com/flyersworder/agent-contracts/actions/workflows/ci.yml/badge.svg)](https://github.com/flyersworder/agent-contracts/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 A formal framework for governing autonomous AI agents through explicit resource constraints and temporal boundaries.
 
@@ -422,15 +424,25 @@ agent-contracts/
 ## Installation
 
 ```bash
-# Clone the repository
+# Install from PyPI
+pip install ai-agent-contracts
+
+# Or with uv
+uv add ai-agent-contracts
+```
+
+The package is importable as `agent_contracts`:
+
+```python
+from agent_contracts import Contract, ResourceConstraints
+```
+
+**For development** (from source):
+
+```bash
 git clone https://github.com/flyersworder/agent-contracts.git
 cd agent-contracts
-
-# Install with uv (recommended)
-uv pip install -e .
-
-# Or install with pip
-pip install -e .
+uv sync --dev
 ```
 
 **Requirements**: Python ≥ 3.12
