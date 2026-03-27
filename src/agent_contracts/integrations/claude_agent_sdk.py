@@ -25,7 +25,7 @@ Example:
 from typing import Any
 
 from agent_contracts.core.contract import Contract
-from agent_contracts.core.enforcement import ContractEnforcer
+from agent_contracts.core.enforcement import ContractEnforcer, EnforcementEvent
 from agent_contracts.core.monitor import ResourceMonitor, TemporalMonitor
 
 try:
@@ -214,10 +214,11 @@ class ContractedClaudeAgent:
     async def _pre_tool_use_hook(
         self, hook_input: Any, session_id: Any, context: Any
     ) -> dict[str, Any]:
-        """Pre-tool-use enforcement stub.
+        """Pre-tool-use enforcement hook.
 
-        Called before each tool invocation. Will enforce per-tool limits and
-        aggregate tool invocation budget in future implementation.
+        Called before each tool invocation. Enforces per-tool limits,
+        aggregate tool invocation budget, web search limits, and temporal
+        constraints. Returns a block decision if any constraint is exceeded.
 
         Args:
             hook_input: PreToolUseHookInput from the SDK
@@ -225,17 +226,44 @@ class ContractedClaudeAgent:
             context: HookContext from the SDK
 
         Returns:
-            Empty dict (allow tool use by default)
+            Empty dict to allow, or {"decision": "block", "reason": "..."} to block
         """
+        tool_name = hook_input.get("tool_name", "unknown")
+
+        # 1. Check per-tool limits
+        if not self._resource_monitor.can_use_tool(tool_name):
+            return {"decision": "block", "reason": f"Per-tool limit exceeded for '{tool_name}'"}
+
+        # 2. Check aggregate tool invocations
+        constraints = self.contract.resources
+        if (
+            constraints.tool_invocations is not None
+            and self._resource_monitor.usage.tool_invocations >= constraints.tool_invocations
+        ):
+            return {"decision": "block", "reason": "Total tool invocation limit exceeded"}
+
+        # 3. Check web search limit
+        if (
+            tool_name == "WebSearch"
+            and constraints.web_searches is not None
+            and self._resource_monitor.usage.web_searches >= constraints.web_searches
+        ):
+            return {"decision": "block", "reason": "WebSearch limit exceeded"}
+
+        # 4. Check temporal constraints
+        if self._temporal_monitor.is_over_duration() or self._temporal_monitor.is_past_deadline():
+            return {"decision": "block", "reason": "Contract temporal limit exceeded"}
+
         return {}
 
     async def _post_tool_use_hook(
         self, hook_input: Any, session_id: Any, context: Any
     ) -> dict[str, Any]:
-        """Post-tool-use enforcement stub.
+        """Post-tool-use audit hook.
 
-        Called after each tool invocation completes. Will track usage and
-        check for violations in future implementation.
+        Called after each tool invocation completes. Tracks tool usage counts
+        (aggregate and per-tool), web search counts, and emits an enforcement
+        event for the audit trail.
 
         Args:
             hook_input: PostToolUseHookInput from the SDK
@@ -243,6 +271,33 @@ class ContractedClaudeAgent:
             context: HookContext from the SDK
 
         Returns:
-            Empty dict (no action by default)
+            Empty dict (no blocking action)
         """
+        tool_name = hook_input.get("tool_name", "unknown")
+
+        # Track tool usage
+        self._resource_monitor.usage.tool_invocations += 1
+        self._resource_monitor.usage.tool_usage_by_name[tool_name] = (
+            self._resource_monitor.usage.tool_usage_by_name.get(tool_name, 0) + 1
+        )
+
+        # Track web searches
+        if tool_name == "WebSearch":
+            self._resource_monitor.usage.web_searches += 1
+
+        # Emit enforcement event for audit trail
+        self._enforcer._emit_event(
+            EnforcementEvent(
+                event_type="tool_use",
+                contract=self.contract,
+                message=f"Tool '{tool_name}' executed",
+                data={
+                    "tool_name": tool_name,
+                    "tool_use_id": hook_input.get("tool_use_id", ""),
+                    "agent_id": hook_input.get("agent_id", ""),
+                    "agent_type": hook_input.get("agent_type", ""),
+                },
+            )
+        )
+
         return {}
