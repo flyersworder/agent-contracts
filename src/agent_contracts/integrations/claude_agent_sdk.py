@@ -22,11 +22,13 @@ Example:
     >>> result = await contracted.aexecute()
 """
 
+from datetime import datetime
 from typing import Any
 
-from agent_contracts.core.contract import Contract
+from agent_contracts.core.contract import Contract, ContractState
 from agent_contracts.core.enforcement import ContractEnforcer, EnforcementEvent
 from agent_contracts.core.monitor import ResourceMonitor, TemporalMonitor
+from agent_contracts.core.wrapper import ExecutionLog, ExecutionResult
 
 try:
     from claude_agent_sdk import (
@@ -301,3 +303,122 @@ class ContractedClaudeAgent:
         )
 
         return {}
+
+    async def aexecute(self) -> "ExecutionResult[str]":
+        """Execute the agent asynchronously within contract constraints.
+
+        Streams messages from the Claude Agent SDK's query function,
+        tracking token usage per AssistantMessage and capturing the final
+        result from ResultMessage.
+
+        Returns:
+            ExecutionResult with output, success status, violations, and audit log
+        """
+        start_time = datetime.now()
+        output: str | None = None
+        violations: list[str] = []
+        events: list[dict[str, Any]] = []
+
+        # Start monitoring
+        self._temporal_monitor.start()
+        if not self._enforcer._enforcement_active:
+            self._enforcer.start()
+
+        # Activate contract if still in DRAFTED state
+        if self.contract.state == ContractState.DRAFTED:
+            self.contract.activate()
+
+        merged_options = self._build_options()
+
+        try:
+            async for message in query(prompt=self.prompt, options=merged_options):
+                if isinstance(message, AssistantMessage):
+                    usage = message.usage
+                    if usage:
+                        token_count = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                        self._resource_monitor.usage.add_tokens(token_count)
+                        self._resource_monitor.usage.api_calls += 1
+
+                        # Check constraints after each AssistantMessage
+                        constraint_violations = self._resource_monitor.check_constraints()
+                        if constraint_violations:
+                            for v in constraint_violations:
+                                msg = f"{v.resource}: {v.actual} > {v.limit}"
+                                violations.append(msg)
+                                events.append(
+                                    {
+                                        "type": "constraint_violated",
+                                        "message": msg,
+                                        "timestamp": datetime.now().isoformat(),
+                                    }
+                                )
+                            if self.strict_mode:
+                                break
+
+                elif isinstance(message, ResultMessage):
+                    output = message.result
+
+        except Exception as e:
+            violations.append(str(e))
+            events.append(
+                {
+                    "type": "error",
+                    "message": str(e),
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+
+        end_time = datetime.now()
+        success = len(violations) == 0 and output is not None
+
+        # Update contract state
+        if violations and self.contract.state == ContractState.ACTIVE:
+            self.contract.violate()
+        # else: keep ACTIVE for cumulative tracking
+
+        execution_log = ExecutionLog(
+            contract_id=self.contract.id,
+            start_time=start_time,
+            end_time=end_time,
+            final_state=self.contract.state,
+            resource_usage=self._resource_monitor.usage.to_dict(),
+            temporal_metrics={
+                "elapsed_seconds": (end_time - start_time).total_seconds(),
+                "deadline_met": not self._temporal_monitor.is_past_deadline(),
+            },
+            events=events,
+            metadata={},
+        )
+
+        return ExecutionResult(
+            output=output,
+            contract=self.contract,
+            success=success,
+            violations=violations,
+            execution_log=execution_log,
+            metadata={"elapsed_seconds": (end_time - start_time).total_seconds()},
+        )
+
+    def execute(self) -> "ExecutionResult[str]":
+        """Execute the agent synchronously by wrapping aexecute().
+
+        Handles both running and non-running event loops gracefully.
+
+        Returns:
+            ExecutionResult with output, success status, violations, and audit log
+        """
+        import asyncio
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, self.aexecute())
+                return future.result()
+        else:
+            return asyncio.run(self.aexecute())

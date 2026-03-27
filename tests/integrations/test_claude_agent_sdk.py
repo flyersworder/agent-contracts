@@ -5,9 +5,10 @@ These tests mock the SDK — no real Claude sessions needed.
 
 from datetime import datetime, timedelta
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
-from claude_agent_sdk import ClaudeAgentOptions
+from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage
 
 from agent_contracts.core.capabilities import Capabilities
 from agent_contracts.core.contract import (
@@ -363,3 +364,155 @@ class TestPostToolUseHook:
         assert agent._resource_monitor.usage.tool_invocations == 3
         assert agent._resource_monitor.usage.tool_usage_by_name["Read"] == 2
         assert agent._resource_monitor.usage.tool_usage_by_name["Edit"] == 1
+
+
+class TestAexecute:
+    """Test async execution with mocked SDK."""
+
+    def _make_contract(self, **resource_kwargs: Any) -> Contract:
+        return Contract(id="test", name="test", resources=ResourceConstraints(**resource_kwargs))
+
+    @pytest.mark.asyncio
+    async def test_basic_execution_returns_result(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = self._make_contract(tokens=50000)
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello")
+
+        # Create mock messages
+        mock_assistant = MagicMock(spec=AssistantMessage)
+        mock_assistant.usage = {"input_tokens": 100, "output_tokens": 50}
+
+        mock_result = MagicMock(spec=ResultMessage)
+        mock_result.result = "Test output"
+
+        async def mock_query(*args: Any, **kwargs: Any) -> Any:
+            yield mock_assistant
+            yield mock_result
+
+        with patch("agent_contracts.integrations.claude_agent_sdk.query", mock_query):
+            result = await agent.aexecute()
+
+        assert result.output == "Test output"
+        assert result.success is True
+        assert agent._resource_monitor.usage.tokens == 150
+        assert agent._resource_monitor.usage.api_calls == 1
+
+    @pytest.mark.asyncio
+    async def test_token_limit_violation_stops_execution(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = self._make_contract(tokens=100)
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello")
+
+        mock_assistant = MagicMock(spec=AssistantMessage)
+        mock_assistant.usage = {"input_tokens": 80, "output_tokens": 80}
+
+        mock_result = MagicMock(spec=ResultMessage)
+        mock_result.result = "Partial output"
+
+        async def mock_query(*args: Any, **kwargs: Any) -> Any:
+            yield mock_assistant
+            yield mock_result
+
+        with patch("agent_contracts.integrations.claude_agent_sdk.query", mock_query):
+            result = await agent.aexecute()
+
+        assert result.success is False
+        assert len(result.violations) > 0
+
+    @pytest.mark.asyncio
+    async def test_execution_log_populated(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = self._make_contract(tokens=50000)
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello")
+
+        mock_assistant = MagicMock(spec=AssistantMessage)
+        mock_assistant.usage = {"input_tokens": 100, "output_tokens": 50}
+
+        mock_result = MagicMock(spec=ResultMessage)
+        mock_result.result = "Done"
+
+        async def mock_query(*args: Any, **kwargs: Any) -> Any:
+            yield mock_assistant
+            yield mock_result
+
+        with patch("agent_contracts.integrations.claude_agent_sdk.query", mock_query):
+            result = await agent.aexecute()
+
+        assert result.execution_log is not None
+        assert result.execution_log.contract_id == "test"
+        assert result.execution_log.resource_usage["tokens"] == 150
+
+    @pytest.mark.asyncio
+    async def test_handles_exception_during_query(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = self._make_contract(tokens=50000)
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello")
+
+        async def mock_query(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("Connection lost")
+            yield  # make it an async generator
+
+        with patch("agent_contracts.integrations.claude_agent_sdk.query", mock_query):
+            result = await agent.aexecute()
+
+        assert result.success is False
+        assert any("Connection lost" in v for v in result.violations)
+
+    @pytest.mark.asyncio
+    async def test_messages_without_usage_skipped(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = self._make_contract(tokens=50000)
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello")
+
+        # Assistant message without usage data
+        mock_assistant_no_usage = MagicMock(spec=AssistantMessage)
+        mock_assistant_no_usage.usage = None
+
+        mock_assistant_with_usage = MagicMock(spec=AssistantMessage)
+        mock_assistant_with_usage.usage = {"input_tokens": 200, "output_tokens": 100}
+
+        mock_result = MagicMock(spec=ResultMessage)
+        mock_result.result = "Done"
+
+        async def mock_query(*args: Any, **kwargs: Any) -> Any:
+            yield mock_assistant_no_usage
+            yield mock_assistant_with_usage
+            yield mock_result
+
+        with patch("agent_contracts.integrations.claude_agent_sdk.query", mock_query):
+            result = await agent.aexecute()
+
+        assert result.success is True
+        assert agent._resource_monitor.usage.tokens == 300
+        assert agent._resource_monitor.usage.api_calls == 1  # only counted for message with usage
+
+
+class TestExecuteSync:
+    """Test synchronous execution wrapper."""
+
+    def test_sync_execute_works(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = Contract(id="test", name="test", resources=ResourceConstraints(tokens=50000))
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello")
+
+        mock_assistant = MagicMock(spec=AssistantMessage)
+        mock_assistant.usage = {"input_tokens": 50, "output_tokens": 25}
+
+        mock_result = MagicMock(spec=ResultMessage)
+        mock_result.result = "Sync output"
+
+        async def mock_query(*args: Any, **kwargs: Any) -> Any:
+            yield mock_assistant
+            yield mock_result
+
+        with patch("agent_contracts.integrations.claude_agent_sdk.query", mock_query):
+            result = agent.execute()
+
+        assert result.output == "Sync output"
+        assert result.success is True
