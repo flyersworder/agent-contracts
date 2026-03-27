@@ -15,7 +15,7 @@ resolution-markers = [
 
 [[package]]
 name = "ai-agent-contracts"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "litellm" },
@@ -23,6 +23,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+claude-agent-sdk = [
+    { name = "claude-agent-sdk" },
+]
 eval = [
     { name = "datasets" },
     { name = "matplotlib" },
@@ -46,6 +49,7 @@ dev = [
     { name = "mypy" },
     { name = "pre-commit" },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "scipy" },
@@ -53,6 +57,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "claude-agent-sdk", marker = "extra == 'claude-agent-sdk'", specifier = ">=0.1.50" },
     { name = "datasets", marker = "extra == 'eval'", specifier = ">=4.4.2" },
     { name = "google-adk", marker = "extra == 'google-adk'", specifier = ">=1.18.0" },
     { name = "langchain", marker = "extra == 'langchain'", specifier = ">=0.3.0" },
@@ -65,13 +70,14 @@ requires-dist = [
     { name = "matplotlib", marker = "extra == 'eval'", specifier = ">=3.10.7" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
-provides-extras = ["eval", "langchain", "langgraph", "google-adk"]
+provides-extras = ["eval", "langchain", "langgraph", "google-adk", "claude-agent-sdk"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=1.13.0" },
     { name = "pre-commit", specifier = ">=4.0.0" },
     { name = "pytest", specifier = ">=8.3.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24.0" },
     { name = "pytest-cov", specifier = ">=6.0.0" },
     { name = "ruff", specifier = ">=0.8.0" },
     { name = "scipy", specifier = ">=1.16.3" },
@@ -389,6 +395,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/4b/51/8ade005e5ca5b0d80fb4aff72a3775b325bdc3d27408c8113811a7cbe640/charset_normalizer-3.4.4-cp314-cp314-win_amd64.whl", hash = "sha256:8a6562c3700cce886c5be75ade4a5db4214fda19fede41d9792d100288d8f94c", size = 107104, upload-time = "2025-10-14T04:41:51.051Z" },
     { url = "https://files.pythonhosted.org/packages/da/5f/6b8f83a55bb8278772c5ae54a577f3099025f9ade59d0136ac24a0df4bde/charset_normalizer-3.4.4-cp314-cp314-win_arm64.whl", hash = "sha256:de00632ca48df9daf77a2c65a484531649261ec9f25489917f09e455cb09ddb2", size = 100743, upload-time = "2025-10-14T04:41:52.122Z" },
     { url = "https://files.pythonhosted.org/packages/0a/4c/925909008ed5a988ccbb72dcc897407e5d6d3bd72410d69e051fc0c14647/charset_normalizer-3.4.4-py3-none-any.whl", hash = "sha256:7a32c560861a02ff789ad905a2fe94e3f840803362c84fecf1851cb4cf3dc37f", size = 53402, upload-time = "2025-10-14T04:42:31.76Z" },
+]
+
+[[package]]
+name = "claude-agent-sdk"
+version = "0.1.50"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "mcp" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/24/eb/42a7027a02d3827c6e49f97375a00e6da4708f81295d9afa1a0009ce4abd/claude_agent_sdk-0.1.50.tar.gz", hash = "sha256:e15157792857ecb55274a71f08981efcfda2e169bee7894cbdc245d05ac43203", size = 99070, upload-time = "2026-03-20T23:00:58.646Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/97/66bc98d5026dbed68b7469a4990de71d8c40d19713e37dafacf32ba3be3b/claude_agent_sdk-0.1.50-py3-none-macosx_11_0_arm64.whl", hash = "sha256:858b1822451209b2c3ad8df27458168d29ac19fd628680853f7707ea017fea73", size = 58223299, upload-time = "2026-03-20T23:01:01.742Z" },
+    { url = "https://files.pythonhosted.org/packages/35/0d/65dda40016faa30a63a950d48b400ad26913e8e333e418651faf04d20673/claude_agent_sdk-0.1.50-py3-none-macosx_11_0_x86_64.whl", hash = "sha256:44e75b9d076bd6030742729f99eb38777b80f052b22338d0a028d8190fc59e52", size = 61019645, upload-time = "2026-03-20T23:01:04.742Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/c0/e5c7c6b9e378553fe24bb5367caede725e274a494b6d126e719971c53b8b/claude_agent_sdk-0.1.50-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:7363d431dc6efd83fa658a045e14fa4357440352b548002bfb9096d8f04d143c", size = 74590847, upload-time = "2026-03-20T23:01:07.899Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/af/658a28cb070e0b59ac98e88411536f6f9b8d81e8ddde9a8340106b0b8b0f/claude_agent_sdk-0.1.50-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:493d8cc43f4166291606749cf47b03e822f03b7f371cc77af697564017ccf579", size = 75231505, upload-time = "2026-03-20T23:01:11.45Z" },
+    { url = "https://files.pythonhosted.org/packages/41/44/ff1f2c137406392fa0a69e3c3ff37150267da664decddb6dee83b80ba162/claude_agent_sdk-0.1.50-py3-none-win_amd64.whl", hash = "sha256:2e44caf3e5bce56e26a18158acf3e1c2c2784cf8fa15e425afe92816c987eb1a", size = 75846174, upload-time = "2026-03-20T23:01:15.277Z" },
 ]
 
 [[package]]
@@ -3440,6 +3463,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d1/db/7ef3487e0fb0049ddb5ce41d3a49c235bf9ad299b6a25d5780a89f19230f/pytest-9.0.2.tar.gz", hash = "sha256:75186651a92bd89611d1d9fc20f0b4345fd827c41ccd5c299a868a05d70edf11", size = 1568901, upload-time = "2025-12-06T21:30:51.014Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/3b/ab/b3226f0bd7cdcf710fbede2b3548584366da3b19b5021e74f5bde2a8fa3f/pytest-9.0.2-py3-none-any.whl", hash = "sha256:711ffd45bf766d5264d487b917733b453d917afd2b0ad65223959f59089f875b", size = 374801, upload-time = "2025-12-06T21:30:49.154Z" },
+]
+
+[[package]]
+name = "pytest-asyncio"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/90/2c/8af215c0f776415f3590cac4f9086ccefd6fd463befeae41cd4d3f193e5a/pytest_asyncio-1.3.0.tar.gz", hash = "sha256:d7f52f36d231b80ee124cd216ffb19369aa168fc10095013c6b014a34d3ee9e5", size = 50087, upload-time = "2025-11-10T16:07:47.256Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl", hash = "sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5", size = 15075, upload-time = "2025-11-10T16:07:45.537Z" },
 ]
 
 [[package]]

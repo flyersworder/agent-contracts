@@ -1,7 +1,7 @@
 [project]
 name = "ai-agent-contracts"
 # Version must match src/agent_contracts/__init__.py:__version__
-version = "0.1.0"
+version = "0.2.0"
 description = "A formal framework for governing autonomous AI agents through explicit resource constraints and temporal boundaries"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -48,6 +48,9 @@ langgraph = [
 google-adk = [
     "google-adk>=1.18.0",
 ]
+claude-agent-sdk = [
+    "claude-agent-sdk>=0.1.50",
+]
 
 [dependency-groups]
 dev = [
@@ -55,6 +58,7 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.0.0",
     "scipy>=1.16.3",
 ]
@@ -140,13 +144,16 @@ strict_equality = true
 # which conflicts with strict mypy when the packages are installed.
 [[tool.mypy.overrides]]
 module = [
+    "agent_contracts.integrations",
     "agent_contracts.integrations.langchain",
     "agent_contracts.integrations.langgraph",
     "agent_contracts.integrations.google_adk",
+    "agent_contracts.integrations.claude_agent_sdk",
 ]
 ignore_errors = true
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_test.py"]
 python_classes = ["Test*"]

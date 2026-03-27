@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-27
+
+### Added
+
+**Claude Agent SDK Integration**
+- `ContractedClaudeAgent` for governing Claude Agent SDK agents
+- Hook-based enforcement via `PreToolUse` (blocks) and `PostToolUse` (audit)
+- Exact token tracking from `AssistantMessage.usage`
+- SDK-native limit mapping: `iterations` → `max_turns`, `cost_usd` → `max_budget_usd`
+- Per-tool limits, web search limits, and temporal enforcement via hooks
+- Dual API: `aexecute()` (async) and `execute()` (sync)
+- Full passthrough of SDK features (tools, MCP servers, subagents, skills, permissions)
+- 33 tests with mocked SDK
+
 ## [0.1.0] - 2026-03-26
 
 Initial public release. A formal framework for governing autonomous AI agents through
@@ -47,5 +61,6 @@ explicit resource constraints and temporal boundaries.
 - License changed from CC-BY-4.0 (paper) to Apache-2.0 (software)
 - PyPI package name: `ai-agent-contracts` (the name `agent-contracts` was already taken)
 
-[Unreleased]: https://github.com/flyersworder/agent-contracts/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/flyersworder/agent-contracts/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/flyersworder/agent-contracts/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/flyersworder/agent-contracts/releases/tag/v0.1.0

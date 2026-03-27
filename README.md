@@ -344,6 +344,15 @@ print(skill.instructions)
 - ✅ 11 comprehensive tests, 90% coverage
 - ✅ Real-world demos (multi-turn, multi-agent)
 
+**Claude Agent SDK Integration** ✅ Complete
+- ✅ ContractedClaudeAgent with hook-based enforcement
+- ✅ Exact token tracking from AssistantMessage.usage
+- ✅ Per-tool limits and temporal enforcement via PreToolUse hooks
+- ✅ Audit trail via PostToolUse hooks
+- ✅ Full SDK passthrough (tools, MCP, subagents, skills, permissions)
+- ✅ Dual API: async `aexecute()` and sync `execute()`
+- ✅ 33 comprehensive tests
+
 **Evaluation Pipelines** ✅ Complete
 - ✅ Research Pipeline: Multi-agent report generation (25 topics)
 - ✅ Code Review Pipeline: Coder↔Reviewer loop (175 LiveCodeBench problems)
@@ -351,7 +360,7 @@ print(skill.instructions)
 - ✅ Conservation law enforcement in multi-agent delegation
 - ✅ Iteration limits prevent runaway agent loops
 
-**Total**: 609+ tests, 91%+ coverage
+**Total**: 623+ tests, 81%+ coverage
 
 ## Use Cases
 
@@ -360,6 +369,7 @@ Agent Contracts are designed for:
 - **Production AI Systems** - Cost control and SLA compliance
 - **Complex Multi-Agent Workflows** ⭐ - LangGraph loops, retries, validation cycles
 - **Enterprise Deployments** - Governance, audit trails, and compliance
+- **Claude Agent SDK** - Govern Claude agents with per-tool limits and audit trails
 - **Google ADK Applications** - Multi-turn conversations and multi-agent hierarchies
 - **LangChain Applications** - Simple chains with budget enforcement
 - **Research** - Studying optimal agent behavior under constraints
@@ -376,6 +386,12 @@ Agent Contracts are designed for:
 - Budget risk: VERY HIGH (can spiral to $10+ without limits!)
 - Value: Loop protection, multi-agent coordination, cumulative tracking
 - **This is the killer feature for production deployments**
+
+**Claude Agent SDK** (agentic coding & file/web/terminal):
+- 10-100+ tool calls per session (Read, Edit, Bash, WebSearch, subagents)
+- Budget risk: HIGH (open-ended agents with many tools can spiral)
+- Value: Per-tool limits, temporal enforcement, audit trail, hook-based governance
+- Ideal for: Claude-powered agents, coding assistants, research agents
 
 **Google ADK** (multi-turn & multi-agent):
 - 10-50+ LLM calls per conversation (turns, agent coordination, tool use)
@@ -399,7 +415,8 @@ agent-contracts/
 │       ├── litellm_wrapper.py    # LiteLLM integration
 │       ├── langchain.py          # LangChain integration
 │       ├── langgraph.py          # LangGraph integration ⭐
-│       └── google_adk.py         # Google ADK integration
+│       ├── google_adk.py         # Google ADK integration
+│       └── claude_agent_sdk.py   # Claude Agent SDK integration
 ├── tests/                         # 247+ tests, 94%+ coverage
 │   ├── core/                     # Core module tests (209 tests)
 │   └── integrations/             # Integration tests (38 tests)
@@ -452,6 +469,7 @@ uv sync --dev
 - `langchain` - For LangChain integration (`uv sync --extra langchain`)
 - `langgraph` - For LangGraph integration ⭐ (`uv sync --extra langgraph`)
 - `google-adk` - For Google ADK integration (`uv sync --extra google-adk`)
+- `claude-agent-sdk` - For Claude Agent SDK integration (`uv sync --extra claude-agent-sdk`)
 - `matplotlib` - For visualization benchmarks (`pip install matplotlib`)
 
 ## Development

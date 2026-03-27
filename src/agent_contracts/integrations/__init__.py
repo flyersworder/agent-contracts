@@ -58,7 +58,21 @@ except ImportError:
     DelegatingAdkAgent = None  # type: ignore
     create_contracted_adk_agent = None  # type: ignore
 
+# Claude Agent SDK integration (optional, requires claude-agent-sdk package)
+try:
+    from agent_contracts.integrations.claude_agent_sdk import (
+        CLAUDE_AGENT_SDK_AVAILABLE,
+        ContractedClaudeAgent,
+    )
+
+    if not CLAUDE_AGENT_SDK_AVAILABLE:
+        raise ImportError("claude-agent-sdk not installed")
+except ImportError:
+    CLAUDE_AGENT_SDK_AVAILABLE = False  # type: ignore
+    ContractedClaudeAgent = None  # type: ignore
+
 __all__ = [
+    "CLAUDE_AGENT_SDK_AVAILABLE",
     "GOOGLE_ADK_AVAILABLE",
     "LANGCHAIN_AVAILABLE",
     "LANGGRAPH_AVAILABLE",
@@ -67,6 +81,7 @@ __all__ = [
     "ContractedAdkMultiAgent",
     "ContractedChain",
     "ContractedChainLLM",
+    "ContractedClaudeAgent",
     "ContractedGraph",
     "ContractedLLM",
     "DelegatingAdkAgent",
