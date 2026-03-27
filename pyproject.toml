@@ -48,6 +48,9 @@ langgraph = [
 google-adk = [
     "google-adk>=1.18.0",
 ]
+claude-agent-sdk = [
+    "claude-agent-sdk>=0.1.50",
+]
 
 [dependency-groups]
 dev = [
@@ -140,9 +143,11 @@ strict_equality = true
 # which conflicts with strict mypy when the packages are installed.
 [[tool.mypy.overrides]]
 module = [
+    "agent_contracts.integrations",
     "agent_contracts.integrations.langchain",
     "agent_contracts.integrations.langgraph",
     "agent_contracts.integrations.google_adk",
+    "agent_contracts.integrations.claude_agent_sdk",
 ]
 ignore_errors = true
 
