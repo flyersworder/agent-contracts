@@ -8,7 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage
+from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, HookMatcher, ResultMessage
 
 from agent_contracts.core.capabilities import Capabilities
 from agent_contracts.core.contract import (
@@ -516,3 +516,101 @@ class TestExecuteSync:
 
         assert result.output == "Sync output"
         assert result.success is True
+
+
+class TestPassthrough:
+    """Test that user options are passed through untouched."""
+
+    def test_mcp_servers_preserved(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = Contract(id="test", name="test", resources=ResourceConstraints(tokens=10000))
+        mcp_config = {"playwright": {"command": "npx", "args": ["@playwright/mcp@latest"]}}
+        user_options = ClaudeAgentOptions(mcp_servers=mcp_config)
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello", options=user_options)
+
+        merged = agent._build_options()
+        assert merged.mcp_servers == mcp_config
+
+    def test_agents_preserved(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = Contract(id="test", name="test", resources=ResourceConstraints(tokens=10000))
+        agents_config = {"reviewer": MagicMock()}
+        user_options = ClaudeAgentOptions(agents=agents_config)
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello", options=user_options)
+
+        merged = agent._build_options()
+        assert merged.agents == agents_config
+
+    def test_no_user_options_works(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = Contract(id="test", name="test", resources=ResourceConstraints(tokens=10000))
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello")
+
+        merged = agent._build_options()
+        assert merged is not None
+
+    def test_user_hooks_not_replaced(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = Contract(id="test", name="test", resources=ResourceConstraints(tokens=10000))
+
+        async def user_hook(h: Any, s: Any, c: Any) -> dict[str, Any]:
+            return {}
+
+        user_hooks = {"PreToolUse": [HookMatcher(matcher="Edit", hooks=[user_hook])]}
+        user_options = ClaudeAgentOptions(hooks=user_hooks)
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello", options=user_options)
+
+        merged = agent._build_options()
+        pre_hooks = merged.hooks["PreToolUse"]
+        # Should have user's hook + our enforcement hook
+        assert len(pre_hooks) == 2
+
+    def test_permission_mode_preserved(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = Contract(id="test", name="test", resources=ResourceConstraints(tokens=10000))
+        user_options = ClaudeAgentOptions(permission_mode="bypassPermissions")
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello", options=user_options)
+
+        merged = agent._build_options()
+        assert merged.permission_mode == "bypassPermissions"
+
+
+class TestEdgeCases:
+    """Test edge cases."""
+
+    def test_no_resources_contract(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = Contract(id="test", name="test")
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello")
+
+        merged = agent._build_options()
+        assert merged.max_turns is None
+        assert merged.max_budget_usd is None
+
+    def test_strict_mode_false(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = Contract(id="test", name="test", resources=ResourceConstraints(tokens=10000))
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello", strict_mode=False)
+        assert agent.strict_mode is False
+
+    def test_empty_capabilities(self) -> None:
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = Contract(
+            id="test",
+            name="test",
+            resources=ResourceConstraints(tokens=10000),
+            capabilities=Capabilities(),
+        )
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello")
+
+        merged = agent._build_options()
+        # No tools from capabilities, no instructions — should still work
+        assert merged is not None

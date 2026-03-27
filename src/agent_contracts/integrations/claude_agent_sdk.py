@@ -131,6 +131,8 @@ class ContractedClaudeAgent:
                 kwargs["mcp_servers"] = user.mcp_servers
             if user.agents is not None:
                 kwargs["agents"] = user.agents
+            if user.hooks:
+                kwargs["hooks"] = user.hooks
 
         # Map contract.resources.iterations → max_turns (more restrictive wins)
         if self.contract.resources.iterations is not None:
