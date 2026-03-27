@@ -8,7 +8,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, HookMatcher, ResultMessage
 
 from agent_contracts.core.capabilities import Capabilities
 from agent_contracts.core.contract import (
@@ -17,6 +16,16 @@ from agent_contracts.core.contract import (
     TemporalConstraints,
 )
 from agent_contracts.integrations import CLAUDE_AGENT_SDK_AVAILABLE
+
+# Skip all tests if claude-agent-sdk is not installed
+pytestmark = pytest.mark.skipif(
+    not CLAUDE_AGENT_SDK_AVAILABLE,
+    reason="claude-agent-sdk not installed",
+)
+
+# Import SDK types only if available (guarded by pytestmark above)
+if CLAUDE_AGENT_SDK_AVAILABLE:
+    from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, HookMatcher, ResultMessage
 
 
 class TestClaudeAgentSdkImport:

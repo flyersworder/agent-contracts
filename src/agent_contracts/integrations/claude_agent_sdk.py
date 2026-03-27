@@ -85,10 +85,23 @@ class ContractedClaudeAgent:
         # Set up monitoring and enforcement
         self._resource_monitor = ResourceMonitor(contract.resources)
         self._temporal_monitor = TemporalMonitor(contract)
+        self._events: list[dict[str, Any]] = []
         self._enforcer = ContractEnforcer(
             contract,
             strict_mode=strict_mode,
+            callbacks=[self._on_enforcement_event],
             monitor=self._resource_monitor,
+        )
+
+    def _on_enforcement_event(self, event: EnforcementEvent) -> None:
+        """Handle enforcement events for audit logging."""
+        self._events.append(
+            {
+                "type": event.event_type,
+                "message": event.message,
+                "data": event.data,
+                "timestamp": event.timestamp.isoformat(),
+            }
         )
 
     def _build_options(self) -> "ClaudeAgentOptions":
@@ -238,7 +251,7 @@ class ContractedClaudeAgent:
         if not self._resource_monitor.can_use_tool(tool_name):
             return {"decision": "block", "reason": f"Tool limit exceeded for '{tool_name}'"}
 
-        # 2. Check web search limit
+        # 2. Check web search limit (separate from can_use_tool)
         constraints = self.contract.resources
         if (
             tool_name == "WebSearch"
@@ -247,7 +260,7 @@ class ContractedClaudeAgent:
         ):
             return {"decision": "block", "reason": "WebSearch limit exceeded"}
 
-        # 4. Check temporal constraints
+        # 3. Check temporal constraints
         if self._temporal_monitor.is_over_duration() or self._temporal_monitor.is_past_deadline():
             return {"decision": "block", "reason": "Contract temporal limit exceeded"}
 
@@ -272,15 +285,12 @@ class ContractedClaudeAgent:
         """
         tool_name = hook_input.get("tool_name", "unknown")
 
-        # Track tool usage
-        self._resource_monitor.usage.tool_invocations += 1
-        self._resource_monitor.usage.tool_usage_by_name[tool_name] = (
-            self._resource_monitor.usage.tool_usage_by_name.get(tool_name, 0) + 1
-        )
+        # Track tool usage (thread-safe)
+        self._resource_monitor.usage.add_tool_invocation(tool_name)
 
-        # Track web searches
+        # Track web searches (thread-safe)
         if tool_name == "WebSearch":
-            self._resource_monitor.usage.web_searches += 1
+            self._resource_monitor.usage.add_web_search()
 
         # Emit enforcement event for audit trail
         self._enforcer._emit_event(
@@ -312,7 +322,7 @@ class ContractedClaudeAgent:
         start_time = datetime.now()
         output: str | None = None
         violations: list[str] = []
-        events: list[dict[str, Any]] = []
+        self._events = []  # Reset for this execution
 
         # Start monitoring
         self._temporal_monitor.start()
@@ -336,7 +346,7 @@ class ContractedClaudeAgent:
                             for v in constraint_violations:
                                 msg = f"{v.resource}: {v.actual} > {v.limit}"
                                 violations.append(msg)
-                                events.append(
+                                self._events.append(
                                     {
                                         "type": "constraint_violated",
                                         "message": msg,
@@ -351,7 +361,7 @@ class ContractedClaudeAgent:
 
         except Exception as e:
             violations.append(str(e))
-            events.append(
+            self._events.append(
                 {
                     "type": "error",
                     "message": str(e),
@@ -377,7 +387,7 @@ class ContractedClaudeAgent:
                 "elapsed_seconds": (end_time - start_time).total_seconds(),
                 "deadline_met": not self._temporal_monitor.is_past_deadline(),
             },
-            events=events,
+            events=self._events,
             metadata={},
         )
 
