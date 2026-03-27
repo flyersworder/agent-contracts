@@ -24,16 +24,225 @@ Example:
 
 from typing import Any
 
+from agent_contracts.core.contract import Contract
+from agent_contracts.core.enforcement import ContractEnforcer
+from agent_contracts.core.monitor import ResourceMonitor, TemporalMonitor
+
 try:
-    from claude_agent_sdk import ClaudeAgentOptions
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ClaudeAgentOptions,
+        HookMatcher,
+        ResultMessage,
+        query,
+    )
 
     CLAUDE_AGENT_SDK_AVAILABLE = True
 except ImportError:
     CLAUDE_AGENT_SDK_AVAILABLE = False
     ClaudeAgentOptions = Any  # type: ignore
+    HookMatcher = Any  # type: ignore
+    AssistantMessage = Any  # type: ignore
+    ResultMessage = Any  # type: ignore
+    query = Any  # type: ignore
 
 
 class ContractedClaudeAgent:
-    """Placeholder — implemented in subsequent tasks."""
+    """Contract-governed wrapper for Claude Agent SDK agents.
 
-    pass
+    Wraps the Claude Agent SDK's query function with contract enforcement,
+    mapping contract constraints to SDK options and injecting enforcement
+    hooks for per-tool and budget governance.
+
+    Attributes:
+        contract: The contract governing this agent's execution
+        prompt: The prompt/task to execute
+        strict_mode: If True, violations immediately terminate execution
+    """
+
+    def __init__(
+        self,
+        contract: Contract,
+        prompt: str,
+        options: "ClaudeAgentOptions | None" = None,
+        strict_mode: bool = True,
+    ) -> None:
+        """Initialize the ContractedClaudeAgent.
+
+        Args:
+            contract: Contract defining resource and temporal constraints
+            prompt: The prompt or task to pass to the Claude agent
+            options: Optional ClaudeAgentOptions to merge with contract constraints
+            strict_mode: If True, constraint violations halt execution immediately
+        """
+        self.contract = contract
+        self.prompt = prompt
+        self.strict_mode = strict_mode
+        self._user_options = options
+
+        # Set up monitoring and enforcement
+        self._resource_monitor = ResourceMonitor(contract.resources)
+        self._temporal_monitor = TemporalMonitor(contract)
+        self._enforcer = ContractEnforcer(
+            contract,
+            strict_mode=strict_mode,
+            monitor=self._resource_monitor,
+        )
+
+    def _build_options(self) -> "ClaudeAgentOptions":
+        """Merge contract constraints into ClaudeAgentOptions.
+
+        Contract constraints take the following precedence rules:
+        - For numeric limits (max_turns, max_budget_usd): use min of contract and user
+        - For lists (allowed_tools): merge both sets
+        - For strings (system_prompt): contract instructions prepended to user's
+        - All other user options passed through unchanged
+
+        Returns:
+            A new ClaudeAgentOptions with contract constraints applied
+        """
+        # Build kwargs dict to avoid passing None for unset fields
+        kwargs: dict[str, Any] = {}
+
+        # Start with user options if provided
+        if self._user_options is not None:
+            user = self._user_options
+            if user.permission_mode is not None:
+                kwargs["permission_mode"] = user.permission_mode
+            if user.model is not None:
+                kwargs["model"] = user.model
+            if user.fallback_model is not None:
+                kwargs["fallback_model"] = user.fallback_model
+            if user.max_turns is not None:
+                kwargs["max_turns"] = user.max_turns
+            if user.max_budget_usd is not None:
+                kwargs["max_budget_usd"] = user.max_budget_usd
+            if user.system_prompt is not None:
+                kwargs["system_prompt"] = user.system_prompt
+            if user.cwd is not None:
+                kwargs["cwd"] = user.cwd
+            if user.allowed_tools:
+                kwargs["allowed_tools"] = list(user.allowed_tools)
+            if user.disallowed_tools:
+                kwargs["disallowed_tools"] = list(user.disallowed_tools)
+            if user.mcp_servers:
+                kwargs["mcp_servers"] = user.mcp_servers
+            if user.agents is not None:
+                kwargs["agents"] = user.agents
+
+        # Map contract.resources.iterations → max_turns (more restrictive wins)
+        if self.contract.resources.iterations is not None:
+            contract_max_turns = self.contract.resources.iterations
+            if "max_turns" in kwargs:
+                kwargs["max_turns"] = min(kwargs["max_turns"], contract_max_turns)
+            else:
+                kwargs["max_turns"] = contract_max_turns
+
+        # Map contract.resources.cost_usd → max_budget_usd (more restrictive wins)
+        if self.contract.resources.cost_usd is not None:
+            contract_budget = self.contract.resources.cost_usd
+            if "max_budget_usd" in kwargs:
+                kwargs["max_budget_usd"] = min(kwargs["max_budget_usd"], contract_budget)
+            else:
+                kwargs["max_budget_usd"] = contract_budget
+
+        # Merge capabilities.tools → allowed_tools
+        if self.contract.capabilities is not None and self.contract.capabilities.tools:
+            existing_tools = list(kwargs.get("allowed_tools", []))
+            contract_tools = list(self.contract.capabilities.tools)
+            merged_tools = list(dict.fromkeys(existing_tools + contract_tools))
+            kwargs["allowed_tools"] = merged_tools
+
+        # Merge capabilities.instructions → prepend to system_prompt
+        if (
+            self.contract.capabilities is not None
+            and self.contract.capabilities.instructions is not None
+        ):
+            contract_instructions = self.contract.capabilities.instructions
+            existing_prompt = kwargs.get("system_prompt")
+            if existing_prompt:
+                kwargs["system_prompt"] = f"{contract_instructions}\n\n{existing_prompt}"
+            else:
+                kwargs["system_prompt"] = contract_instructions
+
+        # Build enforcement hooks
+        existing_hooks = kwargs.pop("hooks", None)
+        kwargs["hooks"] = self._build_hooks(existing_hooks)
+
+        return ClaudeAgentOptions(**kwargs)
+
+    def _build_hooks(
+        self,
+        existing_hooks: "dict[str, list[HookMatcher]] | None",
+    ) -> "dict[str, list[HookMatcher]]":
+        """Merge contract enforcement hooks with user-provided hooks.
+
+        Inserts PreToolUse and PostToolUse HookMatcher placeholders that
+        route through the contract enforcement layer.
+
+        Args:
+            existing_hooks: Any hooks already set by the user
+
+        Returns:
+            Merged hooks dict with enforcement hooks added
+        """
+        hooks: dict[str, list[Any]] = {}
+
+        # Copy existing user hooks
+        if existing_hooks:
+            for event_type, matchers in existing_hooks.items():
+                hooks[event_type] = list(matchers)
+
+        # Add PreToolUse enforcement hook
+        pre_hook_matcher = HookMatcher(
+            matcher=None,
+            hooks=[self._pre_tool_use_hook],
+        )
+        hooks.setdefault("PreToolUse", [])
+        hooks["PreToolUse"].append(pre_hook_matcher)
+
+        # Add PostToolUse enforcement hook
+        post_hook_matcher = HookMatcher(
+            matcher=None,
+            hooks=[self._post_tool_use_hook],
+        )
+        hooks.setdefault("PostToolUse", [])
+        hooks["PostToolUse"].append(post_hook_matcher)
+
+        return hooks
+
+    async def _pre_tool_use_hook(
+        self, hook_input: Any, session_id: Any, context: Any
+    ) -> dict[str, Any]:
+        """Pre-tool-use enforcement stub.
+
+        Called before each tool invocation. Will enforce per-tool limits and
+        aggregate tool invocation budget in future implementation.
+
+        Args:
+            hook_input: PreToolUseHookInput from the SDK
+            session_id: Current session identifier
+            context: HookContext from the SDK
+
+        Returns:
+            Empty dict (allow tool use by default)
+        """
+        return {}
+
+    async def _post_tool_use_hook(
+        self, hook_input: Any, session_id: Any, context: Any
+    ) -> dict[str, Any]:
+        """Post-tool-use enforcement stub.
+
+        Called after each tool invocation completes. Will track usage and
+        check for violations in future implementation.
+
+        Args:
+            hook_input: PostToolUseHookInput from the SDK
+            session_id: Current session identifier
+            context: HookContext from the SDK
+
+        Returns:
+            Empty dict (no action by default)
+        """
+        return {}
