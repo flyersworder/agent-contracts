@@ -22,11 +22,13 @@ This document tracks development progress and key decisions for the Agent Contra
 **Per-Tool Limits**: Fine-grained resource control (Dec 23) ✅
 **Indeterminacy Evaluator**: NeurIPS 2025 LLM-as-Judge (Dec 23) ✅
 **Evaluation Pipelines**: Research & Code Review experiments (Dec 23) ✅
+**Claude Agent SDK**: Anthropic-native integration (Mar 27) ✅
+**PyPI Release**: Published as `ai-agent-contracts` (Mar 26) ✅
 
 **Metrics**:
-- **Tests**: 609+ passing
-- **Coverage**: 91%+
-- **Integrations**: LiteLLM, LangChain, LangGraph, Google ADK
+- **Tests**: 623+ passing
+- **Coverage**: 81%+
+- **Integrations**: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK
 
 ## Core Framework (Phase 1)
 
