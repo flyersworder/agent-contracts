@@ -491,6 +491,43 @@ class TestAexecute:
         assert agent._resource_monitor.usage.tokens == 300
         assert agent._resource_monitor.usage.api_calls == 1  # only counted for message with usage
 
+    @pytest.mark.asyncio
+    async def test_lenient_mode_continues_after_violation(self) -> None:
+        """strict_mode=False should record violations but keep executing."""
+        from agent_contracts.integrations.claude_agent_sdk import ContractedClaudeAgent
+
+        contract = Contract(
+            id="test",
+            name="test",
+            resources=ResourceConstraints(tokens=100),
+        )
+        agent = ContractedClaudeAgent(contract=contract, prompt="Hello", strict_mode=False)
+
+        # First message exceeds token budget, second message continues
+        mock_assistant1 = MagicMock(spec=AssistantMessage)
+        mock_assistant1.usage = {"input_tokens": 80, "output_tokens": 80}
+
+        mock_assistant2 = MagicMock(spec=AssistantMessage)
+        mock_assistant2.usage = {"input_tokens": 50, "output_tokens": 50}
+
+        mock_result = MagicMock(spec=ResultMessage)
+        mock_result.result = "Completed despite violation"
+
+        async def mock_query(*args: Any, **kwargs: Any) -> Any:
+            yield mock_assistant1
+            yield mock_assistant2
+            yield mock_result
+
+        with patch("agent_contracts.integrations.claude_agent_sdk.query", mock_query):
+            result = await agent.aexecute()
+
+        # Violations recorded but execution continued
+        assert len(result.violations) > 0
+        assert result.output == "Completed despite violation"
+        # Both messages were consumed (not broken early)
+        assert agent._resource_monitor.usage.tokens == 260
+        assert agent._resource_monitor.usage.api_calls == 2
+
 
 class TestExecuteSync:
     """Test synchronous execution wrapper."""

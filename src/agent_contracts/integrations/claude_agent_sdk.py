@@ -234,19 +234,12 @@ class ContractedClaudeAgent:
         """
         tool_name = hook_input.get("tool_name", "unknown")
 
-        # 1. Check per-tool limits
+        # 1. Check per-tool limits and aggregate tool invocations
         if not self._resource_monitor.can_use_tool(tool_name):
-            return {"decision": "block", "reason": f"Per-tool limit exceeded for '{tool_name}'"}
+            return {"decision": "block", "reason": f"Tool limit exceeded for '{tool_name}'"}
 
-        # 2. Check aggregate tool invocations
+        # 2. Check web search limit
         constraints = self.contract.resources
-        if (
-            constraints.tool_invocations is not None
-            and self._resource_monitor.usage.tool_invocations >= constraints.tool_invocations
-        ):
-            return {"decision": "block", "reason": "Total tool invocation limit exceeded"}
-
-        # 3. Check web search limit
         if (
             tool_name == "WebSearch"
             and constraints.web_searches is not None
@@ -324,11 +317,7 @@ class ContractedClaudeAgent:
         # Start monitoring
         self._temporal_monitor.start()
         if not self._enforcer._enforcement_active:
-            self._enforcer.start()
-
-        # Activate contract if still in DRAFTED state
-        if self.contract.state == ContractState.DRAFTED:
-            self.contract.activate()
+            self._enforcer.start()  # Also activates contract (DRAFTED → ACTIVE)
 
         merged_options = self._build_options()
 
