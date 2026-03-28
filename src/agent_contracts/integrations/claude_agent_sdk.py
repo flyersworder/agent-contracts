@@ -352,8 +352,14 @@ class ContractedClaudeAgent:
                         self._resource_monitor.usage.api_calls += 1
 
                         # Check constraints after each AssistantMessage
-                        constraint_violations = self._resource_monitor.check_constraints()
-                        if constraint_violations:
+                        # Route through enforcer so user-registered hooks fire
+                        is_violated, constraint_violations = self._enforcer.check_constraints(
+                            metadata={
+                                "integration": "claude_agent_sdk",
+                                "phase": "assistant_message",
+                            }
+                        )
+                        if is_violated:
                             for v in constraint_violations:
                                 msg = f"{v.resource}: {v.actual} > {v.limit}"
                                 violations.append(msg)

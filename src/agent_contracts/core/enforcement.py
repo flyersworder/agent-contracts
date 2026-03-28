@@ -334,11 +334,22 @@ class ContractEnforcer:
             self.callbacks.remove(callback)
 
     def add_pre_check_hook(self, hook: CheckHook) -> None:
-        """Add a pre-check hook."""
+        """Add a pre-check hook.
+
+        Pre-check hooks run before constraint checking and can block execution
+        by returning HookResult(allow=False, action=HARD_STOP or SOFT_STOP).
+
+        Args:
+            hook: Callable that takes CheckContext and returns HookResult
+        """
         self.pre_check_hooks.append(hook)
 
     def remove_pre_check_hook(self, hook: CheckHook) -> None:
-        """Remove a pre-check hook."""
+        """Remove a pre-check hook.
+
+        Args:
+            hook: Hook to remove
+        """
         if hook in self.pre_check_hooks:
             self.pre_check_hooks.remove(hook)
 
@@ -355,7 +366,11 @@ class ContractEnforcer:
         self.post_check_hooks.append(hook)
 
     def remove_post_check_hook(self, hook: CheckHook) -> None:
-        """Remove a post-check hook."""
+        """Remove a post-check hook.
+
+        Args:
+            hook: Hook to remove
+        """
         if hook in self.post_check_hooks:
             self.post_check_hooks.remove(hook)
 

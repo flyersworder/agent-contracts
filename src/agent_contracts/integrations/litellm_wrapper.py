@@ -318,7 +318,12 @@ class ContractedLLM:
                         )
 
                     # Check constraints
-                    is_violated, violations = self.enforcer.check_constraints()
+                    is_violated, violations = self.enforcer.check_constraints(
+                        metadata={
+                            "integration": "litellm",
+                            "model": kwargs.get("model"),
+                        }
+                    )
                     if is_violated and self.enforcer.strict_mode:
                         raise ContractViolationError(
                             contract=self.contract,
