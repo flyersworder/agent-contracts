@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-28
+
+### Added
+
+**Pre-Execution Hooks**
+- `CheckContext` frozen dataclass: contract, monitor, phase, and integration metadata
+- `HookResult` frozen dataclass: allow/block with configurable action severity
+- `CheckHook` type alias for hook callables
+- `pre_check_hooks` and `post_check_hooks` on `ContractEnforcer.__init__`
+- `metadata` parameter on `ContractEnforcer.check_constraints()` (backward-compatible)
+- `add_pre_check_hook()`, `remove_pre_check_hook()`, `add_post_check_hook()`, `remove_post_check_hook()` methods
+- Hook actions: WARN/THROTTLE (informational, non-blocking) and SOFT_STOP/HARD_STOP (blocking)
+- Post-check hooks are observational only (cannot block execution)
+- Integration metadata pass-through from all 5 integrations (LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK)
+- Claude Agent SDK `_pre_tool_use_hook` refactored to route through enforcer for hook consistency
+- Defensive copy of metadata dict to prevent cross-hook mutation
+- Exception safety: hook errors caught and logged, never crash enforcement
+- 23 new tests, 646+ total tests passing
+- Documentation: `docs/pre-execution-hooks.md` with usage guide and behavioral monitor design
+
+### Changed
+- `ContractEnforcer.check_constraints()` signature: added optional `metadata` parameter (fully backward-compatible)
+- Claude Agent SDK `aexecute()` now routes constraint checks through enforcer instead of directly calling monitor
+
 ## [0.2.0] - 2026-03-27
 
 ### Added
@@ -61,6 +85,7 @@ explicit resource constraints and temporal boundaries.
 - License changed from CC-BY-4.0 (paper) to Apache-2.0 (software)
 - PyPI package name: `ai-agent-contracts` (the name `agent-contracts` was already taken)
 
-[Unreleased]: https://github.com/flyersworder/agent-contracts/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/flyersworder/agent-contracts/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/flyersworder/agent-contracts/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/flyersworder/agent-contracts/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/flyersworder/agent-contracts/releases/tag/v0.1.0

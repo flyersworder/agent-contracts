@@ -609,4 +609,4 @@ If you use this framework in your research, please cite:
 
 ---
 
-**Version**: 0.2.0 | **Last Updated**: March 28, 2026 | **Status**: Production Ready ⭐
+**Version**: 0.3.0 | **Last Updated**: March 28, 2026 | **Status**: Production Ready ⭐
