@@ -29,10 +29,13 @@ from agent_contracts.core.delegation import (
     DelegationSummary,
 )
 from agent_contracts.core.enforcement import (
+    CheckContext,
+    CheckHook,
     ContractEnforcer,
     EnforcementAction,
     EnforcementCallback,
     EnforcementEvent,
+    HookResult,
 )
 from agent_contracts.core.executor import (
     ContractExecutionResult,
@@ -78,6 +81,8 @@ __all__ = [
     "AgentSpec",
     "AllocationRecord",
     "Capabilities",
+    "CheckContext",
+    "CheckHook",
     "ConservationViolationError",
     "Contract",
     "ContractAgent",
@@ -98,6 +103,7 @@ __all__ = [
     "ExecutionConfig",
     "ExecutionLog",
     "ExecutionResult",
+    "HookResult",
     "InputSpecification",
     "OutputSpecification",
     "ResourceAllocation",

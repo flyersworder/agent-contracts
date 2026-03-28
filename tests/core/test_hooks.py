@@ -248,3 +248,23 @@ class TestContractEnforcerHooks:
         enforcer = self._make_enforcer(pre_check_hooks=[throttle_hook])
         is_violated, _ = enforcer.check_constraints()
         assert is_violated is False
+
+
+class TestHookExports:
+    """Tests for hook type exports."""
+
+    def test_import_from_core(self) -> None:
+        """Types importable from agent_contracts.core."""
+        from agent_contracts.core import CheckContext, CheckHook, HookResult
+
+        assert CheckContext is not None
+        assert HookResult is not None
+        assert CheckHook is not None
+
+    def test_import_from_top_level(self) -> None:
+        """Types importable from agent_contracts top-level."""
+        from agent_contracts import CheckContext, CheckHook, HookResult
+
+        assert CheckContext is not None
+        assert HookResult is not None
+        assert CheckHook is not None

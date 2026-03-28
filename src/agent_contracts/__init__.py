@@ -36,10 +36,13 @@ from agent_contracts.core.delegation import (
 
 # Monitoring and enforcement
 from agent_contracts.core.enforcement import (
+    CheckContext,
+    CheckHook,
     ContractEnforcer,
     EnforcementAction,  # noqa: F401
     EnforcementCallback,  # noqa: F401
     EnforcementEvent,
+    HookResult,
 )
 
 # Execution engine
@@ -106,6 +109,8 @@ except ImportError:
 __all__ = [
     "AgentSpec",
     "Capabilities",
+    "CheckContext",
+    "CheckHook",
     "Contract",
     "ContractAgent",
     "ContractEnforcer",
@@ -122,6 +127,7 @@ __all__ = [
     "ExecutionConfig",
     "ExecutionLog",
     "ExecutionResult",
+    "HookResult",
     "InputSpecification",
     "OutputSpecification",
     "ResourceConstraints",
