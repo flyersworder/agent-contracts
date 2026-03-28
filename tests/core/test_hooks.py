@@ -268,3 +268,42 @@ class TestHookExports:
         assert CheckContext is not None
         assert HookResult is not None
         assert CheckHook is not None
+
+
+class TestLiteLLMHookIntegration:
+    """Tests that hooks fire when using ContractedLLM."""
+
+    def test_hook_receives_litellm_metadata(self) -> None:
+        """Pre-check hook receives litellm integration metadata."""
+        from unittest.mock import MagicMock, patch
+
+        from agent_contracts import Contract, ResourceConstraints
+        from agent_contracts.core.enforcement import CheckContext, HookResult
+        from agent_contracts.integrations.litellm_wrapper import ContractedLLM
+
+        received: list[dict] = []
+
+        def capture_hook(ctx: CheckContext) -> HookResult:
+            received.append(ctx.metadata)
+            return HookResult(allow=True)
+
+        contract = Contract(id="test", name="Test", resources=ResourceConstraints(tokens=10000))
+        llm = ContractedLLM(contract=contract, strict_mode=False)
+        llm.enforcer.add_pre_check_hook(capture_hook)
+
+        mock_response = MagicMock()
+        mock_response.get.side_effect = lambda key, default=None: {
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            "choices": [{"message": {"content": "test"}}],
+            "_hidden_params": {"response_cost": 0.001},
+        }.get(key, default)
+
+        with patch(
+            "agent_contracts.integrations.litellm_wrapper.completion", return_value=mock_response
+        ):
+            llm.completion(model="gpt-4", messages=[{"role": "user", "content": "hi"}])
+
+        # Pre-check fires twice: before call and after call
+        assert len(received) >= 1
+        assert received[0]["integration"] == "litellm"
+        assert received[0]["model"] == "gpt-4"

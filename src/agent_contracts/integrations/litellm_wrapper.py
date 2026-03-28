@@ -114,7 +114,7 @@ class ContractedLLM:
             self.start()
 
         # Check constraints before call
-        self._check_constraints_before_call()
+        self._check_constraints_before_call(**kwargs)
 
         # Auto-apply reasoning_effort from contract if not already specified
         if "reasoning_effort" not in kwargs:
@@ -249,7 +249,7 @@ class ContractedLLM:
                     )
 
         # Check constraints after call
-        self._check_constraints_after_call()
+        self._check_constraints_after_call(**kwargs)
 
         return response
 
@@ -276,7 +276,7 @@ class ContractedLLM:
             self.start()
 
         # Check constraints before call
-        self._check_constraints_before_call()
+        self._check_constraints_before_call(**kwargs)
 
         # Auto-apply reasoning_effort from contract if not already specified
         if "reasoning_effort" not in kwargs:
@@ -369,7 +369,7 @@ class ContractedLLM:
             )
 
             # Final constraint check
-            self._check_constraints_after_call()
+            self._check_constraints_after_call(**kwargs)
 
     def _get_reasoning_effort(self) -> str | None:
         """Get reasoning effort level to use for the call.
@@ -453,8 +453,11 @@ class ContractedLLM:
             pass
         return ""
 
-    def _check_constraints_before_call(self) -> None:
+    def _check_constraints_before_call(self, **kwargs: Any) -> None:
         """Check constraints before making an LLM call.
+
+        Args:
+            **kwargs: LLM call kwargs, used to build hook metadata
 
         Raises:
             ContractViolationError: If already violated in strict mode
@@ -462,8 +465,14 @@ class ContractedLLM:
         if not self._started:
             return
 
+        metadata = {
+            "integration": "litellm",
+            "model": kwargs.get("model"),
+            "messages": kwargs.get("messages"),
+        }
+
         # Check if already violated
-        is_violated, violations = self.enforcer.check_constraints()
+        is_violated, violations = self.enforcer.check_constraints(metadata=metadata)
         if is_violated and self.enforcer.strict_mode:
             raise ContractViolationError(
                 contract=self.contract,
@@ -480,8 +489,11 @@ class ContractedLLM:
                 message="Temporal constraints exceeded",
             )
 
-    def _check_constraints_after_call(self) -> None:
+    def _check_constraints_after_call(self, **kwargs: Any) -> None:
         """Check constraints after making an LLM call.
+
+        Args:
+            **kwargs: LLM call kwargs, used to build hook metadata
 
         Raises:
             ContractViolationError: If violated in strict mode
@@ -489,8 +501,14 @@ class ContractedLLM:
         if not self._started:
             return
 
+        metadata = {
+            "integration": "litellm",
+            "model": kwargs.get("model"),
+            "messages": kwargs.get("messages"),
+        }
+
         # Check resource constraints
-        is_violated, violations = self.enforcer.check_constraints()
+        is_violated, violations = self.enforcer.check_constraints(metadata=metadata)
         if is_violated and self.enforcer.strict_mode:
             raise ContractViolationError(
                 contract=self.contract,
