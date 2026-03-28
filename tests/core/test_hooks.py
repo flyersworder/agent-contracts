@@ -307,3 +307,41 @@ class TestLiteLLMHookIntegration:
         assert len(received) >= 1
         assert received[0]["integration"] == "litellm"
         assert received[0]["model"] == "gpt-4"
+
+
+class TestClaudeSDKHookIntegration:
+    """Tests that hooks fire from Claude Agent SDK pre/post tool use."""
+
+    def test_hook_fires_on_pre_tool_use(self) -> None:
+        """Pre-check hook fires when Claude SDK pre_tool_use_hook runs."""
+        import asyncio
+
+        from agent_contracts import Contract, ResourceConstraints
+        from agent_contracts.core.enforcement import CheckContext, HookResult
+        from agent_contracts.integrations.claude_agent_sdk import (
+            ContractedClaudeAgent,
+        )
+
+        received: list[dict] = []
+
+        def capture_hook(ctx: CheckContext) -> HookResult:
+            received.append(ctx.metadata)
+            return HookResult(allow=True)
+
+        contract = Contract(
+            id="test",
+            name="Test",
+            resources=ResourceConstraints(tokens=10000, tool_invocations=10),
+        )
+        agent = ContractedClaudeAgent(contract=contract, prompt="test", strict_mode=False)
+        agent._enforcer.add_pre_check_hook(capture_hook)
+        agent._enforcer.start()
+
+        # Simulate pre_tool_use_hook call
+        hook_input = {"tool_name": "Read", "tool_use_id": "tu_123"}
+        result = asyncio.run(agent._pre_tool_use_hook(hook_input, "session1", None))
+
+        assert len(received) >= 1
+        assert received[0]["integration"] == "claude_agent_sdk"
+        assert received[0]["tool_name"] == "Read"
+        assert result == {} or result.get("decision") != "block"

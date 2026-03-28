@@ -233,9 +233,8 @@ class ContractedClaudeAgent:
     ) -> dict[str, Any]:
         """Pre-tool-use enforcement hook.
 
-        Called before each tool invocation. Enforces per-tool limits,
-        aggregate tool invocation budget, web search limits, and temporal
-        constraints. Returns a block decision if any constraint is exceeded.
+        Routes through the enforcer's check_constraints() so that user-registered
+        pre-check hooks fire consistently with other integrations.
 
         Args:
             hook_input: PreToolUseHookInput from the SDK
@@ -247,11 +246,11 @@ class ContractedClaudeAgent:
         """
         tool_name = hook_input.get("tool_name", "unknown")
 
-        # 1. Check per-tool limits and aggregate tool invocations
+        # Check per-tool limits (not covered by check_constraints resource checks)
         if not self._resource_monitor.can_use_tool(tool_name):
             return {"decision": "block", "reason": f"Tool limit exceeded for '{tool_name}'"}
 
-        # 2. Check web search limit (separate from can_use_tool)
+        # Check web search limit
         constraints = self.contract.resources
         if (
             tool_name == "WebSearch"
@@ -260,9 +259,21 @@ class ContractedClaudeAgent:
         ):
             return {"decision": "block", "reason": "WebSearch limit exceeded"}
 
-        # 3. Check temporal constraints
+        # Check temporal constraints
         if self._temporal_monitor.is_over_duration() or self._temporal_monitor.is_past_deadline():
             return {"decision": "block", "reason": "Contract temporal limit exceeded"}
+
+        # Route through enforcer so user-registered hooks fire
+        metadata = {
+            "integration": "claude_agent_sdk",
+            "tool_name": tool_name,
+            "phase": "pre_tool_use",
+            "hook_input": hook_input,
+        }
+        is_violated, violations = self._enforcer.check_constraints(metadata=metadata)
+        if is_violated:
+            reasons = ", ".join(v.resource for v in violations)
+            return {"decision": "block", "reason": f"Constraint violated: {reasons}"}
 
         return {}
 
