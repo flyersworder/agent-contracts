@@ -207,6 +207,8 @@ class ContractEnforcer:
         """Check if current usage violates any constraints.
 
         Runs pre-check hooks before and post-check hooks after constraint checking.
+        When a pre-check hook blocks, returns a single ViolationInfo with
+        resource='hook'.
 
         Args:
             metadata: Optional integration-specific data passed to hooks
@@ -219,7 +221,7 @@ class ContractEnforcer:
         # 1. Run pre-check hooks
         blocked = self._run_hooks(self.pre_check_hooks, "pre_check", resolved_metadata)
         if blocked:
-            return True, [ViolationInfo(resource="hook", limit=0, actual=0)]
+            return True, [ViolationInfo(resource="hook", limit=0, actual=1)]
 
         # 2. Existing constraint checking (unchanged)
         violations = self.monitor.check_constraints()
@@ -341,7 +343,15 @@ class ContractEnforcer:
             self.pre_check_hooks.remove(hook)
 
     def add_post_check_hook(self, hook: CheckHook) -> None:
-        """Add a post-check hook."""
+        """Add a post-check hook.
+
+        Post-check hooks are observational: they run after constraint checking
+        but cannot block execution. The allow/action fields of HookResult are
+        ignored for post-check hooks.
+
+        Args:
+            hook: Callable that takes CheckContext and returns HookResult
+        """
         self.post_check_hooks.append(hook)
 
     def remove_post_check_hook(self, hook: CheckHook) -> None:
@@ -360,13 +370,16 @@ class ContractEnforcer:
             contract=self.contract,
             monitor=self.monitor,
             phase=phase,
-            metadata=metadata,
+            metadata=dict(metadata),  # defensive copy to prevent mutation
         )
         for hook in hooks:
             try:
                 result = hook(context)
             except Exception as e:
                 logger.warning("Error in check hook: %s", e, exc_info=True)
+                continue
+            # Post-check hooks are observational — they cannot block
+            if phase == "post_check":
                 continue
             if not result.allow:
                 self._emit_event(
