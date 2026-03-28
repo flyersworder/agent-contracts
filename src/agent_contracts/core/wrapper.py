@@ -210,7 +210,9 @@ class ContractAgent[TInput, TOutput]:
             output = self._monitored_execution(input_data)
 
             # Check constraints after execution
-            is_violated, _constraint_violations = self.enforcer.check_constraints()
+            is_violated, _constraint_violations = self.enforcer.check_constraints(
+                metadata={"integration": "contract_agent"}
+            )
 
             # Check temporal constraints
             self.enforcer.check_temporal_constraints()

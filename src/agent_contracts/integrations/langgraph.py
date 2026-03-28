@@ -410,7 +410,9 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
             # Stream execution
             for chunk in self.graph.stream(inputs, config=config):
                 # Check constraints at each chunk
-                is_violated, _violations = self.enforcer.check_constraints()
+                is_violated, _violations = self.enforcer.check_constraints(
+                    metadata={"integration": "langgraph"}
+                )
 
                 if is_violated and self.strict_mode:
                     raise RuntimeError("Contract violated during streaming execution")
@@ -418,7 +420,7 @@ class ContractedGraph(ContractAgent[dict[str, Any], dict[str, Any]]):
                 yield chunk
 
             # Final constraint check
-            self.enforcer.check_constraints()
+            self.enforcer.check_constraints(metadata={"integration": "langgraph"})
             self.enforcer.check_temporal_constraints()
 
         except Exception as e:

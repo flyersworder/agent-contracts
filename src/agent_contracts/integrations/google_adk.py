@@ -363,7 +363,9 @@ class ContractedAdkAgent(ContractAgent[dict[str, Any], dict[str, Any]]):
                         final_response = part.text
 
             # Check constraints during execution
-            is_violated, violations = self.enforcer.check_constraints()
+            is_violated, violations = self.enforcer.check_constraints(
+                metadata={"integration": "google_adk"}
+            )
             if is_violated and self.strict_mode:
                 # Stop execution on violation
                 raise RuntimeError(f"Contract violated during execution: {violations}")
