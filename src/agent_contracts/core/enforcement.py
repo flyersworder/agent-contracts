@@ -6,6 +6,7 @@ contract constraints during agent execution.
 
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -74,6 +75,46 @@ class EnforcementEvent:
 
 # Type alias for enforcement callbacks
 EnforcementCallback = Callable[[EnforcementEvent], None]
+
+
+@dataclass(frozen=True)
+class CheckContext:
+    """Context passed to pre/post-check hooks.
+
+    Provides hooks with the contract, resource monitor, current phase,
+    and integration-specific metadata for making allow/block decisions.
+
+    Attributes:
+        contract: The contract being enforced
+        monitor: Resource monitor with current usage state
+        phase: Which phase triggered the hook ("pre_check" or "post_check")
+        metadata: Integration-specific data (e.g. {"integration": "litellm", "model": "gpt-4"})
+    """
+
+    contract: Contract
+    monitor: "ResourceMonitor"
+    phase: str
+    metadata: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class HookResult:
+    """Result from a check hook execution.
+
+    Attributes:
+        allow: If True, execution proceeds. If False, action determines severity.
+        reason: Human-readable explanation (used in enforcement events when allow=False)
+        action: What to do when allow=False. WARN/THROTTLE emit events but don't block.
+                SOFT_STOP/HARD_STOP emit events and block execution.
+    """
+
+    allow: bool = True
+    reason: str = ""
+    action: EnforcementAction = EnforcementAction.WARN
+
+
+# Type alias for check hooks
+CheckHook = Callable[[CheckContext], HookResult]
 
 
 class ContractEnforcer:
