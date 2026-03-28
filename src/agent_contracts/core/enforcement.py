@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from agent_contracts.core.contract import Contract, ContractState
 from agent_contracts.core.monitor import ResourceMonitor, ViolationInfo
@@ -92,8 +92,8 @@ class CheckContext:
     """
 
     contract: Contract
-    monitor: "ResourceMonitor"
-    phase: str
+    monitor: ResourceMonitor
+    phase: Literal["pre_check", "post_check"]
     metadata: dict[str, Any]
 
 
@@ -110,7 +110,7 @@ class HookResult:
 
     allow: bool = True
     reason: str = ""
-    action: EnforcementAction = EnforcementAction.WARN
+    action: EnforcementAction = EnforcementAction.WARN  # Only consulted when allow=False
 
 
 # Type alias for check hooks
@@ -136,6 +136,8 @@ class ContractEnforcer:
         strict_mode: bool = True,
         callbacks: list[EnforcementCallback] | None = None,
         monitor: ResourceMonitor | None = None,
+        pre_check_hooks: list[CheckHook] | None = None,
+        post_check_hooks: list[CheckHook] | None = None,
     ) -> None:
         """Initialize contract enforcer.
 
@@ -144,11 +146,15 @@ class ContractEnforcer:
             strict_mode: If True, violations cause immediate termination
             callbacks: Optional list of callback functions for events
             monitor: Optional pre-existing monitor to use (creates one if None)
+            pre_check_hooks: Optional hooks to run before constraint checking
+            post_check_hooks: Optional hooks to run after constraint checking
         """
         self.contract = contract
         self.monitor = monitor or ResourceMonitor(contract.resources)
         self.strict_mode = strict_mode
         self.callbacks = callbacks or []
+        self.pre_check_hooks: list[CheckHook] = pre_check_hooks or []
+        self.post_check_hooks: list[CheckHook] = post_check_hooks or []
         self._enforcement_active = False
 
     def start(self) -> None:
@@ -195,12 +201,27 @@ class ContractEnforcer:
             )
         )
 
-    def check_constraints(self) -> tuple[bool, list[ViolationInfo]]:
+    def check_constraints(
+        self, metadata: dict[str, Any] | None = None
+    ) -> tuple[bool, list[ViolationInfo]]:
         """Check if current usage violates any constraints.
+
+        Runs pre-check hooks before and post-check hooks after constraint checking.
+
+        Args:
+            metadata: Optional integration-specific data passed to hooks
 
         Returns:
             Tuple of (is_violated, violations_list)
         """
+        resolved_metadata = metadata or {}
+
+        # 1. Run pre-check hooks
+        blocked = self._run_hooks(self.pre_check_hooks, "pre_check", resolved_metadata)
+        if blocked:
+            return True, [ViolationInfo(resource="hook", limit=0, actual=0)]
+
+        # 2. Existing constraint checking (unchanged)
         violations = self.monitor.check_constraints()
         is_violated = len(violations) > 0
 
@@ -231,6 +252,9 @@ class ContractEnforcer:
             # Handle violation based on strict mode
             if self.strict_mode:
                 self._handle_violation(violations)
+
+        # 3. Run post-check hooks
+        self._run_hooks(self.post_check_hooks, "post_check", resolved_metadata)
 
         return is_violated, violations
 
@@ -306,6 +330,60 @@ class ContractEnforcer:
         """
         if callback in self.callbacks:
             self.callbacks.remove(callback)
+
+    def add_pre_check_hook(self, hook: CheckHook) -> None:
+        """Add a pre-check hook."""
+        self.pre_check_hooks.append(hook)
+
+    def remove_pre_check_hook(self, hook: CheckHook) -> None:
+        """Remove a pre-check hook."""
+        if hook in self.pre_check_hooks:
+            self.pre_check_hooks.remove(hook)
+
+    def add_post_check_hook(self, hook: CheckHook) -> None:
+        """Add a post-check hook."""
+        self.post_check_hooks.append(hook)
+
+    def remove_post_check_hook(self, hook: CheckHook) -> None:
+        """Remove a post-check hook."""
+        if hook in self.post_check_hooks:
+            self.post_check_hooks.remove(hook)
+
+    def _run_hooks(
+        self,
+        hooks: list[CheckHook],
+        phase: Literal["pre_check", "post_check"],
+        metadata: dict[str, Any],
+    ) -> bool:
+        """Run hooks, emit events, return True if any hook blocked."""
+        context = CheckContext(
+            contract=self.contract,
+            monitor=self.monitor,
+            phase=phase,
+            metadata=metadata,
+        )
+        for hook in hooks:
+            try:
+                result = hook(context)
+            except Exception as e:
+                logger.warning("Error in check hook: %s", e, exc_info=True)
+                continue
+            if not result.allow:
+                self._emit_event(
+                    EnforcementEvent(
+                        event_type="hook_blocked",
+                        contract=self.contract,
+                        message=f"Hook blocked execution: {result.reason}",
+                        data={
+                            "phase": phase,
+                            "action": result.action.value,
+                            "reason": result.reason,
+                        },
+                    )
+                )
+                if result.action in (EnforcementAction.HARD_STOP, EnforcementAction.SOFT_STOP):
+                    return True
+        return False
 
     def _emit_event(self, event: EnforcementEvent) -> None:
         """Emit an enforcement event to all callbacks.
