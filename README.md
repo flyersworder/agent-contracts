@@ -86,6 +86,38 @@ contract = Contract(
 )
 ```
 
+### Pre-Execution Hooks (Custom Policy)
+
+Add custom governance logic that runs before every constraint check:
+
+```python
+from agent_contracts import (
+    Contract, ContractedLLM, CheckContext, HookResult,
+    EnforcementAction, ResourceConstraints,
+)
+
+# Define a hook that blocks off-topic requests
+def topic_guard(ctx: CheckContext) -> HookResult:
+    messages = ctx.metadata.get("messages", [])
+    if any("off-topic" in str(m) for m in messages):
+        return HookResult(
+            allow=False,
+            reason="Request outside allowed domain",
+            action=EnforcementAction.HARD_STOP,
+        )
+    return HookResult()  # allow by default
+
+contract = Contract(
+    id="guarded-agent",
+    resources=ResourceConstraints(tokens=10000, cost_usd=1.0)
+)
+
+with ContractedLLM(contract) as llm:
+    llm.enforcer.add_pre_check_hook(topic_guard)
+    # Hooks fire automatically on every LLM call
+    # Works with all integrations: LiteLLM, LangGraph, Google ADK, Claude SDK
+```
+
 ### LangGraph Multi-Agent Workflows ⭐
 
 For complex workflows with cycles and multi-agent coordination:
@@ -213,6 +245,7 @@ contract = Contract(
 ### Key Resources
 
 - **[Whitepaper](./docs/whitepaper.md)** - Complete theoretical framework with mathematical foundations
+- **[Pre-Execution Hooks](./docs/pre-execution-hooks.md)** - Custom governance hooks and behavioral monitor design
 - **[Examples](./docs/examples/)** - Coming soon: Practical implementation examples
 
 ### Quick Start by Role
@@ -353,6 +386,14 @@ print(skill.instructions)
 - ✅ Dual API: async `aexecute()` and sync `execute()`
 - ✅ 33 comprehensive tests
 
+**Pre-Execution Hooks** ✅ Complete
+- ✅ User-defined pre/post-check hooks on ContractEnforcer
+- ✅ `CheckContext`, `HookResult`, `CheckHook` types for custom policy governance
+- ✅ Integration metadata pass-through (all 5 integrations)
+- ✅ Hook actions: WARN, THROTTLE (informational) and SOFT_STOP, HARD_STOP (blocking)
+- ✅ Post-check hooks are observational (cannot block)
+- ✅ Backward compatible — existing code works unchanged
+
 **Evaluation Pipelines** ✅ Complete
 - ✅ Research Pipeline: Multi-agent report generation (25 topics)
 - ✅ Code Review Pipeline: Coder↔Reviewer loop (175 LiveCodeBench problems)
@@ -360,7 +401,7 @@ print(skill.instructions)
 - ✅ Conservation law enforcement in multi-agent delegation
 - ✅ Iteration limits prevent runaway agent loops
 
-**Total**: 623+ tests, 81%+ coverage
+**Total**: 646+ tests, 81%+ coverage
 
 ## Use Cases
 
@@ -568,4 +609,4 @@ If you use this framework in your research, please cite:
 
 ---
 
-**Version**: 0.1.0 | **Last Updated**: December 23, 2025 | **Status**: Production Ready ⭐
+**Version**: 0.2.0 | **Last Updated**: March 28, 2026 | **Status**: Production Ready ⭐
