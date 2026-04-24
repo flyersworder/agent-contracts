@@ -4,7 +4,7 @@ This package provides formal contracts for governing autonomous AI agents throug
 explicit resource constraints and temporal boundaries.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __author__ = "Qing Ye"
 __license__ = "Apache-2.0"
 
@@ -82,7 +82,14 @@ from agent_contracts.core.wrapper import (
 )
 
 # Integrations
-from agent_contracts.integrations.litellm_wrapper import ContractedLLM
+# LiteLLM integration (optional, requires litellm package)
+try:
+    from agent_contracts.integrations.litellm_wrapper import ContractedLLM
+
+    LITELLM_AVAILABLE = True
+except ImportError:
+    LITELLM_AVAILABLE = False
+    ContractedLLM = None  # type: ignore
 
 # Contract templates
 from agent_contracts.templates import (
@@ -107,6 +114,7 @@ except ImportError:
     create_contracted_chain = None  # type: ignore
 
 __all__ = [
+    "LITELLM_AVAILABLE",
     "AgentSpec",
     "Capabilities",
     "CheckContext",

@@ -4,7 +4,15 @@ This module contains adapters for popular frameworks and LLM providers.
 """
 
 from agent_contracts.core.wrapper import ContractViolationError
-from agent_contracts.integrations.litellm_wrapper import ContractedLLM
+
+# LiteLLM integration (optional, requires litellm package)
+try:
+    from agent_contracts.integrations.litellm_wrapper import ContractedLLM
+
+    LITELLM_AVAILABLE = True
+except ImportError:
+    LITELLM_AVAILABLE = False
+    ContractedLLM = None  # type: ignore
 
 # LangChain integration (optional, requires langchain package)
 try:
@@ -76,6 +84,7 @@ __all__ = [
     "GOOGLE_ADK_AVAILABLE",
     "LANGCHAIN_AVAILABLE",
     "LANGGRAPH_AVAILABLE",
+    "LITELLM_AVAILABLE",
     "ContractViolationError",
     "ContractedAdkAgent",
     "ContractedAdkMultiAgent",

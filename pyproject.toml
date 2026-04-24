@@ -1,7 +1,7 @@
 [project]
 name = "ai-agent-contracts"
 # Version must match src/agent_contracts/__init__.py:__version__
-version = "0.3.0"
+version = "0.3.1"
 description = "A formal framework for governing autonomous AI agents through explicit resource constraints and temporal boundaries"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,7 +20,6 @@ classifiers = [
 ]
 
 dependencies = [
-    "litellm>=1.60.0",
     "python-dotenv>=1.0.0",
 ]
 
@@ -31,6 +30,9 @@ Issues = "https://github.com/flyersworder/agent-contracts/issues"
 Documentation = "https://github.com/flyersworder/agent-contracts/blob/main/docs/README.md"
 
 [project.optional-dependencies]
+litellm = [
+    "litellm>=1.60.0",
+]
 eval = [
     "datasets>=4.4.2",
     "matplotlib>=3.10.7",
@@ -144,7 +146,9 @@ strict_equality = true
 # which conflicts with strict mypy when the packages are installed.
 [[tool.mypy.overrides]]
 module = [
+    "agent_contracts",
     "agent_contracts.integrations",
+    "agent_contracts.integrations.litellm_wrapper",
     "agent_contracts.integrations.langchain",
     "agent_contracts.integrations.langgraph",
     "agent_contracts.integrations.google_adk",

@@ -13,12 +13,15 @@ resolution-markers = [
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[options]
+exclude-newer = "2026-04-21T19:18:08.727881Z"
+exclude-newer-span = "P3D"
+
 [[package]]
 name = "ai-agent-contracts"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
-    { name = "litellm" },
     { name = "python-dotenv" },
 ]
 
@@ -43,6 +46,9 @@ langgraph = [
     { name = "langchain-core" },
     { name = "langgraph" },
 ]
+litellm = [
+    { name = "litellm" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -66,11 +72,11 @@ requires-dist = [
     { name = "langchain-core", marker = "extra == 'langgraph'", specifier = ">=0.3.0" },
     { name = "langchain-google-genai", marker = "extra == 'langchain'", specifier = ">=4.1.2" },
     { name = "langgraph", marker = "extra == 'langgraph'", specifier = ">=0.2.0" },
-    { name = "litellm", specifier = ">=1.60.0" },
+    { name = "litellm", marker = "extra == 'litellm'", specifier = ">=1.60.0" },
     { name = "matplotlib", marker = "extra == 'eval'", specifier = ">=3.10.7" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
-provides-extras = ["eval", "langchain", "langgraph", "google-adk", "claude-agent-sdk"]
+provides-extras = ["litellm", "eval", "langchain", "langgraph", "google-adk", "claude-agent-sdk"]
 
 [package.metadata.requires-dev]
 dev = [

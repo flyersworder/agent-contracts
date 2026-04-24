@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-04-24
+
+### Changed
+
+- **`litellm` moved from required to optional dependency.** `litellm` is used only by `ContractedLLM` in `integrations/litellm_wrapper.py`. Treating it as a required dependency pulled in ~70 hard-pinned transitive dependencies (including `aiohttp==3.13.3` with several active CVEs) for every install — including users who only use the `Contract` / `ContractExecutor` surface with a different LLM integration (LangChain, LangGraph, Google ADK, or Claude Agent SDK). `litellm` now joins the existing pattern of optional integration extras (`langchain`, `langgraph`, `google-adk`, `claude-agent-sdk`).
+- **`ContractedLLM` is a conditional import** in both `agent_contracts` and `agent_contracts.integrations`, matching the pattern used for the other integrations. A new `LITELLM_AVAILABLE` flag is exported for runtime capability checks.
+
+### Migration
+
+- If you were installing `ai-agent-contracts` (no extras) and using `ContractedLLM` or `ContractExecutor`, switch to `pip install ai-agent-contracts[litellm]`. Importing `ContractedLLM` when `litellm` is not installed now yields `None` at import time rather than a hard `ImportError` (mirroring the other optional integrations).
+
 ## [0.3.0] - 2026-03-28
 
 ### Added

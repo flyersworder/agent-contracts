@@ -56,7 +56,14 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
-      - run: uvx uv-secure uv.lock
+      # Scan only the base install surface. Optional integration extras
+      # (litellm, langchain, langgraph, google-adk, claude-agent-sdk) can
+      # pull in pinned transitive graphs outside our control — users who
+      # opt into those extras accept the associated risks. A base-only
+      # scan guarantees the default `pip install ai-agent-contracts` is
+      # audited on every push.
+      - run: uv export --frozen --no-dev --no-emit-project --no-hashes -o requirements-base.txt
+      - run: uvx uv-secure requirements-base.txt
 
   publish:
     needs: [lint, test, security]
