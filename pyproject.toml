@@ -31,7 +31,7 @@ Documentation = "https://github.com/flyersworder/agent-contracts/blob/main/docs/
 
 [project.optional-dependencies]
 litellm = [
-    "litellm>=1.60.0",
+    "litellm>=1.83.7",
 ]
 eval = [
     "datasets>=4.4.2",
