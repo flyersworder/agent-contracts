@@ -62,8 +62,8 @@ jobs:
       # opt into those extras accept the associated risks. A base-only
       # scan guarantees the default `pip install ai-agent-contracts` is
       # audited on every push.
-      - run: uv export --frozen --no-dev --no-emit-project --no-hashes -o requirements-base.txt
-      - run: uvx uv-secure requirements-base.txt
+      - run: uv export --frozen --no-dev --no-emit-project --no-hashes -o requirements.txt
+      - run: uvx uv-secure requirements.txt
 
   publish:
     needs: [lint, test, security]
