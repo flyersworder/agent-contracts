@@ -169,3 +169,9 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=html",
 ]
+
+[tool.uv]
+# LiteLLM >=1.83.7 hard-pins python-dotenv==1.0.1, which has
+# GHSA-mf9w-mj56-hr94 (fixed in 1.2.2). Override lets uv ignore that
+# pin so the base install keeps a patched python-dotenv.
+override-dependencies = ["python-dotenv>=1.2.2"]
