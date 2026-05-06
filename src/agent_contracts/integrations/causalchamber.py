@@ -38,6 +38,7 @@ Status: M1 stub — API shape only. M2 lands the real implementation; M3
 plugs in the five baseline agents from §5 of the validation plan.
 """
 
+import dataclasses
 import os
 from collections.abc import Callable
 from typing import Any, Literal
@@ -45,6 +46,7 @@ from typing import Any, Literal
 from agent_contracts.core.contract import Contract, ResourceConstraints
 from agent_contracts.core.enforcement import ContractEnforcer, EnforcementEvent
 from agent_contracts.core.monitor import ResourceMonitor, TemporalMonitor
+from agent_contracts.core.wrapper import ContractViolationError
 
 # Optional dependency: causalchamber. Pattern matches the other integrations
 # (litellm_wrapper, langchain, langgraph, google_adk, claude_agent_sdk).
@@ -164,58 +166,201 @@ class ContractedChamberAgent:
             monitor=self._resource_monitor,
         )
 
-        # Dataset and ground-truth handles populated lazily in M2.
+        # Dataset and ground-truth handles populated lazily on first access.
+        # The package's Dataset(...) call needs the parent dir to already exist
+        # before it tries to write the downloaded zip — create it eagerly so
+        # any subsequent load() / ground_truth() / query_*() call just works.
+        os.makedirs(self.data_root, exist_ok=True)
         self._dataset: Any = None
         self._ground_truth: Any = None
+
+    # ------------------------------------------------------------ data loading
+
+    def load(self) -> None:
+        """Download (if needed) the chamber dataset and load ground truth.
+
+        Idempotent — subsequent calls are no-ops. Called automatically on
+        first tool use; can also be called eagerly to surface download
+        errors at construction time rather than mid-run.
+        """
+        if self._dataset is None:
+            self._dataset = Dataset(
+                name=DATASET_FOR_CHAMBER[self.chamber],
+                root=self.data_root,
+                download=True,
+            )
+        if self._ground_truth is None:
+            self._ground_truth = _gt_graph(
+                chamber=self.chamber,
+                configuration=self.configuration,
+            )
+
+    def _ensure_loaded(self) -> None:
+        """Trigger lazy load on first access."""
+        if self._dataset is None or self._ground_truth is None:
+            self.load()
+
+    def available_experiments(self) -> list[str]:
+        """Return the list of experiment names (the menu, size M).
+
+        Available without spending any budget — this is the catalog the
+        agent consults when planning which interventions to query.
+        """
+        self._ensure_loaded()
+        return list(self._dataset.available_experiments())
 
     # ------------------------------------------------------------------ tools
 
     def query_intervention(self, experiment_name: str) -> Any:
         """Spend one unit of `per_tool_limits["intervene"]` and return data.
 
-        The agent calls this to "spend" intervention budget. The integration:
-            1. Checks whether the per-tool budget allows the call
-            2. Loads the named experiment from the dataset
-            3. Increments `tool_usage_by_name["intervene"]`
-            4. Emits an enforcement event
-            5. Returns the experiment's measurements as a DataFrame
+        Flow follows the convention used by `claude_agent_sdk.py`'s pre/post
+        tool hooks:
+
+            1. Pre-check: gate via `ResourceMonitor.can_use_tool("intervene")`.
+               If exhausted in strict_mode, raise `ContractViolationError`
+               immediately without running the tool or charging the budget.
+            2. Run the tool (load the experiment from the dataset).
+            3. Post-check: increment `tool_usage_by_name["intervene"]` and
+               emit a `tool_use` enforcement event for the audit trail.
+
+        "Charge on success" means a failed query (e.g., bad name) does not
+        consume budget — the agent gets to retry without penalty.
 
         Args:
             experiment_name: Name of the pre-recorded experiment (one of the
-                M experiments listed by `Dataset.available_experiments()`).
+                M names returned by `available_experiments()`).
 
         Returns:
             DataFrame of measurements for the requested experiment.
 
         Raises:
-            NotImplementedError: M1 stub. Implementation lands in M2.
-            ContractViolationError: (post-M2) when the per-tool budget is
-                exhausted in strict_mode.
+            ContractViolationError: When per-tool budget is exhausted in
+                strict_mode.
+            KeyError / ValueError: From the underlying `Dataset` when the
+                experiment name is unknown — propagated as-is. Budget is
+                NOT charged on this path.
         """
-        raise NotImplementedError(
-            "M1 stub. M2 will wire dataset access + per-tool event emission. "
-            "See docs/causal_chamber_validation_plan.md §9 milestone M2."
+        self._ensure_loaded()
+
+        # Pre-check
+        if not self._resource_monitor.can_use_tool("intervene"):
+            self._enforcer._emit_event(
+                EnforcementEvent(
+                    event_type="tool_blocked",
+                    contract=self.contract,
+                    message="Tool 'intervene' blocked: per-tool budget exhausted",
+                    data={
+                        "tool_name": "intervene",
+                        "experiment_name": experiment_name,
+                        "limit": self.contract.resources.per_tool_limits.get("intervene"),
+                        "actual": self._resource_monitor.usage.get_tool_usage("intervene"),
+                    },
+                )
+            )
+            if self.strict_mode:
+                raise ContractViolationError(
+                    self.contract,
+                    "per_tool_limit",
+                    f"intervention budget exhausted "
+                    f"(limit={self.contract.resources.per_tool_limits.get('intervene')})",
+                )
+
+        # Run
+        df = self._dataset.get_experiment(experiment_name).as_pandas_dataframe()
+
+        # Post: charge budget + emit audit event
+        self._resource_monitor.usage.add_tool_invocation("intervene")
+        self._enforcer._emit_event(
+            EnforcementEvent(
+                event_type="tool_use",
+                contract=self.contract,
+                message="Tool 'intervene' executed",
+                data={
+                    "tool_name": "intervene",
+                    "experiment_name": experiment_name,
+                    "rows": int(df.shape[0]),
+                    "cols": int(df.shape[1]),
+                },
+            )
         )
+        return df
 
     def query_observation(self, n_samples: int = 1) -> Any:
-        """Spend `n_samples` units of `per_tool_limits["observe"]` and return data.
+        """Spend one unit of `per_tool_limits["observe"]` and return passive data.
 
-        The agent calls this to draw passive (non-interventional) samples
-        from the chamber. Used by §5 baselines that need observational data
-        in addition to interventional data.
+        Returns `n_samples` rows from a designated observational source.
+
+        **M2 semantic note:** the LT `lt_interventions_standard_v1` and WT
+        `wt_walks_v1` datasets do not ship a separate "purely observational"
+        experiment. As a stand-in, this method returns the first `n_samples`
+        rows of the *first* listed experiment, treating those rows as a
+        passive baseline view of the chamber. This is a deliberate
+        placeholder — M3 may refine the semantic once concrete agents
+        surface what they actually need from `query_observation()`.
+
+        The budget tracking is not a placeholder: per-tool enforcement,
+        violation events, and audit emissions all behave correctly today.
 
         Args:
-            n_samples: Number of passive samples to draw.
+            n_samples: Number of passive samples to draw. Counts as ONE
+                unit of `per_tool_limits["observe"]` — the *call* is the
+                budgeted resource, not the row count, matching the pattern
+                used by `per_tool_limits["intervene"]`.
 
         Returns:
-            DataFrame of n_samples passive observations.
+            DataFrame of `n_samples` passive observations.
 
         Raises:
-            NotImplementedError: M1 stub. Implementation lands in M2.
+            ContractViolationError: When per-tool budget is exhausted in
+                strict_mode.
+            ValueError: If `n_samples <= 0`.
         """
-        raise NotImplementedError(
-            "M1 stub. M2 will wire passive-sample access + per-tool tracking."
+        if n_samples <= 0:
+            raise ValueError(f"n_samples must be positive, got {n_samples}")
+        self._ensure_loaded()
+
+        if not self._resource_monitor.can_use_tool("observe"):
+            self._enforcer._emit_event(
+                EnforcementEvent(
+                    event_type="tool_blocked",
+                    contract=self.contract,
+                    message="Tool 'observe' blocked: per-tool budget exhausted",
+                    data={
+                        "tool_name": "observe",
+                        "n_samples": n_samples,
+                        "limit": self.contract.resources.per_tool_limits.get("observe"),
+                        "actual": self._resource_monitor.usage.get_tool_usage("observe"),
+                    },
+                )
+            )
+            if self.strict_mode:
+                raise ContractViolationError(
+                    self.contract,
+                    "per_tool_limit",
+                    f"observation budget exhausted "
+                    f"(limit={self.contract.resources.per_tool_limits.get('observe')})",
+                )
+
+        # Stand-in passive source: first n_samples rows of first experiment.
+        # See M2 semantic note in the docstring.
+        first_name = self._dataset.available_experiments()[0]
+        df = self._dataset.get_experiment(first_name).as_pandas_dataframe().head(n_samples)
+
+        self._resource_monitor.usage.add_tool_invocation("observe")
+        self._enforcer._emit_event(
+            EnforcementEvent(
+                event_type="tool_use",
+                contract=self.contract,
+                message="Tool 'observe' executed",
+                data={
+                    "tool_name": "observe",
+                    "n_samples": n_samples,
+                    "rows_returned": int(df.shape[0]),
+                },
+            )
         )
+        return df
 
     # ------------------------------------------------------------- ground-truth
 
@@ -228,39 +373,54 @@ class ContractedChamberAgent:
         to make the "this is for scoring, not for the agent" intent visible
         in call sites.
 
-        Returns:
-            DataFrame adjacency matrix with rows/columns indexed by node names.
+        Calls `causalchamber.ground_truth.graph(chamber, configuration)`
+        on first invocation; subsequent calls return the cached DataFrame.
 
-        Raises:
-            NotImplementedError: M1 stub. M2 will call
-                `causalchamber.ground_truth.graph(chamber, configuration)`.
+        Returns:
+            Square adjacency-matrix DataFrame with rows/columns indexed by
+            node names. Nonzero entries denote edges.
         """
-        raise NotImplementedError("M1 stub. M2 will call causalchamber.ground_truth.graph(...).")
+        self._ensure_loaded()
+        return self._ground_truth
 
     # ------------------------------------------------------------- run loop
 
     def run(self, *args: Any, **kwargs: Any) -> Any:
         """Run the bound agent under contract enforcement.
 
-        Convenience wrapper for the common case `agent(self, *args, **kwargs)`
-        executed under the contract's monitor + enforcer. For test cases that
-        only need the tools (and drive the loop themselves), call
-        `query_intervention()` / `query_observation()` directly.
+        Thin wrapper: starts the enforcer, dispatches to
+        `self.agent(self, *args, **kwargs)`, and stops the enforcer in a
+        `try/finally` so the contract state transitions even on exception.
+
+        For tests that only exercise the tools (and drive the loop
+        themselves), call `query_intervention()` / `query_observation()`
+        directly without going through `run()`.
+
+        Args:
+            *args: Forwarded to `self.agent`.
+            **kwargs: Forwarded to `self.agent`.
+
+        Returns:
+            Whatever `self.agent` returns.
 
         Raises:
-            NotImplementedError: M1 stub. M3 implements the agent loop once
-                the five baselines exist.
             RuntimeError: If `agent` was not provided at construction.
+            Exception: Any exception from the agent or from contract
+                enforcement (e.g., `ContractViolationError`) propagates;
+                the enforcer is stopped in `finally` regardless.
         """
         if self.agent is None:
             raise RuntimeError(
                 "ContractedChamberAgent.run() requires an `agent` callable "
                 "passed at construction time."
             )
-        raise NotImplementedError(
-            "M1 stub. M3 wires the agent loop with start/stop monitoring "
-            "around `self.agent(self, *args, **kwargs)`."
-        )
+
+        self._ensure_loaded()
+        self._enforcer.start()
+        try:
+            return self.agent(self, *args, **kwargs)
+        finally:
+            self._enforcer.stop(reason="run() complete")
 
     # ------------------------------------------------------------- internals
 
@@ -324,12 +484,44 @@ def create_contracted_chamber_agent(
         A ContractedChamberAgent ready to call.
 
     Raises:
-        NotImplementedError: M1 stub. M2 lands the real Contract assembly.
+        ImportError: If the `causalchamber` package is not installed
+            (raised by the `ContractedChamberAgent` constructor).
     """
-    raise NotImplementedError(
-        "M1 stub. M2 will assemble Contract(per_tool_limits={...}) and call "
-        "ContractedChamberAgent(...). See docs/causal_chamber_M1_decisions.md "
-        "§2.1 for the intended API."
+    if contract_id is None:
+        contract_id = f"chamber-{chamber}-{configuration}-k{intervention_budget}"
+
+    # Build per-tool limits, merging any extra resource constraints the caller
+    # supplied. Caller-provided per_tool_limits are merged with the chamber
+    # tools (caller wins on key conflicts so they can override budgets).
+    per_tool_limits: dict[str, int] = {"intervene": intervention_budget}
+    if observation_budget > 0:
+        per_tool_limits["observe"] = observation_budget
+
+    if extra_resources is not None:
+        # Caller-provided per_tool_limits win on key conflicts.
+        merged_per_tool = {**per_tool_limits, **extra_resources.per_tool_limits}
+        resources = dataclasses.replace(extra_resources, per_tool_limits=merged_per_tool)
+    else:
+        resources = ResourceConstraints(per_tool_limits=per_tool_limits)
+
+    contract = Contract(
+        id=contract_id,
+        name=f"Causal Chamber: {chamber}/{configuration}",
+        description=(
+            f"Causal-discovery contract for {chamber}/{configuration} chamber, "
+            f"intervention budget k={intervention_budget}"
+            + (f", observation budget={observation_budget}" if observation_budget > 0 else "")
+        ),
+        resources=resources,
+    )
+
+    return ContractedChamberAgent(
+        contract=contract,
+        chamber=chamber,
+        configuration=configuration,
+        agent=agent,
+        data_root=data_root,
+        strict_mode=strict_mode,
     )
 
 

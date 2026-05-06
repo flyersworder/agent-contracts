@@ -232,3 +232,4 @@ results/
 !results/research_pipeline/figures/*.md
 # Also allow evaluation figures
 !evaluation/**/figures/*.png
+data/
