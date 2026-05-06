@@ -61,25 +61,51 @@ address:
    self-defined. The contract is the thing being measured *and* the thing
    defining what success looks like.
 
-The Causal Chamber pillar fixes all three at once: ground-truth graphs replace
-LLM-as-judge, edge accuracy and CI calibration are falsifiable performance
-metrics, and the chambers are an externally maintained benchmark used by other
-papers (Gamella et al. 2024 in *Nature Machine Intelligence* 2025).
+The Causal Chamber pillar **directly fixes #1 and #3**: ground-truth graphs
+replace LLM-as-judge, and the chambers are an externally maintained benchmark
+used by other papers (Gamella et al. 2024 in *Nature Machine Intelligence*
+2025).
+
+**Weakness #2 requires more than the chamber data alone.** A single LLM agent
+calling a single budgeted tool only validates that "budget caps produce
+predictable quality" — true of `if k >= limit: break` and not specifically a
+contract-framework finding. To convert the chamber substrate into a
+falsifiable claim about *the contract framework*, three additional design
+choices are load-bearing:
+
+- **Multi-agent scenarios under conservation laws** (§5) so the framework's
+  delegation primitives — not just `per_tool_limits` — are exercised. Without
+  this, the chamber pillar is single-agent work submitted to a multi-agent
+  venue.
+- **Non-LLM principled baselines** (§5) so the comparison set is not "three
+  flavors of LLM." Without this, the headline reads "LLMs do causal discovery
+  under budgets" rather than "the contract framework helps causal-discovery
+  agents."
+- **Cross-pillar governance-transfer evidence** (§7 — promoted from
+  subsection to full section) so chamber findings about governance gains are
+  *linked* to LLM-pipeline findings. Without this, the two pillars stand
+  independently and the paper has two contributions instead of one joint
+  contribution.
+
+Restated: chambers buy us the *substrate* for a falsifiable claim. §5 and §7
+below convert that substrate into a falsifiable claim about *the contract
+framework*, which is what AAMAS reviewers care about.
 
 ### 2.3 Venue and timeline strategy
 
 | Date | Event | Action |
 |---|---|---|
-| 2026-05-25 → 26 | COINE 2026 oral, Paphos | Present existing paper. **Capture reviewer feedback in person** (see §10). |
-| 2026-05-27 → 31 | Recovery + integration kickoff | Write up COINE feedback. Spin up chamber adapter scaffolding. |
-| 2026-06 → 09 | Chamber pillar implementation + experiments | See §9 milestones. |
+| **2026-05-06 → 05-24** | **Pre-COINE M1 head start** | Chamber adapter scaffolding (pulled forward from original 05-27 start; see §9 / §10 for why this is now possible). |
+| 2026-05-25 → 26 | COINE 2026 oral, Paphos | Present existing paper. 15-min slot, **low-information signal** — see §10. |
+| 2026-05-27 → 06-01 | Light COINE writeup (1 page max) | Note any genuinely surprising audience question. Empty note is acceptable. |
+| 2026-06 → 09 | Chamber pillar implementation + cross-pillar transfer experiments | See §9 milestones. |
 | 2026-10 (target) | AAMAS 2027 submission | Primary mainstream target. Oral COINE version cited in cover letter as evidence of prior peer review. |
-| 2026-11 → 2027-04 | Revision window | Strengthen for ECAI 2027. If AAMAS rejects, ECAI gets a stronger paper with reviewer feedback baked in. |
+| 2026-11 → 2027-04 | Revision window | Strengthen for ECAI 2027. If AAMAS rejects, ECAI gets a stronger paper. |
 | 2027-04 (target) | ECAI 2027 submission | Backup mainstream target, Athens (EU-guaranteed). |
 
-The dependency chain is one-way: COINE feedback → chamber experiments → AAMAS
-submission → optional ECAI strengthening. No critical path passes through
-US-located venues.
+The dependency chain is one-way: chamber experiments → AAMAS submission →
+optional ECAI strengthening. **COINE is parallel, not gating.** No critical
+path passes through US-located venues.
 
 ### 2.4 Extension delta vs COINE paper (≥30% novelty bar)
 
@@ -88,13 +114,15 @@ material. Our delta:
 
 | Element | COINE 2026 | Extended (AAMAS/ECAI 2027) |
 |---|---|---|
-| Empirical pillars | 1 (LLM pipelines, Section 8 "Empirical Evaluation") | **2** (LLM pipelines + chamber benchmark) |
+| Empirical pillars | 1 (LLM pipelines, Section 8 "Empirical Evaluation") | **2 + bridge** (LLM pipelines + chamber benchmark + cross-pillar transfer study) |
 | Ground-truth available | No (LLM-as-judge) | **Yes** (known causal graphs) |
 | Contract tightness sweep | No (single budget per condition) | **Yes** (Pareto frontier across 5 budget levels) |
-| Falsifiable claims | Predictability, conservation | **+ Edge recovery accuracy, + CI calibration coverage** |
-| Cross-domain validation | LLM only | **LLM + causal discovery** (governance gain transfers) |
-| Run counts | 25 research topics × 2 conditions; 140 code-review trials (70 problems × 2) | **+ 1080 chamber runs** (900 CONTRACTED + 180 UNCONTRACTED, see §6.1) |
-| Total new pages | — | ~6–8 pages of new content |
+| Falsifiable claims | Predictability, conservation | **+ Edge recovery accuracy, + CI calibration coverage, + cross-domain governance transfer** |
+| Cross-domain validation | LLM only | **LLM + causal discovery** with explicit transfer experiment (§7) |
+| Non-LLM baselines | None | **Random + GreedyIG-lite** (principled non-LLM, isolates LLM contribution) |
+| Multi-agent under conservation law | Implicit in research / code-review pipelines | **Explicit** (Planner+Reasoner variant, §5) |
+| Run counts | 25 research topics × 2 conditions; 140 code-review trials (70 problems × 2) | **+ ~1800 chamber runs** (1080 LLM-bearing) **+ ~2750 cross-pillar re-runs** at matched tightness (see §6.1, §7) |
+| Total new pages | — | ~7–9 pages of new content |
 
 This comfortably clears the 30% novelty threshold. The extended paper is not
 "COINE plus an appendix"; it is the COINE paper *recontextualized* as Pillar B
@@ -333,31 +361,91 @@ matching the existing pattern for `litellm`, `langchain`, etc.
 
 ---
 
-## 5. Agent variants under test
+## 5. Agent variants and baselines under test
 
-Three agent designs, all under the same contract:
+Two axes of variation, not one. The original §5 listed three single-agent LLM
+variants (LLM-only, LLM+PC, LLM+GES); this revision adds an architecture axis
+and non-LLM baselines so the experimental design isolates the contract
+framework's contribution from the LLM's contribution.
 
-1. **LLM-only ICL.** Pure in-context-learning agent (Claude Sonnet via the
-   Claude Agent SDK integration). Sees observation summaries, decides which
-   intervention to query next, eventually emits an adjacency matrix + edge
-   confidences. Tests whether contract budgets force LLMs to be strategic
-   about which interventions matter.
-2. **LLM + PC.** LLM plans intervention sequence; the classical PC algorithm
-   (constraint-based causal discovery) does the actual graph inference from
-   the resulting data. Tests whether contracts let LLMs orchestrate
-   classical methods well.
-3. **LLM + GES.** Same as #2 but with greedy equivalence search instead of
-   PC. GES uses score-based methods so the failure modes differ from PC.
+**Axis A — architecture:** single-agent vs multi-agent. Single-agent designs
+validate that the framework can govern one agent's tool use. Multi-agent
+designs validate the framework's *unique* contribution: conservation laws
+across delegated budgets, structured violation events surfacing at boundaries,
+policy enforcement at handoffs. AAMAS is a multi-agent venue; the chamber
+design needs at least one multi-agent variant for venue fit alone.
 
-All three use the same `ChamberContract`, the same `query_intervention` /
-`query_observation` tools, the same scoring functions. Only the planning and
-inference differ.
+**Axis B — method:** LLM-orchestrated vs principled-classical vs naive.
+Without a non-LLM baseline, the comparison set is "three flavors of LLM" and
+the framework looks like a wrapper around prompting.
 
-The point of having three variants: contract tightness sweeps may produce
-*different Pareto frontiers per agent design*. If contracts dominate
-identically across agents, that is a strong governance claim. If contracts
-dominate differently, that is a finding about which agent designs benefit
-most from governance — also publishable.
+### 5.1 The five variants
+
+| # | Variant | Architecture | Method | Why included |
+|---|---|---|---|---|
+| 1 | **Random** | Single-agent | Naive | Absolute floor of the Pareto plot. Picks `k` interventions uniformly at random, runs the same graph-inference step as LLM+PC. ~50 LOC; cost ~free. |
+| 2 | **GreedyIG-lite** | Single-agent | Non-LLM, principled | Reference line for "what a principled non-LLM achieves." Fits a linear-Gaussian SCM to current data, picks the next intervention greedily by approximate variance reduction in the MAP-graph posterior (Tong & Koller 2001 in spirit; Hauser & Bühlmann 2014 in form). Full-posterior version deferred to a v2 / journal extension. |
+| 3 | **LLM-only ICL** | Single-agent | LLM throughout | Pure in-context-learning agent (Claude Sonnet via Claude Agent SDK). LLM picks each intervention and emits final adjacency matrix + edge confidences. |
+| 4 | **LLM+PC** | Single-agent | LLM-orchestrated classical | LLM plans intervention sequence; classical PC algorithm infers the graph from the resulting data. |
+| 5 | **Planner+Reasoner** ⭐ | **Multi-agent** | LLM throughout, two roles | Planner agent picks interventions under sub-budget A; Reasoner agent proposes graph under sub-budget B. **Conservation law: A + B ≤ total intervention budget.** Exercises the framework's delegation primitives. |
+
+**Variant 5 is the contribution-load-bearing variant.** Variants 1–4
+establish the Pareto landscape; variant 5 does something the alternatives
+literally cannot — enforce a budget *across* an agent boundary with
+structured violation events at the handoff.
+
+The original LLM+GES variant is dropped (per R1's "two variants is the floor"
+clause). GES adds a third method-axis cell with score-based discovery; its
+contribution is small relative to the gains from adding Random, GreedyIG-lite,
+and Planner+Reasoner.
+
+### 5.2 Implications for the experimental matrix
+
+The §6.1 cell count grows but only LLM-bearing cells incur real cost:
+
+```
+CONTRACTED Pareto sweep:
+  2 chambers × 5 budget levels × 5 variants × 30 seeds = 1500 runs
+  (was 900; +600 from substituting Random/GreedyIG-lite/Planner+Reasoner for GES)
+  Of which LLM-bearing: 3 variants × 300 cells = 900 LLM runs (unchanged)
+
+UNCONTRACTED baseline:
+  2 chambers × 5 variants × 30 seeds = 300 runs (was 180)
+  Of which LLM-bearing: 3 variants × 60 cells = 180 LLM runs (unchanged)
+
+Total: 1800 runs (+67% over original 1080); LLM-bearing: 1080 (unchanged)
+```
+
+Random and GreedyIG-lite are CPU-only (no LLM calls) so the headline cost
+stays close to the original. Planner+Reasoner roughly doubles tokens per run
+since two agents communicate. Revised chamber-pillar cost: **~$200** (was
+~$165). See §6.4.
+
+If M5 timeline pressure forces a cut: drop GreedyIG-lite seeds from 30 to 10
+and run only 3 of 5 budget levels for it; drop Random entirely if absolutely
+necessary (it's the cheapest line to retire because nobody will fight us on
+the upper-bound). The load-bearing variants — LLM+PC and Planner+Reasoner —
+are protected.
+
+### 5.3 Headline figure (updated)
+
+The Pareto plot — x-axis intervention-budget-fraction k/M, y-axis SHD —
+carries **five lines per chamber**, each with an explicit interpretive role:
+
+- **Random**: absolute floor. LLM and principled methods both must clear it.
+- **GreedyIG-lite**: principled non-LLM reference. Gap between it and LLM
+  variants is "what the LLM adds."
+- **LLM-only ICL**: what an LLM does *without* classical infrastructure.
+- **LLM+PC**: what an LLM does *with* classical infrastructure.
+- **Planner+Reasoner**: what the *contract framework* does when budget is
+  delegated across an agent boundary.
+
+The story the figure tells: if Planner+Reasoner sits *on or above* LLM+PC at
+matched total budget, that is direct evidence the framework's conservation
+laws preserve quality under delegation — i.e., the framework adds value, not
+overhead. If it sits below, that is *also* a publishable finding (delegation
+overhead has measurable cost), and the paper's framing rotates accordingly
+(see R8 in §11).
 
 ---
 
@@ -376,18 +464,20 @@ comparable across chambers despite different absolute menu sizes
 × 5 budget levels   (k/M ∈ {0.10, 0.25, 0.50, 0.75, 1.00})
                     → LT: k ∈ {6, 15, 30, 45, 59}
                     → WT: k ∈ {3,  7, 14, 21, 28}
-× 3 agent variants  (LLM-only, LLM+PC, LLM+GES)
+× 5 agent variants  (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner)
 × 30 seeds          (statistical power)
-= 900 runs
+= 1500 runs
+   of which 900 are LLM-bearing (3 LLM variants × 300 cells)
 ```
 
 **UNCONTRACTED baseline** (single point per agent, for §6.2 comparison):
 
 ```
-2 chambers × 3 agent variants × 30 seeds = 180 runs
+2 chambers × 5 agent variants × 30 seeds = 300 runs
+   of which 180 are LLM-bearing
 ```
 
-**Total: 1080 runs.**
+**Total: 1800 runs (1080 LLM-bearing).**
 
 (WT `pressure-control` configuration has only 1 dataset experiment available
 — too few for a budget sweep — so it's excluded from the main grid. May be
@@ -431,27 +521,42 @@ research and code-review pipelines, for narrative consistency.
 
 ### 6.4 Cost estimate
 
-LLM cost per run ≈ $0.15 (≈30K tokens × $5/M for Claude Sonnet, conservative).
-1080 total runs ≈ **~$165**. CPU cost on existing development hardware is
-negligible (PC and GES are O(n³) at worst on a 38-node graph: seconds per
-fit). Total experiment cost is well under what the existing research pipeline
-cost.
+LLM cost per run varies by variant:
+
+- **LLM-only ICL**: ~$0.15/run (≈30K tokens × $5/M for Claude Sonnet)
+- **LLM+PC**: ~$0.10/run (LLM only plans; PC inference is free CPU)
+- **Planner+Reasoner**: ~$0.25/run (two LLM agents communicating)
+- **Random, GreedyIG-lite**: ~free (no LLM calls; CPU-only fit + selection)
+
+Total chamber-pillar LLM cost (1080 LLM-bearing runs): **~$200**. CPU cost
+on existing development hardware is negligible — PC, GreedyIG-lite linear-
+Gaussian fitting, and selection are O(n³) at worst on a 38-node graph
+(seconds per fit). Combined with §7's cross-pillar re-runs (~$575), total
+experimental envelope is **~$775**, comfortably within R7's overrun
+tolerance.
 
 ### 6.5 Headline figure
 
 The single figure that has to land for AAMAS reviewers: a Pareto plot with
-**intervention budget on the x-axis** and **SHD on the y-axis** (lower = better).
-One line per (chamber, configuration, agent_variant) combination. Error
-bands from the 30 seeds.
+**intervention-budget fraction k/M on the x-axis** and **SHD on the y-axis**
+(lower = better). **Five lines per chamber** (Random, GreedyIG-lite,
+LLM-only, LLM+PC, Planner+Reasoner) with explicit interpretive roles per
+§5.3. Error bands from the 30 seeds.
 
 What success looks like:
 
-- A clear monotonic relationship between budget and quality (validates the
-  framework controls a meaningful resource).
+- All LLM variants clear the **Random** floor (validates the LLM does
+  something better than picking interventions blind).
+- LLM+PC and/or Planner+Reasoner clear **GreedyIG-lite** at most budget
+  levels (validates the LLM adds value over a principled non-LLM baseline —
+  defends against the "is the LLM even necessary?" reviewer attack).
+- **Planner+Reasoner sits on or above LLM+PC** at matched *total* budget
+  (validates the framework's conservation laws preserve quality under
+  delegation — the contribution-load-bearing claim).
+- A clear monotonic relationship between budget and quality across all
+  variants (validates the framework controls a meaningful resource).
 - Diminishing returns at high budget (validates that strategic intervention
-  selection matters — agents do better than random).
-- Different agent variants produce different curves (validates the framework
-  is sensitive to agent design, not measuring noise).
+  selection matters).
 - CI coverage ≥ 0.95 on the calibration sub-figure (validates the falsifiable
   uncertainty claim).
 
@@ -467,26 +572,110 @@ Parquet for fast aggregation.
 
 ---
 
-## 7. Cross-pillar consistency study
+## 7. Cross-pillar governance transfer
 
-The most reviewer-friendly experiment in this plan, and arguably the highest-
-leverage paragraph in the paper. After the chamber sweep is done, re-run a
-small subset (~10%) of the existing research and code-review pipeline
-experiments at *matched contract tightness levels* — e.g., scale per-tool
-limits in those domains so they correspond to chamber budget percentiles.
+This was a subsection in the original plan. **Promoted to a full section**
+because it is the load-bearing experiment for the two-pillar story. Without
+it, chamber results stand as "interesting causal-discovery findings,"
+LLM-pipeline results stand as "interesting governance findings," and the
+paper has no joint claim.
 
-Goal: show that the *governance gains* observed in the chamber pillar
-(reduced variance, predictable quality, runaway prevention) replicate in the
-LLM pipelines, despite the LLM pipelines lacking ground-truth scoring.
+### 7.1 What the cross-pillar evidence has to show
 
-This is the bridge between the two pillars. Without it, a reviewer can
-plausibly claim "your chamber results are real but specific to causal
-discovery." With it, the claim is "governance gains are domain-general; the
-chamber pillar provides ground truth, the LLM pipelines provide breadth."
+A single property: **governance gains observed in one pillar replicate in
+the other at matched contract tightness.** Three concrete claims, one figure
+each:
 
-Scoping: a single subsection in the paper, ≤ 1 figure. This is not a
-re-execution of the existing pipelines from scratch, just a targeted
-re-running at matched tightness.
+1. **Variance-reduction transfer.** CV reduction observed in chamber
+   Planner+Reasoner replicates in research-pipeline
+   Researcher→Analyzer→Reporter at matched tightness.
+2. **Conservation-law transfer.** Delegated-budget compliance rate observed
+   in chambers replicates in research-pipeline budget delegation across
+   delegation depth.
+3. **Runaway-prevention transfer.** Iteration-cap effectiveness in
+   code-review Coder↔Reviewer replicates in chamber multi-agent variants
+   under matched delegation depth.
+
+### 7.2 Tightness matching across domains
+
+Tightness levels from §6.1 (k/M ∈ {0.10, 0.25, 0.50, 0.75, 1.00}) map to
+LLM-pipeline budgets by *quantile-matching the agent's natural usage
+distribution*:
+
+- For each LLM pipeline, run 30 UNCONTRACTED seeds and record the empirical
+  distribution of total tool calls (research) or total iterations
+  (code-review).
+- Tightness level *t* corresponds to the *t*-th percentile of that
+  distribution. *t = 0.10* means "limit the agent to the 10th percentile of
+  what it would naturally use."
+
+This matching controls for the agent's *self-selected* effort rather than
+for absolute counts — defensible across domains where absolute units don't
+commensurate (chamber interventions ≠ research-pipeline tool calls).
+
+### 7.3 The three figures
+
+**Figure 7.1 — variance-reduction transfer.**
+
+- x-axis: tightness level (5 quantiles)
+- y-axis: CV of quality metric
+- 4 lines: chamber-LT, chamber-WT, research pipeline, code-review pipeline
+- Per-pillar quality metric: chamber=SHD, research=indeterminacy-aware
+  quality score, code-review=pass@1
+- Pattern that earns the claim: all four lines decrease monotonically with
+  tightness. If they do not co-decrease, variance reduction is
+  domain-specific and the paper says so explicitly.
+
+**Figure 7.2 — conservation-law transfer.**
+
+- x-axis: delegation depth (1, 2, 3 hops in research; equivalent multi-agent
+  depth in chambers)
+- y-axis: fraction of runs where sub-agent budgets exceeded delegated
+  allocation
+- 2 lines: chamber Planner+Reasoner, research Researcher→Analyzer→Reporter
+- Pattern that earns the claim: violation rate near zero (the framework's
+  job) and bounded growth with depth.
+
+**Figure 7.3 — runaway-prevention transfer.**
+
+- ECDF (or violin) of total tool calls per run
+- Faceted by domain (chamber Planner+Reasoner, code-review Coder↔Reviewer);
+  cap-on vs cap-off overlaid in each facet
+- Pattern that earns the claim: cap-on truncates cleanly; cap-off has heavy
+  right tail in both domains.
+
+### 7.4 Scope of re-running
+
+Not the original "≤10%" — the experiment needs real statistical power.
+
+| Pipeline | Cells | Cost basis | Cost |
+|---|---|---|---|
+| Research | 25 topics × 5 tightness × 10 seeds = 1250 runs | ~$0.40/run | ~$500 |
+| Code-review | 30 problems × 5 tightness × 10 seeds = 1500 runs | ~$0.05/run (Gemini Flash) | ~$75 |
+| **Cross-pillar total** | **2750 runs** | — | **~$575** |
+
+Combined with revised chamber pillar (~$200): **total experiment cost
+~$775.** Still small in absolute terms.
+
+### 7.5 Timeline impact
+
+§9 absorbs the expansion: M6 extends from 2 → 3 weeks, M7 compresses from
+3 → 2 weeks. Net calendar is neutral. The compression is feasible only
+because COINE feedback (§10) is descoped to "low-information signal,"
+freeing M1 calendar that previously waited on the May 25–26 trip.
+
+### 7.6 Why this is the highest-leverage section
+
+If §6 results are clean but §7 doesn't transfer, we have a publishable
+causal-discovery paper — but not a contract-framework paper. If §7
+transfers, the entire COINE-paper corpus of governance findings is
+*retroactively validated* by the chamber ground truth. That is the move
+that turns this submission from "extending COINE with another experiment"
+into "establishing that contract-framework governance gains are
+domain-general."
+
+This is the section reviewers will read most carefully. It deserves a full
+section, not a subsection.
 
 ---
 
@@ -504,7 +693,7 @@ evaluation/chamber_pipeline/
 │   ├── lt_standard.yaml
 │   ├── wt_standard.yaml
 │   └── wt_pressure_control.yaml
-├── agents.py                 # LLM-only, LLM+PC, LLM+GES
+├── agents.py                 # Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner
 ├── scoring.py                # SHD, F1, CI coverage
 ├── orchestrator.py           # one experiment cell end-to-end
 ├── run_experiment.py         # CLI entry point; full sweep
@@ -520,47 +709,51 @@ reading the codebase should immediately recognize the chamber pipeline as
 
 ## 9. Milestones and timeline
 
-5 months between COINE presentation (May 26) and AAMAS submission (~Oct 1).
+5+ months between today (plan revision date 2026-05-06) and AAMAS submission
+(~Oct 1). M1 is **pulled forward to start now** because COINE 2026 is a
+15-minute oral talk — not a working session — so its feedback strand is
+descoped (see §10). The technical strand of M1 no longer waits on Paphos.
 
 | # | Window | Milestone | Acceptance criterion |
 |---|---|---|---|
-| M1 | 2026-05-27 → 06-07 | COINE feedback writeup + chamber adapter scaffolding | New file `docs/coine_feedback.md` written; `integrations/causalchamber.py` stub committed; `chambers` extra in `pyproject.toml`; failing smoke test exists |
+| M1 | 2026-05-06 → 06-07 | Chamber adapter scaffolding (pulled forward; COINE feedback strand descoped per §10) | `integrations/causalchamber.py` stub committed; `chambers` extra in `pyproject.toml`; failing smoke test exists; §12 Q1+Q2 decisions documented based on a read of existing integrations |
 | M2 | 2026-06-08 → 06-21 | Adapter complete + ground-truth scoring functions | Smoke test passes: load `lt/standard` graph, run a fake agent that returns the ground truth, score reports SHD=0 and F1=1 |
-| M3 | 2026-06-22 → 07-05 | Three baseline agents implemented | All three variants run end-to-end on a single budget cell; produce coherent adjacency-matrix outputs |
-| M4 | 2026-07-06 → 07-19 | Pilot sweep | 1 chamber × 3 budgets × 30 seeds = 90 runs; preliminary Pareto curve looks monotonic |
-| M5 | 2026-07-20 → 08-23 | Full sweep | All 1080 runs (900 CONTRACTED + 180 UNCONTRACTED) complete; results in Parquet; headline figure generated |
-| M6 | 2026-08-24 → 09-06 | Cross-pillar consistency study | Subset re-runs of research / code-review pipelines at matched tightness; one bridging figure |
-| M7 | 2026-09-07 → 09-27 | Paper extension drafted | `paper/paper-extended.qmd` (or branch of `paper.qmd`) contains new Section 8 ("Empirical Evaluation") subsections; intro and abstract rewritten to reflect two-pillar structure |
-| M8 | 2026-09-28 → 10-XX | Submission polish | All AAMAS formatting requirements met; cover letter cites COINE acceptance |
+| M3 | 2026-06-22 → 07-12 | **Five** baseline agents implemented (3 weeks, was 2) | All five variants (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner) run end-to-end on a single budget cell; produce coherent adjacency-matrix outputs |
+| M4 | 2026-07-13 → 07-26 | Pilot sweep | 1 chamber × 3 budgets × 5 variants × 30 seeds = 450 runs; preliminary Pareto curve monotonic; Random sits below LLM variants as sanity check |
+| M5 | 2026-07-27 → 08-23 | Full chamber sweep | All 1800 runs (1500 CONTRACTED + 300 UNCONTRACTED) complete; 1080 are LLM-bearing; results in Parquet; headline 5-line Pareto figure generated |
+| M6 | 2026-08-24 → 09-13 | **Cross-pillar transfer study** (full section, 3 figures, was subsection) | 2750 LLM-pipeline re-runs at matched tightness; Figures 7.1, 7.2, 7.3 generated; transfer claim supported or refuted with statistical power |
+| M7 | 2026-09-14 → 09-27 | Paper extension drafted (compressed 1 week to absorb M6 expansion) | `paper/paper-extended.qmd` (or branch) contains new chamber-pillar + cross-pillar transfer sections; intro and abstract rewritten to reflect two-pillar+bridge structure |
+| M8 | 2026-09-28 → 10-XX | Submission polish | All AAMAS formatting requirements met; cover letter cites COINE acceptance; §10 1-pager attached as appendix or sidebar |
 
-Each milestone unblocks the next. The plan has buffer baked in (M5 has 5
-weeks for what should be 3 weeks of compute), specifically because the agent
-implementations in M3 are the highest-uncertainty piece.
+Each milestone unblocks the next. M3 grew from 2 → 3 weeks because we now
+implement five variants instead of three (Random and GreedyIG-lite are cheap,
+but Planner+Reasoner is novel work). M6 grew from 2 → 3 weeks because §7 is
+now a full section. M7 compressed from 3 → 2 weeks; this compression is
+feasible only because M1 was pulled forward, giving the technical track three
+extra weeks of head start.
 
 ---
 
-## 10. COINE feedback capture (May 25–26 in Paphos)
+## 10. COINE attendance (descoped from "feedback capture")
 
-Workshop attendance is part of this plan, not a side trip. Specific things
-to actively probe at the oral session:
+COINE 2026 is a **15-minute oral slot, not a working session.** The original
+plan treated it as a feedback-capture milestone gating M1; this revision
+treats it as **low-information signal** and the technical work proceeds in
+parallel.
 
-- **Reviewers' counterexamples.** Did anyone surface a multi-agent scenario
-  where contracts fail or are easily evaded? These become test cases in the
-  chamber experiments.
-- **Quality-evaluation pushback.** If reviewers raise the LLM-as-judge
-  concern, articulate the chamber plan and ask whether ground-truth
-  validation addresses their concern. If yes, lock in framing. If no,
-  understand what would.
-- **Agents-community priors.** AAMAS reviewers will overlap heavily with the
-  COINE audience. What metrics do they expect to see in a contracts paper?
-  What baselines? What axes of comparison?
-- **Calibrated-CI feasibility.** Ask anyone in the causal-inference / MAS
-  intersection whether 95% coverage on edge presence is reasonable to claim,
-  or whether we should soften to "well-calibrated edge confidences."
+Light-touch action: a 1-page note at `docs/coine_feedback.md` by 2026-06-01
+documenting any genuinely surprising audience reaction or hallway question.
+If the note is empty, that is fine — no calendar slips on its account. The
+expected content is closer to "interesting question from X about Y" than
+"structured feedback we have to address before submitting."
 
-Output: a writeup at `docs/coine_feedback.md` by 2026-06-07 (start of M1
-window), feeding directly into the chamber experiment design before the
-adapter is locked.
+If — and only if — the COINE audience surfaces a substantive flaw in the
+framework itself (R5), escalate immediately and reassess the AAMAS timeline.
+Otherwise, proceed.
+
+This descoping is what frees the May 6 → May 27 window for M1's technical
+strand (chamber adapter scaffolding), which in turn enables M7's 1-week
+compression in §9.
 
 ---
 
@@ -568,13 +761,14 @@ adapter is locked.
 
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
-| R1 | Causal-discovery agent is a new paradigm; agent implementations are harder than expected | Medium | High (delays M3 → M5) | Start M3 with LLM-only (simplest); fall back to LLM+PC only as the main result if LLM+GES proves problematic. Three variants is a stretch goal, two is the floor. |
+| R1 | Causal-discovery agent is a new paradigm; agent implementations are harder than expected | Medium | High (delays M3 → M5) | Start M3 with Random + LLM-only (simplest); GreedyIG-lite second; LLM+PC third; Planner+Reasoner last. **Floor: LLM+PC + Planner+Reasoner + Random** (Pareto floor + main hybrid + multi-agent claim). GreedyIG-lite and LLM-only are stretch if M3 slips. |
 | R2 | Calibrated CI coverage too hard for LLM-based agents | Medium | Medium (weakens calibration claim) | Soften to "edge confidences" (no formal coverage guarantee) in v1; add bootstrap-based coverage in v2 if time allows. The SHD/F1 results stand independently. |
 | R3 | AAMAS reviewers reject because the chamber pillar isn't on real hardware | Low | Medium | Cite Gamella et al. — the offline data *is* real-hardware measurements, just pre-recorded. The 59 experiments per chamber are the same data their own published validation rests on. |
 | R4 | `causalchamber` package breaks (yanked numpy 2.4.0 already a yellow flag) | Low | Low | Pin a working version range in the `chambers` extra. Vendor the offline datasets to our own storage if upstream becomes unreliable. |
 | R5 | COINE attendance reveals a substantive flaw in the framework itself | Low | High | Address in M1; if it's framework-level (not just experiment-level), reassess whether AAMAS is reachable on the original timeline or whether we need to push to ECAI 2027 only. |
 | R6 | AAMAS 2027 location announced in late May 2026 lands somewhere we can't travel to | Medium | Medium | Already mitigated by parallel ECAI 2027 (Athens, confirmed) plan. AAMAS becomes optional rather than primary if location is bad. |
-| R7 | Compute cost overruns | Very low | Low | Budget is ~$200; even 5× overrun is trivially absorbed. |
+| R7 | Compute cost overruns | Very low | Low | Budget is ~$775 (chambers + cross-pillar); even 5× overrun is absorbable. |
+| R8 | Planner+Reasoner conservation law shows measurable but small effect over LLM+PC | Medium | Low | Report effect-size with CI rather than binary effect/no-effect framing. A small positive effect is a finding ("delegation is roughly free"); a small negative effect is also a finding ("delegation has measurable cost"). Either is publishable; the paper's framing rotates accordingly. |
 
 No risk in this list is severe enough to threaten the plan. R1 is the most
 work-likely, R5 is the most damage-likely; both are addressed up-front.
