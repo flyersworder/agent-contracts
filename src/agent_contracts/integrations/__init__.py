@@ -79,7 +79,24 @@ except ImportError:
     CLAUDE_AGENT_SDK_AVAILABLE = False  # type: ignore
     ContractedClaudeAgent = None  # type: ignore
 
+# Causal Chamber integration (optional, requires causalchamber package)
+# M1 stub — see docs/causal_chamber_M1_decisions.md §2.1
+try:
+    from agent_contracts.integrations.causalchamber import (
+        CAUSAL_CHAMBER_AVAILABLE,
+        ContractedChamberAgent,
+        create_contracted_chamber_agent,
+    )
+
+    if not CAUSAL_CHAMBER_AVAILABLE:
+        raise ImportError("causalchamber not installed")
+except ImportError:
+    CAUSAL_CHAMBER_AVAILABLE = False  # type: ignore
+    ContractedChamberAgent = None  # type: ignore
+    create_contracted_chamber_agent = None  # type: ignore
+
 __all__ = [
+    "CAUSAL_CHAMBER_AVAILABLE",
     "CLAUDE_AGENT_SDK_AVAILABLE",
     "GOOGLE_ADK_AVAILABLE",
     "LANGCHAIN_AVAILABLE",
@@ -90,6 +107,7 @@ __all__ = [
     "ContractedAdkMultiAgent",
     "ContractedChain",
     "ContractedChainLLM",
+    "ContractedChamberAgent",
     "ContractedClaudeAgent",
     "ContractedGraph",
     "ContractedLLM",
@@ -97,5 +115,6 @@ __all__ = [
     "LangChainContractedLLM",
     "create_contracted_adk_agent",
     "create_contracted_chain",
+    "create_contracted_chamber_agent",
     "create_contracted_graph",
 ]
