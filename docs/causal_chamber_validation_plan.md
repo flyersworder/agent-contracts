@@ -401,17 +401,28 @@ cells (LLM+PC and the Planner+Reasoner multi-agent design) plus two non-LLM
 baselines (Random, GreedyIG-lite) and one pure-LLM ICL variant cover the
 contribution claim.
 
-**Model choice for all LLM-bearing variants: DeepSeek v4 Flash via
-OpenRouter** ($0.14/M input, $0.28/M output, 1M-token context window),
-accessed through the framework's existing LiteLLM integration. Chosen for
-(a) cost efficiency at experimental scale — ~30× cheaper than Claude Sonnet
-on a typical 25K-input/5K-output run — and (b) open-weights reproducibility,
-so third parties can re-run our experiments without Anthropic API
-credentials. The 1M context window also means the agent never has to
-truncate or summarize prior observations during an intervention sequence,
-keeping the experimental setup uncomplicated by windowing logic. Robustness
-to model choice is addressed in §6.4 (cost) and Open Question §12.6
-(sensitivity check, deferred decision).
+**Model choice across both pillars: DeepSeek v4 Flash via OpenRouter**
+($0.14/M input, $0.28/M output, 1M-token context window), accessed through
+the framework's existing LiteLLM integration. Used for all LLM-bearing
+variants in the chamber pillar (variants 3, 4, 5 above) **and** for §7's
+cross-pillar re-runs of the research and code-review pipelines (which
+parameterize `--model` and previously defaulted to Gemini 2.5 Flash Lite).
+Single-model consistency across pillars is deliberate — variance in the
+cross-pillar transfer figures (§7) cannot be attributed to model
+differences, only to domain.
+
+Chosen for: (a) cost efficiency at experimental scale (~30× cheaper than
+Claude Sonnet on a typical 25K-input/5K-output run); (b) open-weights
+reproducibility — third parties can replicate the full paper with one
+OpenRouter key; (c) the 1M context window so the agent never has to
+truncate or summarize prior observations during an intervention sequence
+(no windowing logic to complicate the experimental setup).
+
+A higher-capacity robustness sweep using **DeepSeek v4 Pro** (same model
+family, ~3× Flash cost, $0.435/$0.870 per M tok in/out) runs at the
+cell-grid scope per §6.7. Within-family scale-up isolates *capacity* as
+the only axis of variation; a cross-vendor sensitivity check would
+confound capacity, vendor, and training-pipeline differences.
 
 ### 5.2 Implications for the experimental matrix
 
@@ -430,10 +441,10 @@ UNCONTRACTED baseline:
 Total: 1800 runs (+67% over original 1080 total); LLM-bearing: 1080 (unchanged)
 ```
 
-Random and GreedyIG-lite are CPU-only (no LLM calls) so the headline cost
-stays close to the original. Planner+Reasoner roughly doubles tokens per run
-since two agents communicate. Revised chamber-pillar cost: **~$200** (was
-~$165). See §6.4.
+Random and GreedyIG-lite are CPU-only (no LLM calls). Planner+Reasoner
+roughly doubles tokens per run since two agents communicate, so it
+dominates the LLM-bearing cost. Chamber-pillar cost at DeepSeek v4 Flash
+pricing: **~$7**. See §6.4 for the grand total across all components.
 
 If M5 timeline pressure forces a cut, the cut order — from most to least
 expendable — is: (1) **LLM-only** (LLM+PC subsumes its claim for the main
@@ -536,23 +547,46 @@ research and code-review pipelines, for narrative consistency.
 
 ### 6.4 Cost estimate
 
-LLM cost per run for the chamber pillar (DeepSeek v4 Flash via OpenRouter,
-$0.14/M input, $0.28/M output):
+All LLM-bearing runs use DeepSeek v4 Flash via OpenRouter ($0.14/M input,
+$0.28/M output) for both pillars. The §6.7 robustness sweep adds DeepSeek
+v4 Pro ($0.435/$0.870 per M tok) at cell-grid scope.
 
-- **LLM-only**: ~$0.005/run (≈25K input + 5K output tokens at DeepSeek v4 Flash pricing)
+**Chamber pillar (Flash):**
+
+- **LLM-only**: ~$0.005/run (≈25K input + 5K output tokens at Flash pricing)
 - **LLM+PC**: ~$0.003/run (LLM only plans; PC inference is free CPU)
 - **Planner+Reasoner**: ~$0.010/run (two LLM agents communicating, ~2× tokens)
 - **Random, GreedyIG-lite**: ~free (no LLM calls; CPU-only fit + selection)
 
-Total chamber-pillar LLM cost (1080 LLM-bearing runs): **~$7**. CPU cost
-on existing development hardware is negligible — PC, GreedyIG-lite linear-
-Gaussian fitting, and selection are O(n³) at worst on a 38-node graph
-(seconds per fit). Combined with §7's cross-pillar re-runs (~$575, using
-the existing pipelines' incumbent models): total experimental envelope is
-**~$582**. The chamber pillar's LLM cost is now an order of magnitude
-below CPU and engineering-time cost; if cross-pillar is also migrated to
-DeepSeek v4 Flash, total drops to ~$25 and the project's compute budget
-ceases to be a meaningful constraint at all.
+**Cross-pillar §7 re-runs (Flash, via existing pipelines' `--model` flag):**
+
+- **Research pipeline**: ~$0.05/run (multi-agent Researcher→Analyzer→Reporter,
+  ~250K tokens cumulative across agent turns)
+- **Code-review pipeline**: ~$0.015/run (iterative Coder↔Reviewer loop,
+  ~100K tokens cumulative across iterations)
+
+**§6.7 DeepSeek v4 Pro robustness sweep:**
+
+- 300 Pro runs at cell-grid scope (2 chambers × 3 budget levels × 5 variants
+  × 10 seeds): ~$5
+
+**Cost totals:**
+
+| Component | Runs | Total |
+|---|---|---|
+| Chamber pillar (Flash) | 1080 LLM-bearing | ~$7 |
+| Cross-pillar research (Flash) | 1250 | ~$62 |
+| Cross-pillar code-review (Flash) | 1500 | ~$23 |
+| Pro robustness sweep (cell-grid) | 300 | ~$5 |
+| **Grand total** | **4130 LLM runs** | **~$97** |
+
+CPU cost on existing development hardware is negligible — PC, GreedyIG-lite
+linear-Gaussian fitting, and selection are O(n³) at worst on a 38-node
+graph (seconds per fit). The project's compute budget ceases to be a
+meaningful constraint; engineering time is the binding resource. Actual
+per-run cost is instrumented via `ResourceUsage.cost_usd` and reported
+in the paper, so the headline ~$97 figure is a budget ceiling rather than
+a guess.
 
 ### 6.5 Headline figure
 
@@ -584,12 +618,51 @@ What success looks like:
 ### 6.6 Reproducibility
 
 Seed everything we can: numpy and the agent's tool-selection RNG are fully
-seedable; LLM determinism is best-effort (Claude does not currently offer
-strict seed-based reproducibility, so per-run LLM variance is captured by
-running 30 seeds). Pin `causalchamber` version and rely on the package's
-built-in checksum verification of dataset downloads. All experiment configs
-live as YAML in `evaluation/chamber_pipeline/configs/`. Results dumped as
-Parquet for fast aggregation.
+seedable; LLM determinism is best-effort (OpenRouter inference is non-
+deterministic across requests even at temperature=0, so per-run LLM
+variance is captured by running 30 seeds). Pin `causalchamber` version and
+rely on the package's built-in checksum verification of dataset downloads.
+Pin DeepSeek model versions via OpenRouter's stable model IDs
+(`deepseek/deepseek-v4-flash`, `deepseek/deepseek-v4-pro`); record the
+exact model snapshot in run metadata for forensic reproducibility. All
+experiment configs live as YAML in `evaluation/chamber_pipeline/configs/`.
+Results dumped as Parquet for fast aggregation.
+
+### 6.7 DeepSeek v4 Pro robustness sweep
+
+A higher-capacity sweep using **DeepSeek v4 Pro** ($0.435/$0.870 per M tok
+in/out, same model family as Flash, ~3× cost, 1M-token context) replicates
+a subset of the chamber Pareto sweep at the **cell-grid scope**:
+
+- 2 chambers (LT, WT, both standard configuration)
+- 3 budget levels (k/M ∈ {0.10, 0.50, 1.00} — endpoints + midpoint of
+  the five-level Flash sweep)
+- 5 variants (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner)
+- 10 seeds (reduced from 30 since Pro is for capacity-axis comparison,
+  not primary statistical claims)
+- = **300 Pro runs at ~$5**
+
+The 3-level subset is chosen so the Pareto plot at Pro capacity remains
+interpretable (low-, mid-, high-budget points) while keeping run count
+small enough that results land inside M5's window without delaying M6.
+
+**Visualization.** Pro Pareto points overlay onto the headline Figure 6.1
+as dashed lines (Flash = solid, Pro = dashed). If the curves coincide, the
+framework's claims are robust to capacity within the DeepSeek family. If
+they diverge, that is itself a finding and the paper's "capacity-
+invariance" framing rotates accordingly.
+
+**Why same-family scaling.** Cross-vendor sensitivity (e.g., Claude
+Sonnet) confounds three axes simultaneously: capacity, vendor, and
+training-pipeline closedness. Same-family scaling (Flash → Pro) isolates
+capacity as the only axis of variation, which is the cleaner robustness
+argument and the one reviewers can interpret unambiguously.
+
+**Scope flex.** If M5 finishes ahead of schedule, scope can expand to
+full replication (1080 Pro runs ≈ $16, parallel curves at full budget
+resolution). If M5 slips, scope can drop to one-cell minimum (50 runs
+≈ $1, single sensitivity datapoint). The cell-grid (300 runs) is the
+default.
 
 ---
 
@@ -684,14 +757,28 @@ Not the original "≤10%" — the experiment needs real statistical power.
 
 | Pipeline | Cells | Cost basis | Cost |
 |---|---|---|---|
-| Research | 25 topics × 5 tightness × 10 seeds = 1250 runs | ~$0.40/run | ~$500 |
-| Code-review | 30 problems × 5 tightness × 10 seeds = 1500 runs | ~$0.05/run (Gemini Flash) | ~$75 |
-| **Cross-pillar total** | **2750 runs** | — | **~$575** |
+| Research | 25 topics × 5 tightness × 10 seeds = 1250 runs | ~$0.05/run (DeepSeek v4 Flash, multi-agent ~250K tok/run) | ~$62 |
+| Code-review | 30 problems × 5 tightness × 10 seeds = 1500 runs | ~$0.015/run (DeepSeek v4 Flash, iterative ~100K tok/run) | ~$23 |
+| **Cross-pillar total** | **2750 runs** | — | **~$85** |
 
 Code-review subsamples 30 of the 70 LiveCodeBench problems for cost; the
-30 are stratified by difficulty. Full 70-problem replication is deferred
-to a journal extension. Combined with revised chamber pillar (~$200):
-**total experiment cost ~$775.** Still small in absolute terms.
+30 are stratified by difficulty. The cost is now low enough that the
+70-problem full set is genuinely cheap (~$53), so this could be
+re-evaluated during M6 — kept at 30 for now to preserve the option of
+stratified comparison to the COINE paper's own 70-problem analyses.
+
+The model migration is a one-line CLI flag — both pipelines parameterize
+`--model` and currently default to `gemini/gemini-2.5-flash-lite`.
+Cross-pillar re-runs pass `--model openrouter/deepseek/deepseek-v4-flash`
+instead. **§7's cross-pillar runs therefore use a different model than
+the COINE paper's original §8 experiments**, which is intentional: the
+cross-pillar's purpose is to test transfer of *governance behaviors*
+under a single model held constant across both pillars, not to replicate
+COINE numerically.
+
+Combined with revised chamber pillar (~$7) and the §6.7 Pro robustness
+sweep (~$5): **total experiment cost ~$97.** Real per-run cost is
+instrumented via `ResourceUsage.cost_usd` and reported in the paper.
 
 ### 7.5 Timeline impact
 
@@ -756,7 +843,7 @@ descoped (see §10). The technical strand of M1 no longer waits on Paphos.
 | M2 | 2026-06-08 → 06-21 | Adapter complete + ground-truth scoring functions | Smoke test passes: load `lt/standard` graph, run a fake agent that returns the ground truth, score reports SHD=0 and F1=1 |
 | M3 | 2026-06-22 → 07-12 | **Five** baseline agents implemented (3 weeks, was 2) | All five variants (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner) run end-to-end on a single budget cell; produce coherent adjacency-matrix outputs |
 | M4 | 2026-07-13 → 07-26 | Pilot sweep | 1 chamber × 3 budgets × 5 variants × 30 seeds = 450 runs; preliminary Pareto curve monotonic; Random sits below LLM variants as sanity check |
-| M5 | 2026-07-27 → 08-23 | Full chamber sweep | All 1800 runs (1500 CONTRACTED + 300 UNCONTRACTED) complete; 1080 are LLM-bearing; results in Parquet; headline 5-line Pareto figure generated |
+| M5 | 2026-07-27 → 08-23 | Full chamber sweep + Pro robustness | All 1800 Flash chamber runs (1500 CONTRACTED + 300 UNCONTRACTED) complete; 1080 are LLM-bearing; **300 DeepSeek v4 Pro robustness runs (§6.7) complete**; results in Parquet; headline 5-line Pareto figure (Figure 6.1) generated with Flash/Pro overlay |
 | M6 | 2026-08-24 → 09-13 | **Cross-pillar transfer study** (full section, 3 figures, was subsection) | 2750 LLM-pipeline re-runs at matched tightness; Figures 7.1, 7.2, 7.3 generated; transfer claim supported or refuted with statistical power |
 | M7 | 2026-09-14 → 09-27 | Paper extension drafted (compressed 1 week to absorb M6 expansion) | `paper/paper-extended.qmd` (or branch) contains new chamber-pillar + cross-pillar transfer sections; intro and abstract rewritten to reflect two-pillar+bridge structure |
 | M8 | 2026-09-28 → 10-XX | Submission polish | All AAMAS formatting requirements met; cover letter cites COINE acceptance; §10 1-pager attached as appendix or sidebar |
@@ -803,7 +890,7 @@ technical strand (chamber adapter scaffolding), which in turn enables M7's
 | R4 | `causalchamber` package breaks (yanked numpy 2.4.0 already a yellow flag) | Low | Low | Pin a working version range in the `chambers` extra. Vendor the offline datasets to our own storage if upstream becomes unreliable. |
 | R5 | COINE attendance reveals a substantive flaw in the framework itself | Low | High | Address in M1; if it's framework-level (not just experiment-level), reassess whether AAMAS is reachable on the original timeline or whether we need to push to ECAI 2027 only. |
 | R6 | AAMAS 2027 location announced in late May 2026 lands somewhere we can't travel to | Medium | Medium | Already mitigated by parallel ECAI 2027 (Athens, confirmed) plan. AAMAS becomes optional rather than primary if location is bad. |
-| R7 | Compute cost overruns | Very low | Low | Budget is ~$582 (chambers ~$7 with DeepSeek v4 Flash + cross-pillar ~$575); chamber overrun is trivial at any factor; cross-pillar dominates and is itself absorbable at 5×. |
+| R7 | Compute cost overruns | Effectively zero | Negligible | Budget is **~$97** (chamber $7 + cross-pillar $85 + Pro robustness $5), all at DeepSeek v4 Flash/Pro on OpenRouter. Cost is now noise relative to engineering time; even 10× overrun is absorbable. Actual cost instrumented via `ResourceUsage.cost_usd` and reported in the paper. |
 | R8 | Planner+Reasoner conservation law shows measurable but small effect over LLM+PC | Medium | Low | Report effect-size with CI rather than binary effect/no-effect framing. A small positive effect is a finding ("delegation is roughly free"); a small negative effect is also a finding ("delegation has measurable cost"). Either is publishable; the paper's framing rotates accordingly. |
 
 No risk in this list is severe enough to threaten the plan. R1 is the most
@@ -837,15 +924,6 @@ we get there:
    package, giving other framework authors a standard reference experiment
    to run. High community-impact upside but not on the critical path. Decide
    post-submission.
-6. **Whether to add a Claude Sonnet sensitivity check for model robustness.**
-   The chamber pillar uses DeepSeek v4 Flash for cost and reproducibility.
-   A reviewer may ask whether results hold for stronger models. A targeted
-   sensitivity check at one (chamber × budget) cell with all 5 variants × 10
-   seeds ≈ 100 runs at ~$20 added cost would directly defend against this
-   attack. Include if M5 finishes ahead of schedule; otherwise defer to
-   appendix or v2. The framework's claims should not depend on model choice;
-   if results diverge meaningfully across models, that is itself a finding
-   and the paper's framing rotates accordingly.
 
 ---
 
