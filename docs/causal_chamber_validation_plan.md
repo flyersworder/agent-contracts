@@ -363,10 +363,10 @@ matching the existing pattern for `litellm`, `langchain`, etc.
 
 ## 5. Agent variants and baselines under test
 
-Two axes of variation, not one. The original §5 listed three single-agent LLM
-variants (LLM-only, LLM+PC, LLM+GES); this revision adds an architecture axis
-and non-LLM baselines so the experimental design isolates the contract
-framework's contribution from the LLM's contribution.
+Five variants on two axes of variation. The matrix is sized to isolate the
+contract framework's contribution from the LLM's contribution, so the
+chamber pillar's findings are claims about *the framework* rather than
+"LLMs do causal discovery."
 
 **Axis A — architecture:** single-agent vs multi-agent. Single-agent designs
 validate that the framework can govern one agent's tool use. Multi-agent
@@ -385,7 +385,7 @@ the framework looks like a wrapper around prompting.
 |---|---|---|---|---|
 | 1 | **Random** | Single-agent | Naive | Absolute floor of the Pareto plot. Picks `k` interventions uniformly at random, runs the same graph-inference step as LLM+PC. ~50 LOC; cost ~free. |
 | 2 | **GreedyIG-lite** | Single-agent | Non-LLM, principled | Reference line for "what a principled non-LLM achieves." Fits a linear-Gaussian SCM to current data, picks the next intervention greedily by approximate variance reduction in the MAP-graph posterior (Tong & Koller 2001 in spirit; Hauser & Bühlmann 2014 in form). Full-posterior version deferred to a v2 / journal extension. |
-| 3 | **LLM-only ICL** | Single-agent | LLM throughout | Pure in-context-learning agent (Claude Sonnet via Claude Agent SDK). LLM picks each intervention and emits final adjacency matrix + edge confidences. |
+| 3 | **LLM-only** | Single-agent | LLM throughout | Pure in-context-learning (ICL) agent (**DeepSeek v4 Flash via OpenRouter**, accessed through the framework's LiteLLM integration). LLM picks each intervention and emits final adjacency matrix + edge confidences. |
 | 4 | **LLM+PC** | Single-agent | LLM-orchestrated classical | LLM plans intervention sequence; classical PC algorithm infers the graph from the resulting data. |
 | 5 | **Planner+Reasoner** ⭐ | **Multi-agent** | LLM throughout, two roles | Planner agent picks interventions under sub-budget A; Reasoner agent proposes graph under sub-budget B. **Conservation law: A + B ≤ total intervention budget.** Exercises the framework's delegation primitives. |
 
@@ -394,10 +394,24 @@ establish the Pareto landscape; variant 5 does something the alternatives
 literally cannot — enforce a budget *across* an agent boundary with
 structured violation events at the handoff.
 
-The original LLM+GES variant is dropped (per R1's "two variants is the floor"
-clause). GES adds a third method-axis cell with score-based discovery; its
-contribution is small relative to the gains from adding Random, GreedyIG-lite,
-and Planner+Reasoner.
+GES (greedy equivalence search) and other score-based discovery methods are
+deferred to a v2 / journal extension where method-axis breadth becomes the
+primary contribution. For the present submission, two principled-method
+cells (LLM+PC and the Planner+Reasoner multi-agent design) plus two non-LLM
+baselines (Random, GreedyIG-lite) and one pure-LLM ICL variant cover the
+contribution claim.
+
+**Model choice for all LLM-bearing variants: DeepSeek v4 Flash via
+OpenRouter** ($0.14/M input, $0.28/M output, 1M-token context window),
+accessed through the framework's existing LiteLLM integration. Chosen for
+(a) cost efficiency at experimental scale — ~30× cheaper than Claude Sonnet
+on a typical 25K-input/5K-output run — and (b) open-weights reproducibility,
+so third parties can re-run our experiments without Anthropic API
+credentials. The 1M context window also means the agent never has to
+truncate or summarize prior observations during an intervention sequence,
+keeping the experimental setup uncomplicated by windowing logic. Robustness
+to model choice is addressed in §6.4 (cost) and Open Question §12.6
+(sensitivity check, deferred decision).
 
 ### 5.2 Implications for the experimental matrix
 
@@ -413,7 +427,7 @@ UNCONTRACTED baseline:
   2 chambers × 5 variants × 30 seeds = 300 runs (was 180)
   Of which LLM-bearing: 3 variants × 60 cells = 180 LLM runs (unchanged)
 
-Total: 1800 runs (+67% over original 1080); LLM-bearing: 1080 (unchanged)
+Total: 1800 runs (+67% over original 1080 total); LLM-bearing: 1080 (unchanged)
 ```
 
 Random and GreedyIG-lite are CPU-only (no LLM calls) so the headline cost
@@ -421,11 +435,12 @@ stays close to the original. Planner+Reasoner roughly doubles tokens per run
 since two agents communicate. Revised chamber-pillar cost: **~$200** (was
 ~$165). See §6.4.
 
-If M5 timeline pressure forces a cut: drop GreedyIG-lite seeds from 30 to 10
-and run only 3 of 5 budget levels for it; drop Random entirely if absolutely
-necessary (it's the cheapest line to retire because nobody will fight us on
-the upper-bound). The load-bearing variants — LLM+PC and Planner+Reasoner —
-are protected.
+If M5 timeline pressure forces a cut, the cut order — from most to least
+expendable — is: (1) **LLM-only** (LLM+PC subsumes its claim for the main
+contribution), (2) **GreedyIG-lite** seeds reduced from 30 to 10 and only
+3 of 5 budget levels exercised. **The Pareto-floor + main-hybrid +
+multi-agent triplet (Random + LLM+PC + Planner+Reasoner) is protected**,
+matching R1's floor in §11.
 
 ### 5.3 Headline figure (updated)
 
@@ -435,7 +450,7 @@ carries **five lines per chamber**, each with an explicit interpretive role:
 - **Random**: absolute floor. LLM and principled methods both must clear it.
 - **GreedyIG-lite**: principled non-LLM reference. Gap between it and LLM
   variants is "what the LLM adds."
-- **LLM-only ICL**: what an LLM does *without* classical infrastructure.
+- **LLM-only**: what an LLM does *without* classical infrastructure.
 - **LLM+PC**: what an LLM does *with* classical infrastructure.
 - **Planner+Reasoner**: what the *contract framework* does when budget is
   delegated across an agent boundary.
@@ -521,27 +536,33 @@ research and code-review pipelines, for narrative consistency.
 
 ### 6.4 Cost estimate
 
-LLM cost per run varies by variant:
+LLM cost per run for the chamber pillar (DeepSeek v4 Flash via OpenRouter,
+$0.14/M input, $0.28/M output):
 
-- **LLM-only ICL**: ~$0.15/run (≈30K tokens × $5/M for Claude Sonnet)
-- **LLM+PC**: ~$0.10/run (LLM only plans; PC inference is free CPU)
-- **Planner+Reasoner**: ~$0.25/run (two LLM agents communicating)
+- **LLM-only**: ~$0.005/run (≈25K input + 5K output tokens at DeepSeek v4 Flash pricing)
+- **LLM+PC**: ~$0.003/run (LLM only plans; PC inference is free CPU)
+- **Planner+Reasoner**: ~$0.010/run (two LLM agents communicating, ~2× tokens)
 - **Random, GreedyIG-lite**: ~free (no LLM calls; CPU-only fit + selection)
 
-Total chamber-pillar LLM cost (1080 LLM-bearing runs): **~$200**. CPU cost
+Total chamber-pillar LLM cost (1080 LLM-bearing runs): **~$7**. CPU cost
 on existing development hardware is negligible — PC, GreedyIG-lite linear-
 Gaussian fitting, and selection are O(n³) at worst on a 38-node graph
-(seconds per fit). Combined with §7's cross-pillar re-runs (~$575), total
-experimental envelope is **~$775**, comfortably within R7's overrun
-tolerance.
+(seconds per fit). Combined with §7's cross-pillar re-runs (~$575, using
+the existing pipelines' incumbent models): total experimental envelope is
+**~$582**. The chamber pillar's LLM cost is now an order of magnitude
+below CPU and engineering-time cost; if cross-pillar is also migrated to
+DeepSeek v4 Flash, total drops to ~$25 and the project's compute budget
+ceases to be a meaningful constraint at all.
 
 ### 6.5 Headline figure
 
-The single figure that has to land for AAMAS reviewers: a Pareto plot with
-**intervention-budget fraction k/M on the x-axis** and **SHD on the y-axis**
-(lower = better). **Five lines per chamber** (Random, GreedyIG-lite,
-LLM-only, LLM+PC, Planner+Reasoner) with explicit interpretive roles per
-§5.3. Error bands from the 30 seeds.
+The single figure that has to land for AAMAS reviewers (**Figure 6.1**): a
+Pareto plot with **intervention-budget fraction k/M on the x-axis** and
+**SHD on the y-axis** (lower = better). **Five lines per chamber** (Random,
+GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner) with explicit
+interpretive roles per §5.3. Error bands from the 30 seeds. A companion
+calibration plot (**Figure 6.2**) reports CI coverage and mean interval
+width per variant at each budget level.
 
 What success looks like:
 
@@ -557,7 +578,7 @@ What success looks like:
   variants (validates the framework controls a meaningful resource).
 - Diminishing returns at high budget (validates that strategic intervention
   selection matters).
-- CI coverage ≥ 0.95 on the calibration sub-figure (validates the falsifiable
+- CI coverage ≥ 0.95 on **Figure 6.2** (validates the falsifiable
   uncertainty claim).
 
 ### 6.6 Reproducibility
@@ -602,9 +623,10 @@ Tightness levels from §6.1 (k/M ∈ {0.10, 0.25, 0.50, 0.75, 1.00}) map to
 LLM-pipeline budgets by *quantile-matching the agent's natural usage
 distribution*:
 
-- For each LLM pipeline, run 30 UNCONTRACTED seeds and record the empirical
-  distribution of total tool calls (research) or total iterations
-  (code-review).
+- For each LLM pipeline, derive the empirical distribution of total tool
+  calls (research) or total iterations (code-review) **from the existing
+  UNCONTRACTED runs already collected for the COINE paper** — no new
+  calibration runs required.
 - Tightness level *t* corresponds to the *t*-th percentile of that
   distribution. *t = 0.10* means "limit the agent to the 10th percentile of
   what it would naturally use."
@@ -626,15 +648,27 @@ commensurate (chamber interventions ≠ research-pipeline tool calls).
   tightness. If they do not co-decrease, variance reduction is
   domain-specific and the paper says so explicitly.
 
-**Figure 7.2 — conservation-law transfer.**
+**Figure 7.2 — conservation-law transfer (two-panel, shared y-axis).**
 
-- x-axis: delegation depth (1, 2, 3 hops in research; equivalent multi-agent
-  depth in chambers)
-- y-axis: fraction of runs where sub-agent budgets exceeded delegated
-  allocation
-- 2 lines: chamber Planner+Reasoner, research Researcher→Analyzer→Reporter
-- Pattern that earns the claim: violation rate near zero (the framework's
-  job) and bounded growth with depth.
+- y-axis (both panels): fraction of runs where the sub-agent's actual
+  budget consumption exceeded its delegated allocation.
+- **Left panel (chamber, Planner+Reasoner):** x-axis = realized sub-budget
+  split ratio A/(A+B), binned into terciles {Planner-heavy, balanced,
+  Reasoner-heavy} from the existing §6.1 runs. One line per chamber (LT,
+  WT), ~100 runs per tercile per chamber. Tests whether conservation holds
+  across the spectrum of allocation strategies the Planner adopts. **No
+  new runs required** — the Planner allocates A:B dynamically per run, and
+  we group post-hoc by realized split.
+- **Right panel (research pipeline):** x-axis = handoff position
+  (handoff 1 = Researcher→Analyzer; handoff 2 = Analyzer→Reporter). Single
+  line; data points are violation rates at each handoff aggregated across
+  the §7.4 cross-pillar runs.
+- Pattern that earns the claim: in **both panels**, violation rate stays
+  near zero (the framework's job) with bounded growth.
+- The two-panel framing is honest about the fact that "delegation pressure"
+  parameterizes differently per domain. Both panels defend the same claim
+  — *the framework's conservation laws hold across delegation* — under the
+  parameterization natural to each domain.
 
 **Figure 7.3 — runaway-prevention transfer.**
 
@@ -654,8 +688,10 @@ Not the original "≤10%" — the experiment needs real statistical power.
 | Code-review | 30 problems × 5 tightness × 10 seeds = 1500 runs | ~$0.05/run (Gemini Flash) | ~$75 |
 | **Cross-pillar total** | **2750 runs** | — | **~$575** |
 
-Combined with revised chamber pillar (~$200): **total experiment cost
-~$775.** Still small in absolute terms.
+Code-review subsamples 30 of the 70 LiveCodeBench problems for cost; the
+30 are stratified by difficulty. Full 70-problem replication is deferred
+to a journal extension. Combined with revised chamber pillar (~$200):
+**total experiment cost ~$775.** Still small in absolute terms.
 
 ### 7.5 Timeline impact
 
@@ -751,9 +787,9 @@ If — and only if — the COINE audience surfaces a substantive flaw in the
 framework itself (R5), escalate immediately and reassess the AAMAS timeline.
 Otherwise, proceed.
 
-This descoping is what frees the May 6 → May 27 window for M1's technical
-strand (chamber adapter scaffolding), which in turn enables M7's 1-week
-compression in §9.
+This descoping is what frees the entire May 6 → June 7 M1 window for the
+technical strand (chamber adapter scaffolding), which in turn enables M7's
+1-week compression in §9.
 
 ---
 
@@ -767,7 +803,7 @@ compression in §9.
 | R4 | `causalchamber` package breaks (yanked numpy 2.4.0 already a yellow flag) | Low | Low | Pin a working version range in the `chambers` extra. Vendor the offline datasets to our own storage if upstream becomes unreliable. |
 | R5 | COINE attendance reveals a substantive flaw in the framework itself | Low | High | Address in M1; if it's framework-level (not just experiment-level), reassess whether AAMAS is reachable on the original timeline or whether we need to push to ECAI 2027 only. |
 | R6 | AAMAS 2027 location announced in late May 2026 lands somewhere we can't travel to | Medium | Medium | Already mitigated by parallel ECAI 2027 (Athens, confirmed) plan. AAMAS becomes optional rather than primary if location is bad. |
-| R7 | Compute cost overruns | Very low | Low | Budget is ~$775 (chambers + cross-pillar); even 5× overrun is absorbable. |
+| R7 | Compute cost overruns | Very low | Low | Budget is ~$582 (chambers ~$7 with DeepSeek v4 Flash + cross-pillar ~$575); chamber overrun is trivial at any factor; cross-pillar dominates and is itself absorbable at 5×. |
 | R8 | Planner+Reasoner conservation law shows measurable but small effect over LLM+PC | Medium | Low | Report effect-size with CI rather than binary effect/no-effect framing. A small positive effect is a finding ("delegation is roughly free"); a small negative effect is also a finding ("delegation has measurable cost"). Either is publishable; the paper's framing rotates accordingly. |
 
 No risk in this list is severe enough to threaten the plan. R1 is the most
@@ -801,6 +837,15 @@ we get there:
    package, giving other framework authors a standard reference experiment
    to run. High community-impact upside but not on the critical path. Decide
    post-submission.
+6. **Whether to add a Claude Sonnet sensitivity check for model robustness.**
+   The chamber pillar uses DeepSeek v4 Flash for cost and reproducibility.
+   A reviewer may ask whether results hold for stronger models. A targeted
+   sensitivity check at one (chamber × budget) cell with all 5 variants × 10
+   seeds ≈ 100 runs at ~$20 added cost would directly defend against this
+   attack. Include if M5 finishes ahead of schedule; otherwise defer to
+   appendix or v2. The framework's claims should not depend on model choice;
+   if results diverge meaningfully across models, that is itself a finding
+   and the paper's framing rotates accordingly.
 
 ---
 
