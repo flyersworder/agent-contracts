@@ -1,0 +1,257 @@
+"""Causal-discovery inference helpers for the chamber pillar.
+
+Currently wraps the PC algorithm from `causal-learn` so the Random and
+LLM+PC variants in `agents.py` (and any future score-based variants) can
+share a single conversion step from raw chamber measurements to a
+directed adjacency-matrix DataFrame.
+
+Data convention used here: chamber experiments record measurements of
+all chamber variables plus an `intervention` meta-column logging which
+variable was perturbed. We pool the rows from all spent experiments and
+drop the meta-column before passing to PC. This is the simple "PC on
+pooled interventional data" baseline. M3+ may swap in interventional-
+aware methods (IPM, GIES, etc.) when method-axis breadth becomes the
+primary contribution; for the AAMAS submission, PC-on-pool is the
+single classical inference step shared across the LLM+PC and Random
+variants per plan §5.
+
+CPDAG → directed-adjacency convention:
+
+    PC outputs a CPDAG (Markov equivalence class), not a DAG. For an
+    undirected edge i — j, the data is consistent with both i → j and
+    j → i. We convert by reporting *both* directions in the binary
+    adjacency matrix, surfacing the agent's uncertainty to the SHD
+    scorer rather than making an arbitrary orientation choice. Cost:
+    exactly +1 false positive per undirected edge under the cell-wise
+    SHD convention used by `evaluation.chamber_pipeline.scoring.shd`.
+
+    causal-learn's `pc_graph[i, j]` represents the endpoint of the i—j
+    edge **at node i** (NOT j — easy to misread). Values:
+
+        pc_graph[i, j] =  1  →  arrowhead at i
+        pc_graph[i, j] = -1  →  tail at i
+        pc_graph[i, j] =  0  →  no edge
+
+    So a definite arrow i → j (head at j, tail at i) is encoded as
+    `pc_graph[j, i] = 1` (head at j) AND `pc_graph[i, j] = -1` (tail at i).
+    An undirected edge i — j is `pc_graph[i, j] = -1` AND
+    `pc_graph[j, i] = -1` (tails at both ends).
+
+    Therefore:
+        `adj[i, j] = 1` iff
+            `pc_graph[j, i] == 1`                                      (arrowhead at j from i)
+            OR (`pc_graph[i, j] == -1` AND `pc_graph[j, i] == -1`)     (undirected — both dirs)
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+# `causal-learn` is part of the chambers extra; importing it lazily so
+# tests of unrelated chamber-pipeline pieces don't fail at collection
+# time when the extra is uninstalled.
+try:
+    from causallearn.search.ConstraintBased.PC import pc as _causallearn_pc
+
+    CAUSAL_LEARN_AVAILABLE = True
+except ImportError:
+    CAUSAL_LEARN_AVAILABLE = False
+    _causallearn_pc = None  # type: ignore[assignment]
+
+
+def pool_experiment_data(experiment_dfs: list[pd.DataFrame], node_names: list[str]) -> pd.DataFrame:
+    """Concatenate per-experiment rows and project to ground-truth nodes.
+
+    Args:
+        experiment_dfs: One DataFrame per spent experiment, in spending
+            order. Each must include all columns in `node_names` (extra
+            columns are dropped).
+        node_names: The chamber's ground-truth node names. Used to align
+            and order columns so PC's index-by-position output can be
+            mapped back to node names.
+
+    Returns:
+        Single DataFrame with rows from all experiments, columns ordered
+        as `node_names`. No meta-columns.
+
+    Raises:
+        ValueError: If any experiment is missing a required node column,
+            or if `experiment_dfs` is empty.
+    """
+    if not experiment_dfs:
+        raise ValueError("experiment_dfs is empty — at least one experiment is required")
+
+    missing_per_df: list[set[str]] = []
+    for df in experiment_dfs:
+        missing = set(node_names) - set(df.columns)
+        if missing:
+            missing_per_df.append(missing)
+
+    if missing_per_df:
+        # Report only the first to keep the message tight.
+        raise ValueError(
+            f"Experiment DataFrames are missing required node columns; "
+            f"first offender missing: {sorted(missing_per_df[0])}"
+        )
+
+    # Project each DataFrame to just the node columns (drop intervention
+    # and any other meta-columns) and stack.
+    projected = [df[node_names].copy() for df in experiment_dfs]
+    pooled = pd.concat(projected, axis=0, ignore_index=True)
+    return pooled
+
+
+def cpdag_to_directed_adjacency(pc_graph: np.ndarray, node_names: list[str]) -> pd.DataFrame:
+    """Convert a `causal-learn` PC `graph` matrix into a directed adjacency DataFrame.
+
+    See module docstring for the convention. In short: undirected edges
+    become bidirectional in the output DataFrame, definite arrows stay
+    in their oriented direction.
+
+    Args:
+        pc_graph: The 2-D ndarray returned as `result.G.graph` from
+            `causallearn.search.ConstraintBased.PC.pc(...)`. Values are
+            in `{-1, 0, 1}`.
+        node_names: Ordered list of variable names; must match the
+            column ordering of the data passed to `pc(...)`.
+
+    Returns:
+        Square DataFrame with rows/columns = `node_names`, entries in
+        `{0, 1}`, diagonal forced to 0.
+    """
+    if pc_graph.shape != (len(node_names), len(node_names)):
+        raise ValueError(
+            f"pc_graph shape {pc_graph.shape} does not match len(node_names)={len(node_names)}"
+        )
+
+    # Definite arrowhead at j coming from i: pc_graph[j, i] == 1.
+    arrowhead_at_j_from_i = pc_graph.T == 1
+    # Undirected i — j: tail at both endpoints. Report both directions
+    # so the agent's lack-of-orientation surfaces to the SHD scorer.
+    undirected = (pc_graph == -1) & (pc_graph.T == -1)
+
+    adj = (arrowhead_at_j_from_i | undirected).astype(int)
+    np.fill_diagonal(adj, 0)
+    return pd.DataFrame(adj, index=node_names, columns=node_names)
+
+
+# Default row cap for run_pc. Fisher-Z is asymptotic in N — past a few
+# hundred samples on typical chamber-grade SNR, additional rows slow PC
+# without improving inference quality. Each chamber experiment is 1000
+# rows of largely-redundant samples (same intervention, slight noise
+# variation), so subsampling to a few hundred discards minimal signal.
+# At unbounded N, PC at 38 nodes by 2000 rows can take >1h; at N=300
+# it's seconds. Set max_rows=None to disable.
+DEFAULT_MAX_ROWS = 300
+
+
+def run_pc(
+    pooled_data: pd.DataFrame,
+    node_names: list[str],
+    alpha: float = 0.05,
+    indep_test: str = "fisherz",
+    show_progress: bool = False,
+    max_rows: int | None = DEFAULT_MAX_ROWS,
+    seed: int = 0,
+    **pc_kwargs: Any,
+) -> pd.DataFrame:
+    """Run PC on pooled chamber data, return directed-adjacency DataFrame.
+
+    Args:
+        pooled_data: Output of `pool_experiment_data(...)`. Must have
+            columns matching `node_names` in the same order.
+        node_names: Ordered list of node names — the chamber's
+            ground-truth row/column index.
+        alpha: Significance level for the independence test. Default
+            0.05 matches `causal-learn`'s default and standard practice.
+        indep_test: Independence test name passed to `causal-learn`.
+            `"fisherz"` (default) is the linear-Gaussian-appropriate
+            choice for chamber data.
+        show_progress: If True, `causal-learn`'s tqdm progress bars
+            are printed. Default False because they're verbose in
+            test output.
+        max_rows: If set and `pooled_data` has more rows than this,
+            subsample uniformly (with `seed`-controlled RNG) before
+            calling PC. See `DEFAULT_MAX_ROWS` rationale at module
+            level. Pass None to use all rows (slow at 38 nodes).
+        seed: RNG seed for the subsampling. Has no effect when
+            `max_rows is None` or `len(pooled_data) <= max_rows`.
+        **pc_kwargs: Forwarded to `causallearn.search.ConstraintBased.PC.pc`.
+
+    Returns:
+        Directed-adjacency DataFrame (see `cpdag_to_directed_adjacency`).
+
+    Raises:
+        ImportError: If `causal-learn` is not installed.
+        ValueError: If `pooled_data` columns don't match `node_names`.
+    """
+    if not CAUSAL_LEARN_AVAILABLE:
+        raise ImportError(
+            "causal-learn is required for PC inference. "
+            "Install with: pip install 'ai-agent-contracts[chambers]'"
+        )
+
+    if list(pooled_data.columns) != list(node_names):
+        raise ValueError(
+            "pooled_data columns must match node_names in order — "
+            "use pool_experiment_data() to build the input"
+        )
+
+    if max_rows is not None and len(pooled_data) > max_rows:
+        pooled_data = pooled_data.sample(n=max_rows, random_state=seed)
+
+    # Drop zero-variance columns. PC's Fisher-Z test produces a singular
+    # correlation matrix on constant columns and hangs (or returns
+    # garbage). This is structurally inevitable in chamber data: each
+    # experiment perturbs one variable, holding others constant, so any
+    # variable not downstream of a perturbed variable in the spent set
+    # has zero variance in the pooled view. We drop them, run PC on the
+    # remaining variables, and pad the result back to full node-set
+    # shape with zeros in the dropped rows/cols. Zero = "no signal, no
+    # claim" — the honest representation when the agent hasn't
+    # perturbed something that drives that variable.
+    variances = pooled_data.var()
+    valid_cols = [n for n in node_names if variances.get(n, 0.0) > 1e-12]
+
+    if not valid_cols:
+        # Nothing has signal — return all-zeros on the full node set.
+        return pd.DataFrame(
+            np.zeros((len(node_names), len(node_names)), dtype=int),
+            index=node_names,
+            columns=node_names,
+        )
+
+    valid_data = pooled_data[valid_cols]
+    data_array = valid_data.to_numpy(dtype=float)
+    result = _causallearn_pc(
+        data_array,
+        alpha=alpha,
+        indep_test=indep_test,
+        show_progress=show_progress,
+        verbose=False,
+        **pc_kwargs,
+    )
+    valid_adj = cpdag_to_directed_adjacency(result.G.graph, valid_cols)
+
+    if len(valid_cols) == len(node_names):
+        return valid_adj
+
+    # Pad back to full node set: zeros for dropped rows/columns.
+    full = pd.DataFrame(
+        np.zeros((len(node_names), len(node_names)), dtype=int),
+        index=node_names,
+        columns=node_names,
+    )
+    full.loc[valid_cols, valid_cols] = valid_adj.values
+    return full
+
+
+__all__ = [
+    "CAUSAL_LEARN_AVAILABLE",
+    "cpdag_to_directed_adjacency",
+    "pool_experiment_data",
+    "run_pc",
+]

@@ -54,6 +54,7 @@ claude-agent-sdk = [
     "claude-agent-sdk>=0.1.50",
 ]
 chambers = [
+    "causal-learn>=0.1.4",
     # Causal Chamber benchmark — Gamella et al. NMI 2025
     # See docs/causal_chamber_validation_plan.md for the AAMAS/ECAI 2027 pillar
     "causalchamber>=0.1.5",

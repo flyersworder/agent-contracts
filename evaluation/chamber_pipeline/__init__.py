@@ -9,18 +9,44 @@ new top-level `validators/` submodule).
 Modules:
     scoring: SHD, F1, CI-coverage scoring functions for ground-truth-based
         causal-discovery evaluation. Pure functions; no framework state.
+    inference: PC algorithm wrapper (via `causal-learn`) shared by Random,
+        GreedyIG-lite, and LLM+PC variants per plan §5.
+    agents: Five baseline variants from plan §5.1 — random_agent (M3a),
+        greedy_ig_lite_agent (M3a), llm_only_agent (M3b), llm_pc_agent
+        (M3b), planner_reasoner_agents (M3c).
 
 Future modules (M3+):
-    agents:        Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner
     orchestrator:  one experiment cell end-to-end
     run_experiment: CLI entry point for the §6.1 sweep
     analyze_results: aggregation + Pareto figure generation
 """
 
+from .agents import (
+    greedy_ig_lite_agent,
+    llm_only_agent,
+    llm_pc_agent,
+    planner_reasoner_agents,
+    random_agent,
+)
+from .inference import (
+    CAUSAL_LEARN_AVAILABLE,
+    cpdag_to_directed_adjacency,
+    pool_experiment_data,
+    run_pc,
+)
 from .scoring import ci_coverage, f1_edges, shd
 
 __all__ = [
+    "CAUSAL_LEARN_AVAILABLE",
     "ci_coverage",
+    "cpdag_to_directed_adjacency",
     "f1_edges",
+    "greedy_ig_lite_agent",
+    "llm_only_agent",
+    "llm_pc_agent",
+    "planner_reasoner_agents",
+    "pool_experiment_data",
+    "random_agent",
+    "run_pc",
     "shd",
 ]
