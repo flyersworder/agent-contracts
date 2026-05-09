@@ -33,6 +33,8 @@ import argparse
 import sys
 from typing import TYPE_CHECKING, Any
 
+from dotenv import load_dotenv
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -44,6 +46,14 @@ from .orchestrator import (
     run_sweep,
 )
 from .results import RunRecord, write_records_csv, write_records_parquet
+
+# Load .env so OPENROUTER_API_KEY (and any other auth) is available to
+# litellm.completion when LLM-bearing variants run. Idempotent: safe to
+# call at import time. Mirrors the pattern in
+# `evaluation/research_pipeline/run_experiment.py:54`. Without this,
+# `python -m evaluation.chamber_pipeline.run_experiment --pilot` would
+# fail with auth errors unless the user manually sourced .env first.
+load_dotenv()
 
 # Pre-baked sweep specs matching plan §9 milestones. CLI flags --pilot
 # and --m5 select these; --custom (the default) lets the user override
