@@ -135,6 +135,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=0.05,
         help="PC independence-test significance level. Default: 0.05.",
     )
+    parser.add_argument(
+        "--cell-timeout-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Optional per-cell wall-clock timeout. None (default) = no timeout. "
+            "Recommended for M5 sweeps to recover from rare LLM API hangs "
+            "without losing the surrounding sweep. Cells that time out are "
+            "recorded as status='error' with error_type='TimeoutError'. "
+            "Note: the underlying Python thread is NOT killed (Python doesn't "
+            "support thread cancellation); use M4c parallelism for stronger "
+            "isolation if needed."
+        ),
+    )
 
     # Output / control flags.
     parser.add_argument(
@@ -175,10 +189,26 @@ def _parse_csv_list(s: str) -> list[str]:
 
 
 def _build_sweep_from_args(args: argparse.Namespace) -> SweepSpec:
-    """Translate parsed argparse Namespace into a SweepSpec."""
+    """Translate parsed argparse Namespace into a SweepSpec.
+
+    Pre-baked specs (--pilot, --m5) ignore custom-sweep flags entirely.
+    Custom sweeps thread every CLI flag into the SweepSpec, including
+    the per-cell timeout.
+    """
     if args.pilot:
+        # Apply only the timeout override (the rest of PILOT_SPEC is
+        # plan-§9 fixed); replace via dataclasses.replace so PILOT_SPEC
+        # itself stays immutable.
+        if args.cell_timeout_seconds is not None:
+            from dataclasses import replace
+
+            return replace(PILOT_SPEC, cell_timeout_seconds=args.cell_timeout_seconds)
         return PILOT_SPEC
     if args.m5:
+        if args.cell_timeout_seconds is not None:
+            from dataclasses import replace
+
+            return replace(M5_SPEC, cell_timeout_seconds=args.cell_timeout_seconds)
         return M5_SPEC
 
     # Custom sweep.
@@ -193,38 +223,61 @@ def _build_sweep_from_args(args: argparse.Namespace) -> SweepSpec:
         seeds=tuple(range(args.seeds)),
         configuration=args.configuration,  # type: ignore[arg-type]
         pc_alpha=args.pc_alpha,
+        cell_timeout_seconds=args.cell_timeout_seconds,
     )
 
 
-def _build_mock_llm() -> Any:
-    """Construct a tiny in-process LLM fixture that picks the first
-    menu entry from each user prompt.
+class CliMockLLM:
+    """In-process LLM fixture that picks the idx-th menu entry per call.
 
-    Used for `--mock-llm` smoke testing. Mirrors the FakeLLM /
-    `_indexed_menu_responder` pattern from the M3b/M3c test files,
-    but inlined here so the CLI doesn't import test modules.
+    Used for `--mock-llm` smoke testing — exercises the full pipeline
+    end-to-end without OpenRouter spend. Promoted to module scope (vs
+    inline in `_build_mock_llm`) so users debugging the CLI can
+    instantiate it directly:
+
+        >>> from evaluation.chamber_pipeline.run_experiment import CliMockLLM
+        >>> mock = CliMockLLM()
+        >>> # pass `mock` as `llm=` to run_sweep / run_cell directly
+
+    Picks the idx-th distinct menu entry from the user prompt's
+    `Menu:\n...` block. For `llm_only`'s adjacency-emission prompt
+    (which has no menu, just node names + a JSON-format ask), emits
+    `{}` — i.e., the "no edges" baseline. This means `--mock-llm`
+    runs against `llm_only` produce all-zeros adjacencies, which is
+    fine for smoke-testing the orchestration but useless for actual
+    quality measurement (real LLM-only needs DeepSeek for that).
+
+    Mirrors the FakeLLM / `_indexed_menu_responder` pattern from the
+    M3b/M3c test files but inlined here so the CLI doesn't depend on
+    the test directory at runtime.
     """
 
-    class _CliMockLLM:
-        def __init__(self) -> None:
-            self.calls: list[dict[str, Any]] = []
+    # Menu entries across LT and WT chambers start with one of these
+    # prefixes (LT: uniform_*; WT: actuators_*, loads_*, regime_*).
+    # Conservative match — adding new chambers may need new prefixes.
+    _MENU_PREFIXES = ("uniform_", "exp_", "actuators_", "loads_", "regime_")
 
-        def __call__(self, *, model: str, messages: list[dict[str, str]], **_: Any) -> dict:
-            idx = len(self.calls)
-            self.calls.append({"model": model, "messages": messages, "idx": idx})
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
 
-            # Pick the idx-th distinct menu entry from the user prompt.
-            user_text = messages[-1]["content"]
-            menu_entries = [
-                line.strip()
-                for line in user_text.splitlines()
-                if line.strip().startswith(("uniform_", "exp_", "actuators_", "loads_", "regime_"))
-            ]
-            # llm_only's adjacency-emission prompt has no menu — emit empty graph.
-            content = menu_entries[idx % len(menu_entries)] if menu_entries else "{}"
-            return {"choices": [{"message": {"content": content}}]}
+    def __call__(self, *, model: str, messages: list[dict[str, str]], **_: Any) -> dict:
+        idx = len(self.calls)
+        self.calls.append({"model": model, "messages": messages, "idx": idx})
 
-    return _CliMockLLM()
+        user_text = messages[-1]["content"]
+        menu_entries = [
+            line.strip()
+            for line in user_text.splitlines()
+            if line.strip().startswith(self._MENU_PREFIXES)
+        ]
+        # llm_only's adjacency-emission prompt has no menu — emit empty graph.
+        content = menu_entries[idx % len(menu_entries)] if menu_entries else "{}"
+        return {"choices": [{"message": {"content": content}}]}
+
+
+def _build_mock_llm() -> CliMockLLM:
+    """Factory wrapper kept for argparse-driven CLI use."""
+    return CliMockLLM()
 
 
 def _format_record_summary(records: list[RunRecord]) -> str:
@@ -261,7 +314,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Chambers: {sweep.chambers}")
         print(f"Budget fractions: {sweep.budget_fractions}")
         print(f"Agents: {[s.name for s in sweep.selected_specs()]}")
-        print(f"Seeds: {len(sweep.seeds)} (range 0..{max(sweep.seeds)})")
+        seeds_max = max(sweep.seeds) if sweep.seeds else -1
+        print(f"Seeds: {len(sweep.seeds)} (range 0..{seeds_max})")
         print(f"Skipped cells (registry-incompatible): {len(cells) - len(compatible)}")
         return 0
 
@@ -271,28 +325,59 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Optional mocked LLM for offline smoke runs.
     llm = _build_mock_llm() if args.mock_llm else None
 
-    # Per-cell progress callback (skipped under --quiet).
+    # Per-cell progress callback. Three modes:
+    #   - --quiet        : silent
+    #   - default        : every `progress_interval` cells, print ETA + counts
+    #   - last cell      : always print final summary line
+    # The 30-60min M4b run benefits from periodic ETA updates (vs the
+    # original "dot per cell" stream which gave no time information).
+    import time as _time
+
+    sweep_t0 = _time.perf_counter()
+    progress_interval = 10  # Print every Nth cell (and on errors / on the final cell).
+    counts = {"ok": 0, "skipped": 0, "error": 0}
+
     def progress(record: RunRecord, idx: int, total: int) -> None:
+        counts[record.status] += 1
         if args.quiet:
             return
-        marker = {"ok": ".", "skipped": "s", "error": "E"}[record.status]
-        # One char per cell, line-wrapped at 80.
-        sys.stdout.write(marker)
+        # Print on intervals, on the final cell, or when an error fires
+        # (errors are interesting enough to surface immediately).
+        is_last = (idx + 1) == total
+        is_interval = (idx + 1) % progress_interval == 0
+        is_error = record.status == "error"
+        if not (is_last or is_interval or is_error):
+            return
+        elapsed = _time.perf_counter() - sweep_t0
+        rate = (idx + 1) / elapsed if elapsed > 0 else 0
+        remaining = (total - (idx + 1)) / rate if rate > 0 else 0
+        eta_min, eta_sec = divmod(int(remaining), 60)
+        elapsed_min, elapsed_sec = divmod(int(elapsed), 60)
+        prefix = "[ERROR]" if is_error else "[progress]"
+        sys.stdout.write(
+            f"{prefix} {idx + 1}/{total} cells "
+            f"(ok={counts['ok']} skipped={counts['skipped']} error={counts['error']}) "
+            f"elapsed={elapsed_min}m{elapsed_sec:02d}s "
+            f"eta={eta_min}m{eta_sec:02d}s\n"
+        )
         sys.stdout.flush()
-        if (idx + 1) % 80 == 0 or (idx + 1) == total:
-            sys.stdout.write(f" {idx + 1}/{total}\n")
-            sys.stdout.flush()
 
     records = run_sweep(sweep, llm=llm, on_cell=progress)
 
-    # Write output. Extension determines format; .parquet is the default.
+    # Write output. Extension determines format. Unrecognized extensions
+    # error out rather than silently re-appending .parquet — saves the
+    # user from getting `runs/foo.txt.parquet` when they meant
+    # `runs/foo.parquet`.
     out = args.out
     if out.endswith(".csv"):
         write_records_csv(records, out)
-    else:
-        if not out.endswith(".parquet"):
-            out = out + ".parquet"
+    elif out.endswith(".parquet"):
         write_records_parquet(records, out)
+    else:
+        parser.error(
+            f"--out must end in .parquet or .csv; got {out!r}. "
+            f"Append the desired extension explicitly."
+        )
 
     print(_format_record_summary(records))
     print(f"Wrote {len(records)} records to {out}")

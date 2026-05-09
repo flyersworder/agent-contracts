@@ -34,7 +34,10 @@ from evaluation.chamber_pipeline.orchestrator import (
     SweepSpec,
     _budget_k_for,
     _build_agent_kwargs,
+    _CountingLLM,
+    _invoke_with_timeout,
     _PcDegeneracyHandler,
+    _read_llm_metrics,
     count_cells,
     get_spec,
     iter_sweep_cells,
@@ -686,3 +689,318 @@ class TestRecordsIO:
 def test_numpy_pandas_smoke() -> None:
     assert isinstance(np.zeros(2), np.ndarray)
     assert isinstance(pd.DataFrame({"x": [1]}), pd.DataFrame)
+
+
+# ---------------------------------------------------------------------------
+# Tests added in M4a.1 (post-review polish)
+# ---------------------------------------------------------------------------
+
+
+class TestCountingLLM:
+    """Per-cell LLM proxy that counts calls + accumulates token / cost."""
+
+    def test_proxies_to_target(self) -> None:
+        captured: list[dict[str, Any]] = []
+
+        def target(*, model: str, messages: list[dict[str, str]], **_: Any) -> dict:
+            captured.append({"model": model, "messages": messages})
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        wrapper = _CountingLLM(target=target)
+        result = wrapper(model="m", messages=[{"role": "user", "content": "hi"}])
+
+        assert len(captured) == 1
+        assert result["choices"][0]["message"]["content"] == "ok"
+        assert len(wrapper.calls) == 1
+
+    def test_extracts_dict_shape_usage(self) -> None:
+        def target(**_: Any) -> dict:
+            return {
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 100, "completion_tokens": 25},
+                "_hidden_params": {"response_cost": 0.0042},
+            }
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(model="m", messages=[])
+        wrapper(model="m", messages=[])
+
+        assert wrapper.total_input_tokens == 200
+        assert wrapper.total_output_tokens == 50
+        assert wrapper.total_cost_usd == pytest.approx(0.0084)
+
+    def test_extracts_attr_shape_usage(self) -> None:
+        """LiteLLM's Pydantic-shape responses also work."""
+
+        class _Usage:
+            prompt_tokens = 30
+            completion_tokens = 10
+
+        class _Hidden:
+            response_cost = 0.001
+
+        class _Message:
+            content = "x"
+
+        class _Choice:
+            message = _Message()
+
+        from typing import ClassVar
+
+        class _Resp:
+            choices: ClassVar[list[_Choice]] = [_Choice()]
+            usage = _Usage()
+            _hidden_params = _Hidden()
+
+        def target(**_: Any) -> Any:
+            return _Resp()
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(model="m", messages=[])
+
+        assert wrapper.total_input_tokens == 30
+        assert wrapper.total_output_tokens == 10
+        assert wrapper.total_cost_usd == pytest.approx(0.001)
+
+    def test_missing_usage_does_not_raise(self) -> None:
+        """FakeLLM-style responses (no usage field) → counts stay at 0, no crash."""
+
+        def target(**_: Any) -> dict:
+            return {"choices": [{"message": {"content": "x"}}]}
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(model="m", messages=[])
+        assert len(wrapper.calls) == 1
+        assert wrapper.total_input_tokens == 0
+        assert wrapper.total_output_tokens == 0
+        assert wrapper.total_cost_usd == 0.0
+
+    def test_records_call_before_target_invocation(self) -> None:
+        """A target that raises must still leave the call recorded — useful
+        for cost-attribution audits ('I tried to call, even if it failed')."""
+
+        def target(**_: Any) -> dict:
+            raise RuntimeError("simulated API failure")
+
+        wrapper = _CountingLLM(target=target)
+        with pytest.raises(RuntimeError):
+            wrapper(model="m", messages=[])
+        assert len(wrapper.calls) == 1
+
+
+class TestReadLlmMetrics:
+    """The (n_llm_calls, tokens_in, tokens_out, cost_usd) extractor."""
+
+    def test_none_wrapper_yields_all_none(self) -> None:
+        n, ti, to, c = _read_llm_metrics(None)
+        assert (n, ti, to, c) == (None, None, None, None)
+
+    def test_wrapper_with_calls_populates_all(self) -> None:
+        wrapper = _CountingLLM(
+            target=lambda **_: {
+                "choices": [{"message": {"content": "x"}}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            }
+        )
+        wrapper(model="m", messages=[])
+        n, ti, to, c = _read_llm_metrics(wrapper)
+        assert n == 1
+        assert ti == 10
+        assert to == 5
+        assert c == 0.0  # no cost reported but tracked
+
+    def test_wrapper_with_zero_calls_yields_n_zero_tokens_none(self) -> None:
+        """LLM variant ran a budget=0 short-circuit — n_llm_calls=0 but
+        token / cost fields stay None to distinguish 'tracked zero' from
+        'no measurement'."""
+        wrapper = _CountingLLM()
+        n, ti, to, c = _read_llm_metrics(wrapper)
+        assert n == 0
+        assert ti is None
+        assert to is None
+        assert c is None
+
+
+class TestInvokeWithTimeout:
+    """Per-cell timeout wrapper around the agent invocation."""
+
+    def test_no_timeout_calls_directly(self) -> None:
+        result = _invoke_with_timeout(lambda _adapter, **kw: 42, None, {}, None)
+        assert result == 42
+
+    def test_within_timeout_returns_result(self) -> None:
+        def fast(_adapter, **_kwargs):
+            return "done"
+
+        result = _invoke_with_timeout(fast, None, {}, timeout=5.0)
+        assert result == "done"
+
+    def test_exceeds_timeout_raises_timeout_error(self) -> None:
+        import time as _time
+
+        def slow(_adapter, **_kwargs):
+            _time.sleep(2.0)
+            return "never"
+
+        with pytest.raises(TimeoutError, match="timeout"):
+            _invoke_with_timeout(slow, None, {}, timeout=0.2)
+
+
+class TestRegistryFrozen:
+    """AGENT_REGISTRY is a tuple — can't be mutated by tests or callers."""
+
+    def test_registry_is_tuple(self) -> None:
+        assert isinstance(AGENT_REGISTRY, tuple)
+
+    def test_registry_cannot_be_appended(self) -> None:
+        with pytest.raises(AttributeError):
+            AGENT_REGISTRY.append(  # type: ignore[attr-defined]
+                AgentSpec(name="rogue", run=lambda *a, **kw: None, chambers=("lt",))
+            )
+
+
+@requires_causalchamber
+class TestRunCellNewMetrics:
+    """run_cell now populates n_llm_calls + tokens + cost via _CountingLLM."""
+
+    def test_llm_pc_with_real_token_reporting(self) -> None:
+        """A FakeLLM that reports usage → tokens populated on the RunRecord."""
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+
+        del create_contracted_chamber_agent
+
+        class _UsageReportingLLM:
+            calls: list[dict[str, Any]]
+
+            def __init__(self) -> None:
+                self.calls = []
+
+            def __call__(self, *, model: str, messages: list[dict[str, str]], **_: Any) -> dict:
+                idx = len(self.calls)
+                self.calls.append({"model": model, "idx": idx})
+                user_text = messages[-1]["content"]
+                menu = [
+                    line.strip()
+                    for line in user_text.splitlines()
+                    if line.strip().startswith("uniform_")
+                ]
+                content = menu[idx % len(menu)] if menu else "{}"
+                return {
+                    "choices": [{"message": {"content": content}}],
+                    "usage": {"prompt_tokens": 100, "completion_tokens": 20},
+                    "_hidden_params": {"response_cost": 0.001},
+                }
+
+        record = run_cell(
+            spec=get_spec("llm_pc"),
+            chamber="lt",
+            configuration="standard",
+            budget_k=2,
+            seed=0,
+            llm=_UsageReportingLLM(),
+        )
+        assert record.status == "ok"
+        # 2 selection LLM calls expected → 2 x 100 = 200 input, 2 x 20 = 40 output, 2 x 0.001 = 0.002 cost
+        assert record.n_llm_calls == 2
+        assert record.tokens_in == 200
+        assert record.tokens_out == 40
+        assert record.cost_usd == pytest.approx(0.002)
+
+    def test_random_agent_has_no_llm_metrics(self) -> None:
+        record = run_cell(
+            spec=get_spec("random"),
+            chamber="lt",
+            configuration="standard",
+            budget_k=2,
+            seed=0,
+        )
+        assert record.status == "ok"
+        assert record.n_llm_calls is None
+        assert record.tokens_in is None
+        assert record.tokens_out is None
+        assert record.cost_usd is None
+
+    def test_cell_timeout_records_error(self) -> None:
+        """A slow agent + tight timeout → status='error', error_type='TimeoutError'."""
+        import time as _time
+
+        def slow_agent(_adapter, **_kwargs):
+            _time.sleep(2.0)
+            import pandas as _pd
+
+            return _pd.DataFrame()
+
+        slow_spec = AgentSpec(name="slow", run=slow_agent, chambers=("lt",), kind="non_llm")
+        record = run_cell(
+            spec=slow_spec,
+            chamber="lt",
+            configuration="standard",
+            budget_k=2,
+            seed=0,
+            cell_timeout_seconds=0.2,
+        )
+        assert record.status == "error"
+        assert record.error_type == "TimeoutError"
+        assert record.error_message is not None
+        assert "timeout" in record.error_message.lower()
+
+
+class TestRunRecordNewSchema:
+    """RunRecord has tokens_in, tokens_out, cost_usd fields (M5-stable schema)."""
+
+    def test_default_none_for_new_fields(self) -> None:
+        r = RunRecord(
+            chamber="lt",
+            configuration="standard",
+            agent_name="random",
+            budget_k=1,
+            budget_fraction=0.0,
+            seed=0,
+            status="ok",
+            started_at="2026-05-09T00:00:00",
+            finished_at="2026-05-09T00:00:01",
+        )
+        assert r.tokens_in is None
+        assert r.tokens_out is None
+        assert r.cost_usd is None
+
+    def test_to_dict_preserves_new_fields(self) -> None:
+        r = RunRecord(
+            chamber="lt",
+            configuration="standard",
+            agent_name="llm_pc",
+            budget_k=1,
+            budget_fraction=0.0,
+            seed=0,
+            status="ok",
+            started_at="2026-05-09T00:00:00",
+            finished_at="2026-05-09T00:00:01",
+            tokens_in=100,
+            tokens_out=20,
+            cost_usd=0.005,
+        )
+        d = r.to_dict()
+        assert d["tokens_in"] == 100
+        assert d["tokens_out"] == 20
+        assert d["cost_usd"] == 0.005
+
+    def test_to_dict_handles_non_serializable_extra(self) -> None:
+        """default=str fallback in json.dumps prevents mid-sweep crash."""
+        r = RunRecord(
+            chamber="lt",
+            configuration="standard",
+            agent_name="random",
+            budget_k=1,
+            budget_fraction=0.0,
+            seed=0,
+            status="ok",
+            started_at="x",
+            finished_at="x",
+            extra={"obj": np.array([1, 2, 3])},  # not normally JSON-serializable
+        )
+        # Must not raise.
+        d = r.to_dict()
+        # The numpy array got string-ified.
+        assert d["extra_json"] is not None

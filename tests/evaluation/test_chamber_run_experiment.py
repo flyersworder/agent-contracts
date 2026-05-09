@@ -22,6 +22,7 @@ from agent_contracts.integrations import CAUSAL_CHAMBER_AVAILABLE
 from evaluation.chamber_pipeline.run_experiment import (
     M5_SPEC,
     PILOT_SPEC,
+    CliMockLLM,
     _build_mock_llm,
     _build_sweep_from_args,
     build_arg_parser,
@@ -284,3 +285,106 @@ class TestErrorPaths:
     def test_missing_out_without_dry_run_errors(self) -> None:
         with pytest.raises(SystemExit):
             main(["--pilot"])
+
+
+# ---------------------------------------------------------------------------
+# Tests added in M4a.1 (post-review polish)
+# ---------------------------------------------------------------------------
+
+
+class TestCellTimeoutFlag:
+    """--cell-timeout-seconds plumbs through to the SweepSpec."""
+
+    def test_timeout_default_is_none(self) -> None:
+        parser = build_arg_parser()
+        args = parser.parse_args(["--pilot", "--out", "x.parquet"])
+        sweep = _build_sweep_from_args(args)
+        assert sweep.cell_timeout_seconds is None
+
+    def test_timeout_propagates_on_pilot(self) -> None:
+        """The pilot preset is immutable; we replace via dataclass.replace."""
+        parser = build_arg_parser()
+        args = parser.parse_args(["--pilot", "--cell-timeout-seconds", "60", "--out", "x.parquet"])
+        sweep = _build_sweep_from_args(args)
+        # Original PILOT_SPEC is unchanged.
+        assert PILOT_SPEC.cell_timeout_seconds is None
+        # New sweep has the override.
+        assert sweep.cell_timeout_seconds == 60.0
+
+    def test_timeout_propagates_on_custom(self) -> None:
+        parser = build_arg_parser()
+        args = parser.parse_args(
+            [
+                "--chambers",
+                "lt",
+                "--budgets",
+                "0.5",
+                "--seeds",
+                "1",
+                "--cell-timeout-seconds",
+                "30",
+                "--out",
+                "x.parquet",
+            ]
+        )
+        sweep = _build_sweep_from_args(args)
+        assert sweep.cell_timeout_seconds == 30.0
+
+
+class TestCliMockLlmPromoted:
+    """CliMockLLM is now a top-level class (importable for debugging)."""
+
+    def test_can_be_imported_directly(self) -> None:
+        # If this raises an ImportError, the class wasn't properly promoted.
+        from evaluation.chamber_pipeline.run_experiment import CliMockLLM as _CliMock
+
+        instance = _CliMock()
+        assert hasattr(instance, "calls")
+        assert callable(instance)
+
+    def test_records_call_count(self) -> None:
+        mock = CliMockLLM()
+        mock(model="x", messages=[{"role": "user", "content": "Menu:\nuniform_a_mid"}])
+        assert len(mock.calls) == 1
+
+
+class TestOutputExtensionValidation:
+    """--out validation: only .parquet and .csv accepted."""
+
+    def test_unrecognized_extension_errors(self) -> None:
+        with pytest.raises(SystemExit):
+            main(
+                [
+                    "--chambers",
+                    "lt",
+                    "--budgets",
+                    "0.10",
+                    "--variants",
+                    "random",
+                    "--seeds",
+                    "1",
+                    "--out",
+                    "/tmp/m4a1-bad.txt",
+                    "--quiet",
+                ]
+            )
+
+
+class TestEmptySeedsDryRun:
+    """--seeds 0 produces an empty seed range; dry-run shouldn't crash on max()."""
+
+    def test_zero_seeds_dry_run_does_not_crash(self) -> None:
+        rc = main(
+            [
+                "--chambers",
+                "lt",
+                "--budgets",
+                "0.10",
+                "--variants",
+                "random",
+                "--seeds",
+                "0",
+                "--dry-run",
+            ]
+        )
+        assert rc == 0

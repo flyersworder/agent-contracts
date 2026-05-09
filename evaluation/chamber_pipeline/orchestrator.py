@@ -35,11 +35,12 @@ Design (resolves the four open questions from M3 final review):
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import time
 import traceback
-from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from agent_contracts.integrations.causalchamber import (
@@ -123,7 +124,7 @@ class AgentSpec:
 #   - GreedyIG-lite: LT only (WT's experimental design has no discrete
 #     intervention targets — see plan §5.1 row 2 footnote and the
 #     NotImplementedError in `agents.greedy_ig_lite_agent`)
-AGENT_REGISTRY: list[AgentSpec] = [
+AGENT_REGISTRY: tuple[AgentSpec, ...] = (
     AgentSpec(
         name="random",
         run=random_agent,
@@ -160,7 +161,7 @@ AGENT_REGISTRY: list[AgentSpec] = [
         kind="llm_multi",
         extra_kwargs=("planner_budget", "reasoner_budget"),
     ),
-]
+)
 
 
 def get_spec(name: str) -> AgentSpec:
@@ -198,6 +199,107 @@ class _PcDegeneracyHandler(logging.Handler):
         # on "fell back" so wording tweaks don't silently break this.
         if "fell back" in record.getMessage().lower():
             self.count += 1
+
+
+# ---------------------------------------------------------------------------
+# LLM-call counting wrapper
+# ---------------------------------------------------------------------------
+
+
+class _CountingLLM:
+    """Per-cell LLM proxy that counts calls and accumulates token / cost.
+
+    Wraps either a user-supplied LLM callable (FakeLLM in tests) or
+    `litellm.completion` (production, lazy-imported on first call).
+    Either way, exposes `.calls` (list, length = number of invocations
+    in this cell) and three running totals
+    (`total_input_tokens`, `total_output_tokens`, `total_cost_usd`).
+
+    Why "always wrap":
+        Before this, `run_cell` had two code paths — one for the
+        FakeLLM-style `.calls` attribute, one fall-through that left
+        `n_llm_calls=None` on production runs. Always wrapping
+        unifies the paths: the orchestrator instantiates a fresh
+        `_CountingLLM` per cell, the user's LLM (if any) is invoked
+        through it, and the counter is read off the wrapper after
+        the cell finishes.
+
+    Token / cost extraction:
+        Best-effort. A response is checked for OpenAI-shaped
+        `usage.prompt_tokens` / `usage.completion_tokens` (LiteLLM
+        normalizes to this) and `_hidden_params.response_cost` (when
+        LiteLLM populates it). If any field is missing — e.g., a
+        FakeLLM whose response doesn't carry `usage` — the running
+        totals stay at zero and the orchestrator records None on the
+        RunRecord. Both dict-shape and Pydantic-attr responses are
+        accommodated, mirroring the pattern in
+        `agents.llm_planner._response_text`.
+    """
+
+    def __init__(self, target: LLMCallable | None = None) -> None:
+        # Capture the target callable (None = use real litellm.completion;
+        # resolved lazily on first call so the import cost only happens
+        # when an LLM-bearing variant actually runs).
+        self._target = target
+        self.calls: list[dict[str, Any]] = []
+        self.total_input_tokens: int = 0
+        self.total_output_tokens: int = 0
+        self.total_cost_usd: float = 0.0
+
+    def __call__(self, **kwargs: Any) -> Any:
+        if self._target is None:
+            from litellm import completion as _completion
+
+            self._target = _completion
+
+        # Record the call BEFORE invoking — even on exception we know
+        # one was attempted, which matters for cost-attribution audits.
+        idx = len(self.calls)
+        self.calls.append({"model": kwargs.get("model"), "idx": idx})
+
+        response = self._target(**kwargs)
+
+        # Best-effort usage extraction. Responses may be dict-shape
+        # (most LiteLLM responses) or Pydantic-shape (some providers).
+        # Both are tolerated; missing fields silently leave totals at 0.
+        try:
+            usage = (
+                response.get("usage", {})
+                if isinstance(response, dict)
+                else getattr(response, "usage", {}) or {}
+            )
+            in_tok = (
+                usage.get("prompt_tokens")
+                if isinstance(usage, dict)
+                else getattr(usage, "prompt_tokens", 0)
+            ) or 0
+            out_tok = (
+                usage.get("completion_tokens")
+                if isinstance(usage, dict)
+                else getattr(usage, "completion_tokens", 0)
+            ) or 0
+            self.total_input_tokens += int(in_tok)
+            self.total_output_tokens += int(out_tok)
+        except (AttributeError, TypeError, ValueError):
+            # Response shape doesn't carry usage — fine, just skip.
+            pass
+
+        try:
+            hidden = (
+                response.get("_hidden_params", {})
+                if isinstance(response, dict)
+                else getattr(response, "_hidden_params", {}) or {}
+            )
+            cost = (
+                hidden.get("response_cost", 0.0)
+                if isinstance(hidden, dict)
+                else getattr(hidden, "response_cost", 0.0)
+            ) or 0.0
+            self.total_cost_usd += float(cost)
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+        return response
 
 
 # ---------------------------------------------------------------------------
@@ -259,14 +361,15 @@ def run_cell(
     seed: int,
     pc_alpha: float = 0.05,
     llm: LLMCallable | None = None,
+    cell_timeout_seconds: float | None = None,
 ) -> RunRecord:
     """Run one cell of the sweep grid and return a RunRecord.
 
-    Catches all exceptions per cell — this method NEVER raises
-    (the orchestrator depends on per-cell isolation: one bad cell
-    must not lose the surrounding sweep). Skipped, ok, and error
-    cells all produce well-formed RunRecords with `status` set
-    accordingly.
+    Catches all exceptions per cell — this method NEVER raises (catches
+    `Exception`, not `BaseException`, so KeyboardInterrupt still
+    propagates by design — Ctrl-C should kill the sweep, not silently
+    convert to an error record). Skipped, ok, and error cells all
+    produce well-formed RunRecords with `status` set accordingly.
 
     Args:
         spec: The agent variant to run.
@@ -276,8 +379,20 @@ def run_cell(
         seed: RNG seed.
         pc_alpha: PC independence-test significance level (ignored for
             llm_only; passed through for all others).
-        llm: Injectable LLM callable. None means the agent's own
-            default is used (which lazy-imports `litellm.completion`).
+        llm: Injectable LLM callable. None means lazy-import
+            `litellm.completion` for the production path. Either way,
+            the orchestrator wraps it in a `_CountingLLM` per cell so
+            `n_llm_calls` / `tokens_in` / `tokens_out` / `cost_usd`
+            are populated on the RunRecord.
+        cell_timeout_seconds: Wall-clock timeout for the agent
+            invocation (in seconds). None = no timeout. On timeout,
+            the cell is recorded as `status="error"` with
+            `error_type="TimeoutError"`. Note: the underlying thread
+            is NOT killed (Python doesn't support thread-level
+            cancellation), but the cell's slot in the sweep is freed
+            and the next cell starts immediately. For M4b's serial
+            sweep this is acceptable; M5's parallelism case will need
+            stronger isolation.
 
     Returns:
         A RunRecord with status "ok" / "skipped" / "error".
@@ -339,12 +454,18 @@ def run_cell(
     if prev_level > logging.WARNING:
         inference_logger.setLevel(logging.WARNING)
 
-    kwargs = _build_agent_kwargs(spec, budget_k, seed, pc_alpha, llm)
-    n_llm_calls: int | None = _maybe_count_llm_calls(llm) if spec.accepts_llm else None
+    # Wrap the LLM (user-supplied or lazy-imported litellm.completion)
+    # in a per-cell _CountingLLM so n_llm_calls + tokens + cost can be
+    # populated uniformly. Non-LLM variants get None for all four.
+    counting_llm: _CountingLLM | None = None
+    if spec.accepts_llm:
+        counting_llm = _CountingLLM(target=llm)
+
+    kwargs = _build_agent_kwargs(spec, budget_k, seed, pc_alpha, counting_llm)
 
     t0 = time.perf_counter()
     try:
-        predicted = spec.run(adapter, **kwargs)
+        predicted = _invoke_with_timeout(spec.run, adapter, kwargs, cell_timeout_seconds)
         wall = time.perf_counter() - t0
 
         # Score against ground truth.
@@ -359,14 +480,7 @@ def run_cell(
         n_edges_truth = int(truth.values.sum() - truth.values.trace())
 
         finished_at = now_iso()
-        n_llm_after: int | None = _maybe_count_llm_calls(llm) if spec.accepts_llm else None
-        n_llm_calls_for_cell: int | None = None
-        if spec.accepts_llm:
-            n_llm_calls_for_cell = (
-                (n_llm_after - n_llm_calls)
-                if (n_llm_after is not None and n_llm_calls is not None)
-                else None
-            )
+        n_llm_calls_for_cell, tokens_in, tokens_out, cost_usd = _read_llm_metrics(counting_llm)
 
         # PC variants populate degeneracy count; llm_only doesn't run PC.
         n_pc_degen: int | None = None if spec.name == "llm_only" else handler.count
@@ -388,6 +502,9 @@ def run_cell(
             wall_time_seconds=wall,
             n_llm_calls=n_llm_calls_for_cell,
             n_pc_degeneracies=n_pc_degen,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            cost_usd=cost_usd,
         )
     except NotImplementedError as exc:
         # Defensive: the registry already filtered this, but the agent
@@ -449,6 +566,11 @@ class SweepSpec:
         seeds: Range of RNG seeds. Default 30 per plan §6.1.
         configuration: Chamber configuration. "standard" per §6.1.
         pc_alpha: PC independence-test significance level.
+        cell_timeout_seconds: Optional per-cell wall-clock timeout
+            forwarded to `run_cell`. None = no timeout. M4b's pilot
+            uses None (LLM calls are typically <30s); M5 should set
+            this to ~120s to recover from rare API hangs without
+            losing the surrounding sweep.
     """
 
     chambers: tuple[ChamberId, ...] = ("lt", "wt")
@@ -457,6 +579,7 @@ class SweepSpec:
     seeds: tuple[int, ...] = tuple(range(30))
     configuration: ConfigId = "standard"
     pc_alpha: float = 0.05
+    cell_timeout_seconds: float | None = None
 
     def selected_specs(self) -> list[AgentSpec]:
         """The AgentSpec list this sweep will dispatch (filtered by agent_names)."""
@@ -552,6 +675,7 @@ def run_sweep(
             seed=seed,
             pc_alpha=sweep.pc_alpha,
             llm=llm,
+            cell_timeout_seconds=sweep.cell_timeout_seconds,
         )
         records.append(record)
         if on_cell is not None:
@@ -571,22 +695,62 @@ def _truncate(text: str, n: int) -> str:
     return text[: n - 3] + "..."
 
 
-def _maybe_count_llm_calls(llm: LLMCallable | None) -> int | None:
-    """Pull the call count off a FakeLLM-shaped object, or return None.
+def _invoke_with_timeout(
+    target: Callable[..., Any],
+    adapter: Any,
+    kwargs: dict[str, Any],
+    timeout: float | None,
+) -> Any:
+    """Invoke `target(adapter, **kwargs)`, optionally with a wall-clock timeout.
 
-    Real `litellm.completion` is a function with no `.calls` attr, so
-    this returns None for it — leaving `n_llm_calls` as None for
-    production runs (M4b will plumb token-spend tracking via a
-    different mechanism, likely the existing ContractedLLM monitor).
-    For tests using FakeLLM, the call count is read off `llm.calls`.
+    With timeout=None: direct call (zero overhead — relevant for the
+    common case of the M4b/M5 pilot, where most cells complete in <1s).
+
+    With a timeout: dispatch via a single-worker ThreadPoolExecutor
+    and `future.result(timeout=...)`. The thread is NOT killed on
+    timeout (Python doesn't support thread cancellation); for the
+    serial sweep this is fine because the cell that timed out is
+    already lost and the next cell starts from a clean slate. M5
+    parallelism would need stronger isolation (process-level kill).
+
+    On timeout, raises `TimeoutError` so `run_cell`'s outer
+    `except Exception` records the cell as `status="error"` with
+    `error_type="TimeoutError"`.
     """
-    calls = getattr(llm, "calls", None)
-    if calls is None:
-        return None
-    try:
-        return len(calls)
-    except TypeError:
-        return None
+    if timeout is None:
+        return target(adapter, **kwargs)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(target, adapter, **kwargs)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError as exc:
+            raise TimeoutError(f"cell exceeded {timeout}s wall-clock timeout") from exc
+
+
+def _read_llm_metrics(
+    counting_llm: _CountingLLM | None,
+) -> tuple[int | None, int | None, int | None, float | None]:
+    """Extract (n_llm_calls, tokens_in, tokens_out, cost_usd) from a wrapper.
+
+    Returns (None, None, None, None) when the wrapper is None
+    (non-LLM variant). When the wrapper saw at least one call, all
+    four are populated — even if the wrapped target reported zero
+    tokens (e.g., FakeLLM). When the wrapper saw zero calls (LLM
+    variant ran a budget=0 short-circuit path), n_llm_calls=0 is
+    populated but token / cost fields stay None to keep "tracked
+    zero" distinguishable from "no measurement."
+    """
+    if counting_llm is None:
+        return None, None, None, None
+    n = len(counting_llm.calls)
+    if n == 0:
+        return 0, None, None, None
+    return (
+        n,
+        counting_llm.total_input_tokens,
+        counting_llm.total_output_tokens,
+        counting_llm.total_cost_usd,
+    )
 
 
 __all__ = [
@@ -600,8 +764,3 @@ __all__ = [
     "run_cell",
     "run_sweep",
 ]
-
-
-# Re-export iterables / suppress unused-import diagnostics for the
-# variables we keep available to callers via __all__.
-_ = (Iterable, field)

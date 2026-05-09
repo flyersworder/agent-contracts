@@ -80,6 +80,13 @@ class RunRecord:
             fallback fired during this cell. Captured by a logging
             handler the orchestrator installs around each cell. None
             if the cell didn't run PC at all (LLM-only variant).
+        tokens_in: Cumulative input/prompt tokens spent on this cell's
+            LLM calls. None for non-LLM variants and for cells whose
+            LLM target doesn't report a usage block (e.g., FakeLLM).
+        tokens_out: Same but for output/completion tokens.
+        cost_usd: Cumulative cost in USD for this cell's LLM calls,
+            read from `_hidden_params.response_cost` when LiteLLM
+            populates it. None when the LLM target doesn't report.
         error_type: Exception class name for "error" cells; None
             otherwise.
         error_message: First 500 chars of the exception message for
@@ -120,6 +127,18 @@ class RunRecord:
     n_llm_calls: int | None = None
     n_pc_degeneracies: int | None = None
 
+    # --- LLM cost / token tracking ---
+    # Populated by the orchestrator's _CountingLLM wrapper for cells whose
+    # agent accepts an LLM. Stay None for non-LLM variants and for cells
+    # where the LLM target didn't report a usage block (e.g., FakeLLM in
+    # tests). Real production runs against litellm's OpenAI-shape
+    # responses populate all three. Carrying them in the schema from M4
+    # forward means M4b and M5 Parquets are mergeable without a schema
+    # migration.
+    tokens_in: int | None = None
+    tokens_out: int | None = None
+    cost_usd: float | None = None
+
     # --- failure / skip context ---
     error_type: str | None = None
     error_message: str | None = None
@@ -136,11 +155,14 @@ class RunRecord:
         The `extra` dict is JSON-stringified into the `extra_json` column
         to avoid Parquet's mixed-type-column headaches. Empty extras
         produce `extra_json=None` rather than `"{}"` to keep null
-        semantics clear.
+        semantics clear. `default=str` is used as a defensive fallback
+        for non-JSON-serializable values (e.g., a numpy array
+        accidentally stuffed into `extra`) so write_records_parquet
+        doesn't raise mid-sweep on a single rogue value.
         """
         d = asdict(self)
         extra = d.pop("extra")
-        d["extra_json"] = json.dumps(extra) if extra else None
+        d["extra_json"] = json.dumps(extra, default=str) if extra else None
         return d
 
 
