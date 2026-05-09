@@ -18,7 +18,7 @@ Agents (per plan §5):
 | 2 | greedy_ig_lite     | single-agent | non-LLM, principled  | M3a ✅ |
 | 3 | llm_only           | single-agent | LLM throughout       | M3b ✅ |
 | 4 | llm_pc             | single-agent | LLM-orchestrated PC  | M3b ✅ |
-| 5 | planner_reasoner   | multi-agent  | LLM, two roles       | M3c ⏳ |
+| 5 | planner_reasoner   | multi-agent  | LLM, two roles       | M3c ✅ |
 
 The R1 mitigation order from plan §11 is reflected here: Random and
 GreedyIG-lite (no network, no API keys, fast unit tests) land first.
@@ -42,6 +42,8 @@ import pandas as pd
 from .inference import pool_experiment_data, run_pc
 from .llm_planner import (
     build_adjacency_prompt,
+    build_planner_select_prompt,
+    build_reasoner_select_prompt,
     build_select_prompt,
     parse_adjacency_response,
     parse_selection_response,
@@ -263,8 +265,11 @@ def greedy_ig_lite_agent(
 # experiments: llm_only asks the LLM to commit a graph; llm_pc routes
 # the pooled data through classical PC inference.
 #
-# Variant 5 (planner_reasoner) lands in M3c — multi-agent with
-# delegated sub-budgets under conservation A + B <= total.
+# Variant 5 (planner_reasoner) — M3c — multi-agent with delegated
+# sub-budgets under conservation A + B <= k_intervene. Reuses
+# `_llm_select_loop` for both phases, switching only the prompt
+# builder (Planner vs Reasoner system messages) and seeding the
+# Reasoner with the Planner's picks via `starting_chosen`.
 # ---------------------------------------------------------------------------
 
 
@@ -282,56 +287,93 @@ def _default_llm() -> LLMCallable:
     return completion
 
 
+# Prompt-builder type alias used by `_llm_select_loop`. Three concrete
+# implementations live in `llm_planner.py`: build_select_prompt (M3b
+# default), build_planner_select_prompt + build_reasoner_select_prompt
+# (M3c). Any callable matching this shape is acceptable; tests can pass
+# stand-ins to verify the loop's role-handoff behaviour.
+PromptBuilder = Callable[[list[str], int, list[str] | None], list[dict[str, str]]]
+
+
 def _llm_select_loop(
     adapter: ContractedChamberAgent,
     llm: LLMCallable,
     model: str,
     seed: int,
+    *,
+    spend: int | None = None,
+    starting_chosen: list[str] | None = None,
+    prompt_builder: PromptBuilder = build_select_prompt,
 ) -> tuple[list[str], list[pd.DataFrame]]:
-    """Step `budget` times: prompt LLM for one experiment, query, repeat.
+    """Step `spend` times: prompt LLM for one experiment, query, repeat.
 
-    Shared between `llm_only_agent` and `llm_pc_agent` — both spend their
-    intervention budget the same way, they only differ in what happens
-    after the loop (LLM emits adjacency vs. PC infers it).
+    Shared by all LLM-bearing variants — `llm_only_agent` (M3b),
+    `llm_pc_agent` (M3b), and the two phases of `planner_reasoner_agents`
+    (M3c). Each variant differs in: (a) which `prompt_builder` it passes
+    (Planner uses `build_planner_select_prompt` etc.), (b) whether it
+    seeds the loop with prior-phase choices via `starting_chosen`, and
+    (c) what runs *after* the loop (LLM emits adjacency vs PC infers it).
 
     Failure-tolerant: if the LLM returns an off-menu / malformed response,
     we deterministically pick a random unspent menu entry (RNG seeded with
     `seed`) and proceed. This guarantees the agent always spends exactly
-    `min(budget, len(menu))` interventions, so cross-variant comparisons
-    on the budget axis remain clean.
+    `min(spend, len(menu) - len(starting_chosen))` interventions, so
+    cross-variant comparisons on the budget axis remain clean.
 
     Args:
         adapter: Contract-wrapped chamber adapter.
         llm: LLM callable matching `litellm.completion`'s shape.
         model: Model identifier passed through to `llm(model=..., messages=...)`.
         seed: Seed for the fallback RNG (only used on bad LLM outputs).
+        spend: Override the per-tool budget (None = use adapter's full
+            `per_tool_limits["intervene"]`). Used by `planner_reasoner_agents`
+            to limit each phase to its sub-budget. The adapter's per-tool
+            enforcement still gates overall spend, so this is the
+            "soft" cap; the adapter is the "hard" cap.
+        starting_chosen: Experiments already spent by an earlier phase.
+            Excluded from this phase's selectable pool AND surfaced to
+            the LLM via the prompt's `already_chosen` block. Used by the
+            Reasoner phase to inherit the Planner's picks.
+        prompt_builder: Callable returning chat messages for the
+            selection prompt. Defaults to the M3b opaque-menu prompt.
 
     Returns:
-        `(chosen_names, experiment_dfs)` — parallel lists of length
-        `min(budget, len(menu))` in spending order.
+        `(chosen_names, experiment_dfs)` — parallel lists of just THIS
+        loop's spend (does not include `starting_chosen`).
     """
-    budget = _intervention_budget(adapter)
+    full_budget = _intervention_budget(adapter)
     menu = list(adapter.available_experiments())
 
-    if budget <= 0 or not menu:
+    if full_budget <= 0 or not menu:
+        return [], []
+
+    spend = full_budget if spend is None else spend
+    if spend <= 0:
+        return [], []
+
+    starting_chosen = list(starting_chosen or [])
+    # Cap by what's still selectable (menu minus prior-phase picks).
+    available = [m for m in menu if m not in starting_chosen]
+    actual_spend = min(spend, len(available))
+    if actual_spend <= 0:
         return [], []
 
     rng = _random.Random(seed)
-    spent = min(budget, len(menu))
-
     chosen: list[str] = []
     dfs: list[pd.DataFrame] = []
-    for step in range(spent):
-        remaining = spent - step
-        messages = build_select_prompt(menu, remaining_budget=remaining, already_chosen=chosen)
+    for step in range(actual_spend):
+        remaining = actual_spend - step
+        # Compose the "already chosen" view: prior phase + this phase so far.
+        all_chosen = starting_chosen + chosen
+        messages = prompt_builder(menu, remaining, all_chosen)
         response = llm(model=model, messages=messages)
         name = parse_selection_response(response, menu)
 
-        if name is None or name in chosen:
+        if name is None or name in all_chosen:
             # Fallback: random unspent. If everything is spent (LLM kept
             # picking duplicates and the menu is exhausted), fall back to
             # random over the full menu so we still spend the slot.
-            unspent = [m for m in menu if m not in chosen]
+            unspent = [m for m in menu if m not in all_chosen]
             name = rng.choice(unspent) if unspent else rng.choice(menu)
 
         chosen.append(name)
@@ -445,18 +487,164 @@ def planner_reasoner_agents(
     reasoner_budget: int,
     model: str = "openrouter/deepseek/deepseek-v4-flash",
     seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
 ) -> pd.DataFrame:
-    """Planner + Reasoner under conservation A + B ≤ total. M3c stub.
+    """Planner + Reasoner under conservation A + B <= total. Plan §5.1 variant 5.
 
-    Plan §5.1 variant 5 — the contribution-load-bearing variant.
-    Planner agent picks interventions under sub-budget A; Reasoner
-    agent proposes graph under sub-budget B. Conservation law:
-    A + B ≤ adapter's total intervention budget.
+    The contribution-load-bearing variant. Two LLM-driven phases share
+    the chamber adapter's intervention budget under an explicit
+    conservation law (A + B <= k_intervene), and a single PC inference
+    consumes the union of the experiments both phases queried. The
+    headline comparison vs. `llm_pc_agent` (variant 4) is plan §5.3:
+    if Planner+Reasoner sits on or above LLM+PC at matched total
+    budget, that's direct evidence the framework's conservation laws
+    preserve quality under delegation.
 
-    Exercises the framework's delegation primitives, not just
-    `per_tool_limits`. AAMAS-fit relies on this variant.
+    Phase split:
+        - Planner (budget A): broad exploration. Sees the chamber menu
+          and a planner-framed system message asking it to pick
+          experiments that give the Reasoner a useful baseline.
+        - Reasoner (budget B): targeted refinement. Sees the menu plus
+          the Planner's picks (via the prompt's `already_chosen` block)
+          and a reasoner-framed system message asking it to pick
+          experiments that complement the Planner's choices.
+        - Inference: PC on the pooled data of all (A + B) experiments.
+          Same inference step as `llm_pc_agent` to keep the §5.3
+          comparison clean — only the *selection policy* differs.
+
+    Conservation enforcement:
+        - Upfront check: A + B <= k. Violations raise
+          `ConservationViolationError` BEFORE any LLM call (no spend
+          on a contract that can't legally execute).
+        - Audit trail: both sub-budgets are recorded as
+          `ContractingCapability.create_subcontract` allocations on
+          the parent adapter's contract, exercising the framework's
+          delegation primitive (per plan §5 line 76-77). The framework's
+          built-in conservation check is on tokens; here we additionally
+          gate on `per_tool_limits`, since the chamber pillar's
+          budgeted axis is interventions, not tokens.
+
+    Args:
+        adapter: Contract-wrapped chamber adapter. Its
+            `per_tool_limits["intervene"]` is the total k that
+            A + B must satisfy.
+        planner_budget: A — interventions allocated to the Planner.
+            Non-negative. A=0 means the Reasoner runs alone.
+        reasoner_budget: B — interventions allocated to the Reasoner.
+            Non-negative. B=0 means the Planner runs alone (the
+            variant degenerates to llm_pc with budget A).
+        model: LiteLLM model identifier. Defaults per plan §5.
+        seed: RNG seed for both phases' fallback paths and PC's
+            row-subsampling. Both phases share the seed; randomness
+            is only used on bad LLM outputs.
+        pc_alpha: PC independence-test significance level.
+        llm: Injectable LLM callable for testing.
+
+    Returns:
+        Directed-adjacency DataFrame indexed by chamber node names.
+
+    Raises:
+        ValueError: If either sub-budget is negative.
+        ConservationViolationError: If A + B > k_intervene.
     """
-    raise NotImplementedError("M3c — see docs/causal_chamber_validation_plan.md §9 milestone M3.")
+    # Local import to avoid pulling delegation framework into module
+    # top-level (keeps the M3a non-LLM path zero-dep). The delegation
+    # primitives are first used at M3c, not before.
+    from agent_contracts.core.delegation import (
+        ConservationViolationError,
+        ContractingCapability,
+    )
+
+    if planner_budget < 0 or reasoner_budget < 0:
+        raise ValueError(
+            f"Sub-budgets must be non-negative; got planner={planner_budget}, "
+            f"reasoner={reasoner_budget}"
+        )
+
+    nodes = _node_names(adapter)
+    total = _intervention_budget(adapter)
+
+    # Conservation enforcement on per-tool budget. The framework's
+    # ContractingCapability enforces conservation on tokens / cost; the
+    # chamber pillar's resource axis is interventions. We enforce
+    # manually here so the AAMAS conservation-law claim covers the
+    # actually-budgeted axis.
+    if planner_budget + reasoner_budget > total:
+        raise ConservationViolationError(
+            message=(
+                f"Conservation violated for chamber adapter "
+                f"'{adapter.contract.id}': planner_budget ({planner_budget}) + "
+                f"reasoner_budget ({reasoner_budget}) = "
+                f"{planner_budget + reasoner_budget} exceeds total "
+                f"intervention budget ({total})."
+            ),
+            requested=planner_budget + reasoner_budget,
+            available=total,
+            parent_id=adapter.contract.id,
+        )
+
+    if total <= 0 or not adapter.available_experiments():
+        return _empty_adjacency(nodes)
+
+    # Audit-trail allocations via the framework's delegation primitive.
+    # Per-tool conservation is enforced above (the framework primitive
+    # only checks tokens / cost), but recording the allocations is what
+    # the AAMAS plan calls out (§5 line 77: "delegation primitives —
+    # not just per_tool_limits — are exercised").
+    capability = ContractingCapability(
+        parent_contract=adapter.contract,
+        parent_monitor=adapter._resource_monitor,
+    )
+    capability.create_subcontract(
+        name="planner",
+        per_tool_limits={"intervene": planner_budget},
+        description=(f"Chamber Planner: broad-exploration phase, sub-budget A={planner_budget}"),
+    )
+    capability.create_subcontract(
+        name="reasoner",
+        per_tool_limits={"intervene": reasoner_budget},
+        description=(
+            f"Chamber Reasoner: targeted-refinement phase, sub-budget B={reasoner_budget}"
+        ),
+    )
+
+    llm = llm or _default_llm()
+
+    # Phase 1 — Planner: broad exploration under sub-budget A.
+    planner_chosen, planner_dfs = _llm_select_loop(
+        adapter,
+        llm,
+        model,
+        seed,
+        spend=planner_budget,
+        starting_chosen=None,
+        prompt_builder=build_planner_select_prompt,
+    )
+
+    # Phase 2 — Reasoner: refines based on Planner's picks under sub-budget B.
+    # `starting_chosen` carries the Planner's selections into the
+    # Reasoner's prompt (the role-handoff signal) and excludes them from
+    # the Reasoner's selectable pool.
+    _reasoner_chosen, reasoner_dfs = _llm_select_loop(
+        adapter,
+        llm,
+        model,
+        seed,
+        spend=reasoner_budget,
+        starting_chosen=planner_chosen,
+        prompt_builder=build_reasoner_select_prompt,
+    )
+
+    # Phase 3 — Inference: PC on pooled data from BOTH phases. Same
+    # inference step as llm_pc_agent so the §5.3 comparison reads
+    # cleanly (only the selection policy differs across the two cells).
+    all_dfs = planner_dfs + reasoner_dfs
+    if not all_dfs:
+        return _empty_adjacency(nodes)
+    pooled = pool_experiment_data(all_dfs, nodes)
+    return run_pc(pooled, nodes, alpha=pc_alpha, seed=seed)
 
 
 __all__ = [

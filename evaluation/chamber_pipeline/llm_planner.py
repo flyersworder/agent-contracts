@@ -112,6 +112,69 @@ def build_select_prompt(
     ]
 
 
+# ---------------------------------------------------------------------------
+# Two-role variants used by the Planner+Reasoner agents (M3c).
+#
+# Both phases reuse `build_select_prompt`'s user-message structure (menu,
+# remaining budget, already-chosen list) and only override the system
+# message to communicate the role. This keeps the diff against M3b small
+# and means every parsing-side fix in `parse_selection_response` applies
+# uniformly across all three LLM-bearing variants.
+# ---------------------------------------------------------------------------
+
+
+_PLANNER_SYSTEM_MESSAGE = (
+    "You are the Planner in a two-agent causal-discovery design. You will "
+    "pick interventional experiments first, then a Reasoner agent will "
+    "pick additional experiments informed by your choices. Your task is "
+    "to pick experiments that give the Reasoner a useful baseline to "
+    "build on — prioritize broad coverage of distinct perturbed variables "
+    "over depth on any one variable. The experiment names encode what "
+    "each one perturbs and how strongly."
+)
+
+_REASONER_SYSTEM_MESSAGE = (
+    "You are the Reasoner in a two-agent causal-discovery design. The "
+    "Planner has already selected the experiments shown in the "
+    "'Already spent' block below. Your task is to pick ONE additional "
+    "experiment that best complements the Planner's choices — focus on "
+    "gaps in coverage or experiments that would help disambiguate the "
+    "graph structure suggested by the Planner's picks. The experiment "
+    "names encode what each one perturbs and how strongly."
+)
+
+
+def build_planner_select_prompt(
+    menu: list[str],
+    remaining_budget: int,
+    already_chosen: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Selection prompt for the Planner phase of `planner_reasoner_agents` (M3c).
+
+    Same user message as `build_select_prompt`; system message is replaced
+    to frame the role — pick for coverage, knowing a Reasoner will refine.
+    """
+    msgs = build_select_prompt(menu, remaining_budget, already_chosen)
+    msgs[0]["content"] = _PLANNER_SYSTEM_MESSAGE
+    return msgs
+
+
+def build_reasoner_select_prompt(
+    menu: list[str],
+    remaining_budget: int,
+    already_chosen: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Selection prompt for the Reasoner phase of `planner_reasoner_agents` (M3c).
+
+    Same user message as `build_select_prompt`; system message is replaced
+    to frame the role — refine based on the Planner's picks (which appear
+    in the user message's `already_chosen` block).
+    """
+    msgs = build_select_prompt(menu, remaining_budget, already_chosen)
+    msgs[0]["content"] = _REASONER_SYSTEM_MESSAGE
+    return msgs
+
+
 def parse_selection_response(response: Any, menu: list[str]) -> str | None:
     """Extract one valid experiment name from an LLM completion response.
 
@@ -288,6 +351,8 @@ def _response_text(response: Any) -> str:
 
 __all__ = [
     "build_adjacency_prompt",
+    "build_planner_select_prompt",
+    "build_reasoner_select_prompt",
     "build_select_prompt",
     "parse_adjacency_response",
     "parse_selection_response",

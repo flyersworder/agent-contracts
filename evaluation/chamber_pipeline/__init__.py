@@ -38,6 +38,8 @@ from .inference import (
 )
 from .llm_planner import (
     build_adjacency_prompt,
+    build_planner_select_prompt,
+    build_reasoner_select_prompt,
     build_select_prompt,
     parse_adjacency_response,
     parse_selection_response,
@@ -47,6 +49,8 @@ from .scoring import ci_coverage, f1_edges, shd
 __all__ = [
     "CAUSAL_LEARN_AVAILABLE",
     "build_adjacency_prompt",
+    "build_planner_select_prompt",
+    "build_reasoner_select_prompt",
     "build_select_prompt",
     "ci_coverage",
     "cpdag_to_directed_adjacency",
