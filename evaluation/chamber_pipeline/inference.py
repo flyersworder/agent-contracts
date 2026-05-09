@@ -54,13 +54,16 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 # The exact error phrase causal-learn's Fisher-Z raises on a singular
-# sub-correlation matrix. Used as a tight substring filter so the
-# fallback path doesn't accidentally swallow unrelated future ValueErrors
-# from causal-learn that happen to mention "singular" elsewhere in their
-# message (e.g., a hypothetical "singular value decomposition input
-# invalid"). Verified against causallearn==0.1.4 at
-# .venv/lib/.../causallearn/utils/cit.py:218 and :482.
+# sub-correlation matrix (verified against causallearn==0.1.4 at
+# .venv/lib/.../causallearn/utils/cit.py:218 and :482) and the phrase
+# numpy raises from `np.linalg.inv` on a singular input matrix.
+# Both are matched as tight substring filters so the fallback path
+# doesn't accidentally swallow unrelated future errors that happen to
+# mention "singular" elsewhere in their message (e.g., a hypothetical
+# "singular value decomposition did not converge" from a different code
+# path in numpy or causal-learn).
 _FISHERZ_SINGULAR_PHRASE = "correlation matrix is singular"
+_LINALG_SINGULAR_PHRASE = "singular matrix"
 
 # `causal-learn` is part of the chambers extra; importing it lazily so
 # tests of unrelated chamber-pipeline pieces don't fail at collection
@@ -254,12 +257,23 @@ def run_pc(
         # experiments perturb downstream variables that are deterministic
         # functions of each other in the spent set). The honest fallback
         # is "PC made no claim" -> all-zeros adjacency on the full node
-        # set. Re-raise other ValueErrors so genuine input bugs still
-        # surface — only the exact Fisher-Z singular message is swallowed.
-        is_singular_value_error = (
-            isinstance(exc, ValueError) and _FISHERZ_SINGULAR_PHRASE in str(exc).lower()
-        )
-        if isinstance(exc, ValueError) and not is_singular_value_error:
+        # set.
+        #
+        # Both error types are filtered on a specific phrase so unrelated
+        # bugs (a non-singular ValueError from causal-learn input
+        # validation, or a non-singular LinAlgError from a different
+        # numpy code path) still surface as exceptions rather than
+        # silent zero-adjacency results. The two phrases cover both
+        # legs of the failure: causal-learn raises ValueError with
+        # `_FISHERZ_SINGULAR_PHRASE` when its `np.linalg.inv` fails;
+        # numpy may also surface the underlying `LinAlgError("Singular
+        # matrix")` directly if the inversion happens outside
+        # causal-learn's wrapper.
+        msg = str(exc).lower()
+        is_known_singular_failure = (
+            isinstance(exc, ValueError) and _FISHERZ_SINGULAR_PHRASE in msg
+        ) or (isinstance(exc, np.linalg.LinAlgError) and _LINALG_SINGULAR_PHRASE in msg)
+        if not is_known_singular_failure:
             raise
         # Log for M5 sweep visibility — degenerate-cell counts are
         # publishable as a finding ("X% of cells under variant V at

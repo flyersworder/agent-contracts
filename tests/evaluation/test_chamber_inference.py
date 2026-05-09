@@ -241,3 +241,47 @@ class TestSingularFallbackLogging:
         assert any("fell back" in m.lower() for m in warning_messages), (
             f"Expected fallback warning; got: {warning_messages}"
         )
+
+
+@requires_causal_learn
+class TestUnknownLinAlgErrorReraise:
+    """Verify that LinAlgErrors NOT matching the singular-matrix phrase re-raise.
+
+    The previous polish only filtered ValueErrors on phrase; LinAlgErrors
+    were silently swallowed regardless of message. This test pins the
+    new tighter behaviour against regression — using monkeypatch to
+    inject a LinAlgError with an unrelated message (e.g., a hypothetical
+    "SVD did not converge") and verifying it propagates.
+    """
+
+    def test_unknown_linalg_error_propagates(self, monkeypatch) -> None:
+        """A LinAlgError with a non-singular message must NOT be swallowed."""
+        from evaluation.chamber_pipeline import inference
+
+        def raising_pc(*args, **kwargs):
+            raise np.linalg.LinAlgError("SVD did not converge")
+
+        monkeypatch.setattr(inference, "_causallearn_pc", raising_pc)
+        # Construct minimal valid input.
+        rng = np.random.default_rng(0)
+        data = pd.DataFrame({"x": rng.standard_normal(50), "y": rng.standard_normal(50)})
+        with pytest.raises(np.linalg.LinAlgError, match="SVD did not converge"):
+            run_pc(data, ["x", "y"])
+
+    def test_unknown_value_error_propagates(self, monkeypatch) -> None:
+        """A ValueError with a non-fisherz-singular message must NOT be swallowed.
+
+        Already true pre-polish, but pinned here as a regression guard
+        because the singular-failure logic in run_pc now mixes both
+        exception types in one filter expression — easy to break.
+        """
+        from evaluation.chamber_pipeline import inference
+
+        def raising_pc(*args, **kwargs):
+            raise ValueError("input array contains nan")
+
+        monkeypatch.setattr(inference, "_causallearn_pc", raising_pc)
+        rng = np.random.default_rng(0)
+        data = pd.DataFrame({"x": rng.standard_normal(50), "y": rng.standard_normal(50)})
+        with pytest.raises(ValueError, match="contains nan"):
+            run_pc(data, ["x", "y"])

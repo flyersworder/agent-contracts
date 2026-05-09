@@ -430,16 +430,19 @@ The §6.1 cell count grows but only LLM-bearing cells incur real cost:
 
 ```
 CONTRACTED Pareto sweep:
-  2 chambers × 5 budget levels × 5 variants × 30 seeds = 1500 runs
-  (was 900 with 3 variants; +600 from net +2 variants — added Random,
-  GreedyIG-lite, Planner+Reasoner; dropped LLM+GES)
-  Of which LLM-bearing: 3 variants × 300 cells = 900 LLM runs (unchanged)
+  LT: 1 chamber × 5 budget levels × 5 variants × 30 seeds = 750 runs
+  WT: 1 chamber × 5 budget levels × 4 variants × 30 seeds = 600 runs
+  (WT skips variant 2 — GreedyIG-lite is LT-only per §5.1)
+  Total CONTRACTED:                                       1350 runs
+  Of which LLM-bearing: 3 variants × 300 cells          =  900 LLM runs
 
 UNCONTRACTED baseline:
-  2 chambers × 5 variants × 30 seeds = 300 runs (was 180)
-  Of which LLM-bearing: 3 variants × 60 cells = 180 LLM runs (unchanged)
+  LT: 1 chamber × 5 variants × 30 seeds = 150 runs
+  WT: 1 chamber × 4 variants × 30 seeds = 120 runs (variant 2 skipped)
+  Total UNCONTRACTED:                     270 runs
+  Of which LLM-bearing: 3 variants × 60 cells = 180 LLM runs
 
-Total: 1800 runs (+67% over original 1080 total); LLM-bearing: 1080 (unchanged)
+Total: 1620 runs; LLM-bearing: 1080 (unchanged — variant 2 is non-LLM)
 ```
 
 Random and GreedyIG-lite are CPU-only (no LLM calls). Planner+Reasoner
@@ -457,7 +460,8 @@ matching R1's floor in §11.
 ### 5.3 Headline figure (updated)
 
 The Pareto plot — x-axis intervention-budget-fraction k/M, y-axis SHD —
-carries **five lines per chamber**, each with an explicit interpretive role:
+carries **five lines for LT, four for WT** (variant 2 / GreedyIG-lite
+is LT-only per §5.1). Each line has an explicit interpretive role:
 
 - **Random**: absolute floor. LLM and principled methods both must clear it.
 - **GreedyIG-lite**: principled non-LLM reference. Gap between it and LLM
@@ -491,20 +495,26 @@ comparable across chambers despite different absolute menu sizes
 × 5 budget levels   (k/M ∈ {0.10, 0.25, 0.50, 0.75, 1.00})
                     → LT: k ∈ {6, 15, 30, 45, 59}
                     → WT: k ∈ {3,  7, 14, 21, 28}
-× 5 agent variants  (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner)
+× agent variants    LT: 5 (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner)
+                    WT: 4 (variant 2 / GreedyIG-lite skipped — LT-only per §5.1)
 × 30 seeds          (statistical power)
-= 1500 runs
-   of which 900 are LLM-bearing (3 LLM variants × 300 cells)
+= LT: 1 × 5 × 5 × 30 =  750 runs
++ WT: 1 × 5 × 4 × 30 =  600 runs
+                     = 1350 runs total
+   of which 900 are LLM-bearing (3 LLM variants × 300 cells; variant 2
+   is non-LLM and its WT-skip leaves the LLM-bearing count unchanged)
 ```
 
 **UNCONTRACTED baseline** (single point per agent, for §6.2 comparison):
 
 ```
-2 chambers × 5 agent variants × 30 seeds = 300 runs
+LT: 1 × 5 × 30 = 150 runs
+WT: 1 × 4 × 30 = 120 runs (variant 2 skipped per §5.1)
+             = 270 runs
    of which 180 are LLM-bearing
 ```
 
-**Total: 1800 runs (1080 LLM-bearing).**
+**Total: 1620 runs (1080 LLM-bearing).**
 
 (WT `pressure-control` configuration has only 1 dataset experiment available
 — too few for a budget sweep — so it's excluded from the main grid. May be
@@ -568,8 +578,8 @@ v4 Pro ($0.435/$0.870 per M tok) at cell-grid scope.
 
 **§6.7 DeepSeek v4 Pro robustness sweep:**
 
-- 300 Pro runs at cell-grid scope (2 chambers × 3 budget levels × 5 variants
-  × 10 seeds): ~$5
+- 270 Pro runs at cell-grid scope (LT: 3 budgets × 5 variants × 10 seeds = 150;
+  WT: 3 budgets × 4 variants × 10 seeds = 120 — variant 2 LT-only): ~$5
 
 **Cost totals:**
 
@@ -579,8 +589,8 @@ v4 Pro ($0.435/$0.870 per M tok) at cell-grid scope.
 | §7.2 cross-pillar tightness calibration (Flash UNCONTRACTED) | 165 | ~$6 |
 | Cross-pillar research re-runs (Flash) | 1250 | ~$62 |
 | Cross-pillar code-review re-runs (Flash) | 1500 | ~$23 |
-| Pro robustness sweep (cell-grid) | 300 | ~$5 |
-| **Grand total** | **4295 LLM runs** | **~$103** |
+| Pro robustness sweep (cell-grid) | 270 | ~$5 |
+| **Grand total** | **4265 LLM runs** | **~$103** |
 
 CPU cost on existing development hardware is negligible — PC, GreedyIG-lite
 linear-Gaussian fitting, and selection are O(n³) at worst on a 38-node
@@ -639,10 +649,11 @@ a subset of the chamber Pareto sweep at the **cell-grid scope**:
 - 2 chambers (LT, WT, both standard configuration)
 - 3 budget levels (k/M ∈ {0.10, 0.50, 1.00} — endpoints + midpoint of
   the five-level Flash sweep)
-- 5 variants (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner)
+- variants: 5 on LT (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner),
+  4 on WT (variant 2 / GreedyIG-lite is LT-only per §5.1)
 - 10 seeds (reduced from 30 since Pro is for capacity-axis comparison,
   not primary statistical claims)
-- = **300 Pro runs at ~$5**
+- = LT: 3 × 5 × 10 = 150 + WT: 3 × 4 × 10 = 120 = **270 Pro runs at ~$5**
 
 The 3-level subset is chosen so the Pareto plot at Pro capacity remains
 interpretable (low-, mid-, high-budget points) while keeping run count
@@ -857,8 +868,8 @@ descoped (see §10). The technical strand of M1 no longer waits on Paphos.
 | M1 | 2026-05-06 → 06-07 | Chamber adapter scaffolding (pulled forward; COINE feedback strand descoped per §10) | `integrations/causalchamber.py` stub committed; `chambers` extra in `pyproject.toml`; failing smoke test exists; §12 Q1+Q2 decisions documented based on a read of existing integrations |
 | M2 | 2026-06-08 → 06-21 | Adapter complete + ground-truth scoring functions | Smoke test passes: load `lt/standard` graph, run a fake agent that returns the ground truth, score reports SHD=0 and F1=1 |
 | M3 | 2026-06-22 → 07-12 | **Five** baseline agents implemented (3 weeks, was 2) | All five variants (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner) run end-to-end on a single budget cell; produce coherent adjacency-matrix outputs |
-| M4 | 2026-07-13 → 07-26 | Pilot sweep | 1 chamber × 3 budgets × 5 variants × 30 seeds = 450 runs; preliminary Pareto curve monotonic; Random sits below LLM variants as sanity check |
-| M5 | 2026-07-27 → 08-23 | Full chamber sweep + Pro robustness | All 1800 Flash chamber runs (1500 CONTRACTED + 300 UNCONTRACTED) complete; 1080 are LLM-bearing; **300 DeepSeek v4 Pro robustness runs (§6.7) complete**; results in Parquet; headline 5-line Pareto figure (Figure 6.1) generated with Flash/Pro overlay |
+| M4 | 2026-07-13 → 07-26 | Pilot sweep | LT chamber × 3 budgets × 5 variants × 30 seeds = 450 runs (LT chosen so all 5 variants run; WT pilot would have only 4 since variant 2 is LT-only per §5.1); preliminary Pareto curve monotonic; Random sits below LLM variants as sanity check |
+| M5 | 2026-07-27 → 08-23 | Full chamber sweep + Pro robustness | All 1620 Flash chamber runs (1350 CONTRACTED + 270 UNCONTRACTED; LT 5 variants, WT 4 variants per §5.1) complete; 1080 are LLM-bearing; **270 DeepSeek v4 Pro robustness runs (§6.7) complete**; results in Parquet; headline Pareto figure (Figure 6.1: 5 lines for LT, 4 for WT) generated with Flash/Pro overlay |
 | M6 | 2026-08-24 → 09-13 | **Cross-pillar transfer study** (full section, 3 figures, was subsection) | DeepSeek-Flash calibration sweep complete (§7.2, ~165 UNCONTRACTED runs, ~half-day); 2750 LLM-pipeline re-runs at matched tightness; Figures 7.1, 7.2, 7.3 generated; transfer claim supported or refuted with statistical power |
 | M7 | 2026-09-14 → 09-27 | Paper extension drafted (compressed 1 week to absorb M6 expansion) | `paper/paper-extended.qmd` (or branch) contains new chamber-pillar + cross-pillar transfer sections; intro and abstract rewritten to reflect two-pillar+bridge structure |
 | M8 | 2026-09-28 → 10-XX | Submission polish | All AAMAS formatting requirements met; cover letter cites COINE acceptance; §10 1-pager attached as appendix or sidebar |

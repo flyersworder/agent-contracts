@@ -17,6 +17,19 @@ Modules:
         greedy_ig_lite_agent (M3a), llm_only_agent (M3b), llm_pc_agent
         (M3b), planner_reasoner_agents (M3c).
 
+Agent calling convention (the contract M4's orchestrator dispatches against):
+    Each agent is a callable `agent(adapter, **agent_kwargs) -> pd.DataFrame`
+    that:
+      - Reads its budget from `adapter.contract.resources.per_tool_limits["intervene"]`
+      - Spends some prefix of that budget via `adapter.query_intervention(...)`
+      - Returns a directed-adjacency DataFrame indexed by the chamber's
+        ground-truth node names (`adapter.ground_truth().index`), with
+        entries in {0, 1} and the diagonal forced to 0.
+    Variant-specific kwargs (e.g., `model`, `llm`, `pc_alpha`,
+    `planner_budget`) are documented per-agent. Agents may raise
+    `NotImplementedError` when incompatible with a chamber (e.g.,
+    GreedyIG-lite on WT — see plan §5.1 variant 2).
+
 Future modules (M4+):
     orchestrator:  one experiment cell end-to-end (M4 pilot sweep)
     run_experiment: CLI entry point for the §6.1 sweep (M4)
