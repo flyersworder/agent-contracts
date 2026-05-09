@@ -25,10 +25,18 @@ This document tracks development progress and key decisions for the Agent Contra
 **Claude Agent SDK**: Anthropic-native integration (Mar 27) ✅
 **PyPI Release**: Published as `ai-agent-contracts` (Mar 26) ✅
 
+**Causal Chamber pillar** (AAMAS 2027 / ECAI 2027 extension):
+- **M1**: Adapter scaffolding (May 6) ✅
+- **M2**: Adapter implementation + scoring (May 6) ✅
+- **M3a/b/c**: 5 baseline agents (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner) (May 8) ✅
+- **Per-tool conservation**: framework refactor for `ContractingCapability` (May 8) ✅
+- **M4a/a.1**: Orchestrator + AgentSpec registry + CLI + analyzer (May 9) ✅
+- **M4b smoke + pilot**: Pending (operational fixes for OpenRouter throttling shipped; ready to run)
+
 **Metrics**:
-- **Tests**: 623+ passing
+- **Tests**: 1029 passing (chamber pillar adds ~250 tests on top of the framework's ~780)
 - **Coverage**: 81%+
-- **Integrations**: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK
+- **Integrations**: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, **Causal Chambers**
 
 ## Core Framework (Phase 1)
 
@@ -284,31 +292,39 @@ agent-contracts/
 
 ## Next Steps
 
-**Option 1: Release v0.1.0**
-1. Final documentation review
-2. Package for PyPI
-3. Write announcement
-4. Community release
+**Active: M4b chamber-pillar pilot sweep**
+1. Smoke validation (~2hr, ~$0.30): `uv run python -m evaluation.chamber_pipeline.run_experiment --chambers lt --budgets 0.10,0.50,1.00 --seeds 3 --cell-timeout-seconds 600 --out runs/m4-smoke.parquet`
+2. Full pilot (~18hr overnight, ~$1.40): `uv run python -m evaluation.chamber_pipeline.run_experiment --pilot --cell-timeout-seconds 600 --out runs/m4-pilot.parquet`
+3. Analyze: `uv run python -m evaluation.chamber_pipeline.analyze_results --input runs/m4-pilot.parquet --out-dir runs/m4-pilot-figs/ --check-m4-acceptance`
 
-**Option 2: Additional Integrations**
+**M4c (deferred operational hardening, before M5)**
+- Checkpointing / resume from partial Parquet
+- Parallelism (`ThreadPoolExecutor` in `run_sweep`) — needs logger thread-safety + per-thread adapter
+- MENU_SIZES vs `available_experiments()` consistency assert
+- Integration test that hits one real LLM call (would have caught M4b root-cause bugs)
+- Tighter `_SELECTION_MAX_TOKENS` if 200 → 50 maintains quality
+
+**Other tracks (independent)**
 - AutoGen integration
 - CrewAI integration
-- Contract templates library
+- Audit dashboards / policy management UI / cost attribution reports
 
-**Option 3: Enterprise Features**
-- Audit dashboards
-- Policy management UI
-- Cost attribution reports
+## Operational notes (chamber pillar)
+
+- **OpenRouter rate limits**: `deepseek-v4-flash` is hosted by 8 providers; the orchestrator pins `Parasail` first because OpenRouter's auto-routing chose throttle-prone AtlasCloud. See `evaluation/chamber_pipeline/orchestrator.py:_CountingLLM.DEFAULT_PROVIDER_ORDER`.
+- **Socket timeout**: `socket.setdefaulttimeout(30)` is set at `run_experiment.py` module load — without this, `litellm.completion(timeout=N)` doesn't propagate to the SSL socket and stuck calls hang the process forever.
+- **Max tokens**: `_llm_select_loop` caps output at 200 tokens (selection step) and `llm_only_agent` at 4096 (adjacency emission). Without caps, DeepSeek v4 Flash generates ~1300 tokens of verbose reasoning per "pick one" call.
 
 ## References
 
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`
+- **Causal Chamber Plan**: `docs/causal_chamber_validation_plan.md` (full M4/M5/M6 spec for AAMAS 2027 / ECAI 2027)
 - **Repository**: https://github.com/flyersworder/agent-contracts
 
 ---
 
-*Last Updated: December 23, 2025*
+*Last Updated: 2026-05-09 (M4a complete; M4b operationally ready, smoke + pilot pending)*
 *Status: Production-ready, 609+ tests, 91%+ coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines*
