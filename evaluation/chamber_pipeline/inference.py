@@ -45,10 +45,22 @@ CPDAG → directed-adjacency convention:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+logger = logging.getLogger(__name__)
+
+# The exact error phrase causal-learn's Fisher-Z raises on a singular
+# sub-correlation matrix. Used as a tight substring filter so the
+# fallback path doesn't accidentally swallow unrelated future ValueErrors
+# from causal-learn that happen to mention "singular" elsewhere in their
+# message (e.g., a hypothetical "singular value decomposition input
+# invalid"). Verified against causallearn==0.1.4 at
+# .venv/lib/.../causallearn/utils/cit.py:218 and :482.
+_FISHERZ_SINGULAR_PHRASE = "correlation matrix is singular"
 
 # `causal-learn` is part of the chambers extra; importing it lazily so
 # tests of unrelated chamber-pipeline pieces don't fail at collection
@@ -242,10 +254,24 @@ def run_pc(
         # experiments perturb downstream variables that are deterministic
         # functions of each other in the spent set). The honest fallback
         # is "PC made no claim" -> all-zeros adjacency on the full node
-        # set. Re-raise non-singular ValueErrors so genuine input bugs
-        # still surface.
-        if isinstance(exc, ValueError) and "singular" not in str(exc).lower():
+        # set. Re-raise other ValueErrors so genuine input bugs still
+        # surface — only the exact Fisher-Z singular message is swallowed.
+        is_singular_value_error = (
+            isinstance(exc, ValueError) and _FISHERZ_SINGULAR_PHRASE in str(exc).lower()
+        )
+        if isinstance(exc, ValueError) and not is_singular_value_error:
             raise
+        # Log for M5 sweep visibility — degenerate-cell counts are
+        # publishable as a finding ("X% of cells under variant V at
+        # budget k hit PC degeneracy"). Without the warning, the count
+        # is invisible at run-time and only inferable from output
+        # all-zeros, which is ambiguous (could also be "no signal").
+        logger.warning(
+            "PC inference fell back to all-zeros adjacency on %d-node input (%s): %s",
+            len(node_names),
+            type(exc).__name__,
+            str(exc).strip(),
+        )
         return pd.DataFrame(
             np.zeros((len(node_names), len(node_names)), dtype=int),
             index=node_names,

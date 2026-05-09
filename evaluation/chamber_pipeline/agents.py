@@ -225,6 +225,30 @@ def greedy_ig_lite_agent(
     if budget <= 0 or not menu:
         return _empty_adjacency(nodes)
 
+    # Guard: target-coverage requires that menu names parse into discrete
+    # target variables. WT's experimental design uses random-walk
+    # (`actuators_random_walk_N`), regime-jump (`regime_jumps_single`),
+    # and load-mix (`loads_hatch_mix_*`) experiments that don't have a
+    # discrete intervention target — _parse_target returns None for all
+    # of them. Without this guard, GreedyIG-lite would silently degrade
+    # to "all targets are None → tier 1 has 1 entry → tier 2 has the
+    # rest in random order" (i.e., effectively random selection), which
+    # would invisibly skew the §5.3 Pareto plot on WT. Per plan §5.1
+    # variant 2, GreedyIG-lite is LT-only; the M5 sweep skips it on WT.
+    n_parseable = sum(1 for name in menu if _parse_target(name) is not None)
+    if n_parseable == 0:
+        chamber_label = getattr(adapter, "chamber", "<unknown>")
+        raise NotImplementedError(
+            f"GreedyIG-lite cannot run on chamber '{chamber_label}': none of "
+            f"the {len(menu)} menu entries match the `uniform_<target>_<strength>` "
+            f"naming convention that the target-coverage heuristic requires. "
+            f"This chamber's experimental design (e.g., random-walk perturbations) "
+            f"does not have discrete intervention targets, so target-coverage has "
+            f"no structure to exploit. Per the validation plan §5.1 variant 2, "
+            f"GreedyIG-lite is LT-only — skip variant 2 in this chamber's cells "
+            f"of the §6.1 sweep. Sample menu entries: {menu[:3]}."
+        )
+
     rng = _random.Random(seed)
 
     # Group menu by parsed target variable. None bucket holds the

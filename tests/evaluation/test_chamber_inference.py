@@ -173,3 +173,71 @@ class TestRunPc:
         # The contract is "no crash, well-typed shape" — not a specific graph.
         assert adj.shape == (3, 3)
         assert list(adj.index) == ["x", "y", "z"]
+
+
+# ---------------------------------------------------------------------------
+# Tests added post M3 review
+# ---------------------------------------------------------------------------
+
+
+@requires_causal_learn
+class TestPcAlphaParameterPlumbing:
+    """Verify `pc_alpha` actually flows through to the independence test.
+
+    Without this test, a typo in any of the four call sites (random_agent,
+    greedy_ig_lite_agent, llm_pc_agent, planner_reasoner_agents) would
+    silently use the default 0.05 instead of the caller's value.
+    """
+
+    def _branchy_data(self, seed: int = 0, n: int = 500) -> pd.DataFrame:
+        """Generate data where alpha matters: a weak dependence that's
+        included at alpha=0.5 but excluded at alpha=0.001."""
+        rng = np.random.default_rng(seed)
+        x = rng.standard_normal(n)
+        # y has a tiny residual dependence on x but is mostly noise.
+        y = 0.05 * x + rng.standard_normal(n)
+        # z is independent of both.
+        z = rng.standard_normal(n)
+        return pd.DataFrame({"x": x, "y": y, "z": z})
+
+    def test_alpha_changes_output(self) -> None:
+        """Same data + different alpha → at least one cell of the
+        adjacency must differ. Establishes that pc_alpha is load-bearing."""
+        data = self._branchy_data()
+        nodes = ["x", "y", "z"]
+        adj_strict = run_pc(data, nodes, alpha=0.001)
+        adj_loose = run_pc(data, nodes, alpha=0.5)
+        # On the same data, looser alpha admits more edges than stricter.
+        # Either output may be all-zeros depending on the noise; the
+        # contract is just that the parameter affects the output.
+        assert not (adj_strict.values == adj_loose.values).all(), (
+            "pc_alpha had no effect on output — parameter may not be plumbed correctly"
+        )
+
+
+@requires_causal_learn
+class TestSingularFallbackLogging:
+    """Verify the singular-matrix fallback emits a warning for M5 sweep visibility."""
+
+    def test_warns_on_singular_matrix(self, caplog) -> None:
+        """Degenerate input → all-zeros output AND a warning logged."""
+        import logging
+
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal(200)
+        y = 2.0 * x  # perfectly collinear → singular sub-correlation
+        z = rng.standard_normal(200)
+        data = pd.DataFrame({"x": x, "y": y, "z": z})
+
+        with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+            adj = run_pc(data, ["x", "y", "z"])
+
+        # Output is well-typed (the all-zeros fallback).
+        assert adj.shape == (3, 3)
+        # AND a warning was emitted about the fallback. The exact phrasing
+        # is implementation detail; we just check the keyword "fell back"
+        # which is in the log message.
+        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any("fell back" in m.lower() for m in warning_messages), (
+            f"Expected fallback warning; got: {warning_messages}"
+        )

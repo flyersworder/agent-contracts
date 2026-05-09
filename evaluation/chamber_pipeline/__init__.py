@@ -17,10 +17,10 @@ Modules:
         greedy_ig_lite_agent (M3a), llm_only_agent (M3b), llm_pc_agent
         (M3b), planner_reasoner_agents (M3c).
 
-Future modules (M3+):
-    orchestrator:  one experiment cell end-to-end
-    run_experiment: CLI entry point for the §6.1 sweep
-    analyze_results: aggregation + Pareto figure generation
+Future modules (M4+):
+    orchestrator:  one experiment cell end-to-end (M4 pilot sweep)
+    run_experiment: CLI entry point for the §6.1 sweep (M4)
+    analyze_results: aggregation + §5.3 Pareto figure generation (M5)
 """
 
 from .agents import (

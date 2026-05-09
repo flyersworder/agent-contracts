@@ -700,3 +700,116 @@ class TestPerToolConservation:
             monitor.usage.add_tool_invocation("intervene")
         summary = cap.get_summary()
         assert summary.conservation_satisfied is False
+
+
+# ---------------------------------------------------------------------------
+# Unconstrained-axis tests (added post M3 review)
+#
+# Mirrors the per-tool "missing entry = unbounded" semantics for the
+# tokens and cost axes. A parent that does not declare a token budget
+# (resources.tokens is None) should allow children to request any token
+# amount without raising. The framework was previously inconsistent —
+# per-tool was unbounded-when-undeclared but tokens was zero-when-
+# undeclared, which silently rejected delegation against unconstrained
+# parents.
+# ---------------------------------------------------------------------------
+
+
+class TestUnconstrainedTokenAndCostAxes:
+    """A parent that doesn't declare an axis treats it as unbounded for children."""
+
+    def test_token_unconstrained_parent_allows_token_delegation(self):
+        """Parent has tokens=None; child requests tokens=10_000 — must not raise."""
+        parent = Contract(
+            id="parent",
+            name="Parent",
+            resources=ResourceConstraints(per_tool_limits={"intervene": 5}),
+        )
+        cap = ContractingCapability(parent)
+        # Should NOT raise — token axis is unconstrained.
+        child = cap.create_subcontract(name="child", tokens=10_000)
+        assert child.resources.tokens == 10_000
+
+    def test_cost_unconstrained_parent_allows_cost_delegation(self):
+        """Parent has cost_usd=None; child requests cost_usd=100.0 — must not raise."""
+        parent = Contract(
+            id="parent",
+            name="Parent",
+            resources=ResourceConstraints(tokens=100_000),
+        )
+        cap = ContractingCapability(parent)
+        # Should NOT raise — cost axis is unconstrained.
+        child = cap.create_subcontract(name="child", cost_usd=100.0)
+        assert child.resources.cost_usd == 100.0
+
+    def test_constrained_predicates_distinguish_zero_from_unset(self):
+        """parent_*_constrained must be False when None, True when 0."""
+        unset_parent = Contract(
+            id="p1",
+            name="P1",
+            resources=ResourceConstraints(per_tool_limits={"intervene": 1}),
+        )
+        zero_parent = Contract(
+            id="p2",
+            name="P2",
+            resources=ResourceConstraints(tokens=0, cost_usd=0.0),
+        )
+        unset_cap = ContractingCapability(unset_parent)
+        zero_cap = ContractingCapability(zero_parent)
+
+        assert unset_cap.parent_token_budget_constrained is False
+        assert unset_cap.parent_cost_budget_constrained is False
+        assert zero_cap.parent_token_budget_constrained is True
+        assert zero_cap.parent_cost_budget_constrained is True
+
+    def test_zero_budget_still_enforces_conservation(self):
+        """If parent declares tokens=0 (vs None), child requests must be rejected."""
+        parent = Contract(
+            id="parent",
+            name="Parent",
+            resources=ResourceConstraints(tokens=0),
+        )
+        cap = ContractingCapability(parent)
+        with pytest.raises(ConservationViolationError):
+            cap.create_subcontract(name="child", tokens=1)
+
+    def test_can_allocate_skips_unconstrained_axes(self):
+        """can_allocate's per-axis gating respects the constrained predicates."""
+        parent = Contract(
+            id="parent",
+            name="Parent",
+            resources=ResourceConstraints(per_tool_limits={"intervene": 1}),
+        )
+        cap = ContractingCapability(parent)
+        # Token axis unconstrained → any token request is allowed.
+        assert cap.can_allocate(tokens=10**9) is True
+        # Cost axis unconstrained → any cost request is allowed.
+        assert cap.can_allocate(cost_usd=10**6) is True
+        # But per-tool axis is still enforced.
+        assert cap.can_allocate(per_tool_limits={"intervene": 2}) is False
+
+
+class TestReleaseUnconstrainedTool:
+    """release_allocation must handle children whose per_tool_limits include
+    tools the parent doesn't constrain (these are recorded in the
+    AllocationRecord but not in _total_allocated_per_tool — symmetric
+    release must not raise KeyError)."""
+
+    def test_release_with_unconstrained_tool_does_not_raise(self):
+        # Parent constrains only `intervene`; child has both intervene + observe.
+        parent = Contract(
+            id="parent",
+            name="Parent",
+            resources=ResourceConstraints(per_tool_limits={"intervene": 5}),
+        )
+        cap = ContractingCapability(parent)
+        cap.create_subcontract(
+            name="mixed",
+            per_tool_limits={"intervene": 2, "observe": 99},
+        )
+        # Sanity: only the constrained tool is in the running total.
+        assert cap.total_allocated_per_tool == {"intervene": 2}
+        # Release must succeed without raising on the unconstrained-tool path.
+        cap.release_allocation("mixed")
+        # Constrained-tool total back to zero.
+        assert cap.total_allocated_per_tool == {}

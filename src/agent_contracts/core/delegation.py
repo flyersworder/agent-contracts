@@ -144,8 +144,16 @@ class ContractingCapability:
     An agent with this capability can delegate work to other agents by
     creating subcontracts, with automatic enforcement of conservation laws.
 
-    The conservation law ensures that:
+    The conservation law ensures that, on every axis the parent declares:
         parent_used + Σ child_budgets ≤ parent_budget
+
+    Three axes are governed: tokens, cost, and per-tool call counts.
+    A child request on an axis the parent doesn't declare (e.g.,
+    `tokens=N` against a parent with `resources.tokens is None`) is
+    treated as unconstrained — the framework allows it and does not
+    track it for conservation. Use `parent_token_budget_constrained`,
+    `parent_cost_budget_constrained`, and `parent_per_tool_limit(tool)`
+    to disambiguate "no budget declared" from "zero budget declared."
 
     Attributes:
         parent_contract: The parent contract that governs this agent
@@ -197,13 +205,41 @@ class ContractingCapability:
 
     @property
     def parent_budget_tokens(self) -> int:
-        """Total token budget of parent contract."""
+        """Total token budget of parent contract.
+
+        Returns 0 when the parent does not declare a token budget — see
+        `parent_token_budget_constrained` for distinguishing "no budget"
+        from "zero budget."
+        """
         return self.parent_contract.resources.tokens or 0
 
     @property
+    def parent_token_budget_constrained(self) -> bool:
+        """True iff parent declares a token budget; False = unconstrained.
+
+        Mirrors the `per_tool_limits` semantics introduced in M3c: a
+        parent that does not declare an axis is treated as unbounded
+        on that axis, so children may request any amount. Without
+        this disambiguation, `parent_budget_tokens == 0` could mean
+        either "no tokens budgeted" or "zero tokens allowed" — and the
+        framework needs to enforce conservation only on the latter.
+        """
+        return self.parent_contract.resources.tokens is not None
+
+    @property
     def parent_budget_cost(self) -> float:
-        """Total cost budget of parent contract."""
+        """Total cost budget of parent contract.
+
+        Returns 0.0 when the parent does not declare a cost budget — see
+        `parent_cost_budget_constrained` for distinguishing "no budget"
+        from "zero budget."
+        """
         return self.parent_contract.resources.cost_usd or 0.0
+
+    @property
+    def parent_cost_budget_constrained(self) -> bool:
+        """True iff parent declares a cost budget; False = unconstrained."""
+        return self.parent_contract.resources.cost_usd is not None
 
     @property
     def parent_used_tokens(self) -> int:
@@ -356,9 +392,12 @@ class ContractingCapability:
             True if allocation would satisfy conservation law on every
             constrained axis.
         """
-        if tokens > self.remaining_tokens:
+        # Skip token/cost conservation when the parent doesn't declare
+        # those axes — matches per-tool semantics ("missing entry =
+        # unbounded"). See parent_token_budget_constrained docstring.
+        if self.parent_token_budget_constrained and tokens > self.remaining_tokens:
             return False
-        if cost_usd > self.remaining_cost:
+        if self.parent_cost_budget_constrained and cost_usd > self.remaining_cost:
             return False
         if per_tool_limits:
             for tool, requested in per_tool_limits.items():
@@ -387,17 +426,28 @@ class ContractingCapability:
     ) -> Contract:
         """Create a subcontract with budget allocated from parent.
 
-        This method enforces the conservation law: the sum of all child
-        budgets plus parent's own usage cannot exceed parent's total budget.
+        Enforces the conservation law `parent_used + Σ child_budgets ≤
+        parent_budget` independently on each axis the parent declares:
+        tokens, cost, and per-tool call counts. Axes the parent does
+        NOT declare (e.g., parent has `tokens=None`) are treated as
+        unconstrained — child requests for them are recorded but not
+        gated.
 
         Args:
             name: Name for the child contract (used in ID generation)
-            tokens: Token budget to allocate to child
-            cost_usd: Cost budget to allocate to child
+            tokens: Token budget to allocate to child. Skipped if parent
+                doesn't declare a token budget.
+            cost_usd: Cost budget to allocate to child. Skipped if parent
+                doesn't declare a cost budget.
             api_calls: Optional API call limit for child
             iterations: Optional iteration limit for child (maps to ADK max_llm_calls)
             tool_invocations: Optional total tool invocation limit for child
-            per_tool_limits: Optional per-tool invocation limits (tool_name -> max_calls)
+            per_tool_limits: Optional per-tool invocation limits (tool_name -> max_calls).
+                For each tool the parent declares in its own `per_tool_limits`,
+                the request must satisfy `parent_used + Σ siblings + request ≤
+                parent_limit`. Tools the parent does not declare are
+                unconstrained but still recorded in `AllocationRecord` for
+                audit completeness.
             reasoning_tokens: Optional reasoning/thinking token budget for child
                 (communicates to agent how much thinking budget is allocated)
             description: Description of the child's task
@@ -407,7 +457,11 @@ class ContractingCapability:
             A new Contract configured for the child agent
 
         Raises:
-            ConservationViolationError: If allocation would violate conservation law
+            ConservationViolationError: If allocation would violate conservation
+                on any declared axis (tokens, cost, or any per-tool limit).
+                The error's `requested`, `available`, and `parent_id` fields
+                identify the failing axis; the message names the offending
+                tool when it's a per-tool failure.
             ValueError: If name is empty or already used
         """
         # Validate name
@@ -418,8 +472,11 @@ class ContractingCapability:
         if child_id in self._allocations:
             raise ValueError(f"Child contract '{name}' already exists")
 
-        # Check conservation law for tokens
-        if tokens > 0 and tokens > self.remaining_tokens:
+        # Check conservation law for tokens — only when parent declares a
+        # token budget. Unconstrained parents (resources.tokens is None)
+        # allow children to request any token amount, matching the
+        # per-tool semantics from the M3c refactor (line 192-195).
+        if tokens > 0 and self.parent_token_budget_constrained and tokens > self.remaining_tokens:
             raise ConservationViolationError(
                 message=(
                     f"Cannot allocate {tokens:,} tokens to '{name}'. "
@@ -434,8 +491,8 @@ class ContractingCapability:
                 parent_id=self.parent_contract.id,
             )
 
-        # Check conservation law for cost
-        if cost_usd > 0 and cost_usd > self.remaining_cost:
+        # Check conservation law for cost — only when parent declares one.
+        if cost_usd > 0 and self.parent_cost_budget_constrained and cost_usd > self.remaining_cost:
             raise ConservationViolationError(
                 message=(
                     f"Cannot allocate ${cost_usd:.4f} to '{name}'. "
@@ -626,11 +683,13 @@ class ContractingCapability:
         is unconstrained and trivially satisfied.
         """
         tokens_ok = (
-            self.parent_used_tokens + self._total_allocated_tokens <= self.parent_budget_tokens
+            (self.parent_used_tokens + self._total_allocated_tokens <= self.parent_budget_tokens)
+            if self.parent_token_budget_constrained
+            else True
         )
         cost_ok = (
             (self.parent_used_cost + self._total_allocated_cost <= self.parent_budget_cost)
-            if self.parent_budget_cost > 0
+            if self.parent_cost_budget_constrained
             else True
         )
 

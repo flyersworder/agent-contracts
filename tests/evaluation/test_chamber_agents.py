@@ -1,9 +1,10 @@
 """Tests for the Causal Chamber pipeline's M3a baseline agents.
 
 Covers `evaluation.chamber_pipeline.agents.random_agent` and
-`greedy_ig_lite_agent` (M3a). The LLM-bearing variants land in M3b/M3c
-and have placeholder tests verifying they raise NotImplementedError
-with a clear M3 reference.
+`greedy_ig_lite_agent` (M3a). The LLM-bearing variants live in
+`test_chamber_llm_agents.py` (M3b) and `test_chamber_planner_reasoner.py`
+(M3c) — this file deliberately stays focused on the M3a non-LLM agents
+plus the cross-chamber compatibility smoke (added post M3 review).
 
 These tests need `causalchamber` (the chambers extra) for the
 ContractedChamberAgent end-to-end path.
@@ -210,3 +211,79 @@ class TestAgentBudgetContract:
         )
         with pytest.raises(ContractViolationError, match="intervention budget exhausted"):
             adapter.run()
+
+
+# ---------------------------------------------------------------------------
+# Chamber-parameterized smoke tests (added post M3 review)
+#
+# Catches the kind of bug where an agent silently degrades on one chamber
+# but works on another because a regex / parser was tested only against
+# LT's naming conventions. Random is robust by design (no parsing); GIG
+# requires parseable target names and so MUST raise on chambers without
+# them, per plan §5.1 variant 2 ("LT-only" footnote).
+# ---------------------------------------------------------------------------
+
+
+@requires_causalchamber
+class TestChamberCompatibility:
+    """Cross-chamber compatibility for the M3a non-LLM agents."""
+
+    def test_random_agent_works_on_lt(self) -> None:
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+
+        adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=2)
+        adj = random_agent(adapter, seed=0)
+        assert adj.shape == adapter.ground_truth().shape
+
+    def test_random_agent_works_on_wt(self) -> None:
+        """Random doesn't parse menu names, so it works on any chamber."""
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+
+        adapter = create_contracted_chamber_agent(chamber="wt", intervention_budget=2)
+        adj = random_agent(adapter, seed=0)
+        assert adj.shape == adapter.ground_truth().shape
+
+    def test_greedy_ig_lite_works_on_lt(self) -> None:
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+
+        adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=2)
+        adj = greedy_ig_lite_agent(adapter, seed=0)
+        assert adj.shape == adapter.ground_truth().shape
+
+    def test_greedy_ig_lite_raises_on_wt(self) -> None:
+        """WT's experimental design has no discrete intervention targets,
+        so target-coverage degenerates to random selection. GIG-lite
+        must refuse to run rather than silently mimic Random — otherwise
+        the §5.3 Pareto plot on WT would show GIG ≈ Random with no
+        explanation, and a reviewer would (rightly) ask why."""
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+
+        adapter = create_contracted_chamber_agent(chamber="wt", intervention_budget=2)
+        with pytest.raises(NotImplementedError, match=r"WT|wt|target-coverage|LT-only"):
+            greedy_ig_lite_agent(adapter, seed=0)
+
+    def test_greedy_ig_lite_error_names_chamber_and_offers_remedy(self) -> None:
+        """The error message must be loud enough for an M5 sweep
+        runner to know which cells to skip and why."""
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+
+        adapter = create_contracted_chamber_agent(chamber="wt", intervention_budget=2)
+        with pytest.raises(NotImplementedError) as exc:
+            greedy_ig_lite_agent(adapter, seed=0)
+        msg = str(exc.value)
+        # Chamber identifier in message → easy to grep in sweep logs.
+        assert "wt" in msg.lower()
+        # Remedy spelled out → orchestrator author knows what to do.
+        assert "skip" in msg.lower()
+        # Plan-doc reference → anyone confused has a place to read.
+        assert "5.1" in msg

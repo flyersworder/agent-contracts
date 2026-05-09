@@ -397,3 +397,93 @@ def test_top_level_reexports() -> None:
 
     assert exported_only is llm_only_agent
     assert exported_pc is llm_pc_agent
+
+
+# ---------------------------------------------------------------------------
+# Attribute-style response coverage (added post M3 review)
+#
+# LiteLLM may return Pydantic-like response objects in production rather
+# than plain dicts. The parser layer (llm_planner._response_text) handles
+# both shapes, but the AGENT layer was only tested against dicts. This
+# class adds end-to-end coverage on attribute-style responses to catch
+# any future regression in the parsing-vs-agent integration.
+# ---------------------------------------------------------------------------
+
+
+class _AttrMessage:
+    def __init__(self, content: str) -> None:
+        self.content = content
+
+
+class _AttrChoice:
+    def __init__(self, content: str) -> None:
+        self.message = _AttrMessage(content)
+
+
+class _AttrResponse:
+    """Pydantic-like response shape returned by some LiteLLM versions."""
+
+    def __init__(self, content: str) -> None:
+        self.choices = [_AttrChoice(content)]
+
+
+class FakeAttrLLM:
+    """FakeLLM variant that wraps content in attribute-style objects.
+
+    Mirrors `FakeLLM`'s interface but returns `_AttrResponse` instead of
+    a dict. Used to verify the agents' parsing layer handles both shapes.
+    """
+
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = responses
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(self, *, model: str, messages: list[dict[str, str]], **_: Any) -> _AttrResponse:
+        idx = len(self.calls)
+        self.calls.append({"model": model, "messages": messages, "idx": idx})
+        if idx >= len(self._responses):
+            raise AssertionError(
+                f"FakeAttrLLM exhausted: {idx + 1} calls, {len(self._responses)} responses"
+            )
+        return _AttrResponse(self._responses[idx])
+
+
+@requires_causalchamber
+class TestAgentsHandleAttrStyleResponses:
+    """End-to-end agent runs with Pydantic-like LLM responses."""
+
+    def test_llm_only_with_attr_responses(self) -> None:
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+
+        adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=2)
+        menu = adapter.available_experiments()
+        # 2 selections + 1 adjacency emission, all attr-style.
+        llm = FakeAttrLLM(responses=[menu[0], menu[1], json.dumps({menu[0]: []})])
+        adj = llm_only_agent(adapter, llm=llm)
+        # If parsing fails on attr shape, the agent silently falls back
+        # to RNG selections — but the LLM call count would still be 3,
+        # so we can't catch that via call count alone. The smoking gun
+        # is whether the actual chosen experiments match the script.
+        spent = [e["data"]["experiment_name"] for e in adapter.events if e["type"] == "tool_use"]
+        assert spent == [menu[0], menu[1]], (
+            "Attr-style responses didn't propagate through to selection — "
+            "parsing layer silently fell back to RNG."
+        )
+        # And the adjacency-emission stage must have produced a well-typed result.
+        assert adj.shape == adapter.ground_truth().shape
+
+    def test_llm_pc_with_attr_responses(self) -> None:
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+
+        adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=2)
+        menu = adapter.available_experiments()
+        # No adjacency-emission step for llm_pc — just 2 attr selections.
+        llm = FakeAttrLLM(responses=[menu[0], menu[1]])
+        adj = llm_pc_agent(adapter, llm=llm)
+        spent = [e["data"]["experiment_name"] for e in adapter.events if e["type"] == "tool_use"]
+        assert spent == [menu[0], menu[1]]
+        assert adj.shape == adapter.ground_truth().shape
