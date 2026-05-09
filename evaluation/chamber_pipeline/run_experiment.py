@@ -30,22 +30,46 @@ this flag and let agents lazy-import `litellm.completion`.
 from __future__ import annotations
 
 import argparse
+import socket
 import sys
 from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
 
+# Hard upper bound on every socket operation in this process. Without
+# this, an SSL socket read can block forever when the upstream provider
+# (e.g., OpenRouter routing through a backend like Parasail or AtlasCloud)
+# accepts a request and stops sending bytes mid-response. The OpenAI
+# Python SDK uses httpx via a sync→async bridge; when the worker thread
+# stalls on `_ssl__SSLSocket_read → PySSL_select → poll`, the main thread
+# blocks indefinitely on the inter-thread queue. `litellm.completion`'s
+# own `timeout` kwarg only governs higher-level retry budget, not the
+# socket read itself. This default ensures any stuck call surfaces a
+# socket-timeout exception within 30s, which `num_retries=3` in
+# `_CountingLLM` will then exponentially-backoff retry. Discovered via
+# systematic-debugging on a 12-min hung CLI run during M4b smoke.
+_DEFAULT_SOCKET_TIMEOUT_SECONDS = 30
+socket.setdefaulttimeout(_DEFAULT_SOCKET_TIMEOUT_SECONDS)
+
+# Imports below this line intentionally come AFTER socket.setdefaulttimeout
+# so litellm / httpx / openai SDK pick up the global default at import time.
+# E402 noqa is local to this file and intentional.
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-from .orchestrator import (
+from .orchestrator import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
     AGENT_REGISTRY,
     SweepSpec,
     count_cells,
     iter_sweep_cells,
     run_sweep,
 )
-from .results import RunRecord, write_records_csv, write_records_parquet
+from .results import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
+    RunRecord,
+    write_records_csv,
+    write_records_parquet,
+)
 
 # Load .env so OPENROUTER_API_KEY (and any other auth) is available to
 # litellm.completion when LLM-bearing variants run. Idempotent: safe to

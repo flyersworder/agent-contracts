@@ -815,6 +815,69 @@ class TestCountingLLM:
         wrapper(model="m", messages=[], num_retries=0)
         assert captured[0]["num_retries"] == 0
 
+    def test_injects_default_provider_order(self) -> None:
+        """OpenRouter provider routing: pinned to Parasail (fastest) +
+        fp8 fallbacks. Without this, OpenRouter routes by its own
+        cost-or-latency heuristic — which empirically chose AtlasCloud
+        and throttled k=30 cells to a 10-min timeout."""
+        captured: list[dict[str, Any]] = []
+
+        def target(**kwargs: Any) -> dict:
+            captured.append(dict(kwargs))
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(model="m", messages=[])
+        extra = captured[0].get("extra_body", {})
+        assert "provider" in extra
+        assert extra["provider"]["order"] == list(_CountingLLM.DEFAULT_PROVIDER_ORDER)
+        assert extra["provider"]["order"][0] == "Parasail"
+        assert extra["provider"]["allow_fallbacks"] is True
+
+    def test_caller_can_override_provider(self) -> None:
+        """Caller-supplied extra_body.provider wins (e.g., for ablation)."""
+        captured: list[dict[str, Any]] = []
+
+        def target(**kwargs: Any) -> dict:
+            captured.append(dict(kwargs))
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(
+            model="m",
+            messages=[],
+            extra_body={"provider": {"order": ["DeepInfra"], "allow_fallbacks": False}},
+        )
+        assert captured[0]["extra_body"]["provider"]["order"] == ["DeepInfra"]
+
+    def test_injects_default_request_timeout(self) -> None:
+        """Per-request timeout is critical: without it, a stuck SSL read
+        blocks forever (discovered via M4b smoke root-cause debugging).
+        num_retries handles exceptions but never fires on infinite hangs —
+        the timeout is what *creates* the exception that retry handles."""
+        captured: list[dict[str, Any]] = []
+
+        def target(**kwargs: Any) -> dict:
+            captured.append(dict(kwargs))
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(model="m", messages=[])
+        assert captured[0].get("timeout") == _CountingLLM.DEFAULT_REQUEST_TIMEOUT_SECONDS
+        assert captured[0]["timeout"] == 30.0
+
+    def test_caller_can_override_request_timeout(self) -> None:
+        """Caller-supplied timeout wins (e.g., longer for k=59 cells)."""
+        captured: list[dict[str, Any]] = []
+
+        def target(**kwargs: Any) -> dict:
+            captured.append(dict(kwargs))
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(model="m", messages=[], timeout=120.0)
+        assert captured[0]["timeout"] == 120.0
+
 
 class TestReadLlmMetrics:
     """The (n_llm_calls, tokens_in, tokens_out, cost_usd) extractor."""

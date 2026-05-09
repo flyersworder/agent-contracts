@@ -59,6 +59,25 @@ if TYPE_CHECKING:
 LLMCallable = Callable[..., Any]
 
 
+# Per-LLM-call output cap for the selection step. Without a cap, the
+# model (DeepSeek v4 Flash specifically) generates ~1300 output tokens
+# of verbose reasoning for what is fundamentally a "pick one item from
+# this list" task. With this cap, per-call latency drops from ~37s to
+# ~1.5-3s — making the M4 pilot wall-time-feasible. The expected
+# response is just one menu name (~15-30 chars), so 200 tokens is
+# generous headroom for any reasoning prefix the model insists on.
+# Tests can monkey-patch this if they need different behavior.
+_SELECTION_MAX_TOKENS = 200
+
+# Per-LLM-call output cap for the adjacency-emission step in
+# `llm_only_agent`. Larger because the response is a JSON object
+# encoding the full directed-adjacency matrix (LT: ~38 nodes,
+# WT: ~32 nodes — at worst ~38*38 = 1444 entries, but typically
+# only edges-present are encoded so much smaller). 4096 leaves
+# headroom for verbose JSON formatting + any reasoning prefix.
+_ADJACENCY_MAX_TOKENS = 4096
+
+
 # Pattern matching the LT experiment naming convention `uniform_<TARGET>_<STRENGTH>`
 # (and WT's analogous form). The single LT outlier `uniform_reference` is the
 # chamber's no-intervention baseline and parses to target=None.
@@ -390,7 +409,14 @@ def _llm_select_loop(
         # Compose the "already chosen" view: prior phase + this phase so far.
         all_chosen = starting_chosen + chosen
         messages = prompt_builder(menu, remaining, all_chosen)
-        response = llm(model=model, messages=messages)
+        # Cap output to ~200 tokens. The expected response is just one
+        # menu name (~15-30 chars / ~5-10 tokens), but DeepSeek v4 Flash
+        # without max_tokens generates ~1300 output tokens of verbose
+        # reasoning per call (verified empirically during M4b debugging).
+        # 200 leaves ample headroom for the model's reasoning prefix
+        # while bringing per-call latency from ~37s back down to ~1.5-3s.
+        # Callers wanting a different cap can monkey-patch _SELECTION_MAX_TOKENS.
+        response = llm(model=model, messages=messages, max_tokens=_SELECTION_MAX_TOKENS)
         name = parse_selection_response(response, menu)
 
         if name is None or name in all_chosen:
@@ -454,7 +480,10 @@ def llm_only_agent(
     # already covers via PC. Keeping `llm_only` honestly LLM-only at
     # the inference step is what makes the H1 comparison meaningful.
     adj_messages = build_adjacency_prompt(nodes, n_experiments=len(chosen))
-    response = llm(model=model, messages=adj_messages)
+    # Cap output for the adjacency-emission step. Larger than the
+    # selection cap because the response encodes the full directed-edge
+    # JSON map for ~38-node chambers. See _ADJACENCY_MAX_TOKENS docstring.
+    response = llm(model=model, messages=adj_messages, max_tokens=_ADJACENCY_MAX_TOKENS)
     return parse_adjacency_response(response, nodes)
 
 

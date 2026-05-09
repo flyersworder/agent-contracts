@@ -255,6 +255,31 @@ class _CountingLLM:
     # cell-error rate on sustained LLM bursts.
     DEFAULT_NUM_RETRIES = 3
 
+    # OpenRouter's `provider.order` preference for `deepseek-v4-flash`.
+    # OpenRouter's automatic routing chose AtlasCloud by default (probably
+    # cheapest-at-moment), which throttles k=30+ LLM bursts severely
+    # (10-min timeouts on a single cell). Pinning to Parasail (~0.5-1.3s/call,
+    # 5-10x faster than AtlasCloud under load) is the operational fix.
+    # AtlasCloud + SiliconFlow remain as fp8 fallbacks. DeepInfra (fp4) is
+    # excluded to avoid quantization-driven quality variance for AAMAS
+    # reproducibility — plan §5's "single-model" claim implicitly extends
+    # to "single inference precision class," and fp8 is the production
+    # standard for these models.
+    DEFAULT_PROVIDER_ORDER: tuple[str, ...] = ("Parasail", "AtlasCloud", "SiliconFlow")
+
+    # Per-request socket-level timeout (seconds). Without this, a single
+    # litellm.completion call can BLOCK FOREVER on the underlying SSL
+    # socket read when the upstream provider accepts the request but
+    # stops sending bytes mid-response. Discovered via root-cause
+    # systematic debugging during M4b smoke: a stuck call kept the
+    # python process at 0% CPU for 12+ minutes inside `_ssl__SSLSocket_read`.
+    # 30s is generous for normal completions (~1-15s with retries) and
+    # short enough that a stuck call surfaces a TimeoutError that
+    # `num_retries` can backoff-retry against. num_retries handles
+    # *exceptions*; without timeout, hangs never raise → retries
+    # never trigger → process appears wedged. Both are required.
+    DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
+
     def __call__(self, **kwargs: Any) -> Any:
         if self._target is None:
             from litellm import completion as _completion
@@ -267,6 +292,30 @@ class _CountingLLM:
         # paths. Caller-supplied num_retries (e.g., 0 to disable for a
         # specific cell) wins.
         kwargs.setdefault("num_retries", self.DEFAULT_NUM_RETRIES)
+
+        # Inject per-request timeout. Without this, a stuck SSL socket
+        # read (provider accepted the request but stopped sending bytes)
+        # blocks indefinitely. With timeout + num_retries, a stuck call
+        # surfaces as a Timeout exception that retry-with-backoff can
+        # recover from. See DEFAULT_REQUEST_TIMEOUT_SECONDS docstring
+        # for the full root-cause analysis.
+        kwargs.setdefault("timeout", self.DEFAULT_REQUEST_TIMEOUT_SECONDS)
+
+        # Inject OpenRouter provider routing preference if caller didn't
+        # specify one. Litellm forwards `extra_body` to the underlying
+        # OpenRouter request body where `provider` is interpreted.
+        # `allow_fallbacks: True` so a transient outage on the primary
+        # provider auto-routes to the next in the order rather than
+        # failing the whole cell.
+        existing_extra = kwargs.get("extra_body") or {}
+        if "provider" not in existing_extra:
+            kwargs["extra_body"] = {
+                **existing_extra,
+                "provider": {
+                    "order": list(self.DEFAULT_PROVIDER_ORDER),
+                    "allow_fallbacks": True,
+                },
+            }
 
         # Record the call BEFORE invoking — even on exception we know
         # one was attempted, which matters for cost-attribution audits.
