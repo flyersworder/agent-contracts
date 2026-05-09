@@ -515,16 +515,19 @@ def planner_reasoner_agents(
           comparison clean — only the *selection policy* differs.
 
     Conservation enforcement:
-        - Upfront check: A + B <= k. Violations raise
-          `ConservationViolationError` BEFORE any LLM call (no spend
-          on a contract that can't legally execute).
-        - Audit trail: both sub-budgets are recorded as
-          `ContractingCapability.create_subcontract` allocations on
-          the parent adapter's contract, exercising the framework's
-          delegation primitive (per plan §5 line 76-77). The framework's
-          built-in conservation check is on tokens; here we additionally
-          gate on `per_tool_limits`, since the chamber pillar's
-          budgeted axis is interventions, not tokens.
+        - Both sub-budgets are allocated via
+          `ContractingCapability.create_subcontract` BEFORE either
+          phase runs. As of the per-tool delegation refactor, the
+          framework primitive enforces conservation on
+          `per_tool_limits` — so if A + B > k_intervene, the second
+          `create_subcontract` raises `ConservationViolationError`
+          before any LLM call (no API spend on a contract that can't
+          legally execute).
+        - This is the AAMAS plan §5 line 76-77 claim — "delegation
+          primitives — not just per_tool_limits — are exercised" —
+          implemented as a single framework primitive: the same
+          method records the audit trail and enforces the
+          conservation law.
 
     Args:
         adapter: Contract-wrapped chamber adapter. Its
@@ -549,13 +552,10 @@ def planner_reasoner_agents(
         ValueError: If either sub-budget is negative.
         ConservationViolationError: If A + B > k_intervene.
     """
-    # Local import to avoid pulling delegation framework into module
-    # top-level (keeps the M3a non-LLM path zero-dep). The delegation
-    # primitives are first used at M3c, not before.
-    from agent_contracts.core.delegation import (
-        ConservationViolationError,
-        ContractingCapability,
-    )
+    # Local import to avoid pulling the delegation framework into the
+    # module top-level (keeps the M3a non-LLM path zero-dep). The
+    # delegation primitives are first used at M3c, not before.
+    from agent_contracts.core.delegation import ContractingCapability
 
     if planner_budget < 0 or reasoner_budget < 0:
         raise ValueError(
@@ -564,35 +564,16 @@ def planner_reasoner_agents(
         )
 
     nodes = _node_names(adapter)
-    total = _intervention_budget(adapter)
 
-    # Conservation enforcement on per-tool budget. The framework's
-    # ContractingCapability enforces conservation on tokens / cost; the
-    # chamber pillar's resource axis is interventions. We enforce
-    # manually here so the AAMAS conservation-law claim covers the
-    # actually-budgeted axis.
-    if planner_budget + reasoner_budget > total:
-        raise ConservationViolationError(
-            message=(
-                f"Conservation violated for chamber adapter "
-                f"'{adapter.contract.id}': planner_budget ({planner_budget}) + "
-                f"reasoner_budget ({reasoner_budget}) = "
-                f"{planner_budget + reasoner_budget} exceeds total "
-                f"intervention budget ({total})."
-            ),
-            requested=planner_budget + reasoner_budget,
-            available=total,
-            parent_id=adapter.contract.id,
-        )
-
-    if total <= 0 or not adapter.available_experiments():
-        return _empty_adjacency(nodes)
-
-    # Audit-trail allocations via the framework's delegation primitive.
-    # Per-tool conservation is enforced above (the framework primitive
-    # only checks tokens / cost), but recording the allocations is what
-    # the AAMAS plan calls out (§5 line 77: "delegation primitives —
-    # not just per_tool_limits — are exercised").
+    # Build the delegation capability up-front. Both subcontracts are
+    # created BEFORE either phase runs, so per-tool conservation
+    # (planner_budget + reasoner_budget <= k_intervene) is enforced
+    # by the framework primitive itself: `create_subcontract` raises
+    # ConservationViolationError on the second call when A + B > k.
+    # No manual check needed here — `ContractingCapability` owns
+    # conservation semantics for tokens, cost, AND per_tool_limits.
+    # This is what the plan §5 line 76-77 calls out: "delegation
+    # primitives — not just per_tool_limits — are exercised."
     capability = ContractingCapability(
         parent_contract=adapter.contract,
         parent_monitor=adapter._resource_monitor,
@@ -609,6 +590,9 @@ def planner_reasoner_agents(
             f"Chamber Reasoner: targeted-refinement phase, sub-budget B={reasoner_budget}"
         ),
     )
+
+    if _intervention_budget(adapter) <= 0 or not adapter.available_experiments():
+        return _empty_adjacency(nodes)
 
     llm = llm or _default_llm()
 

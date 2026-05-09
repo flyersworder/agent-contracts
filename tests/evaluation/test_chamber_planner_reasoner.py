@@ -23,7 +23,6 @@ What these tests are explicitly about:
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import pytest
@@ -109,7 +108,11 @@ class TestConservationEnforcement:
 
         adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=2)
         llm = FakeLLM(responses=[])  # exhaustion would raise — proves no LLM called
-        with pytest.raises(ConservationViolationError, match="exceeds total"):
+        # The framework primitive emits "Cannot allocate N 'intervene'
+        # calls to '<child_name>'" on the second create_subcontract.
+        # Match on the tool name (framework-stable; won't drift if the
+        # surrounding wording is reworded later).
+        with pytest.raises(ConservationViolationError, match="intervene"):
             planner_reasoner_agents(adapter, planner_budget=2, reasoner_budget=1, llm=llm)
         assert len(llm.calls) == 0, "Conservation must fail BEFORE any LLM call"
 
@@ -438,14 +441,32 @@ def test_top_level_reexport() -> None:
 
 
 def test_conservation_error_message_includes_numbers() -> None:
-    """The error message should be loud about the actual numbers — saves
-    debugging time when the orchestrator misallocates at M4."""
-    # Tiny non-chamber smoke; we just need the error path.
+    """The framework's conservation error must carry actionable info.
+
+    Asserted against a fixed Contract + ResourceMonitor (no chamber dep)
+    so this lands in the suite's no-extras tier. Verifies that the
+    second `create_subcontract` call is the one that raises (planner
+    fits in 5; reasoner asks for 3 of the remaining 1).
+    """
     from unittest.mock import MagicMock
 
+    from agent_contracts.core.contract import Contract, ResourceConstraints
+    from agent_contracts.core.monitor import ResourceMonitor
+
+    parent = Contract(
+        id="test-contract",
+        name="Test",
+        resources=ResourceConstraints(per_tool_limits={"intervene": 5}),
+    )
+    monitor = ResourceMonitor(parent.resources)
+
+    # The agent only touches `adapter.contract`, `adapter._resource_monitor`,
+    # and `adapter.ground_truth` (for the empty-adjacency early return on
+    # exhaustion). MagicMock is fine for the rest because conservation
+    # fires before those code paths.
     fake_adapter = MagicMock()
-    fake_adapter.contract.id = "test-contract"
-    fake_adapter.contract.resources.per_tool_limits = {"intervene": 5}
+    fake_adapter.contract = parent
+    fake_adapter._resource_monitor = monitor
     fake_adapter.ground_truth.return_value.index = ["x", "y"]
 
     with pytest.raises(ConservationViolationError) as exc:
@@ -453,10 +474,12 @@ def test_conservation_error_message_includes_numbers() -> None:
             fake_adapter, planner_budget=4, reasoner_budget=3, llm=FakeLLM(responses=[])
         )
     msg = str(exc.value)
-    # Exact numbers should appear so M4 misallocations are easy to triage.
-    assert "4" in msg and "3" in msg and "5" in msg
-    assert re.search(r"test-contract", msg)
-    # And the structured fields must carry the data programmatically.
-    assert exc.value.requested == 7
-    assert exc.value.available == 5
+    # Tool name + offending child name appear, so M4 misallocations
+    # are easy to triage from the error alone.
+    assert "intervene" in msg
+    assert "reasoner" in msg
+    # Structured fields reflect the failing call: reasoner asked for 3,
+    # only 1 remained (parent limit 5 minus planner's already-allocated 4).
+    assert exc.value.requested == 3
+    assert exc.value.available == 1
     assert exc.value.parent_id == "test-contract"

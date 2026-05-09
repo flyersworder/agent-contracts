@@ -83,6 +83,10 @@ class AllocationRecord:
         child_name: Name of the child contract
         tokens_allocated: Tokens allocated to this child
         cost_allocated: Cost budget allocated to this child
+        per_tool_limits_allocated: Per-tool call budgets allocated to this
+            child (tool_name -> max_calls). Tools the parent doesn't
+            constrain are still recorded here for audit-trail completeness;
+            they just don't participate in conservation accounting.
         created_at: When the allocation was made
         child_contract: Reference to the child contract
     """
@@ -91,6 +95,7 @@ class AllocationRecord:
     child_name: str
     tokens_allocated: int = 0
     cost_allocated: float = 0.0
+    per_tool_limits_allocated: dict[str, int] = field(default_factory=dict)
     created_at: datetime = field(default_factory=datetime.now)
     child_contract: Contract | None = None
 
@@ -110,7 +115,12 @@ class DelegationSummary:
         remaining_tokens: Tokens available for further delegation
         remaining_cost: Cost available for further delegation
         allocations: List of all allocations made
-        conservation_satisfied: Whether conservation law holds
+        conservation_satisfied: Whether conservation law holds (across
+            tokens, cost, AND per-tool limits)
+        total_allocated_per_tool: Sum of per-tool budgets allocated across
+            children, only for tools the parent itself constrains.
+            Defaults to empty dict so callers that don't use per-tool
+            delegation aren't broken by the new field.
     """
 
     parent_id: str
@@ -124,6 +134,7 @@ class DelegationSummary:
     remaining_cost: float
     allocations: list[AllocationRecord]
     conservation_satisfied: bool
+    total_allocated_per_tool: dict[str, int] = field(default_factory=dict)
 
 
 class ContractingCapability:
@@ -177,6 +188,12 @@ class ContractingCapability:
         self._allocations: dict[str, AllocationRecord] = {}
         self._total_allocated_tokens: int = 0
         self._total_allocated_cost: float = 0.0
+        # Per-tool delegated budgets, keyed by tool name. Only tools the
+        # parent contract itself constrains via `per_tool_limits` are
+        # subject to conservation; entries here for unconstrained tools
+        # are still tracked for audit completeness but skipped during
+        # conservation checks.
+        self._total_allocated_per_tool: dict[str, int] = {}
 
     @property
     def parent_budget_tokens(self) -> int:
@@ -245,6 +262,68 @@ class ContractingCapability:
             "cost_usd": self.remaining_cost,
         }
 
+    # ---------------- per-tool delegation accessors ----------------------
+    #
+    # These mirror the tokens / cost accessors above for the per_tool_limits
+    # axis. Conservation semantics: a tool the parent contract does NOT
+    # list in its `per_tool_limits` is treated as unconstrained — child
+    # requests for it are allowed regardless of magnitude. This matches the
+    # monitor's existing behaviour at `monitor.py:567` (a missing entry
+    # means "no limit"), so the framework reads consistently across the
+    # delegation and enforcement layers.
+
+    def parent_per_tool_limit(self, tool_name: str) -> int | None:
+        """Parent's per-tool limit for `tool_name`, or None if unconstrained.
+
+        None means the parent does not budget this tool, so children may
+        request any amount. A value of 0 means the parent forbids the
+        tool — any positive child request will be rejected by
+        `create_subcontract`.
+        """
+        return self.parent_contract.resources.per_tool_limits.get(tool_name)
+
+    def parent_per_tool_used(self, tool_name: str) -> int:
+        """Per-tool calls the parent itself has spent."""
+        return self.parent_monitor.usage.get_tool_usage(tool_name)
+
+    @property
+    def total_allocated_per_tool(self) -> dict[str, int]:
+        """Sum of per-tool budgets allocated across all children.
+
+        Returns a copy — mutating the result does not affect internal state.
+        """
+        return dict(self._total_allocated_per_tool)
+
+    def reserved_per_tool(self, tool_name: str) -> int:
+        """Per-tool budget reserved for parent coordination overhead.
+
+        Mirrors `reserved_tokens` for consistency. Floor-rounds because
+        per-tool budgets are integer call counts. With reserve_ratio=0
+        (the framework default) this is always 0.
+        """
+        limit = self.parent_per_tool_limit(tool_name)
+        if limit is None:
+            return 0
+        return int(limit * self.reserve_ratio)
+
+    def remaining_per_tool(self, tool_name: str) -> int | None:
+        """Per-tool budget available for further delegation, or None if unconstrained.
+
+        Calculated as: parent_limit - parent_used - allocated - reserved.
+        Returns None when the parent has no constraint on this tool
+        (signaling "child may request any amount").
+        """
+        limit = self.parent_per_tool_limit(tool_name)
+        if limit is None:
+            return None
+        return max(
+            0,
+            limit
+            - self.parent_per_tool_used(tool_name)
+            - self._total_allocated_per_tool.get(tool_name, 0)
+            - self.reserved_per_tool(tool_name),
+        )
+
     @property
     def allocations(self) -> list[AllocationRecord]:
         """List of all budget allocations made."""
@@ -259,17 +338,39 @@ class ContractingCapability:
             if alloc.child_contract is not None
         ]
 
-    def can_allocate(self, tokens: int = 0, cost_usd: float = 0.0) -> bool:
+    def can_allocate(
+        self,
+        tokens: int = 0,
+        cost_usd: float = 0.0,
+        per_tool_limits: dict[str, int] | None = None,
+    ) -> bool:
         """Check if an allocation is possible without violating conservation.
 
         Args:
             tokens: Number of tokens to allocate
             cost_usd: Cost budget to allocate
+            per_tool_limits: Optional per-tool call budgets. Tools the
+                parent doesn't constrain are skipped (treated as unbounded).
 
         Returns:
-            True if allocation would satisfy conservation law
+            True if allocation would satisfy conservation law on every
+            constrained axis.
         """
-        return tokens <= self.remaining_tokens and cost_usd <= self.remaining_cost
+        if tokens > self.remaining_tokens:
+            return False
+        if cost_usd > self.remaining_cost:
+            return False
+        if per_tool_limits:
+            for tool, requested in per_tool_limits.items():
+                if requested <= 0:
+                    continue
+                remaining = self.remaining_per_tool(tool)
+                if remaining is None:
+                    # Parent doesn't constrain this tool — always OK.
+                    continue
+                if requested > remaining:
+                    return False
+        return True
 
     def create_subcontract(
         self,
@@ -349,6 +450,38 @@ class ContractingCapability:
                 parent_id=self.parent_contract.id,
             )
 
+        # Check conservation law for per-tool limits.
+        #
+        # Tools the parent does not constrain (`remaining_per_tool == None`)
+        # are treated as unbounded — child requests for them are always
+        # allowed. This matches the monitor's existing semantics at
+        # monitor.py:567 ("missing entry = no limit") so the framework
+        # behaves consistently across delegation and enforcement layers.
+        # Sort for deterministic error messages — handy when multiple
+        # tools could be at fault and the test wants a stable assertion.
+        if per_tool_limits:
+            for tool, requested in sorted(per_tool_limits.items()):
+                if requested <= 0:
+                    continue
+                remaining_for_tool = self.remaining_per_tool(tool)
+                if remaining_for_tool is None:
+                    continue
+                if requested > remaining_for_tool:
+                    raise ConservationViolationError(
+                        message=(
+                            f"Cannot allocate {requested:,} '{tool}' calls to '{name}'. "
+                            f"Parent limit: {self.parent_per_tool_limit(tool):,}, "
+                            f"Parent used: {self.parent_per_tool_used(tool):,}, "
+                            f"Already allocated: "
+                            f"{self._total_allocated_per_tool.get(tool, 0):,}, "
+                            f"Reserved: {self.reserved_per_tool(tool):,}, "
+                            f"Remaining: {remaining_for_tool:,}"
+                        ),
+                        requested=requested,
+                        available=remaining_for_tool,
+                        parent_id=self.parent_contract.id,
+                    )
+
         # Create child contract
         # Note: reasoning_tokens is stored in metadata (not ResourceConstraints)
         # because it's informational for prompts, not enforced. The actual thinking
@@ -377,16 +510,28 @@ class ContractingCapability:
         )
 
         # Record allocation
+        per_tool_recorded: dict[str, int] = dict(per_tool_limits or {})
         allocation = AllocationRecord(
             child_id=child_id,
             child_name=name,
             tokens_allocated=tokens,
             cost_allocated=cost_usd,
+            per_tool_limits_allocated=per_tool_recorded,
             child_contract=child_contract,
         )
         self._allocations[child_id] = allocation
         self._total_allocated_tokens += tokens
         self._total_allocated_cost += cost_usd
+        # Bump per-tool running totals only for tools the parent constrains.
+        # Recording every tool in `per_tool_limits_allocated` is good for
+        # audit, but conservation accounting only matters for budgeted
+        # tools — otherwise an unconstrained tool's totals would drift
+        # without ever participating in `_check_conservation`.
+        for tool, requested in per_tool_recorded.items():
+            if requested > 0 and self.parent_per_tool_limit(tool) is not None:
+                self._total_allocated_per_tool[tool] = (
+                    self._total_allocated_per_tool.get(tool, 0) + requested
+                )
 
         return child_contract
 
@@ -436,6 +581,18 @@ class ContractingCapability:
         allocation = self._allocations.pop(child_id)
         self._total_allocated_tokens -= allocation.tokens_allocated
         self._total_allocated_cost -= allocation.cost_allocated
+        # Release per-tool allocations symmetrically. Only the
+        # parent-constrained tools were added to the running total in
+        # `create_subcontract`, so we can iterate the recorded map and
+        # safely subtract — non-constrained tools won't appear in
+        # `_total_allocated_per_tool` so the .get(..., 0) guards them.
+        for tool, requested in allocation.per_tool_limits_allocated.items():
+            if requested > 0 and tool in self._total_allocated_per_tool:
+                remaining_total = self._total_allocated_per_tool.get(tool, 0) - requested
+                if remaining_total <= 0:
+                    self._total_allocated_per_tool.pop(tool, None)
+                else:
+                    self._total_allocated_per_tool[tool] = remaining_total
 
         return allocation.tokens_allocated
 
@@ -457,12 +614,16 @@ class ContractingCapability:
             remaining_cost=self.remaining_cost,
             allocations=list(self._allocations.values()),
             conservation_satisfied=self._check_conservation(),
+            total_allocated_per_tool=dict(self._total_allocated_per_tool),
         )
 
     def _check_conservation(self) -> bool:
-        """Verify conservation law is satisfied.
+        """Verify conservation law is satisfied across all budgeted axes.
 
-        Conservation: used + allocated ≤ budget
+        Conservation: parent_used + Σ child_allocations ≤ parent_budget,
+        checked independently for tokens, cost, and each per-tool limit
+        the parent declares. A per-tool axis the parent doesn't declare
+        is unconstrained and trivially satisfied.
         """
         tokens_ok = (
             self.parent_used_tokens + self._total_allocated_tokens <= self.parent_budget_tokens
@@ -473,7 +634,15 @@ class ContractingCapability:
             else True
         )
 
-        return tokens_ok and cost_ok
+        per_tool_ok = True
+        for tool, limit in self.parent_contract.resources.per_tool_limits.items():
+            used = self.parent_per_tool_used(tool)
+            allocated = self._total_allocated_per_tool.get(tool, 0)
+            if used + allocated > limit:
+                per_tool_ok = False
+                break
+
+        return tokens_ok and cost_ok and per_tool_ok
 
     def __repr__(self) -> str:
         """String representation of delegation state."""

@@ -543,3 +543,160 @@ class TestEdgeCases:
         assert child.metadata["custom_key"] == "custom_value"
         assert child.metadata["parent_id"] == "parent"
         assert "delegation_time" in child.metadata
+
+
+# ---------------------------------------------------------------------------
+# Per-tool conservation (added with chamber pillar M3c support).
+#
+# Mirror the token / cost conservation classes above but for the
+# `per_tool_limits` axis. The framework should:
+#   - Enforce parent_used + Σ child_allocations ≤ parent_limit per tool
+#   - Treat tools the parent doesn't constrain as unbounded for children
+#   - Record each child's per-tool allocation in AllocationRecord
+#   - Sum constrained-tool allocations into total_allocated_per_tool
+#   - Surface conservation_satisfied=False when any tool is over-allocated
+# ---------------------------------------------------------------------------
+
+
+class TestPerToolConservation:
+    """Per-tool conservation enforced by `create_subcontract`."""
+
+    def _parent(self, intervene_limit: int = 10) -> Contract:
+        return Contract(
+            id="parent",
+            name="Parent",
+            resources=ResourceConstraints(per_tool_limits={"intervene": intervene_limit}),
+        )
+
+    def test_within_budget_succeeds(self):
+        """A=2, B=3, k=10 — well under budget, both allocations succeed."""
+        cap = ContractingCapability(self._parent(intervene_limit=10))
+        cap.create_subcontract(name="planner", per_tool_limits={"intervene": 2})
+        cap.create_subcontract(name="reasoner", per_tool_limits={"intervene": 3})
+        assert cap.total_allocated_per_tool == {"intervene": 5}
+
+    def test_exact_match_succeeds(self):
+        """A + B == k — boundary case, must be allowed."""
+        cap = ContractingCapability(self._parent(intervene_limit=4))
+        cap.create_subcontract(name="planner", per_tool_limits={"intervene": 2})
+        cap.create_subcontract(name="reasoner", per_tool_limits={"intervene": 2})
+        assert cap.remaining_per_tool("intervene") == 0
+
+    def test_oversubscription_raises(self):
+        """A + B > k — second create_subcontract must raise."""
+        cap = ContractingCapability(self._parent(intervene_limit=2))
+        cap.create_subcontract(name="planner", per_tool_limits={"intervene": 2})
+        with pytest.raises(ConservationViolationError) as exc:
+            cap.create_subcontract(name="reasoner", per_tool_limits={"intervene": 1})
+
+        # The error names the offending tool and the actual numbers so
+        # callers can debug allocation issues without reading the
+        # capability's internal state.
+        msg = str(exc.value)
+        assert "intervene" in msg
+        assert "reasoner" in msg
+        assert exc.value.requested == 1
+        assert exc.value.available == 0
+        assert exc.value.parent_id == "parent"
+
+    def test_first_oversubscribed_raises(self):
+        """Single child requesting more than parent's full limit raises immediately."""
+        cap = ContractingCapability(self._parent(intervene_limit=3))
+        with pytest.raises(ConservationViolationError, match="intervene"):
+            cap.create_subcontract(name="bigchild", per_tool_limits={"intervene": 5})
+        # No partial state — capability stays empty.
+        assert cap.allocations == []
+        assert cap.total_allocated_per_tool == {}
+
+    def test_unconstrained_tool_is_unbounded(self):
+        """If parent has no constraint on a tool, child requests are allowed."""
+        # Parent constrains only `intervene`; child requests `observe`.
+        cap = ContractingCapability(self._parent(intervene_limit=2))
+        # Massive request on an unconstrained tool — should not raise.
+        cap.create_subcontract(name="watcher", per_tool_limits={"observe": 9999})
+        # And it's recorded in the allocation, but NOT in the
+        # constrained-tools running total.
+        record = cap.get_allocation("watcher")
+        assert record is not None
+        assert record.per_tool_limits_allocated == {"observe": 9999}
+        assert "observe" not in cap.total_allocated_per_tool
+
+    def test_zero_request_does_not_consume(self):
+        """A zero per-tool request shouldn't bump allocated totals."""
+        cap = ContractingCapability(self._parent(intervene_limit=2))
+        cap.create_subcontract(name="zero", per_tool_limits={"intervene": 0})
+        assert cap.total_allocated_per_tool == {}
+        assert cap.remaining_per_tool("intervene") == 2
+
+    def test_parent_used_counts_against_remaining(self):
+        """Parent's own per-tool spend reduces what's available to children."""
+        parent = self._parent(intervene_limit=5)
+        monitor = ResourceMonitor(parent.resources)
+        # Parent burned 2 itself.
+        monitor.usage.add_tool_invocation("intervene")
+        monitor.usage.add_tool_invocation("intervene")
+
+        cap = ContractingCapability(parent, parent_monitor=monitor)
+        # Only 3 left for children; requesting 4 must raise.
+        with pytest.raises(ConservationViolationError, match="intervene") as exc:
+            cap.create_subcontract(name="child", per_tool_limits={"intervene": 4})
+        assert exc.value.available == 3
+
+    def test_release_allocation_returns_per_tool_to_pool(self):
+        """release_allocation must restore per-tool budget for re-allocation."""
+        cap = ContractingCapability(self._parent(intervene_limit=4))
+        cap.create_subcontract(name="planner", per_tool_limits={"intervene": 3})
+        # No room for B=2 → 3+2=5 > 4.
+        with pytest.raises(ConservationViolationError):
+            cap.create_subcontract(name="reasoner", per_tool_limits={"intervene": 2})
+        # Release planner; now B=2 fits.
+        cap.release_allocation("planner")
+        assert cap.total_allocated_per_tool == {}
+        cap.create_subcontract(name="reasoner", per_tool_limits={"intervene": 2})
+        assert cap.total_allocated_per_tool == {"intervene": 2}
+
+    def test_can_allocate_checks_per_tool(self):
+        """can_allocate's new per_tool_limits parameter mirrors the create check."""
+        cap = ContractingCapability(self._parent(intervene_limit=3))
+        cap.create_subcontract(name="a", per_tool_limits={"intervene": 2})
+
+        assert cap.can_allocate(per_tool_limits={"intervene": 1}) is True
+        assert cap.can_allocate(per_tool_limits={"intervene": 2}) is False
+        # Unconstrained tools are always allowed.
+        assert cap.can_allocate(per_tool_limits={"observe": 1000}) is True
+
+    def test_summary_reports_total_allocated_per_tool(self):
+        cap = ContractingCapability(self._parent(intervene_limit=10))
+        cap.create_subcontract(name="planner", per_tool_limits={"intervene": 2})
+        cap.create_subcontract(name="reasoner", per_tool_limits={"intervene": 3})
+        summary = cap.get_summary()
+        assert summary.total_allocated_per_tool == {"intervene": 5}
+        assert summary.conservation_satisfied is True
+
+    def test_remaining_per_tool_returns_none_for_unconstrained(self):
+        cap = ContractingCapability(self._parent(intervene_limit=3))
+        assert cap.remaining_per_tool("observe") is None
+        assert cap.remaining_per_tool("intervene") == 3
+
+    def test_reserve_ratio_floors_per_tool(self):
+        """reserve_ratio applies to per-tool limits too (floor-rounded)."""
+        cap = ContractingCapability(self._parent(intervene_limit=10), reserve_ratio=0.3)
+        # int(10 * 0.3) = 3 reserved → 7 available for children.
+        assert cap.reserved_per_tool("intervene") == 3
+        assert cap.remaining_per_tool("intervene") == 7
+        # Confirm the conservation check uses the reserved amount.
+        with pytest.raises(ConservationViolationError):
+            cap.create_subcontract(name="greedy", per_tool_limits={"intervene": 8})
+        cap.create_subcontract(name="ok", per_tool_limits={"intervene": 7})
+
+    def test_check_conservation_detects_per_tool_overrun(self):
+        """If parent burns past budget AFTER allocation, conservation_satisfied flips."""
+        parent = self._parent(intervene_limit=5)
+        monitor = ResourceMonitor(parent.resources)
+        cap = ContractingCapability(parent, parent_monitor=monitor)
+        cap.create_subcontract(name="child", per_tool_limits={"intervene": 3})
+        # Parent then burns 3 itself; 3 (allocated) + 3 (used) = 6 > 5.
+        for _ in range(3):
+            monitor.usage.add_tool_invocation("intervene")
+        summary = cap.get_summary()
+        assert summary.conservation_satisfied is False
