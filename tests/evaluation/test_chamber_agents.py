@@ -18,8 +18,6 @@ from agent_contracts.integrations import CAUSAL_CHAMBER_AVAILABLE
 from evaluation.chamber_pipeline.agents import (
     _parse_target,
     greedy_ig_lite_agent,
-    llm_only_agent,
-    llm_pc_agent,
     planner_reasoner_agents,
     random_agent,
 )
@@ -175,20 +173,16 @@ class TestGreedyIgLiteAgent:
 
 
 # ---------------------------------------------------------------------------
-# LLM-bearing variants — M3b/M3c stubs
+# Multi-agent variant — M3c stub
+#
+# llm_only_agent and llm_pc_agent (M3b) are tested in
+# test_chamber_llm_agents.py with a mocked LLM. planner_reasoner_agents
+# is the only remaining stub — gated on M3c per plan §11 R1 ordering.
 # ---------------------------------------------------------------------------
 
 
-class TestM3bM3cStubs:
-    """Verify the LLM-bearing variants raise with a clear M3 reference."""
-
-    def test_llm_only_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="M3b"):
-            llm_only_agent(adapter=None)  # type: ignore[arg-type]
-
-    def test_llm_pc_raises(self) -> None:
-        with pytest.raises(NotImplementedError, match="M3b"):
-            llm_pc_agent(adapter=None)  # type: ignore[arg-type]
+class TestM3cStub:
+    """Verify the multi-agent variant still raises with a clear M3c reference."""
 
     def test_planner_reasoner_raises(self) -> None:
         with pytest.raises(NotImplementedError, match="M3c"):

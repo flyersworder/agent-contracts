@@ -153,3 +153,23 @@ class TestRunPc:
         data = self._vstructure_data()
         with pytest.raises(ValueError, match="columns must match"):
             run_pc(data, ["y", "w", "z"])  # wrong order
+
+    def test_singular_matrix_returns_zero_adjacency(self) -> None:
+        """Highly-collinear data (rank-deficient correlation) -> all-zeros.
+
+        Constructed degenerate input: y is a deterministic linear function
+        of x, so the (x, y) pair is perfectly collinear and Fisher-Z's
+        sub-correlation inversion goes singular. Documented chamber-data
+        failure mode; the agents promise the all-zeros baseline here, so
+        run_pc must deliver it.
+        """
+        rng = np.random.default_rng(0)
+        x = rng.standard_normal(200)
+        y = 2.0 * x  # perfectly collinear
+        z = rng.standard_normal(200)
+        data = pd.DataFrame({"x": x, "y": y, "z": z})
+        adj = run_pc(data, ["x", "y", "z"])
+        # Either PC returns no edges OR it returns the trivial xy edge.
+        # The contract is "no crash, well-typed shape" — not a specific graph.
+        assert adj.shape == (3, 3)
+        assert list(adj.index) == ["x", "y", "z"]

@@ -11,6 +11,8 @@ Modules:
         causal-discovery evaluation. Pure functions; no framework state.
     inference: PC algorithm wrapper (via `causal-learn`) shared by Random,
         GreedyIG-lite, and LLM+PC variants per plan §5.
+    llm_planner: Prompt builders + response parsers for the LLM-bearing
+        agents. Pure functions; no chamber or network dependencies.
     agents: Five baseline variants from plan §5.1 — random_agent (M3a),
         greedy_ig_lite_agent (M3a), llm_only_agent (M3b), llm_pc_agent
         (M3b), planner_reasoner_agents (M3c).
@@ -34,16 +36,26 @@ from .inference import (
     pool_experiment_data,
     run_pc,
 )
+from .llm_planner import (
+    build_adjacency_prompt,
+    build_select_prompt,
+    parse_adjacency_response,
+    parse_selection_response,
+)
 from .scoring import ci_coverage, f1_edges, shd
 
 __all__ = [
     "CAUSAL_LEARN_AVAILABLE",
+    "build_adjacency_prompt",
+    "build_select_prompt",
     "ci_coverage",
     "cpdag_to_directed_adjacency",
     "f1_edges",
     "greedy_ig_lite_agent",
     "llm_only_agent",
     "llm_pc_agent",
+    "parse_adjacency_response",
+    "parse_selection_response",
     "planner_reasoner_agents",
     "pool_experiment_data",
     "random_agent",

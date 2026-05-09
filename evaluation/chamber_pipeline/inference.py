@@ -226,14 +226,31 @@ def run_pc(
 
     valid_data = pooled_data[valid_cols]
     data_array = valid_data.to_numpy(dtype=float)
-    result = _causallearn_pc(
-        data_array,
-        alpha=alpha,
-        indep_test=indep_test,
-        show_progress=show_progress,
-        verbose=False,
-        **pc_kwargs,
-    )
+    try:
+        result = _causallearn_pc(
+            data_array,
+            alpha=alpha,
+            indep_test=indep_test,
+            show_progress=show_progress,
+            verbose=False,
+            **pc_kwargs,
+        )
+    except (np.linalg.LinAlgError, ValueError) as exc:
+        # Fisher-Z's CI step inverts sub-correlation matrices, which can
+        # be singular even when no full column is constant. This happens
+        # on highly-collinear pooled chamber data (e.g., when selected
+        # experiments perturb downstream variables that are deterministic
+        # functions of each other in the spent set). The honest fallback
+        # is "PC made no claim" -> all-zeros adjacency on the full node
+        # set. Re-raise non-singular ValueErrors so genuine input bugs
+        # still surface.
+        if isinstance(exc, ValueError) and "singular" not in str(exc).lower():
+            raise
+        return pd.DataFrame(
+            np.zeros((len(node_names), len(node_names)), dtype=int),
+            index=node_names,
+            columns=node_names,
+        )
     valid_adj = cpdag_to_directed_adjacency(result.G.graph, valid_cols)
 
     if len(valid_cols) == len(node_names):

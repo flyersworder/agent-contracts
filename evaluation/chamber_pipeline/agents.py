@@ -16,8 +16,8 @@ Agents (per plan §5):
 |---|--------------------|--------------|----------------------|--------|
 | 1 | random             | single-agent | naive                | M3a ✅ |
 | 2 | greedy_ig_lite     | single-agent | non-LLM, principled  | M3a ✅ |
-| 3 | llm_only           | single-agent | LLM throughout       | M3b ⏳ |
-| 4 | llm_pc             | single-agent | LLM-orchestrated PC  | M3b ⏳ |
+| 3 | llm_only           | single-agent | LLM throughout       | M3b ✅ |
+| 4 | llm_pc             | single-agent | LLM-orchestrated PC  | M3b ✅ |
 | 5 | planner_reasoner   | multi-agent  | LLM, two roles       | M3c ⏳ |
 
 The R1 mitigation order from plan §11 is reflected here: Random and
@@ -34,14 +34,27 @@ from __future__ import annotations
 
 import random as _random
 import re
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
 from .inference import pool_experiment_data, run_pc
+from .llm_planner import (
+    build_adjacency_prompt,
+    build_select_prompt,
+    parse_adjacency_response,
+    parse_selection_response,
+)
 
 if TYPE_CHECKING:
     from agent_contracts.integrations.causalchamber import ContractedChamberAgent
+
+# Type alias for the LLM callable we accept. Matches `litellm.completion`'s
+# kwargs surface: at minimum `model` (str) and `messages` (list of role/content
+# dicts). Returns a LiteLLM-shaped completion response (dict or Pydantic-like).
+# Tests pass synthetic callables; production passes `litellm.completion`.
+LLMCallable = Callable[..., Any]
 
 
 # Pattern matching the LT experiment naming convention `uniform_<TARGET>_<STRENGTH>`
@@ -244,29 +257,139 @@ def greedy_ig_lite_agent(
 
 
 # ---------------------------------------------------------------------------
-# Variants 3-5 land in M3b / M3c. Stubs documented here so the module's
-# shape is the M3 surface even though only Random + GreedyIG-lite are
-# usable today. See plan §5 for the precise semantics each variant must
-# implement.
+# Variants 3 + 4 — LLM-bearing single-agent variants. Plan §5.1.
+# Both share `_llm_select_loop` for the per-step intervention picking
+# (k LLM calls) and differ only in what consumes the resulting
+# experiments: llm_only asks the LLM to commit a graph; llm_pc routes
+# the pooled data through classical PC inference.
+#
+# Variant 5 (planner_reasoner) lands in M3c — multi-agent with
+# delegated sub-budgets under conservation A + B <= total.
 # ---------------------------------------------------------------------------
+
+
+def _default_llm() -> LLMCallable:
+    """Return `litellm.completion`, importing lazily so non-LLM agents stay zero-dep.
+
+    We don't import litellm at module top because the M3a agents (random,
+    greedy_ig_lite) don't need it — and chamber-pipeline tests for those
+    shouldn't fail at collection time when LLM-stack deps are missing.
+    Importing here means `llm_only_agent` and `llm_pc_agent` only require
+    litellm at call time, and only when no `llm` kwarg was supplied.
+    """
+    from litellm import completion
+
+    return completion
+
+
+def _llm_select_loop(
+    adapter: ContractedChamberAgent,
+    llm: LLMCallable,
+    model: str,
+    seed: int,
+) -> tuple[list[str], list[pd.DataFrame]]:
+    """Step `budget` times: prompt LLM for one experiment, query, repeat.
+
+    Shared between `llm_only_agent` and `llm_pc_agent` — both spend their
+    intervention budget the same way, they only differ in what happens
+    after the loop (LLM emits adjacency vs. PC infers it).
+
+    Failure-tolerant: if the LLM returns an off-menu / malformed response,
+    we deterministically pick a random unspent menu entry (RNG seeded with
+    `seed`) and proceed. This guarantees the agent always spends exactly
+    `min(budget, len(menu))` interventions, so cross-variant comparisons
+    on the budget axis remain clean.
+
+    Args:
+        adapter: Contract-wrapped chamber adapter.
+        llm: LLM callable matching `litellm.completion`'s shape.
+        model: Model identifier passed through to `llm(model=..., messages=...)`.
+        seed: Seed for the fallback RNG (only used on bad LLM outputs).
+
+    Returns:
+        `(chosen_names, experiment_dfs)` — parallel lists of length
+        `min(budget, len(menu))` in spending order.
+    """
+    budget = _intervention_budget(adapter)
+    menu = list(adapter.available_experiments())
+
+    if budget <= 0 or not menu:
+        return [], []
+
+    rng = _random.Random(seed)
+    spent = min(budget, len(menu))
+
+    chosen: list[str] = []
+    dfs: list[pd.DataFrame] = []
+    for step in range(spent):
+        remaining = spent - step
+        messages = build_select_prompt(menu, remaining_budget=remaining, already_chosen=chosen)
+        response = llm(model=model, messages=messages)
+        name = parse_selection_response(response, menu)
+
+        if name is None or name in chosen:
+            # Fallback: random unspent. If everything is spent (LLM kept
+            # picking duplicates and the menu is exhausted), fall back to
+            # random over the full menu so we still spend the slot.
+            unspent = [m for m in menu if m not in chosen]
+            name = rng.choice(unspent) if unspent else rng.choice(menu)
+
+        chosen.append(name)
+        dfs.append(adapter.query_intervention(name))
+
+    return chosen, dfs
 
 
 def llm_only_agent(
     adapter: ContractedChamberAgent,
     model: str = "openrouter/deepseek/deepseek-v4-flash",
     seed: int = 0,
+    *,
+    llm: LLMCallable | None = None,
 ) -> pd.DataFrame:
-    """LLM picks each intervention, then emits the final adjacency. M3b stub.
+    """LLM picks each intervention, then emits the final adjacency directly.
 
-    Plan §5.1 variant 3. DeepSeek v4 Flash via OpenRouter through the
-    framework's LiteLLM integration. LLM uses no classical inference
-    step — it is asked to emit the adjacency matrix directly.
+    Plan §5.1 variant 3 — the "LLM throughout" cell. DeepSeek v4 Flash via
+    OpenRouter through the framework's LiteLLM integration. The LLM never
+    sees classical inference output: it is asked to commit a graph based
+    on the experiments it chose, full stop. The pooled measurement data
+    is *not* fed back to the LLM in this variant; that's the
+    `llm_pc_agent` design (where PC consumes the data instead).
+
+    Spending pattern: exactly `min(budget, len(menu))` interventions.
+    Final adjacency-emission LLM call is *not* counted against
+    `per_tool_limits["intervene"]` (it spends LLM tokens, not chamber
+    tools).
+
+    Args:
+        adapter: Contract-wrapped chamber adapter.
+        model: LiteLLM model identifier. Defaults per plan §5 to
+            DeepSeek v4 Flash via OpenRouter.
+        seed: RNG seed for the fallback path when the LLM returns
+            unparseable selections.
+        llm: Injectable LLM callable for testing. Production callers
+            leave this None and we resolve `litellm.completion` lazily.
+
+    Returns:
+        Directed-adjacency DataFrame indexed by chamber node names.
     """
-    raise NotImplementedError(
-        "M3b — see docs/causal_chamber_validation_plan.md §9 milestone M3 "
-        "(staged: Random + GreedyIG-lite in M3a, LLM-only + LLM+PC in M3b, "
-        "Planner+Reasoner in M3c)."
-    )
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+
+    if budget <= 0 or not adapter.available_experiments():
+        return _empty_adjacency(nodes)
+
+    llm = llm or _default_llm()
+    chosen, _dfs = _llm_select_loop(adapter, llm, model, seed)
+
+    # Final step: ask the LLM to commit a graph. The pooled measurement
+    # data is intentionally NOT included in this prompt — that would make
+    # the variant a "LLM-given-data" hybrid, which is what `llm_pc_agent`
+    # already covers via PC. Keeping `llm_only` honestly LLM-only at
+    # the inference step is what makes the H1 comparison meaningful.
+    adj_messages = build_adjacency_prompt(nodes, n_experiments=len(chosen))
+    response = llm(model=model, messages=adj_messages)
+    return parse_adjacency_response(response, nodes)
 
 
 def llm_pc_agent(
@@ -274,13 +397,46 @@ def llm_pc_agent(
     model: str = "openrouter/deepseek/deepseek-v4-flash",
     seed: int = 0,
     pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
 ) -> pd.DataFrame:
-    """LLM plans intervention sequence; classical PC infers the graph. M3b stub.
+    """LLM plans intervention sequence; classical PC infers the graph.
 
-    Plan §5.1 variant 4. The "main hybrid" cell — LLM chooses what to
-    perturb, PC chooses what edges those perturbations imply.
+    Plan §5.1 variant 4 — the "main hybrid" cell. The LLM chooses *what*
+    to perturb (selection); PC chooses *what edges those perturbations
+    imply* (inference). This is the comparison that most directly
+    interrogates the LLM's domain-design value: pull the inference step
+    out of the LLM's hands, leave only intervention design.
+
+    Spending pattern: exactly `min(budget, len(menu))` interventions.
+    No final LLM call — `run_pc()` consumes the pooled data and returns
+    the directed adjacency.
+
+    Args:
+        adapter: Contract-wrapped chamber adapter.
+        model: LiteLLM model identifier. Defaults per plan §5.
+        seed: RNG seed forwarded to the selection-loop fallback and to
+            `run_pc()`'s subsampling RNG.
+        pc_alpha: PC independence-test significance level.
+        llm: Injectable LLM callable for testing.
+
+    Returns:
+        Directed-adjacency DataFrame indexed by chamber node names.
     """
-    raise NotImplementedError("M3b — see docs/causal_chamber_validation_plan.md §9 milestone M3.")
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+
+    if budget <= 0 or not adapter.available_experiments():
+        return _empty_adjacency(nodes)
+
+    llm = llm or _default_llm()
+    _chosen, dfs = _llm_select_loop(adapter, llm, model, seed)
+
+    if not dfs:
+        return _empty_adjacency(nodes)
+
+    pooled = pool_experiment_data(dfs, nodes)
+    return run_pc(pooled, nodes, alpha=pc_alpha, seed=seed)
 
 
 def planner_reasoner_agents(
