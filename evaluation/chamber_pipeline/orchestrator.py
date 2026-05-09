@@ -246,11 +246,27 @@ class _CountingLLM:
         self.total_output_tokens: int = 0
         self.total_cost_usd: float = 0.0
 
+    # Default LiteLLM retry count for transient failures (rate limits,
+    # network blips, 5xx). LiteLLM's default is 0 — meaning the first
+    # 429 response from OpenRouter raises immediately. Setting this to
+    # 3 enables exponential backoff that catches transient errors while
+    # letting slow-but-OK responses complete normally. Verified against
+    # the M4b smoke: pre-fix, OpenRouter throttling produced ~30-50%
+    # cell-error rate on sustained LLM bursts.
+    DEFAULT_NUM_RETRIES = 3
+
     def __call__(self, **kwargs: Any) -> Any:
         if self._target is None:
             from litellm import completion as _completion
 
             self._target = _completion
+
+        # Inject retry count if caller didn't specify one. FakeLLM's
+        # `**_: Any` catch-all silently absorbs unknown kwargs, so this
+        # is safe across both the production litellm path and test
+        # paths. Caller-supplied num_retries (e.g., 0 to disable for a
+        # specific cell) wins.
+        kwargs.setdefault("num_retries", self.DEFAULT_NUM_RETRIES)
 
         # Record the call BEFORE invoking — even on exception we know
         # one was attempted, which matters for cost-attribution audits.

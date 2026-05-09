@@ -787,6 +787,34 @@ class TestCountingLLM:
             wrapper(model="m", messages=[])
         assert len(wrapper.calls) == 1
 
+    def test_injects_default_num_retries(self) -> None:
+        """OpenRouter rate-limit fix: by default, every LLM call gets
+        num_retries=3 so litellm's exponential backoff catches transient
+        429s. Without this, the M4b smoke saw ~30-50% cell error rate
+        from sustained-load throttling."""
+        captured: list[dict[str, Any]] = []
+
+        def target(**kwargs: Any) -> dict:
+            captured.append(dict(kwargs))
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(model="m", messages=[])
+        assert captured[0].get("num_retries") == _CountingLLM.DEFAULT_NUM_RETRIES
+        assert captured[0]["num_retries"] == 3
+
+    def test_caller_can_override_num_retries(self) -> None:
+        """Caller-supplied num_retries (e.g., 0 to disable for one call) wins."""
+        captured: list[dict[str, Any]] = []
+
+        def target(**kwargs: Any) -> dict:
+            captured.append(dict(kwargs))
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(model="m", messages=[], num_retries=0)
+        assert captured[0]["num_retries"] == 0
+
 
 class TestReadLlmMetrics:
     """The (n_llm_calls, tokens_in, tokens_out, cost_usd) extractor."""

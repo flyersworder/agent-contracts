@@ -349,6 +349,22 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     def progress(record: RunRecord, idx: int, total: int) -> None:
         counts[record.status] += 1
+        # Always log error details to stderr immediately, even under
+        # --quiet — without this, debugging a failing sweep means
+        # waiting for the parquet write at the very end. The 4-line
+        # block (cell index, agent, error_type, message snippet) is
+        # enough to diagnose most failures (rate limits, API errors,
+        # parsing bugs) in real time.
+        if record.status == "error":
+            sys.stderr.write(
+                f"[ERROR-DETAIL] cell {idx + 1}/{total} "
+                f"({record.agent_name} chamber={record.chamber} "
+                f"k={record.budget_k} seed={record.seed}): "
+                f"{record.error_type}: "
+                f"{(record.error_message or '')[:200]}\n"
+            )
+            sys.stderr.flush()
+
         if args.quiet:
             return
         # Print on intervals, on the final cell, or when an error fires
