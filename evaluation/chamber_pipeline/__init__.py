@@ -30,10 +30,20 @@ Agent calling convention (the contract M4's orchestrator dispatches against):
     `NotImplementedError` when incompatible with a chamber (e.g.,
     GreedyIG-lite on WT — see plan §5.1 variant 2).
 
-Future modules (M4+):
-    orchestrator:  one experiment cell end-to-end (M4 pilot sweep)
-    run_experiment: CLI entry point for the §6.1 sweep (M4)
-    analyze_results: aggregation + §5.3 Pareto figure generation (M5)
+M4 modules (added at M4a):
+    orchestrator: AgentSpec registry + per-cell runner (`run_cell`) +
+        full-sweep runner (`run_sweep`). The orchestrator is the
+        contract M4's CLI dispatches against — plan §5.1 chamber
+        compatibility lives in the registry, not in callers.
+    results: RunRecord dataclass + Parquet/CSV writers. One record
+        per cell of the §6.1 grid; never raises mid-sweep so a
+        single bad cell doesn't lose the surrounding ones.
+    run_experiment: argparse CLI. `--pilot` runs the M4 sweep,
+        `--m5` runs the full M5 sweep, `--mock-llm` enables
+        offline smoke testing without OpenRouter spend.
+
+Future modules (M5+):
+    analyze_results: aggregation + §5.3 Pareto figure generation
 """
 
 from .agents import (
@@ -57,18 +67,44 @@ from .llm_planner import (
     parse_adjacency_response,
     parse_selection_response,
 )
+from .orchestrator import (
+    AGENT_REGISTRY,
+    MENU_SIZES,
+    AgentSpec,
+    SweepSpec,
+    count_cells,
+    get_spec,
+    iter_sweep_cells,
+    run_cell,
+    run_sweep,
+)
+from .results import (
+    RunRecord,
+    RunStatus,
+    write_records_csv,
+    write_records_parquet,
+)
 from .scoring import ci_coverage, f1_edges, shd
 
 __all__ = [
+    "AGENT_REGISTRY",
     "CAUSAL_LEARN_AVAILABLE",
+    "MENU_SIZES",
+    "AgentSpec",
+    "RunRecord",
+    "RunStatus",
+    "SweepSpec",
     "build_adjacency_prompt",
     "build_planner_select_prompt",
     "build_reasoner_select_prompt",
     "build_select_prompt",
     "ci_coverage",
+    "count_cells",
     "cpdag_to_directed_adjacency",
     "f1_edges",
+    "get_spec",
     "greedy_ig_lite_agent",
+    "iter_sweep_cells",
     "llm_only_agent",
     "llm_pc_agent",
     "parse_adjacency_response",
@@ -76,6 +112,10 @@ __all__ = [
     "planner_reasoner_agents",
     "pool_experiment_data",
     "random_agent",
+    "run_cell",
     "run_pc",
+    "run_sweep",
     "shd",
+    "write_records_csv",
+    "write_records_parquet",
 ]
