@@ -31,7 +31,16 @@ This document tracks development progress and key decisions for the Agent Contra
 - **M3a/b/c**: 5 baseline agents (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner) (May 8) ✅
 - **Per-tool conservation**: framework refactor for `ContractingCapability` (May 8) ✅
 - **M4a/a.1**: Orchestrator + AgentSpec registry + CLI + analyzer (May 9) ✅
-- **M4b smoke + pilot**: Pending (operational fixes for OpenRouter throttling shipped; ready to run)
+- **M4b smoke**: 45-cell LT smoke run (May 13) ✅ — exposed `llm_only` empty-graph bug
+- **M4b post-smoke fix** (May 14, commit `ad96133`) ✅ — data-grounded `llm_only`
+  via per-experiment per-node mean summary + `_ADJACENCY_MAX_TOKENS` 4096→32768.
+  Verified k/M=1.00 single seed: SHD=27 (was 57), F1=0.76 (was 0), 54/57 edges
+  recovered. **DeepSeek v4 Flash dominates the Pareto at high budget** when given
+  the summary — rotates the §5.3 narrative (see plan).
+- **M4b re-smoke + pilot**: Pending. Re-smoke = 45 cells (~2-3hr, ~$0.50) at
+  3 seeds. Pilot = 450 cells (~24hr, ~$2) at 30 seeds. Both require
+  `--cell-timeout-seconds 1800` (was 600) because the adjacency call now reasons
+  for up to 10min at k/M=1.00.
 
 **Metrics**:
 - **Tests**: 1029 passing (chamber pillar adds ~250 tests on top of the framework's ~780)
@@ -292,9 +301,11 @@ agent-contracts/
 
 ## Next Steps
 
-**Active: M4b chamber-pillar pilot sweep**
-1. Smoke validation (~2hr, ~$0.30): `uv run python -m evaluation.chamber_pipeline.run_experiment --chambers lt --budgets 0.10,0.50,1.00 --seeds 3 --cell-timeout-seconds 600 --out runs/m4-smoke.parquet`
-2. Full pilot (~18hr overnight, ~$1.40): `uv run python -m evaluation.chamber_pipeline.run_experiment --pilot --cell-timeout-seconds 600 --out runs/m4-pilot.parquet`
+**Active: M4b chamber-pillar pilot sweep (post-fix)**
+1. Re-smoke (~2-3hr, ~$0.50) — confirms post-fix Pareto monotone at 3 seeds:
+   `uv run python -m evaluation.chamber_pipeline.run_experiment --chambers lt --budgets 0.10,0.50,1.00 --seeds 3 --cell-timeout-seconds 1800 --out runs/m4b-resmoke.parquet`
+2. Full pilot (~24hr overnight, ~$2) — `--cell-timeout-seconds 1800` mandatory:
+   `uv run python -m evaluation.chamber_pipeline.run_experiment --pilot --cell-timeout-seconds 1800 --out runs/m4-pilot.parquet`
 3. Analyze: `uv run python -m evaluation.chamber_pipeline.analyze_results --input runs/m4-pilot.parquet --out-dir runs/m4-pilot-figs/ --check-m4-acceptance`
 
 **M4c (deferred operational hardening, before M5)**
@@ -313,7 +324,9 @@ agent-contracts/
 
 - **OpenRouter rate limits**: `deepseek-v4-flash` is hosted by 8 providers; the orchestrator pins `Parasail` first because OpenRouter's auto-routing chose throttle-prone AtlasCloud. See `evaluation/chamber_pipeline/orchestrator.py:_CountingLLM.DEFAULT_PROVIDER_ORDER`.
 - **Socket timeout**: `socket.setdefaulttimeout(30)` is set at `run_experiment.py` module load — without this, `litellm.completion(timeout=N)` doesn't propagate to the SSL socket and stuck calls hang the process forever.
-- **Max tokens**: `_llm_select_loop` caps output at 200 tokens (selection step) and `llm_only_agent` at 4096 (adjacency emission). Without caps, DeepSeek v4 Flash generates ~1300 tokens of verbose reasoning per "pick one" call.
+- **Max tokens**: `_llm_select_loop` caps output at 200 tokens (selection step) and `llm_only_agent` at **32768** (adjacency emission, was 4096 pre-M4b-fix). DeepSeek v4 Flash is a *reasoning model* — `reasoning_tokens` typically 95% of `completion_tokens`. At 38-node adjacency prompts the 4096 cap was entirely consumed by hidden reasoning before any `content` was emitted (verified via `usage.completion_tokens_details.reasoning_tokens` on a 2-node diagnostic, 2026-05-14).
+- **Cell timeout**: Pilot needs `--cell-timeout-seconds 1800` (was 600). LLM-only adjacency call at k=59 takes ~10min wall (612s measured 2026-05-14) since the model reasons over a ~22K-token data summary before emitting the 38-node graph.
+- **DeepSeek v4 Flash + summary statistics is unreasonably good** at causal discovery on LT: SHD=27 / F1=0.76 / 54-of-57 edges at k/M=1.00, single seed. Beats every other variant including Planner+Reasoner. If 30-seed pilot confirms, plan §5.3 narrative rotates (LLM-only-with-summary becomes the strong-result, Planner+Reasoner becomes the "delegation has measurable cost" finding).
 
 ## References
 
