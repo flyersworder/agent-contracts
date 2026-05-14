@@ -878,6 +878,111 @@ class TestCountingLLM:
         wrapper(model="m", messages=[], timeout=120.0)
         assert captured[0]["timeout"] == 120.0
 
+    def test_finish_reason_error_triggers_provider_rotation(self) -> None:
+        """M4b re-smoke (2026-05-14): Parasail returned HTTP 200 with
+        `finish_reason: 'error'` in the body — a soft failure mode that
+        OpenRouter's HTTP-level fallback does NOT cycle past. Our wrapper
+        must detect this and retry with the next provider in the list.
+        """
+        captured: list[dict[str, Any]] = []
+
+        def target(**kwargs: Any) -> dict:
+            captured.append(dict(kwargs))
+            # First call fails (Parasail body-error), second succeeds.
+            if len(captured) == 1:
+                return {
+                    "choices": [{"message": {"content": ""}, "finish_reason": "error"}],
+                }
+            return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+        wrapper = _CountingLLM(target=target)
+        response = wrapper(model="m", messages=[])
+
+        # Two HTTP calls were made: first to Parasail (failed), second
+        # rotated to the next provider.
+        assert len(captured) == 2
+        assert captured[0]["extra_body"]["provider"]["order"][0] == "Parasail"
+        assert captured[1]["extra_body"]["provider"]["order"][0] != "Parasail"
+        # The bumped (Parasail) provider should still appear, just at the end.
+        assert "Parasail" in captured[1]["extra_body"]["provider"]["order"]
+        # The successful response is what's returned.
+        assert response["choices"][0]["finish_reason"] == "stop"
+        # Both attempts are tracked in `calls` for cost-attribution honesty.
+        assert len(wrapper.calls) == 2
+        assert wrapper.calls[0]["primary_provider"] == "Parasail"
+        assert wrapper.calls[1]["attempt"] == 1
+
+    def test_all_providers_fail_returns_last_response(self) -> None:
+        """If every provider returns finish_reason='error', the wrapper
+        gives up and returns the last (still-bad) response. The caller's
+        parser then falls back to its own empty-content path (random
+        selection for `parse_selection_response`, empty graph for
+        `parse_adjacency_response`)."""
+        captured: list[dict[str, Any]] = []
+
+        def target(**kwargs: Any) -> dict:
+            captured.append(dict(kwargs))
+            return {
+                "choices": [{"message": {"content": ""}, "finish_reason": "error"}],
+            }
+
+        wrapper = _CountingLLM(target=target)
+        response = wrapper(model="m", messages=[])
+
+        # Exactly one attempt per provider in the default order.
+        assert len(captured) == len(_CountingLLM.DEFAULT_PROVIDER_ORDER)
+        # Last response is returned (still bad — caller will fallback).
+        assert response["choices"][0]["finish_reason"] == "error"
+
+    def test_caller_provider_override_disables_rotation(self) -> None:
+        """If the caller supplies their own `provider` config, our
+        rotation logic stays out of the way — single attempt regardless
+        of finish_reason. Lets ablation experiments / unit tests pin a
+        specific provider without our retry-around-them behavior."""
+        captured: list[dict[str, Any]] = []
+
+        def target(**kwargs: Any) -> dict:
+            captured.append(dict(kwargs))
+            return {
+                "choices": [{"message": {"content": ""}, "finish_reason": "error"}],
+            }
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(
+            model="m",
+            messages=[],
+            extra_body={"provider": {"order": ["DeepInfra"], "allow_fallbacks": False}},
+        )
+        assert len(captured) == 1  # no rotation
+        assert captured[0]["extra_body"]["provider"]["order"] == ["DeepInfra"]
+
+    def test_usage_accumulates_across_rotation_attempts(self) -> None:
+        """Each retry attempt costs real tokens; we must track them all
+        for honest cost attribution. The total should be the sum across
+        all attempts, not just the successful one."""
+        n_calls = 0
+
+        def target(**kwargs: Any) -> dict:
+            nonlocal n_calls
+            n_calls += 1
+            usage = {"prompt_tokens": 10, "completion_tokens": 20}
+            if n_calls == 1:
+                # First attempt fails but still uses tokens.
+                return {
+                    "choices": [{"message": {"content": ""}, "finish_reason": "error"}],
+                    "usage": usage,
+                }
+            return {
+                "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                "usage": usage,
+            }
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(model="m", messages=[])
+        # Two attempts, each consumed 10 in + 20 out.
+        assert wrapper.total_input_tokens == 20
+        assert wrapper.total_output_tokens == 40
+
 
 class TestReadLlmMetrics:
     """The (n_llm_calls, tokens_in, tokens_out, cost_usd) extractor."""

@@ -206,6 +206,36 @@ class _PcDegeneracyHandler(logging.Handler):
 # ---------------------------------------------------------------------------
 
 
+def _response_has_finish_reason_error(response: Any) -> bool:
+    """Return True iff any choice in the response carries finish_reason='error'.
+
+    Used by `_CountingLLM` to detect body-encoded provider failures —
+    OpenRouter returns HTTP 200 with `finish_reason: 'error'` (and the
+    visible `content` empty) when an upstream provider rejects the
+    request internally. Our retry path treats this as equivalent to
+    a transient HTTP failure and rotates providers.
+
+    Tolerant of both dict-shape and Pydantic-shape responses,
+    mirroring `_response_text` in `llm_planner`. Returns False on
+    structurally malformed responses (rather than raising) so the
+    caller can fall through to its own parser-side empty-content
+    handling.
+    """
+    try:
+        choices = response["choices"] if isinstance(response, dict) else response.choices
+        for choice in choices:
+            finish_reason = (
+                choice["finish_reason"]
+                if isinstance(choice, dict)
+                else getattr(choice, "finish_reason", None)
+            )
+            if finish_reason == "error":
+                return True
+        return False
+    except (KeyError, AttributeError, TypeError, IndexError):
+        return False
+
+
 class _CountingLLM:
     """Per-cell LLM proxy that counts calls and accumulates token / cost.
 
@@ -260,12 +290,21 @@ class _CountingLLM:
     # cheapest-at-moment), which throttles k=30+ LLM bursts severely
     # (10-min timeouts on a single cell). Pinning to Parasail (~0.5-1.3s/call,
     # 5-10x faster than AtlasCloud under load) is the operational fix.
-    # AtlasCloud + SiliconFlow remain as fp8 fallbacks. DeepInfra (fp4) is
-    # excluded to avoid quantization-driven quality variance for AAMAS
+    # SiliconFlow + Novita are added as fp8 fallbacks rotated through
+    # by `__call__` when the primary returns `finish_reason: 'error'`
+    # (a body-encoded failure that OpenRouter's HTTP-level `allow_fallbacks`
+    # does not detect — verified during M4b re-smoke, 2026-05-14). AtlasCloud
+    # is retained as a last-resort fp8 host. DeepInfra (fp4) is excluded
+    # to avoid quantization-driven quality variance for AAMAS
     # reproducibility — plan §5's "single-model" claim implicitly extends
     # to "single inference precision class," and fp8 is the production
     # standard for these models.
-    DEFAULT_PROVIDER_ORDER: tuple[str, ...] = ("Parasail", "AtlasCloud", "SiliconFlow")
+    DEFAULT_PROVIDER_ORDER: tuple[str, ...] = (
+        "Parasail",
+        "SiliconFlow",
+        "Novita",
+        "AtlasCloud",
+    )
 
     # Per-request socket-level timeout (seconds). Without this, a single
     # litellm.completion call can BLOCK FOREVER on the underlying SSL
@@ -301,32 +340,80 @@ class _CountingLLM:
         # for the full root-cause analysis.
         kwargs.setdefault("timeout", self.DEFAULT_REQUEST_TIMEOUT_SECONDS)
 
-        # Inject OpenRouter provider routing preference if caller didn't
-        # specify one. Litellm forwards `extra_body` to the underlying
-        # OpenRouter request body where `provider` is interpreted.
-        # `allow_fallbacks: True` so a transient outage on the primary
-        # provider auto-routes to the next in the order rather than
-        # failing the whole cell.
+        # If caller supplied their own provider config, honor it
+        # verbatim and skip our rotation logic (single attempt).
         existing_extra = kwargs.get("extra_body") or {}
-        if "provider" not in existing_extra:
+        caller_supplied_provider = "provider" in existing_extra
+
+        if caller_supplied_provider:
+            # Single attempt with caller's config; preserve call accounting.
+            self.calls.append({"model": kwargs.get("model"), "idx": len(self.calls)})
+            response = self._target(**kwargs)
+            self._accumulate_usage(response)
+            return response
+
+        # Provider rotation loop. OpenRouter's `allow_fallbacks: True`
+        # cycles through `provider.order` when the upstream provider
+        # returns an HTTP error — but **NOT** when the provider returns
+        # 200 with `finish_reason: 'error'` in the response body
+        # (a body-encoded soft failure). We saw this in the M4b
+        # re-smoke (2026-05-14): Parasail returned ~40 body-encoded
+        # errors over a 1-hr window, never triggering OpenRouter
+        # fallback, and `litellm.num_retries=3` masked the failure
+        # because it only retries on raised exceptions.
+        #
+        # The fix is to inspect `finish_reason` ourselves and, on
+        # body-encoded error, rotate the provider list (failed primary
+        # moves to the end) and retry. Each attempt is a separate HTTP
+        # request to OpenRouter, so the rotated `provider.order` takes
+        # effect. After exhausting the list, we surface the last
+        # response — the agent's downstream parsers (parse_selection_response
+        # / parse_adjacency_response) already handle empty content via
+        # fallback paths.
+        provider_order = list(self.DEFAULT_PROVIDER_ORDER)
+        max_attempts = len(provider_order)
+        response: Any = None
+        for attempt in range(max_attempts):
             kwargs["extra_body"] = {
                 **existing_extra,
                 "provider": {
-                    "order": list(self.DEFAULT_PROVIDER_ORDER),
+                    "order": provider_order,
                     "allow_fallbacks": True,
                 },
             }
 
-        # Record the call BEFORE invoking — even on exception we know
-        # one was attempted, which matters for cost-attribution audits.
-        idx = len(self.calls)
-        self.calls.append({"model": kwargs.get("model"), "idx": idx})
+            # Record each attempt as a distinct call for cost-attribution
+            # audit (provider rotation is a real cost; we don't hide it).
+            self.calls.append(
+                {
+                    "model": kwargs.get("model"),
+                    "idx": len(self.calls),
+                    "attempt": attempt,
+                    "primary_provider": provider_order[0],
+                }
+            )
 
-        response = self._target(**kwargs)
+            response = self._target(**kwargs)
+            self._accumulate_usage(response)
 
-        # Best-effort usage extraction. Responses may be dict-shape
-        # (most LiteLLM responses) or Pydantic-shape (some providers).
-        # Both are tolerated; missing fields silently leave totals at 0.
+            if not _response_has_finish_reason_error(response):
+                return response
+
+            # Failed with body-encoded error: rotate so the failed
+            # primary is now at the end, and try the next provider.
+            provider_order = provider_order[1:] + provider_order[:1]
+
+        # All providers exhausted with body-encoded errors. Return the
+        # last (still-bad) response; the caller's parser will fall back.
+        return response
+
+    def _accumulate_usage(self, response: Any) -> None:
+        """Best-effort usage / cost extraction; tolerant of all response shapes.
+
+        Updates `total_input_tokens`, `total_output_tokens`, `total_cost_usd`.
+        Responses may be dict-shape (most LiteLLM responses) or Pydantic-shape
+        (some providers); missing fields silently leave totals at 0.
+        """
         try:
             usage = (
                 response.get("usage", {})
@@ -346,7 +433,6 @@ class _CountingLLM:
             self.total_input_tokens += int(in_tok)
             self.total_output_tokens += int(out_tok)
         except (AttributeError, TypeError, ValueError):
-            # Response shape doesn't carry usage — fine, just skip.
             pass
 
         try:
@@ -363,8 +449,6 @@ class _CountingLLM:
             self.total_cost_usd += float(cost)
         except (AttributeError, TypeError, ValueError):
             pass
-
-        return response
 
 
 # ---------------------------------------------------------------------------
