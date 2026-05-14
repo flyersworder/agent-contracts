@@ -214,9 +214,74 @@ def parse_selection_response(response: Any, menu: list[str]) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def summarize_experiments(
+    experiment_dfs: list[pd.DataFrame],
+    chosen_names: list[str],
+    node_names: list[str],
+    decimals: int = 2,
+) -> str:
+    """Render a compact markdown table of per-experiment per-node means.
+
+    Used by `build_adjacency_prompt` (when invoked via `llm_only_agent`)
+    to give the LLM the *data* it asked for via its intervention picks.
+    Without this summary, `llm_only_agent` reduces to "commit a graph
+    based on names alone," which empirically yields the empty graph
+    (verified in the M4b smoke run, 2026-05-13).
+
+    The output is markdown rather than CSV so a curious reader of the
+    LLM trace sees something legible. Rows are experiments (preserving
+    the order in `chosen_names`); columns are the chamber's graph nodes
+    (preserving the order in `node_names`). Non-node columns (timestamp,
+    counter, intervention, etc.) are dropped.
+
+    Each cell is the within-experiment mean of that node, rounded to
+    `decimals` places. Standard deviations are *not* included in v1 —
+    the LLM can implicitly gauge dynamic range by comparing means
+    across experiments, which is cheaper in tokens. If smoke results
+    show insufficient signal, std can be added behind the same call.
+
+    Args:
+        experiment_dfs: Per-experiment measurement DataFrames, in the
+            same order as `chosen_names`. Each DataFrame should have
+            one row per sample and one column per chamber variable
+            (plus metadata columns which are ignored).
+        chosen_names: The experiment names spent so far (e.g.,
+            `["uniform_red_mid", "uniform_green_mid"]`). The
+            intervention target is encoded in the name; the LLM is
+            expected to parse it.
+        node_names: The chamber's ground-truth graph nodes. Only these
+            columns appear in the summary; everything else is dropped.
+        decimals: Rounding for the mean values. 2 is usually enough
+            to surface intervention effects without bloating tokens.
+
+    Returns:
+        Markdown table string, or the empty string if no experiments
+        were provided. Shape: `(len(chosen_names) + 2)` rows
+        x `(len(node_names) + 1)` columns including header and divider.
+    """
+    if not experiment_dfs or not chosen_names:
+        return ""
+
+    # Header: experiment | node1 | node2 | ...
+    header = "| experiment | " + " | ".join(node_names) + " |"
+    divider = "|" + "|".join(["---"] * (len(node_names) + 1)) + "|"
+
+    rows: list[str] = [header, divider]
+    for name, df in zip(chosen_names, experiment_dfs, strict=False):
+        # Only summarize columns that are graph nodes — drop chamber
+        # metadata (timestamp, counter, flag, intervention, ...).
+        present = [c for c in node_names if c in df.columns]
+        means = df[present].mean(numeric_only=True)
+        cells = [f"{means[n]:.{decimals}f}" if n in means.index else "—" for n in node_names]
+        rows.append(f"| {name} | " + " | ".join(cells) + " |")
+
+    return "\n".join(rows)
+
+
 def build_adjacency_prompt(
     node_names: list[str],
     n_experiments: int,
+    data_summary: str | None = None,
 ) -> list[dict[str, str]]:
     """Build the chat messages asking the LLM to emit a directed adjacency.
 
@@ -230,31 +295,64 @@ def build_adjacency_prompt(
             of variables the LLM may emit edges over). Order is preserved
             in the prompt.
         n_experiments: How many interventional experiments the LLM saw
-            during the selection phase. Reported for context — the
-            response data isn't included; this is the LLM-only variant
-            and the LLM is being asked to commit a graph based on what it
-            already inferred from the menu choices.
+            during the selection phase. Reported for context.
+        data_summary: Optional markdown table from `summarize_experiments`
+            giving per-experiment per-node means. When provided, the
+            prompt instructs the LLM to base its graph on the observed
+            data shifts. When None (default), the prompt falls back to
+            the pre-M4b "commit a graph based on names alone" behavior
+            — kept for backward-compat and unit tests; production
+            `llm_only_agent` always passes a summary.
 
     Returns:
         List of `{role, content}` dicts in OpenAI / LiteLLM chat format.
     """
     rendered_nodes = "\n".join(node_names)
 
-    system = (
-        "You are now committing to a directed causal graph based on the "
-        "experiments you selected. Output the graph as a JSON object "
-        "mapping each source variable to the list of variables it directly "
-        "causes. Include only edges you have evidence for. It is acceptable "
-        "to leave a variable out if it has no outgoing edges."
-    )
-
-    user = (
-        f"You completed {n_experiments} interventional experiments above.\n\n"
-        f"Variables (use these exact names):\n{rendered_nodes}\n\n"
-        "Output the directed causal graph as a JSON object on a single "
-        'line, e.g. `{"x": ["y", "z"], "y": []}`. No prose, no markdown '
-        "fences — just the JSON object."
-    )
+    if data_summary:
+        # Data-grounded path: the LLM has actual measurements to reason
+        # over, so the system prompt drops the "leave a variable out
+        # if it has no outgoing edges" escape hatch that empirically
+        # collapses to the empty graph.
+        system = (
+            "You are inferring a directed causal graph from interventional "
+            "data. For each pair of variables, decide whether the row's "
+            "intervention target causally affects the column variable by "
+            "comparing that column's mean across experiments. Output the "
+            "graph as a JSON object mapping each source variable to the "
+            "list of variables it directly causes. Include every edge "
+            "supported by a clear mean shift; omit only when the evidence "
+            "is genuinely absent."
+        )
+        user = (
+            f"You completed {n_experiments} interventional experiments. The "
+            "intervention target of each experiment is encoded in its name "
+            "(e.g., `uniform_red_mid` intervenes on `red`).\n\n"
+            f"Per-experiment per-variable means (graph nodes only):\n\n"
+            f"{data_summary}\n\n"
+            f"Variables (use these exact names):\n{rendered_nodes}\n\n"
+            "Output the directed causal graph as a JSON object on a single "
+            'line, e.g. `{"x": ["y", "z"], "y": []}`. No prose, no markdown '
+            "fences — just the JSON object."
+        )
+    else:
+        # Legacy path: pre-M4b behavior, kept so existing unit tests
+        # (which don't construct a data summary) still exercise the
+        # builder without flagging spurious failures.
+        system = (
+            "You are now committing to a directed causal graph based on the "
+            "experiments you selected. Output the graph as a JSON object "
+            "mapping each source variable to the list of variables it directly "
+            "causes. Include only edges you have evidence for. It is acceptable "
+            "to leave a variable out if it has no outgoing edges."
+        )
+        user = (
+            f"You completed {n_experiments} interventional experiments above.\n\n"
+            f"Variables (use these exact names):\n{rendered_nodes}\n\n"
+            "Output the directed causal graph as a JSON object on a single "
+            'line, e.g. `{"x": ["y", "z"], "y": []}`. No prose, no markdown '
+            "fences — just the JSON object."
+        )
 
     return [
         {"role": "system", "content": system},

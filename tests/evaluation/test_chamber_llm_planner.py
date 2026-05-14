@@ -17,6 +17,7 @@ from evaluation.chamber_pipeline.llm_planner import (
     build_select_prompt,
     parse_adjacency_response,
     parse_selection_response,
+    summarize_experiments,
 )
 
 # ---------------------------------------------------------------------------
@@ -189,6 +190,101 @@ class TestBuildAdjacencyPrompt:
         msgs = build_adjacency_prompt(["x", "y"], n_experiments=1)
         # Must give the LLM the output schema unambiguously.
         assert "JSON" in msgs[1]["content"] or "json" in msgs[1]["content"]
+
+    def test_data_summary_present_when_provided(self) -> None:
+        # M4b fix: when a data summary is passed, it must appear verbatim
+        # in the user message and the system prompt must drop the
+        # empty-graph escape hatch ("acceptable to leave a variable out").
+        summary = "| experiment | x | y |\n|---|---|---|\n| exp_a | 1.0 | 2.0 |"
+        msgs = build_adjacency_prompt(["x", "y"], n_experiments=1, data_summary=summary)
+        assert summary in msgs[1]["content"]
+        assert "acceptable to leave a variable out" not in msgs[0]["content"]
+        assert "comparing that column's mean" in msgs[0]["content"]
+
+    def test_data_summary_absent_keeps_legacy_prompt(self) -> None:
+        # Backward-compat: the legacy escape-hatch wording must remain
+        # for tests/callers that build the prompt without a summary.
+        msgs = build_adjacency_prompt(["x", "y"], n_experiments=1)
+        assert "acceptable to leave a variable out" in msgs[0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# summarize_experiments
+# ---------------------------------------------------------------------------
+
+
+class TestSummarizeExperiments:
+    """Per-experiment per-node mean summary for the LLM-only data-grounded path."""
+
+    def test_returns_empty_string_for_no_experiments(self) -> None:
+        assert summarize_experiments([], [], ["x", "y"]) == ""
+
+    def test_emits_markdown_table_shape(self) -> None:
+        df = pd.DataFrame({"x": [1.0, 3.0], "y": [2.0, 4.0]})
+        out = summarize_experiments([df], ["exp_a"], ["x", "y"])
+        lines = out.splitlines()
+        # header + divider + 1 data row = 3 lines
+        assert len(lines) == 3
+        assert lines[0].startswith("| experiment | x | y |")
+        assert lines[1].startswith("|---|")
+        assert lines[2].startswith("| exp_a | 2.00 | 3.00 |")
+
+    def test_drops_columns_outside_node_names(self) -> None:
+        # Chamber metadata (timestamp, intervention, ...) must not leak
+        # into the summary; only graph nodes should appear.
+        df = pd.DataFrame(
+            {
+                "timestamp": [1.0, 2.0],
+                "intervention": [1.0, 1.0],
+                "red": [40.0, 42.0],
+                "green": [10.0, 12.0],
+            }
+        )
+        out = summarize_experiments([df], ["exp_a"], ["red", "green"])
+        assert "timestamp" not in out
+        assert "intervention" not in out
+        assert "red" in out
+        assert "green" in out
+
+    def test_missing_node_columns_rendered_as_dash(self) -> None:
+        # If an experiment DataFrame lacks a node (shouldn't happen in
+        # practice but matters for robustness), the cell becomes "—"
+        # rather than crashing.
+        df = pd.DataFrame({"x": [1.0, 3.0]})
+        out = summarize_experiments([df], ["exp_a"], ["x", "y"])
+        assert "—" in out
+
+    def test_preserves_experiment_order(self) -> None:
+        # The LLM should see experiments in the order they were chosen,
+        # not sorted alphabetically.
+        df_a = pd.DataFrame({"x": [1.0]})
+        df_b = pd.DataFrame({"x": [2.0]})
+        out = summarize_experiments([df_b, df_a], ["exp_b", "exp_a"], ["x"])
+        lines = out.splitlines()
+        assert "exp_b" in lines[2]
+        assert "exp_a" in lines[3]
+
+    def test_rounds_to_specified_decimals(self) -> None:
+        df = pd.DataFrame({"x": [1.0, 2.0, 3.0]})  # mean = 2.0
+        # decimals=0 → no fractional part
+        out = summarize_experiments([df], ["exp"], ["x"], decimals=0)
+        assert "| 2 |" in out
+
+    def test_token_footprint_reasonable_for_full_lt_sweep(self) -> None:
+        # Sanity check: 60 experiments x 38 LT nodes should fit
+        # comfortably inside DeepSeek's 1M context. Rough character
+        # ceiling at ~50K chars / ~15K tokens.
+        rng = np.random.default_rng(0)
+        dfs = [
+            pd.DataFrame(
+                rng.uniform(0, 1000, size=(1000, 38)), columns=[f"n{i}" for i in range(38)]
+            )
+            for _ in range(60)
+        ]
+        names = [f"exp_{i}" for i in range(60)]
+        nodes = [f"n{i}" for i in range(38)]
+        out = summarize_experiments(dfs, names, nodes)
+        assert len(out) < 50_000
 
 
 # ---------------------------------------------------------------------------

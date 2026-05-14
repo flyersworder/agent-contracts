@@ -47,6 +47,7 @@ from .llm_planner import (
     build_select_prompt,
     parse_adjacency_response,
     parse_selection_response,
+    summarize_experiments,
 )
 
 if TYPE_CHECKING:
@@ -73,9 +74,21 @@ _SELECTION_MAX_TOKENS = 200
 # `llm_only_agent`. Larger because the response is a JSON object
 # encoding the full directed-adjacency matrix (LT: ~38 nodes,
 # WT: ~32 nodes — at worst ~38*38 = 1444 entries, but typically
-# only edges-present are encoded so much smaller). 4096 leaves
-# headroom for verbose JSON formatting + any reasoning prefix.
-_ADJACENCY_MAX_TOKENS = 4096
+# only edges-present are encoded so much smaller).
+#
+# Why 32768 (was 4096): DeepSeek v4 Flash is a *reasoning model* that
+# spends most of its `completion_tokens` budget on internal chain-of-
+# thought (`reasoning_content`), with only a small fraction left for
+# the visible `content` field. Diagnostic on 2026-05-14 showed 95% of
+# output tokens were reasoning even on a 2-node prompt; on the 38-node
+# LT prompt with 30 experiments of data summary, 4096 was consumed
+# entirely by reasoning and `content` came back empty, parsing to the
+# all-zeros adjacency. Bumping to 32768 leaves comfortable room for
+# both reasoning and the JSON. Cost impact at OpenRouter Flash pricing
+# is ~$0.009 per call → ~$1.35 across all 150 LLM-only pilot cells,
+# negligible vs the ~$1.40 pilot baseline. The 1M-token context
+# accommodates this trivially.
+_ADJACENCY_MAX_TOKENS = 32768
 
 
 # Pattern matching the LT experiment naming convention `uniform_<TARGET>_<STRENGTH>`
@@ -472,14 +485,26 @@ def llm_only_agent(
         return _empty_adjacency(nodes)
 
     llm = llm or _default_llm()
-    chosen, _dfs = _llm_select_loop(adapter, llm, model, seed)
+    chosen, dfs = _llm_select_loop(adapter, llm, model, seed)
 
-    # Final step: ask the LLM to commit a graph. The pooled measurement
-    # data is intentionally NOT included in this prompt — that would make
-    # the variant a "LLM-given-data" hybrid, which is what `llm_pc_agent`
-    # already covers via PC. Keeping `llm_only` honestly LLM-only at
-    # the inference step is what makes the H1 comparison meaningful.
-    adj_messages = build_adjacency_prompt(nodes, n_experiments=len(chosen))
+    # Final step: ask the LLM to commit a graph. We pass a compact
+    # per-experiment per-node mean summary (built in `llm_planner`)
+    # so the LLM does in-context inference over the data it asked for,
+    # rather than reciting priors. The M4b smoke run (2026-05-13)
+    # established empirically that without the summary the LLM
+    # collapses to the empty graph in every cell.
+    #
+    # This is NOT the same as `llm_pc_agent`: PC consumes the *raw*
+    # pooled data via a classical CI test; here the LLM consumes a
+    # numeric *summary* via natural-language reasoning. The two are
+    # cleanly distinct ablations on the same data — exactly what the
+    # plan §5.3 row for "LLM-only" intended.
+    data_summary = summarize_experiments(dfs, chosen, nodes)
+    adj_messages = build_adjacency_prompt(
+        nodes,
+        n_experiments=len(chosen),
+        data_summary=data_summary,
+    )
     # Cap output for the adjacency-emission step. Larger than the
     # selection cap because the response encodes the full directed-edge
     # JSON map for ~38-node chambers. See _ADJACENCY_MAX_TOKENS docstring.

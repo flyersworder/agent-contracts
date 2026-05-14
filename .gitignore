@@ -233,3 +233,6 @@ results/
 # Also allow evaluation figures
 !evaluation/**/figures/*.png
 data/
+
+# Chamber pipeline experiment outputs (parquets, logs, figures)
+runs/
