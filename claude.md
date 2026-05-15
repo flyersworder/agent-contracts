@@ -41,6 +41,19 @@ This document tracks development progress and key decisions for the Agent Contra
   3 seeds. Pilot = 450 cells (~24hr, ~$2) at 30 seeds. Both require
   `--cell-timeout-seconds 1800` (was 600) because the adjacency call now reasons
   for up to 10min at k/M=1.00.
+- **M4b cell-timeout root-cause fix** (May 15, commit `0d694cf`) ✅ — the
+  pilot hung at 60/450 (and re-smoke hung at 30/45 yesterday) because
+  `_invoke_with_timeout` used `with ThreadPoolExecutor(...) as exe:`. The
+  context manager calls `shutdown(wait=True)` on exit, which blocks the main
+  thread waiting for a worker stuck in a non-cancellable openssl SSL_read.
+  `future.result(timeout=1800)` correctly raised TimeoutError *inside* the
+  `with` block, but the exception couldn't escape because `__exit__` was
+  wedged. Replaced with `threading.Thread(daemon=True)` + `worker.join(timeout)`;
+  on timeout, raise and let the daemon thread leak. Now hangs are bounded
+  at 1800s and the sweep advances. The earlier three fixes (socket timeout,
+  max_tokens, provider rotation) were all real bugs but none would have
+  fixed this hang on their own — the cell-timeout safety net was itself
+  broken.
 
 **Metrics**:
 - **Tests**: 1029 passing (chamber pillar adds ~250 tests on top of the framework's ~780)
