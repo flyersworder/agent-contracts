@@ -816,10 +816,12 @@ class TestCountingLLM:
         assert captured[0]["num_retries"] == 0
 
     def test_injects_default_provider_order(self) -> None:
-        """OpenRouter provider routing: pinned to Parasail (fastest) +
-        fp8 fallbacks. Without this, OpenRouter routes by its own
-        cost-or-latency heuristic — which empirically chose AtlasCloud
-        and throttled k=30 cells to a 10-min timeout."""
+        """OpenRouter provider routing: pinned to a fp8-only order so
+        OpenRouter doesn't fall back to fp4 (DeepInfra) for AAMAS
+        reproducibility. The exact ordering is dynamic across days
+        (provider speeds vary), so we assert the order matches
+        DEFAULT_PROVIDER_ORDER and trust that constant to encode
+        today's best-known ordering."""
         captured: list[dict[str, Any]] = []
 
         def target(**kwargs: Any) -> dict:
@@ -831,7 +833,6 @@ class TestCountingLLM:
         extra = captured[0].get("extra_body", {})
         assert "provider" in extra
         assert extra["provider"]["order"] == list(_CountingLLM.DEFAULT_PROVIDER_ORDER)
-        assert extra["provider"]["order"][0] == "Parasail"
         assert extra["provider"]["allow_fallbacks"] is True
 
     def test_caller_can_override_provider(self) -> None:
@@ -879,16 +880,17 @@ class TestCountingLLM:
         assert captured[0]["timeout"] == 120.0
 
     def test_finish_reason_error_triggers_provider_rotation(self) -> None:
-        """M4b re-smoke (2026-05-14): Parasail returned HTTP 200 with
+        """M4b re-smoke (2026-05-14): a provider returned HTTP 200 with
         `finish_reason: 'error'` in the body — a soft failure mode that
         OpenRouter's HTTP-level fallback does NOT cycle past. Our wrapper
         must detect this and retry with the next provider in the list.
         """
         captured: list[dict[str, Any]] = []
+        primary = _CountingLLM.DEFAULT_PROVIDER_ORDER[0]
 
         def target(**kwargs: Any) -> dict:
             captured.append(dict(kwargs))
-            # First call fails (Parasail body-error), second succeeds.
+            # First call fails (body-error from primary), second succeeds.
             if len(captured) == 1:
                 return {
                     "choices": [{"message": {"content": ""}, "finish_reason": "error"}],
@@ -898,18 +900,18 @@ class TestCountingLLM:
         wrapper = _CountingLLM(target=target)
         response = wrapper(model="m", messages=[])
 
-        # Two HTTP calls were made: first to Parasail (failed), second
-        # rotated to the next provider.
+        # Two HTTP calls were made: first to the configured primary (failed),
+        # second rotated to the next provider.
         assert len(captured) == 2
-        assert captured[0]["extra_body"]["provider"]["order"][0] == "Parasail"
-        assert captured[1]["extra_body"]["provider"]["order"][0] != "Parasail"
-        # The bumped (Parasail) provider should still appear, just at the end.
-        assert "Parasail" in captured[1]["extra_body"]["provider"]["order"]
+        assert captured[0]["extra_body"]["provider"]["order"][0] == primary
+        assert captured[1]["extra_body"]["provider"]["order"][0] != primary
+        # The bumped primary should still appear, just at the end.
+        assert primary in captured[1]["extra_body"]["provider"]["order"]
         # The successful response is what's returned.
         assert response["choices"][0]["finish_reason"] == "stop"
         # Both attempts are tracked in `calls` for cost-attribution honesty.
         assert len(wrapper.calls) == 2
-        assert wrapper.calls[0]["primary_provider"] == "Parasail"
+        assert wrapper.calls[0]["primary_provider"] == primary
         assert wrapper.calls[1]["attempt"] == 1
 
     def test_all_providers_fail_returns_last_response(self) -> None:

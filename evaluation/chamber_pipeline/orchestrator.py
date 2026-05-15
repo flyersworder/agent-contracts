@@ -286,24 +286,24 @@ class _CountingLLM:
     DEFAULT_NUM_RETRIES = 3
 
     # OpenRouter's `provider.order` preference for `deepseek-v4-flash`.
-    # OpenRouter's automatic routing chose AtlasCloud by default (probably
-    # cheapest-at-moment), which throttles k=30+ LLM bursts severely
-    # (10-min timeouts on a single cell). Pinning to Parasail (~0.5-1.3s/call,
-    # 5-10x faster than AtlasCloud under load) is the operational fix.
-    # SiliconFlow + Novita are added as fp8 fallbacks rotated through
-    # by `__call__` when the primary returns `finish_reason: 'error'`
-    # (a body-encoded failure that OpenRouter's HTTP-level `allow_fallbacks`
-    # does not detect — verified during M4b re-smoke, 2026-05-14). AtlasCloud
-    # is retained as a last-resort fp8 host. DeepInfra (fp4) is excluded
-    # to avoid quantization-driven quality variance for AAMAS
-    # reproducibility — plan §5's "single-model" claim implicitly extends
-    # to "single inference precision class," and fp8 is the production
-    # standard for these models.
+    # Provider performance is genuinely dynamic across days: yesterday
+    # (2026-05-14) Parasail was the fastest (~0.5-1.3s/call) and AtlasCloud
+    # was throttling badly. Today (2026-05-15) Parasail dropped to ~9 t/s
+    # while Novita and AtlasCloud both serve at ~70-80 t/s. At
+    # `_ADJACENCY_MAX_TOKENS=32768` with ~95% reasoning load on DeepSeek
+    # v4 Flash, a 9 t/s provider takes ~55 min per cell vs ~6 min on a
+    # 70 t/s provider — every cell on Parasail would time out at 1800s.
+    # Order is therefore Novita + AtlasCloud first (consistently fast today,
+    # both fp8), Parasail + SiliconFlow as fallbacks. Rotation in `__call__`
+    # advances on `finish_reason: 'error'` and the cell-timeout safety net
+    # bounds any genuinely-slow provider at `cell_timeout_seconds`.
+    # DeepInfra (fp4) remains excluded to keep the inference-precision
+    # class constant for AAMAS reproducibility.
     DEFAULT_PROVIDER_ORDER: tuple[str, ...] = (
-        "Parasail",
-        "SiliconFlow",
         "Novita",
         "AtlasCloud",
+        "Parasail",
+        "SiliconFlow",
     )
 
     # Per-request socket-level timeout (seconds). Without this, a single
