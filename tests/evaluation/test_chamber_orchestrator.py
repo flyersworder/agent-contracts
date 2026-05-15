@@ -1041,6 +1041,43 @@ class TestInvokeWithTimeout:
         with pytest.raises(TimeoutError, match="timeout"):
             _invoke_with_timeout(slow, None, {}, timeout=0.2)
 
+    def test_unresponsive_target_still_times_out(self) -> None:
+        # Production hangs (stuck SSL socket reads) never release the worker
+        # thread. A `with ThreadPoolExecutor as ...` context manager would
+        # block on shutdown(wait=True) forever in that scenario. Simulate
+        # by passing a target that waits on an unset Event.
+        import threading as _threading
+
+        hang_event = _threading.Event()
+
+        def hang(_adapter, **_kwargs):
+            hang_event.wait()
+
+        outcome: list[str] = []
+
+        def call() -> None:
+            try:
+                _invoke_with_timeout(hang, None, {}, timeout=0.3)
+            except TimeoutError:
+                outcome.append("timed_out")
+            except Exception as exc:  # pragma: no cover - debug aid only
+                outcome.append(f"other:{type(exc).__name__}")
+
+        caller = _threading.Thread(target=call, daemon=True)
+        caller.start()
+        caller.join(timeout=3.0)
+
+        try:
+            assert not caller.is_alive(), (
+                "_invoke_with_timeout did not return within 3s — main thread "
+                "is stuck in shutdown(wait=True) waiting for uncancellable worker"
+            )
+            assert outcome == ["timed_out"]
+        finally:
+            # Release the leaked worker so it can exit (it's daemon=True so
+            # even if we forgot this, it wouldn't block test process exit).
+            hang_event.set()
+
 
 class TestRegistryFrozen:
     """AGENT_REGISTRY is a tuple — can't be mutated by tests or callers."""

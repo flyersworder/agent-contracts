@@ -35,8 +35,8 @@ Design (resolves the four open questions from M3 final review):
 
 from __future__ import annotations
 
-import concurrent.futures
 import logging
+import threading
 import time
 import traceback
 from collections.abc import Callable, Iterator
@@ -855,12 +855,22 @@ def _invoke_with_timeout(
     With timeout=None: direct call (zero overhead — relevant for the
     common case of the M4b/M5 pilot, where most cells complete in <1s).
 
-    With a timeout: dispatch via a single-worker ThreadPoolExecutor
-    and `future.result(timeout=...)`. The thread is NOT killed on
-    timeout (Python doesn't support thread cancellation); for the
-    serial sweep this is fine because the cell that timed out is
-    already lost and the next cell starts from a clean slate. M5
-    parallelism would need stronger isolation (process-level kill).
+    With a timeout: dispatch via a daemon `threading.Thread` and
+    `thread.join(timeout=...)`. We deliberately do NOT use
+    `with ThreadPoolExecutor(...) as exe:` because the context manager
+    calls `shutdown(wait=True)` on exit, which blocks indefinitely if
+    the worker is stuck in a non-cancellable C-level call (e.g.,
+    openssl's SSL_read on a hung TLS socket). This was the root cause
+    of the M4b pilot hangs (2026-05-14, 2026-05-15): the worker
+    couldn't return because httpx wasn't honoring our socket-level
+    timeout, and the main thread couldn't escape because the context
+    manager's __exit__ waited for the worker.
+
+    daemon=True ensures Python's process-exit atexit handler doesn't
+    block on the leaked thread. The leaked worker sits idle (Python
+    has no thread cancellation and openssl ignores signals) until
+    process exit. For the serial sweep this is acceptable; M5
+    parallelism would need process-level isolation.
 
     On timeout, raises `TimeoutError` so `run_cell`'s outer
     `except Exception` records the cell as `status="error"` with
@@ -868,12 +878,25 @@ def _invoke_with_timeout(
     """
     if timeout is None:
         return target(adapter, **kwargs)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(target, adapter, **kwargs)
+
+    result_box: list[Any] = []
+    error_box: list[BaseException] = []
+
+    def _runner() -> None:
         try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError as exc:
-            raise TimeoutError(f"cell exceeded {timeout}s wall-clock timeout") from exc
+            result_box.append(target(adapter, **kwargs))
+        except BaseException as exc:
+            error_box.append(exc)
+
+    worker = threading.Thread(target=_runner, daemon=True)
+    worker.start()
+    worker.join(timeout=timeout)
+
+    if worker.is_alive():
+        raise TimeoutError(f"cell exceeded {timeout}s wall-clock timeout")
+    if error_box:
+        raise error_box[0]
+    return result_box[0]
 
 
 def _read_llm_metrics(
