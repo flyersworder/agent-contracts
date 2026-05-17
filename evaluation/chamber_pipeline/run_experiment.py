@@ -58,6 +58,11 @@ socket.setdefaulttimeout(_DEFAULT_SOCKET_TIMEOUT_SECONDS)
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+from .checkpoint import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
+    append_record_jsonl,
+    done_cell_keys,
+    read_records_jsonl,
+)
 from .orchestrator import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
     AGENT_REGISTRY,
     SweepSpec,
@@ -213,6 +218,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Suppress per-cell progress output. Final summary still prints.",
     )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help=(
+            "Ignore any existing JSONL checkpoint sidecar and start fresh. "
+            "The existing sidecar is rotated to <name>.jsonl.bak-<timestamp>. "
+            "Default behavior: if the sidecar exists, resume by skipping "
+            "cells already in it."
+        ),
+    )
 
     return parser
 
@@ -356,6 +371,55 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not args.out:
         parser.error("--out is required unless --dry-run is set.")
 
+    # Validate output extension early — same check as the final write, but
+    # surfaced before the (potentially hours-long) sweep so the user
+    # doesn't lose work to a typo.
+    out = args.out
+    if not (out.endswith(".csv") or out.endswith(".parquet")):
+        parser.error(
+            f"--out must end in .parquet or .csv; got {out!r}. "
+            f"Append the desired extension explicitly."
+        )
+
+    # JSONL sidecar lives next to --out. Per-cell appends are atomic at
+    # line granularity (POSIX small-write guarantee); a kill loses at
+    # most the current cell, not the entire sweep. See checkpoint.py.
+    from pathlib import Path as _Path
+
+    sidecar_path = _Path(out).with_suffix(".jsonl")
+
+    # Resume-detection (Option A): if the parquet output already exists
+    # but the sidecar doesn't, the user is at risk of clobbering a
+    # completed run. Error out with a hint rather than silently
+    # overwriting.
+    if _Path(out).exists() and not sidecar_path.exists() and not args.no_resume:
+        parser.error(
+            f"Output file {out!r} exists but no sidecar {str(sidecar_path)!r} "
+            f"was found — this looks like a completed prior run. Pass "
+            f"--no-resume to start fresh (overwrites the existing file), "
+            f"or use a different --out path."
+        )
+
+    # Honor --no-resume: rotate the sidecar so the existing partial
+    # results are preserved for forensics but the new run starts clean.
+    if args.no_resume and sidecar_path.exists():
+        from datetime import datetime as _dt
+
+        backup = sidecar_path.with_suffix(f".jsonl.bak-{_dt.now().strftime('%Y%m%dT%H%M%S')}")
+        sidecar_path.rename(backup)
+        print(f"[resume] --no-resume: rotated existing sidecar to {backup}")
+
+    # Read sidecar (if any) to build the skip-keyset for run_sweep.
+    prior_records = read_records_jsonl(sidecar_path)
+    skip_keys = done_cell_keys(prior_records) if prior_records else None
+    total_planned = count_cells(sweep)
+    if skip_keys:
+        print(
+            f"[resume] found {len(prior_records)} prior records in "
+            f"{sidecar_path}; skipping those cells "
+            f"({total_planned - len(skip_keys)}/{total_planned} remaining)"
+        )
+
     # Optional mocked LLM for offline smoke runs.
     llm = _build_mock_llm() if args.mock_llm else None
 
@@ -372,6 +436,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     counts = {"ok": 0, "skipped": 0, "error": 0}
 
     def progress(record: RunRecord, idx: int, total: int) -> None:
+        # DURABILITY FIRST: append to JSONL sidecar BEFORE any printing
+        # or stat-keeping. If the process is killed between the write
+        # and the print, the data is still on disk and the next run
+        # will see this cell as already-done. The print is decorative;
+        # the file write is the source of truth.
+        append_record_jsonl(record, sidecar_path)
+
         counts[record.status] += 1
         # Always log error details to stderr immediately, even under
         # --quiet — without this, debugging a failing sweep means
@@ -412,28 +483,28 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         sys.stdout.flush()
 
-    records = run_sweep(sweep, llm=llm, on_cell=progress)
+    new_records = run_sweep(sweep, llm=llm, on_cell=progress, skip_keys=skip_keys)
 
-    # Write output. Extension determines format. Unrecognized extensions
-    # error out rather than silently re-appending .parquet — saves the
-    # user from getting `runs/foo.txt.parquet` when they meant
-    # `runs/foo.parquet`.
-    out = args.out
+    # Consolidate from sidecar (NOT the in-memory list) so the final
+    # Parquet contains both the prior records and the new ones. Reading
+    # back from disk is also a sanity check: if the sidecar wrote
+    # successfully every cell, this should equal `prior_records + new_records`.
+    all_records = read_records_jsonl(sidecar_path)
+
+    # Write output. Extension was validated above.
     if out.endswith(".csv"):
-        write_records_csv(records, out)
-    elif out.endswith(".parquet"):
-        write_records_parquet(records, out)
+        write_records_csv(all_records, out)
     else:
-        parser.error(
-            f"--out must end in .parquet or .csv; got {out!r}. "
-            f"Append the desired extension explicitly."
-        )
+        write_records_parquet(all_records, out)
 
-    print(_format_record_summary(records))
-    print(f"Wrote {len(records)} records to {out}")
+    print(_format_record_summary(all_records))
+    print(
+        f"Wrote {len(all_records)} records to {out} "
+        f"(new this run: {len(new_records)}, resumed: {len(prior_records)})"
+    )
 
     # Exit non-zero if every cell errored — but tolerate partial failures.
-    if records and all(r.status == "error" for r in records):
+    if all_records and all(r.status == "error" for r in all_records):
         return 1
     return 0
 

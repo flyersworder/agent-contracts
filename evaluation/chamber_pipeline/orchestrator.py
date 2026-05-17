@@ -39,7 +39,7 @@ import logging
 import threading
 import time
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -792,6 +792,7 @@ def run_sweep(
     sweep: SweepSpec,
     llm: LLMCallable | None = None,
     on_cell: Callable[[RunRecord, int, int], None] | None = None,
+    skip_keys: set[tuple[str, str, str, int, int]] | None = None,
 ) -> list[RunRecord]:
     """Run a full sweep and return all RunRecords.
 
@@ -808,11 +809,21 @@ def run_sweep(
         on_cell: Optional progress callback invoked after each cell
             completes, with `(record, idx, total)`. The CLI uses
             this for tqdm-style progress bars.
+        skip_keys: Optional set of `(chamber, configuration,
+            agent_name, budget_k, seed)` tuples to skip. Used by the
+            CLI's resume-from-checkpoint logic so cells already in
+            the JSONL sidecar aren't re-run.
 
     Returns:
-        One RunRecord per cell, in iteration order.
+        One RunRecord per cell, in iteration order (over the
+        post-filter cell list).
     """
-    cells = list(iter_sweep_cells(sweep))
+    from .checkpoint import filter_done_cells
+
+    raw_cells: Iterable[tuple[AgentSpec, ChamberId, int, float, int]] = iter_sweep_cells(sweep)
+    if skip_keys:
+        raw_cells = filter_done_cells(raw_cells, skip_keys, configuration=sweep.configuration)
+    cells = list(raw_cells)
     total = len(cells)
     records: list[RunRecord] = []
     for idx, (spec, chamber, budget_k, _fraction, seed) in enumerate(cells):
