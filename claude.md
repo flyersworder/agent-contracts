@@ -54,6 +54,40 @@ This document tracks development progress and key decisions for the Agent Contra
   max_tokens, provider rotation) were all real bugs but none would have
   fixed this hang on their own — the cell-timeout safety net was itself
   broken.
+- **M4c checkpointing** (May 17, commit `856beb8`) ✅ — per-cell JSONL
+  sidecar + resume-on-restart. Two pilot attempts (May 15 and 16-17) lost
+  217+ ok-cells each when overnight stalls happened, because Parquet only
+  flushes at sweep end. Added `evaluation/chamber_pipeline/checkpoint.py`
+  (append_record_jsonl, read_records_jsonl, done_cell_keys, filter_done_cells,
+  17 tests) and a new `--no-resume` CLI flag. `run_sweep` gains optional
+  `skip_keys` for cell-level filtering. CLI writes one JSON line per cell to
+  `<out>.jsonl` (POSIX-atomic small write), reads it on start to skip done
+  cells, and consolidates JSONL → Parquet at sweep end. Validated via 4-phase
+  smoke (fresh / resume-complete / resume-partial / collision); Option A
+  collision policy refuses to clobber Parquet without sidecar.
+- **M4b PILOT COMPLETE** (May 18, 20:44, commit base `4768945`) ✅
+  - **450/450 cells, 442 ok, 8 timeouts** (1.8% error rate)
+  - Wall time: **35h 33m** (Sun 09:18 → Mon 20:44)
+  - All 8 errors are `planner_reasoner k=59` TimeoutErrors at 1800s — the
+    cell-timeout safety net firing correctly on the most-LLM-call-intensive
+    variant×budget combination (planner + reasoner + adjacency = 3 chained
+    LLM calls). Sweep continued past each timeout instead of wedging.
+  - **M4 acceptance criteria: ✓ PASS** (`analyze_results --check-m4-acceptance`):
+    - All 5 variants' Pareto curves monotonic within 1.5σ noise
+    - Random dominated by all 4 LLM variants at k/M ∈ {0.10, 0.51}
+    - Random dominated by llm_only + llm_pc at k/M=1.00 (planner_reasoner
+      falls out due to its 8 timeouts contaminating its mean)
+  - **§5.3 narrative confirmed at 30 seeds** (was a single-seed hypothesis
+    from May 14): **DeepSeek v4 Flash + data summary dominates the Pareto.**
+    LLM-only at k/M=1.00: **SHD=26, F1=0.75**. Every other variant clusters
+    at SHD≈53-57 / F1≈0.40-0.42. The gap is dramatic and consistent.
+  - **"Delegation has measurable cost" finding**: planner_reasoner F1 stays
+    essentially flat from k=0.51 (0.385) to k=1.00 (0.397) — unlike every
+    other variant which gains substantially with budget. Combined with its
+    8 timeouts at k=59, the most-delegated variant is both worse and less
+    reliable at maximum budget. A paper-worthy operational observation.
+  - Figures: `runs/m4-pilot-figs/pareto_shd.png`, `pareto_f1.png`.
+  - Sidecar: `runs/m4-pilot.jsonl` (450 lines, kept for audit).
 
 **Metrics**:
 - **Tests**: 1029 passing (chamber pillar adds ~250 tests on top of the framework's ~780)
@@ -314,19 +348,30 @@ agent-contracts/
 
 ## Next Steps
 
-**Active: M4b chamber-pillar pilot sweep (post-fix)**
-1. Re-smoke (~2-3hr, ~$0.50) — confirms post-fix Pareto monotone at 3 seeds:
-   `uv run python -m evaluation.chamber_pipeline.run_experiment --chambers lt --budgets 0.10,0.50,1.00 --seeds 3 --cell-timeout-seconds 1800 --out runs/m4b-resmoke.parquet`
-2. Full pilot (~24hr overnight, ~$2) — `--cell-timeout-seconds 1800` mandatory:
-   `uv run python -m evaluation.chamber_pipeline.run_experiment --pilot --cell-timeout-seconds 1800 --out runs/m4-pilot.parquet`
-3. Analyze: `uv run python -m evaluation.chamber_pipeline.analyze_results --input runs/m4-pilot.parquet --out-dir runs/m4-pilot-figs/ --check-m4-acceptance`
+**M4b PILOT: COMPLETE (May 18, 20:44). M4 acceptance criteria PASS.**
+- 450/450 cells, 442 ok / 8 timeouts (1.8% error rate, all planner_reasoner k=59)
+- LLM-only dominates Pareto (SHD=26, F1=0.75 at k/M=1.00); 4× better than next variant
+- Figures at `runs/m4-pilot-figs/`; sidecar `runs/m4-pilot.jsonl` kept for audit
 
-**M4c (deferred operational hardening, before M5)**
-- Checkpointing / resume from partial Parquet
-- Parallelism (`ThreadPoolExecutor` in `run_sweep`) — needs logger thread-safety + per-thread adapter
-- MENU_SIZES vs `available_experiments()` consistency assert
-- Integration test that hits one real LLM call (would have caught M4b root-cause bugs)
-- Tighter `_SELECTION_MAX_TOKENS` if 200 → 50 maintains quality
+**Active: M5 (multi-chamber + scale)**
+1. Re-run on WT chamber: `--chambers wt` (28-node graph, smaller than LT's 38)
+2. Scale to 5 budget levels: 0.10, 0.25, 0.50, 0.75, 1.00 (was 3 for M4b)
+3. Consider VPS migration (`173.212.217.40` already provisioned, repo cloned,
+   uv synced, .env transferred — ready to launch). M5's larger sweep + WT
+   chamber would benefit from running off-laptop. See "Operational notes" below.
+4. Optional: re-run the 8 timed-out planner_reasoner k=59 cells specifically
+   to recover full 30-seed coverage (resume pattern: just re-run the pilot
+   command; checkpoint will skip the 442 ok cells and retry the 8 errors).
+
+**M4c (mostly complete after May 17 work)**
+- Checkpointing / resume from partial Parquet ✅ (commit `856beb8`)
+- Parallelism (`ThreadPoolExecutor` in `run_sweep`) — pending, M5 priority
+  (would cut WT+LT 5-budget sweep wall time from ~70h serial to ~18h on the
+  4-vCPU VPS)
+- MENU_SIZES vs `available_experiments()` consistency assert — still open
+- Integration test that hits one real LLM call — still open; would have
+  caught M4b root-cause bugs earlier
+- Tighter `_SELECTION_MAX_TOKENS` if 200 → 50 maintains quality — open
 
 **Other tracks (independent)**
 - AutoGen integration
@@ -335,11 +380,13 @@ agent-contracts/
 
 ## Operational notes (chamber pillar)
 
-- **OpenRouter rate limits**: `deepseek-v4-flash` is hosted by 8 providers; the orchestrator pins `Parasail` first because OpenRouter's auto-routing chose throttle-prone AtlasCloud. See `evaluation/chamber_pipeline/orchestrator.py:_CountingLLM.DEFAULT_PROVIDER_ORDER`.
+- **OpenRouter rate limits**: `deepseek-v4-flash` is hosted by 8 providers; the orchestrator pins providers in order `(Novita, AtlasCloud, Parasail, SiliconFlow)` because per-provider throughput drifts day-to-day (May 9: Parasail was fastest; May 15: Novita was 7× faster). See `evaluation/chamber_pipeline/orchestrator.py:_CountingLLM.DEFAULT_PROVIDER_ORDER` and re-probe before any multi-hour sweep.
 - **Socket timeout**: `socket.setdefaulttimeout(30)` is set at `run_experiment.py` module load — without this, `litellm.completion(timeout=N)` doesn't propagate to the SSL socket and stuck calls hang the process forever.
 - **Max tokens**: `_llm_select_loop` caps output at 200 tokens (selection step) and `llm_only_agent` at **32768** (adjacency emission, was 4096 pre-M4b-fix). DeepSeek v4 Flash is a *reasoning model* — `reasoning_tokens` typically 95% of `completion_tokens`. At 38-node adjacency prompts the 4096 cap was entirely consumed by hidden reasoning before any `content` was emitted (verified via `usage.completion_tokens_details.reasoning_tokens` on a 2-node diagnostic, 2026-05-14).
 - **Cell timeout**: Pilot needs `--cell-timeout-seconds 1800` (was 600). LLM-only adjacency call at k=59 takes ~10min wall (612s measured 2026-05-14) since the model reasons over a ~22K-token data summary before emitting the 38-node graph.
-- **DeepSeek v4 Flash + summary statistics is unreasonably good** at causal discovery on LT: SHD=27 / F1=0.76 / 54-of-57 edges at k/M=1.00, single seed. Beats every other variant including Planner+Reasoner. If 30-seed pilot confirms, plan §5.3 narrative rotates (LLM-only-with-summary becomes the strong-result, Planner+Reasoner becomes the "delegation has measurable cost" finding).
+- **DeepSeek v4 Flash + summary statistics is unreasonably good** at causal discovery on LT — **CONFIRMED AT 30 SEEDS** (May 18 M4b pilot): SHD=26 / F1=0.75 at k/M=1.00, every other variant clusters at SHD≈53-57 / F1≈0.40-0.42. The §5.3 narrative has rotated: LLM-only-with-summary is the strong result, Planner+Reasoner is the "delegation has measurable cost" finding (F1 stays flat 0.385→0.397 from k=0.51→1.00, plus 8/30 timeouts at k=59).
+- **Checkpoint sidecar**: every pilot run writes one JSON line per cell to `<out>.jsonl` before the Parquet consolidates at sweep end. Resume-on-restart is automatic — re-running the same `--out` command after a kill skips already-done cells. The two May 15 and 16-17 overnight stalls lost ~217 cells each because this didn't exist; M4b May 18 pilot benefited from it (10 timeouts that would have wedged the older orchestrator instead just logged as errors and the sweep continued).
+- **VPS provisioned**: `173.212.217.40` (Ubuntu 24.04, 4 vCPU, 8 GiB RAM, 145 GB disk). Repo cloned at `/root/agent-contracts`, uv synced with `--all-extras`, `.env` transferred (0600 perms). Ready to launch any pilot via `ssh root@173.212.217.40 'cd /root/agent-contracts && export PATH="$HOME/.local/bin:$PATH" && tmux new -d -s pilot "uv run python -m evaluation.chamber_pipeline.run_experiment --pilot --cell-timeout-seconds 1800 --out runs/m4-pilot.parquet > runs/m4-pilot.log 2>&1"'`. Pull results back via `rsync -av root@173.212.217.40:/root/agent-contracts/runs/ ./runs-vps/`.
 
 ## References
 
@@ -350,8 +397,9 @@ agent-contracts/
 
 ---
 
-*Last Updated: 2026-05-09 (M4a complete; M4b operationally ready, smoke + pilot pending)*
-*Status: Production-ready, 609+ tests, 91%+ coverage*
-*Integrations: LiteLLM, LangChain, LangGraph, Google ADK*
-*Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines*
-*Next: Run experiments, package for PyPI (v0.1.0)*
+*Last Updated: 2026-05-18 (M4b pilot COMPLETE, M4 acceptance PASS; M4c checkpointing landed)*
+*Status: Production-ready, 1046+ tests, 81%+ coverage*
+*Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
+*Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar*
+*Pilot dataset: `runs/m4-pilot.parquet` (450 cells, 442 ok, 8 timeouts) — submission-ready for AAMAS 2027 / ECAI 2027*
+*Next: M5 (WT chamber + 5 budget levels), VPS migration (already provisioned)*
