@@ -1,10 +1,47 @@
 # Causal Chamber Validation: Mainstream-Venue Extension Plan
 
-**Status**: Planning
+**Status**: In execution (M4 ✅ complete)
 **Created**: 2026-05-03
+**Last status update**: 2026-05-18 (M4b PILOT COMPLETE, scope revisions below)
 **Owner**: qingye
 **Target venues**: AAMAS 2027 (primary, ~Oct 2026 deadline), ECAI 2027 Athens (secondary, ~Apr 2027 deadline)
 **Prerequisite**: COINE 2026 oral presentation (Paphos, May 25–26, 2026) ✅ accepted
+
+---
+
+> ## 📍 POST-M4B SCOPE UPDATE (2026-05-18)
+>
+> **M4b pilot completed 2026-05-18** with dramatically stronger results than the
+> plan originally anticipated:
+>
+> - **442/450 ok-cells** (8 timeouts, all `planner_reasoner k=59`)
+> - **LLM-only at k/M=1.00: SHD=26, F1=0.75** vs every other variant clustered
+>   at SHD≈53-57, F1≈0.40-0.42
+> - M4 acceptance criteria PASS at 30 seeds (was a single-seed hypothesis from
+>   May 14)
+> - See `runs/m4-pilot-figs/pareto_shd.png` and `pareto_f1.png`
+>
+> **Scope revisions triggered by the strength of these findings**:
+>
+> 1. **M5 budget axis trimmed from 5 → 3 levels.** §6.1 originally specified
+>    `k/M ∈ {0.10, 0.25, 0.50, 0.75, 1.00}`. With M4b showing strong
+>    monotonicity at 3 budgets (0.10, 0.51, 1.00), the intermediate budgets
+>    (0.25, 0.75) add curve-shape refinement without changing the headline
+>    claim. **Saves ~33% of M5 wall time.** Detailed sub-rationale in §6.1
+>    callout.
+> 2. **M6 (cross-pillar transfer study) is now optional, not required.** §7
+>    was written assuming chamber-pillar findings would be modest enough to
+>    need the cross-pillar bridge for impact. M4b's dramatic effect lets the
+>    chamber pillar stand alone as a publishable contribution. M6 becomes a
+>    journal-extension candidate rather than a M7-blocker. Detailed
+>    sub-rationale in §7 callout.
+> 3. **M5 essentials unchanged**: WT chamber sweep + UNCONTRACTED baselines +
+>    DeepSeek v4 Pro robustness. These remain non-negotiable — WT establishes
+>    external validity beyond LT, UNCONTRACTED is the framework paper's
+>    central claim, Pro robustness tests whether Flash dominance generalizes
+>    across model scale.
+>
+> See §6.1 and §7 for in-section detail; §9 milestones table updated.
 
 ---
 
@@ -484,6 +521,18 @@ overhead has measurable cost), and the paper's framing rotates accordingly
 
 ### 6.1 Full sweep
 
+> **📍 Post-M4b scope revision (2026-05-18):** budget axis trimmed from 5 → 3
+> levels. The original 5-level grid (0.10, 0.25, 0.50, 0.75, 1.00) was sized
+> to detect *modest* effect sizes that might require intermediate points to
+> resolve a Pareto curve. M4b's 30-seed data on LT shows monotonicity *and*
+> dramatic separation at just 3 budgets (0.10, 0.51, 1.00) — adding 0.25 and
+> 0.75 refines curve shape without changing the headline claim that
+> LLM-only-with-summary dominates. The trimmed grid below saves ~33% of M5
+> wall time and ~$3.50 of OpenRouter spend. If after M5 launch we observe
+> curves that need intermediate-budget resolution to be interpretable, the
+> 0.25/0.75 cells can be added incrementally via the checkpoint-resume
+> mechanism (M4c) without re-running anything completed.
+
 The headline experiment grid uses **menu-fraction budgets** so curves are
 comparable across chambers despite different absolute menu sizes
 (LT M=59, WT M=28). Two run families:
@@ -492,16 +541,16 @@ comparable across chambers despite different absolute menu sizes
 
 ```
 2 chambers          (lt with standard config; wt with standard config)
-× 5 budget levels   (k/M ∈ {0.10, 0.25, 0.50, 0.75, 1.00})
-                    → LT: k ∈ {6, 15, 30, 45, 59}
-                    → WT: k ∈ {3,  7, 14, 21, 28}
+× 3 budget levels   (k/M ∈ {0.10, 0.50, 1.00})    [revised from 5; see callout]
+                    → LT: k ∈ {6, 30, 59}
+                    → WT: k ∈ {3, 14, 28}
 × agent variants    LT: 5 (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner)
                     WT: 4 (variant 2 / GreedyIG-lite skipped — LT-only per §5.1)
 × 30 seeds          (statistical power)
-= LT: 1 × 5 × 5 × 30 =  750 runs
-+ WT: 1 × 5 × 4 × 30 =  600 runs
-                     = 1350 runs total
-   of which 900 are LLM-bearing (3 LLM variants × 300 cells; variant 2
+= LT: 1 × 3 × 5 × 30 =  450 runs (already done — M4b, 2026-05-18)
++ WT: 1 × 3 × 4 × 30 =  360 runs (M5 scope)
+                     =  810 runs total CONTRACTED
+   of which 540 are LLM-bearing (3 LLM variants × 180 cells; variant 2
    is non-LLM and its WT-skip leaves the LLM-bearing count unchanged)
 ```
 
@@ -514,7 +563,12 @@ WT: 1 × 4 × 30 = 120 runs (variant 2 skipped per §5.1)
    of which 180 are LLM-bearing
 ```
 
-**Total: 1620 runs (1080 LLM-bearing).**
+**Total under revised scope: 1080 runs (720 LLM-bearing)** [was 1620 / 1080
+under the original 5-budget grid; trimmed per the §6.1 callout above].
+
+Of the 1080: 450 are already complete (M4b LT pilot, 2026-05-18); the
+remaining 630 are M5 scope (360 WT CONTRACTED + 270 UNCONTRACTED across
+both chambers).
 
 (WT `pressure-control` configuration has only 1 dataset experiment available
 — too few for a budget sweep — so it's excluded from the main grid. May be
@@ -681,11 +735,29 @@ default.
 
 ## 7. Cross-pillar governance transfer
 
-This was a subsection in the original plan. **Promoted to a full section**
-because it is the load-bearing experiment for the two-pillar story. Without
-it, chamber results stand as "interesting causal-discovery findings,"
-LLM-pipeline results stand as "interesting governance findings," and the
-paper has no joint claim.
+> **📍 Post-M4b scope revision (2026-05-18):** this section is **now optional**
+> rather than load-bearing. The original framing below ("without it, chamber
+> results stand as 'interesting causal-discovery findings'…") assumed M4
+> would produce a *modest* effect that would need cross-pillar bridging for
+> impact. M4b delivered a *dramatic* effect (LLM-only at k/M=1.00 hits SHD=26
+> / F1=0.75, with every other variant clustered at SHD≈53-57 / F1≈0.40-0.42).
+> The chamber-pillar standalone is now strong enough to carry a submission
+> on its own.
+>
+> **Two viable paths for §7 going forward**:
+>
+> 1. **Defer §7 to a journal extension.** Submit the chamber-pillar to
+>    AAMAS 2027 as a single-pillar contribution. Cross-pillar transfer
+>    becomes the natural next paper. Reduces M6 to ~0 and unblocks M7
+>    drafting ~3 weeks earlier.
+> 2. **Execute §7 as originally planned.** Two-pillar submission stays the
+>    target. Worth doing if (a) reviewer feedback on a single-pillar
+>    submission would likely demand it anyway, or (b) the chamber finding
+>    is novel enough that a venue values both pillars in one paper.
+>
+> The decision below is now an *option*, not a *requirement*. The original
+> §7 text below describes execution plan for path (2); path (1) simply
+> skips it.
 
 ### 7.1 What the cross-pillar evidence has to show
 
@@ -863,16 +935,22 @@ reading the codebase should immediately recognize the chamber pipeline as
 15-minute oral talk — not a working session — so its feedback strand is
 descoped (see §10). The technical strand of M1 no longer waits on Paphos.
 
-| # | Window | Milestone | Acceptance criterion |
-|---|---|---|---|
-| M1 | 2026-05-06 → 06-07 | Chamber adapter scaffolding (pulled forward; COINE feedback strand descoped per §10) | `integrations/causalchamber.py` stub committed; `chambers` extra in `pyproject.toml`; failing smoke test exists; §12 Q1+Q2 decisions documented based on a read of existing integrations |
-| M2 | 2026-06-08 → 06-21 | Adapter complete + ground-truth scoring functions | Smoke test passes: load `lt/standard` graph, run a fake agent that returns the ground truth, score reports SHD=0 and F1=1 |
-| M3 | 2026-06-22 → 07-12 | **Five** baseline agents implemented (3 weeks, was 2) | All five variants (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner) run end-to-end on a single budget cell; produce coherent adjacency-matrix outputs |
-| M4 | 2026-07-13 → 07-26 | Pilot sweep | LT chamber × 3 budgets × 5 variants × 30 seeds = 450 runs (LT chosen so all 5 variants run; WT pilot would have only 4 since variant 2 is LT-only per §5.1); preliminary Pareto curve monotonic; Random sits below LLM variants as sanity check |
-| M5 | 2026-07-27 → 08-23 | Full chamber sweep + Pro robustness | All 1620 Flash chamber runs (1350 CONTRACTED + 270 UNCONTRACTED; LT 5 variants, WT 4 variants per §5.1) complete; 1080 are LLM-bearing; **270 DeepSeek v4 Pro robustness runs (§6.7) complete**; results in Parquet; headline Pareto figure (Figure 6.1: 5 lines for LT, 4 for WT) generated with Flash/Pro overlay |
-| M6 | 2026-08-24 → 09-13 | **Cross-pillar transfer study** (full section, 3 figures, was subsection) | DeepSeek-Flash calibration sweep complete (§7.2, ~165 UNCONTRACTED runs, ~half-day); 2750 LLM-pipeline re-runs at matched tightness; Figures 7.1, 7.2, 7.3 generated; transfer claim supported or refuted with statistical power |
-| M7 | 2026-09-14 → 09-27 | Paper extension drafted (compressed 1 week to absorb M6 expansion) | `paper/paper-extended.qmd` (or branch) contains new chamber-pillar + cross-pillar transfer sections; intro and abstract rewritten to reflect two-pillar+bridge structure |
+| # | Window (plan) | Actual | Milestone | Acceptance criterion |
+|---|---|---|---|---|
+| M1 | 2026-05-06 → 06-07 | ✅ 2026-05-06 | Chamber adapter scaffolding | `integrations/causalchamber.py` stub committed; `chambers` extra in `pyproject.toml`; failing smoke test exists; §12 Q1+Q2 decisions documented |
+| M2 | 2026-06-08 → 06-21 | ✅ 2026-05-06 | Adapter complete + ground-truth scoring functions | Smoke test passes: load `lt/standard` graph, run a fake agent that returns the ground truth, score reports SHD=0 and F1=1 |
+| M3 | 2026-06-22 → 07-12 | ✅ 2026-05-08 | **Five** baseline agents implemented | All five variants (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner) run end-to-end on a single budget cell; produce coherent adjacency-matrix outputs |
+| M4 | 2026-07-13 → 07-26 | ✅ **2026-05-18** | Pilot sweep + M4c checkpointing | LT × 3 budgets × 5 variants × 30 seeds = 450 runs; **442 ok / 8 timeouts** (1.8% error rate, all planner_reasoner k=59); acceptance criteria PASS (Pareto monotonic, Random dominated). M4c JSONL checkpoint sidecar landed (commit `856beb8`). Headline: LLM-only at k/M=1.00 hits SHD=26 / F1=0.75. |
+| **M5** | 2026-07-27 → 08-23 | **next (target ~2-3 weeks from 05-19)** | **Trimmed M5**: WT sweep + UNCONTRACTED + Pro robustness | **Revised scope** (see §6.1 callout): 360 WT CONTRACTED + 270 UNCONTRACTED + 270 Pro robustness = **900 new runs** (LT 450 already done). Headline Pareto figure (Figure 6.1: 5 lines for LT, 4 for WT) generated with Flash/Pro overlay. Recommend running on VPS (`173.212.217.40`, provisioned 2026-05-18). |
+| M6 | 2026-08-24 → 09-13 | **OPTIONAL** | Cross-pillar transfer study (§7) | **Now optional** per §7 callout — M4b's dramatic effect makes chamber-pillar standalone publishable. If executed: DeepSeek-Flash calibration sweep + 2750 LLM-pipeline re-runs + Figures 7.1-7.3. If deferred: becomes journal-extension candidate. |
+| M7 | 2026-09-14 → 09-27 | Paper extension drafted | `paper/paper-extended.qmd` (or branch) contains new chamber-pillar section; intro and abstract rewritten. If M6 executed, also cross-pillar transfer section. |
 | M8 | 2026-09-28 → 10-XX | Submission polish | All AAMAS formatting requirements met; cover letter cites COINE acceptance; §10 1-pager attached as appendix or sidebar |
+
+**Schedule status as of 2026-05-18**: M1-M4 finished **~9 weeks early**
+relative to the original plan (M4 closed May 18 vs planned Jul 26). That
+headroom absorbs M5 scope-trim discussions, enables the VPS migration, and
+makes M6 optionality a *deliberate choice* rather than a *deadline-forced
+cut*.
 
 Each milestone unblocks the next. M3 grew from 2 → 3 weeks because we now
 implement five variants instead of three (Random and GreedyIG-lite are cheap,

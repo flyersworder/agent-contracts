@@ -353,15 +353,39 @@ agent-contracts/
 - LLM-only dominates Pareto (SHD=26, F1=0.75 at k/M=1.00); 4× better than next variant
 - Figures at `runs/m4-pilot-figs/`; sidecar `runs/m4-pilot.jsonl` kept for audit
 
-**Active: M5 (multi-chamber + scale)**
-1. Re-run on WT chamber: `--chambers wt` (28-node graph, smaller than LT's 38)
-2. Scale to 5 budget levels: 0.10, 0.25, 0.50, 0.75, 1.00 (was 3 for M4b)
-3. Consider VPS migration (`173.212.217.40` already provisioned, repo cloned,
-   uv synced, .env transferred — ready to launch). M5's larger sweep + WT
-   chamber would benefit from running off-laptop. See "Operational notes" below.
-4. Optional: re-run the 8 timed-out planner_reasoner k=59 cells specifically
-   to recover full 30-seed coverage (resume pattern: just re-run the pilot
-   command; checkpoint will skip the 442 ok cells and retry the 8 errors).
+**Active: M5 (trimmed scope — see plan §6.1 callout dated 2026-05-18)**
+
+Scope revised post-M4b: skip 5-budget expansion (keep 3: 0.10, 0.50, 1.00).
+M4b's dramatic effect at 3 budgets makes intermediate budgets curve-shape
+refinement rather than headline material. Essentials below are non-negotiable.
+
+1. **WT chamber sweep** — 360 CONTRACTED cells (1 chamber × 3 budgets × 4
+   variants × 30 seeds; variant 2 / GreedyIG-lite is LT-only per plan §5.1).
+   Establishes external validity beyond LT's 38-node graph.
+   `uv run python -m evaluation.chamber_pipeline.run_experiment --chambers wt --budgets 0.10,0.50,1.00 --seeds 30 --cell-timeout-seconds 1800 --out runs/m5-wt.parquet`
+2. **UNCONTRACTED baselines** — 270 cells across both chambers (essential for
+   the framework paper's "contracting helps" claim; without these the chamber
+   pillar is a causal-discovery benchmark, not a contracting validation).
+3. **DeepSeek v4 Pro robustness sweep** — 270 cells (tests whether Flash
+   dominance generalizes across model scale). Per plan §6.7.
+4. Run on VPS (`173.212.217.40`, provisioned 2026-05-18). Total new work:
+   ~900 cells vs original M5 plan's 1620. ~33% wall-time savings vs original.
+5. Optional: re-run the 8 timed-out `planner_reasoner k=59` cells from M4b
+   to recover full 30-seed coverage (checkpoint pattern: re-run the pilot
+   command; the sidecar skips the 442 ok cells and only re-attempts the 8
+   errors). Worth doing before declaring M5 complete.
+
+**Now-optional: M6 (cross-pillar transfer study, plan §7)**
+
+Post-M4b reassessment: M6 was load-bearing under the original "modest
+chamber effect needs cross-pillar bridge" assumption. M4b's dramatic effect
+makes chamber pillar standalone publishable. Two paths now both viable:
+
+- (1) Defer §7 to a journal extension → submit single-pillar to AAMAS 2027,
+  unblock M7 drafting ~3 weeks earlier.
+- (2) Execute §7 as originally planned → two-pillar paper.
+
+Defer the decision until M5 is underway and the WT result is in hand.
 
 **M4c (mostly complete after May 17 work)**
 - Checkpointing / resume from partial Parquet ✅ (commit `856beb8`)
