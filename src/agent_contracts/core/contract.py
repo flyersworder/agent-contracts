@@ -17,6 +17,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
 from agent_contracts.core.capabilities import (  # noqa: F401
@@ -169,14 +170,17 @@ class ResourceConstraints:
 
     def __post_init__(self) -> None:
         """Validate resource constraints are non-negative and mode consistency."""
-        # Validate non-negative values (skip string fields like reasoning_effort and dicts)
+        # Validate numeric values. bool is a subclass of int, so reject it
+        # explicitly — a boolean budget is a caller mistake, not a 0/1 budget.
         for field_name, value in self.__dict__.items():
+            if isinstance(value, bool):
+                raise ValueError(f"{field_name} must be numeric, not a boolean")
             if value is not None and isinstance(value, (int, float)) and value < 0:
                 raise ValueError(f"{field_name} must be non-negative, got {value}")
 
         # Validate per_tool_limits values are non-negative integers
         for tool_name, limit in self.per_tool_limits.items():
-            if not isinstance(limit, int):
+            if isinstance(limit, bool) or not isinstance(limit, int):
                 raise ValueError(
                     f"per_tool_limits['{tool_name}'] must be an integer, got {type(limit).__name__}"
                 )
@@ -184,6 +188,10 @@ class ResourceConstraints:
                 raise ValueError(
                     f"per_tool_limits['{tool_name}'] must be non-negative, got {limit}"
                 )
+
+        # Freeze per_tool_limits: a frozen ResourceConstraints must not be
+        # mutable through this dict, nor alias the caller's dict.
+        object.__setattr__(self, "per_tool_limits", MappingProxyType(dict(self.per_tool_limits)))
 
         # Validate token mode consistency - cannot mix lumpsum with fine-grained
         has_lumpsum = self.tokens is not None

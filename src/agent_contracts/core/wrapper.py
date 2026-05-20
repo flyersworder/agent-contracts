@@ -249,6 +249,14 @@ class ContractAgent[TInput, TOutput]:
                 if event["type"] in ("violation", "constraint_violated")
             ]
 
+            # Strict mode: surface the violation as an exception, as documented.
+            if self.strict_mode and is_violated:
+                raise ContractViolationError(
+                    self.contract,
+                    "resource",
+                    "; ".join(violations) or "Resource constraint exceeded",
+                )
+
             # Note: We don't stop the enforcer here to allow cumulative tracking
             # across multiple execute() calls. The enforcer stays active.
 
@@ -280,6 +288,10 @@ class ContractAgent[TInput, TOutput]:
             )
 
         except Exception as e:
+            # A strict-mode violation is intentional — propagate it unchanged.
+            if isinstance(e, ContractViolationError):
+                raise
+
             # Note: Don't stop enforcer to allow recovery and cumulative tracking
 
             # Handle execution failure

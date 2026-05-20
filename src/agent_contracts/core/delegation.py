@@ -53,6 +53,12 @@ from typing import Any
 from agent_contracts.core.contract import Contract, ResourceConstraints
 from agent_contracts.core.monitor import ResourceMonitor
 
+# Absolute tolerance for cost-axis (USD, float) conservation comparisons.
+# The token and per-tool axes are integers and need no tolerance; cost is
+# a float, so an exact-budget split like 0.1 + 0.1 + 0.1 against 0.3 must
+# not be rejected for IEEE-754 representation error.
+_COST_EPSILON = 1e-9
+
 
 class ConservationViolationError(Exception):
     """Raised when a budget allocation would violate conservation laws.
@@ -397,7 +403,7 @@ class ContractingCapability:
         # unbounded"). See parent_token_budget_constrained docstring.
         if self.parent_token_budget_constrained and tokens > self.remaining_tokens:
             return False
-        if self.parent_cost_budget_constrained and cost_usd > self.remaining_cost:
+        if self.parent_cost_budget_constrained and cost_usd > self.remaining_cost + _COST_EPSILON:
             return False
         if per_tool_limits:
             for tool, requested in per_tool_limits.items():
@@ -492,7 +498,11 @@ class ContractingCapability:
             )
 
         # Check conservation law for cost — only when parent declares one.
-        if cost_usd > 0 and self.parent_cost_budget_constrained and cost_usd > self.remaining_cost:
+        if (
+            cost_usd > 0
+            and self.parent_cost_budget_constrained
+            and cost_usd > self.remaining_cost + _COST_EPSILON
+        ):
             raise ConservationViolationError(
                 message=(
                     f"Cannot allocate ${cost_usd:.4f} to '{name}'. "
@@ -688,7 +698,10 @@ class ContractingCapability:
             else True
         )
         cost_ok = (
-            (self.parent_used_cost + self._total_allocated_cost <= self.parent_budget_cost)
+            (
+                self.parent_used_cost + self._total_allocated_cost
+                <= self.parent_budget_cost + _COST_EPSILON
+            )
             if self.parent_cost_budget_constrained
             else True
         )

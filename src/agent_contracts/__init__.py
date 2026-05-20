@@ -4,7 +4,7 @@ This package provides formal contracts for governing autonomous AI agents throug
 explicit resource constraints and temporal boundaries.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 __author__ = "Qing Ye"
 __license__ = "Apache-2.0"
 
