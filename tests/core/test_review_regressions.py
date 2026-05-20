@@ -6,7 +6,7 @@ across the per-module test files) so the review's findings stay traceable.
 
 import pytest
 
-from agent_contracts.core.contract import Contract, ResourceConstraints
+from agent_contracts.core.contract import Contract, ContractState, ResourceConstraints
 from agent_contracts.core.delegation import ContractingCapability
 from agent_contracts.core.skillspec import SkillSpec
 from agent_contracts.core.tokens import TokenCounter
@@ -113,3 +113,20 @@ def test_contract_agent_lenient_mode_returns_result_on_violation() -> None:
     wrapped.resource_monitor.usage.add_tokens(100)
     result = wrapped.execute("x")
     assert result.success is False
+
+
+# --- Follow-up (PR #53 review): strict-mode raise must not skip log finalization ---
+
+
+def test_contract_agent_strict_mode_finalizes_log_before_raising() -> None:
+    """A strict-mode raise must still leave a finalized, consistent execution log."""
+    contract = Contract(id="t3", name="t3", resources=ResourceConstraints(tokens=10))
+    wrapped = ContractAgent(contract=contract, agent=lambda x: "done", strict_mode=True)
+    wrapped.resource_monitor.usage.add_tokens(100)  # exceed the 10-token budget
+    with pytest.raises(ContractViolationError):
+        wrapped.execute("x")
+    log = wrapped.execution_log
+    assert log is not None
+    assert log.end_time is not None, "execution log was not finalized before the raise"
+    assert log.final_state == ContractState.VIOLATED, "log state should reflect the violation"
+    assert log.events, "violation events should be flushed to the log"

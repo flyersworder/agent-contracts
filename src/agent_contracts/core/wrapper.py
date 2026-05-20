@@ -249,14 +249,6 @@ class ContractAgent[TInput, TOutput]:
                 if event["type"] in ("violation", "constraint_violated")
             ]
 
-            # Strict mode: surface the violation as an exception, as documented.
-            if self.strict_mode and is_violated:
-                raise ContractViolationError(
-                    self.contract,
-                    "resource",
-                    "; ".join(violations) or "Resource constraint exceeded",
-                )
-
             # Note: We don't stop the enforcer here to allow cumulative tracking
             # across multiple execute() calls. The enforcer stays active.
 
@@ -277,6 +269,16 @@ class ContractAgent[TInput, TOutput]:
                     "deadline_met": not self.temporal_monitor.is_past_deadline(),
                 }
                 self.execution_log.events = self._events
+
+            # Strict mode: surface the violation as an exception, as documented.
+            # Raised only after the log is finalized so the audit trail stays
+            # complete for a caller that catches the exception.
+            if self.strict_mode and is_violated:
+                raise ContractViolationError(
+                    self.contract,
+                    "resource",
+                    "; ".join(violations) or "Resource constraint exceeded",
+                )
 
             return ExecutionResult(
                 output=output,
