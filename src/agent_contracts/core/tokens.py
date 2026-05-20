@@ -167,12 +167,16 @@ class TokenCounter:
         if model_lower in MODEL_PRICING:
             return MODEL_PRICING[model_lower]
 
-        # Try prefix match for versioned models
+        # Try prefix match for versioned models — the longest matching key
+        # wins so "gpt-4o-2024-08-06" resolves to "gpt-4o", not "gpt-4".
+        best_match: str | None = None
         for known_model in MODEL_PRICING:
-            if model_lower.startswith(known_model):
-                return MODEL_PRICING[known_model]
+            if model_lower.startswith(known_model) and (
+                best_match is None or len(known_model) > len(best_match)
+            ):
+                best_match = known_model
 
-        return None
+        return MODEL_PRICING[best_match] if best_match is not None else None
 
     @staticmethod
     def calculate_cost(

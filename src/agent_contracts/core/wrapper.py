@@ -270,6 +270,16 @@ class ContractAgent[TInput, TOutput]:
                 }
                 self.execution_log.events = self._events
 
+            # Strict mode: surface the violation as an exception, as documented.
+            # Raised only after the log is finalized so the audit trail stays
+            # complete for a caller that catches the exception.
+            if self.strict_mode and is_violated:
+                raise ContractViolationError(
+                    self.contract,
+                    "resource",
+                    "; ".join(violations) or "Resource constraint exceeded",
+                )
+
             return ExecutionResult(
                 output=output,
                 contract=self.contract,
@@ -280,6 +290,10 @@ class ContractAgent[TInput, TOutput]:
             )
 
         except Exception as e:
+            # A strict-mode violation is intentional — propagate it unchanged.
+            if isinstance(e, ContractViolationError):
+                raise
+
             # Note: Don't stop enforcer to allow recovery and cumulative tracking
 
             # Handle execution failure

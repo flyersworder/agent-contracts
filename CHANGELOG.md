@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-05-20
+
+### Fixed
+
+- **`ResourceConstraints` immutability.** Although `ResourceConstraints` is a frozen dataclass, its `per_tool_limits` field was a plain `dict` — mutable after construction and aliased to the dict the caller passed in, so a frozen contract could be silently modified. `per_tool_limits` is now stored as a read-only `MappingProxyType` over a defensive copy.
+- **`get_model_pricing` versioned-model resolution.** The prefix match returned the *first* matching key, so versioned model ids resolved to the wrong model — `gpt-4o-2024-08-06` was priced as `gpt-4`, an order-of-magnitude error. The longest matching prefix now wins.
+- **`SkillSpec` name validation.** The name regex was off by one and rejected valid 64-character names (the agentskills.io limit is 1–64), and it accepted consecutive hyphens that its own error message forbids. Validation now uses a structural regex (no consecutive, leading, or trailing hyphens) plus an explicit 1–64 length check.
+- **`ResourceConstraints` rejects boolean budgets.** Because `bool` is a subclass of `int`, `tokens=True` and boolean `per_tool_limits` values silently passed validation. Booleans are now rejected on every numeric axis.
+- **Cost-axis conservation tolerance.** Conservation checks on the USD cost axis used an unguarded floating-point comparison, so an exact-budget split such as `0.1 + 0.1 + 0.1` against a `0.3` budget spuriously raised `ConservationViolationError`. Cost comparisons now apply a `1e-9` tolerance; the integer-valued token and per-tool axes are unaffected.
+- **`ContractAgent` strict mode.** `strict_mode=True` never raised `ContractViolationError` despite the documented behavior, making strict and lenient modes indistinguishable at the wrapper API. Strict mode now raises on a constraint violation; lenient mode still returns an `ExecutionResult`.
+
 ## [0.3.1] - 2026-04-24
 
 ### Changed
@@ -96,7 +107,9 @@ explicit resource constraints and temporal boundaries.
 - License changed from CC-BY-4.0 (paper) to Apache-2.0 (software)
 - PyPI package name: `ai-agent-contracts` (the name `agent-contracts` was already taken)
 
-[Unreleased]: https://github.com/flyersworder/agent-contracts/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/flyersworder/agent-contracts/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/flyersworder/agent-contracts/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/flyersworder/agent-contracts/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/flyersworder/agent-contracts/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/flyersworder/agent-contracts/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/flyersworder/agent-contracts/releases/tag/v0.1.0

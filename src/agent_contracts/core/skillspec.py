@@ -11,10 +11,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# Regex pattern for valid skill names (agentskills.io specification)
-# Pattern: 1-64 chars, lowercase alphanumeric + hyphens, must start with letter,
-# must end with alphanumeric (not hyphen)
-_SKILL_NAME_PATTERN = re.compile(r"^[a-z]([a-z0-9-]{0,61}[a-z0-9])?$")
+# Regex pattern for valid skill names (agentskills.io specification).
+# Structure: must start with a letter, lowercase alphanumeric + single
+# hyphens, no consecutive hyphens, no leading/trailing hyphen. The 1-64
+# character length bound is checked separately in __post_init__.
+_SKILL_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 
 @dataclass(frozen=True)
@@ -94,8 +95,8 @@ class SkillSpec:
 
     def __post_init__(self) -> None:
         """Validate skill specification against agentskills.io standard."""
-        # Validate name format
-        if not _SKILL_NAME_PATTERN.match(self.name):
+        # Validate name format and length (1-64 chars per agentskills.io)
+        if not (1 <= len(self.name) <= 64) or not _SKILL_NAME_PATTERN.match(self.name):
             raise ValueError(
                 f"Skill name must be 1-64 lowercase alphanumeric characters with hyphens, "
                 f"cannot start/end with hyphen or have consecutive hyphens. Got: '{self.name}'"
