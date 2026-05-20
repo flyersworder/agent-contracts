@@ -10,6 +10,7 @@ The comparison demonstrates Agent Contracts' value:
 - Predictable resource consumption
 """
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -31,6 +32,20 @@ from .usage_tracker import (
     generate_coder_status_prefix,
     generate_reviewer_status_prefix,
 )
+
+
+def _violation_token_count(error_str: str) -> int | None:
+    """Recover an agent's cumulative token count from a contract-violation error.
+
+    When a contract is violated, the agent's ``.run()`` raises before the
+    orchestrator can read its usage, so the tokens already consumed would
+    otherwise be lost (recorded as zero). The contract monitor records the
+    count in the exception text, e.g. ``ViolationInfo(tokens: 66648 > 30000)``;
+    this parses it back out so a halted trial is charged the resources it
+    actually used rather than nothing.
+    """
+    match = re.search(r"tokens:\s*(\d+)", error_str)
+    return int(match.group(1)) if match else None
 
 
 @dataclass
@@ -533,6 +548,13 @@ class ContractedPipeline:
                 if "violated" in error_str.lower() or "limit" in error_str.lower():
                     result.error = f"Coder contract violation: {e}"
                     result.budget_compliant = False
+                    # The Coder consumed tokens before the contract halted it;
+                    # recover that count from the violation so the halted trial
+                    # is not silently charged zero. The monitor count is
+                    # cumulative for the trial, so overwrite rather than add.
+                    consumed = _violation_token_count(error_str)
+                    if consumed is not None:
+                        result.tokens_by_agent["coder"] = consumed
                 else:
                     result.error = f"Coder execution error: {e}"
                 result.iteration_details.append(iter_detail)
@@ -588,6 +610,10 @@ class ContractedPipeline:
                 if "violated" in error_str.lower() or "limit" in error_str.lower():
                     result.error = f"Reviewer contract violation: {e}"
                     result.budget_compliant = False
+                    # Recover tokens consumed before the halt (see Coder branch).
+                    consumed = _violation_token_count(error_str)
+                    if consumed is not None:
+                        result.tokens_by_agent["reviewer"] = consumed
                 else:
                     result.error = f"Reviewer execution error: {e}"
                 result.iteration_details.append(iter_detail)

@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import json
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -185,6 +186,21 @@ def load_results(results_file: Path) -> dict[str, Any]:
         return result
 
 
+def _trial_tokens(trial: dict[str, Any]) -> int:
+    """Tokens a trial actually consumed.
+
+    A contract-violation trial can record ``total_tokens`` as 0 (or a small
+    partial value) because the agent raised before its usage was tallied; the
+    real cumulative count survives in the ``error`` string, e.g.
+    ``ViolationInfo(tokens: 66648 > 30000)``. Recover it so violated trials
+    are not scored as free — otherwise the most expensive trials count as the
+    cheapest, inflating the apparent token reduction.
+    """
+    recorded = trial.get("total_tokens", 0) or 0
+    match = re.search(r"tokens:\s*(\d+)", trial.get("error", "") or "")
+    return int(match.group(1)) + recorded if match else recorded
+
+
 def extract_paired_metrics(
     results: dict[str, Any],
 ) -> dict[str, dict[str, np.ndarray]]:
@@ -230,13 +246,13 @@ def extract_paired_metrics(
             uc = conditions["UNCONTRACTED"]
 
             contracted["success"].append(1 if ct.get("success", False) else 0)
-            contracted["tokens"].append(ct.get("total_tokens", 0))
+            contracted["tokens"].append(_trial_tokens(ct))
             contracted["iterations"].append(ct.get("num_iterations", 0))
             contracted["llm_calls"].append(ct.get("total_llm_calls", 0))
             contracted["runaway"].append(1 if ct.get("runaway_prevented", False) else 0)
 
             uncontracted["success"].append(1 if uc.get("success", False) else 0)
-            uncontracted["tokens"].append(uc.get("total_tokens", 0))
+            uncontracted["tokens"].append(_trial_tokens(uc))
             uncontracted["iterations"].append(uc.get("num_iterations", 0))
             uncontracted["llm_calls"].append(uc.get("total_llm_calls", 0))
             uncontracted["runaway"].append(1 if uc.get("runaway_prevented", False) else 0)
@@ -290,11 +306,11 @@ def extract_by_difficulty(
                 uc = conditions["UNCONTRACTED"]
 
                 contracted["success"].append(1 if ct.get("success", False) else 0)
-                contracted["tokens"].append(ct.get("total_tokens", 0))
+                contracted["tokens"].append(_trial_tokens(ct))
                 contracted["iterations"].append(ct.get("num_iterations", 0))
 
                 uncontracted["success"].append(1 if uc.get("success", False) else 0)
-                uncontracted["tokens"].append(uc.get("total_tokens", 0))
+                uncontracted["tokens"].append(_trial_tokens(uc))
                 uncontracted["iterations"].append(uc.get("num_iterations", 0))
 
         result[diff] = {
@@ -870,9 +886,9 @@ def main() -> None:
    - CONTRACTED: {ct_runaway} problems hit iteration limit
    - UNCONTRACTED: {uc_runaway} problems hit iteration limit
 
-KEY INSIGHT: Agent Contracts provide a 90% token reduction with only a modest
-success rate tradeoff ({success_diff:+.1f}pp). The {var_ratio:.0f}x lower variance means
-costs are highly predictable, addressing the "$47K problem" of runaway AI costs.
+KEY INSIGHT: Agent Contracts cut mean token use by {token_reduction:.0f}% with only a
+modest success-rate tradeoff ({success_diff:+.1f}pp), and bound the runaway tail:
+over-budget trials are detected and halted, addressing the "$47K problem".
 """)
 
     print(f"\nOutput files saved to: {args.output_dir}")
