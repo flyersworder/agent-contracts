@@ -401,6 +401,12 @@ Defer the decision until M5 is underway and the WT result is in hand.
 - AutoGen integration
 - CrewAI integration
 - Audit dashboards / policy management UI / cost attribution reports
+- **OR/optimization research ideas** (backlog, captured 2026-05-30) — stochastic
+  budget allocation in delegation, OR-backed chamber experiment-selection
+  baseline, heuristic-vs-optimum validation oracle. See
+  `docs/or_optimization_research_ideas.md`. Thesis: upgrade our allocation
+  heuristics to *stochastic/robust* optimization (exploits our indeterminacy
+  modeling), NOT the deterministic LP the source article assumes.
 
 ## Operational notes (chamber pillar)
 
@@ -417,6 +423,7 @@ Defer the decision until M5 is underway and the WT result is in hand.
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`
 - **Causal Chamber Plan**: `docs/causal_chamber_validation_plan.md` (full M4/M5/M6 spec for AAMAS 2027 / ECAI 2027)
+- **OR/Optimization Ideas**: `docs/or_optimization_research_ideas.md` (backlog of 3 OR-inspired directions)
 - **Repository**: https://github.com/flyersworder/agent-contracts
 
 ---
