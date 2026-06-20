@@ -301,6 +301,35 @@ Four critical bugs fixed that made multi-call protection non-functional:
 - 325 tests passing (15 skipped - optional LangChain dependency)
 - All enforcement tests updated to expect ACTIVE state (cumulative tracking)
 
+## Dependency Notes
+
+### google-adk 1.x → 2.x silent major bump (Jun 20, 2026)
+While merging 8 Dependabot PRs (#59–#66: pyjwt, python-multipart, langchain
+1.2→1.3, cryptography 46→48, starlette, aiohttp, langsmith, pydantic-settings)
+and running `uv sync --all-extras`, the lockfile shrank by ~1,240 lines and the
+resolved dependency set dropped from **202 → 151 packages (51 removed, 0 added)**.
+
+- **Root cause**: `google-adk` resolved from **1.28.1 → 2.2.0**. This rode in
+  *transitively* — `pyproject.toml` pins `google-adk>=1.18.0` (a floor, no
+  ceiling), so the full graph re-resolution forced by the langchain/cryptography
+  bumps grabbed the newest satisfying release. **Dependabot opened no PR for it**
+  because the requirement string never changed, only the resolved lock did.
+- **Why 51 packages vanished**: ADK 2.x demoted its Google Cloud / Vertex AI
+  stack from hard deps to optional extras — removed: the entire
+  `google-cloud-*` set (aiplatform, bigquery, spanner, pubsub, logging,
+  monitoring, …), `google-api-python-client`, the `opentelemetry-*-gcp`
+  exporters, `sqlalchemy`/`alembic`/`mako`, `grpcio`, `proto-plus`, `protobuf`.
+  None were on tested code paths — coverage held at 90%.
+- **Verification**: `integrations/google_adk.py` still imports cleanly and the
+  full suite passes **1073 / 1 skipped / 90% cov** under ADK 2.x.
+- **Latent follow-up (not yet failing)**: ADK 2.x emits
+  `BaseAgentConfig is deprecated and will be removed in future versions`. A
+  future ADK major may remove the config API `google_adk.py` touches — watch
+  for it on the next ADK bump.
+- **VPS note**: `173.212.217.40` will re-resolve to ADK 2.x on its next
+  `uv sync`. Chamber sweeps use the `chambers` extra + DeepSeek-via-LiteLLM
+  (not ADK), so sweeps are unaffected — but the install footprint will shift.
+
 ## File Structure
 
 ```
@@ -428,8 +457,8 @@ Defer the decision until M5 is underway and the WT result is in hand.
 
 ---
 
-*Last Updated: 2026-05-18 (M4b pilot COMPLETE, M4 acceptance PASS; M4c checkpointing landed)*
-*Status: Production-ready, 1046+ tests, 81%+ coverage*
+*Last Updated: 2026-06-20 (8 Dependabot PRs merged #59–#66; google-adk 1.x→2.x silent major bump captured — see Dependency Notes)*
+*Status: Production-ready, 1073 tests passing (1 skipped), 90% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar*
 *Pilot dataset: `runs/m4-pilot.parquet` (450 cells, 442 ok, 8 timeouts) — submission-ready for AAMAS 2027 / ECAI 2027*
