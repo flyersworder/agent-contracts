@@ -58,7 +58,7 @@ chambers = [
     # Causal Chamber benchmark — Gamella et al. NMI 2025
     # See docs/causal_chamber_validation_plan.md for the AAMAS/ECAI 2027 pillar
     "causalchamber>=0.1.5",
-    "numpy>=1.26,<2.5",  # avoid yanked numpy 2.4.0; see plan §4.4 / R4
+    "numpy>=1.26,<2.6",  # avoid yanked numpy 2.4.0; see plan §4.4 / R4
     "pandas>=2.0",
 ]
 
