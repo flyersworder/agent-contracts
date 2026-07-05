@@ -73,6 +73,24 @@ VARIANT_LABELS: dict[str, str] = {
     "planner_reasoner": "Planner+Reasoner",
 }
 
+# Marker + linestyle per variant so curves stay distinguishable when the
+# figure is printed in black and white (colors alone collapse in grayscale).
+VARIANT_MARKERS: dict[str, str] = {
+    "random": "o",
+    "greedy_ig_lite": "s",
+    "llm_only": "^",
+    "llm_pc": "D",
+    "planner_reasoner": "v",
+}
+
+VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
+    "random": ":",
+    "greedy_ig_lite": "--",
+    "llm_only": "-",
+    "llm_pc": "-.",
+    "planner_reasoner": (0, (3, 1, 1, 1, 1, 1)),
+}
+
 # Variant rendering order in legend (matches plan §5.3 description top-to-bottom).
 VARIANT_ORDER: tuple[str, ...] = (
     "random",
@@ -231,7 +249,8 @@ def plot_pareto(
             yerr=v_df[sem_col],
             label=VARIANT_LABELS.get(variant, variant),
             color=VARIANT_COLORS.get(variant, "#000000"),
-            marker="o",
+            marker=VARIANT_MARKERS.get(variant, "o"),
+            linestyle=VARIANT_LINESTYLES.get(variant, "-"),
             capsize=4,
             linewidth=1.6,
             markersize=6,
