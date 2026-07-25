@@ -107,6 +107,11 @@ appears once positively as in-flow at `v` and once negatively as out-flow at `u`
 internal terms cancel. Only the root's exogenous budget survives on the left and
 total system consumption on the right. ∎
 
+The claim is over the whole resource vector, per-tool counts included. That holds only
+because the node invariant reads an *undeclared* tool as a budget of zero for every node
+but the root (§5.2); under `≤` alone the per-tool components would cancel vacuously and
+the bound would be real for tokens and cost while empty for experiments.
+
 The corollary is the design's whole point: **each node checks only its own edges, and
 global boundedness follows.** No global lock, no central accountant — which is what a
 multi-agent org graph needs and what graph engineering currently has no answer for.
@@ -204,14 +209,27 @@ single readable line.
 
 The per-tool rule needs stating precisely, because `ResourceVector.__le__` compares
 only the keys the *budget* side names — the convention `AllocationRecord` already
-documents. A tool absent from a node's in-flow is therefore *unconstrained*, not zero,
-so without an explicit rule a node funded with no experiment budget could grant
-experiments without limit. `allocate()` enforces the rule edge by edge: a per-tool key
-the source's in-flow does not constrain is rejected with `FlowConservationError`. The
-**root is exempt** — its budget is exogenous, so a tool it leaves unconstrained is
-genuinely unbounded rather than absent. `seal()` re-checks the same property across the
-whole graph. `__le__` itself is unchanged; the propagation rule lives at the graph
-layer, where the notion of "in-flow" exists.
+documents. A tool absent from a node's in-flow is therefore *unconstrained* under `≤`,
+not zero, so without an explicit rule a node funded with no experiment budget could both
+grant and spend experiments without limit. The graph layer closes this on **both** paths:
+
+- **Grant path.** `allocate()` rejects a per-tool key the source's in-flow does not
+  constrain, with `FlowConservationError` naming the tool; `seal()` re-checks the same
+  property across the whole graph.
+- **Consumption path.** The node invariant treats an undeclared tool as a budget of
+  zero, so consuming a tool nobody funded is a violation rather than vacuous compliance.
+  Without this clause §3.2's bound would hold on the scalar dimensions but not on the
+  per-tool ones — which are precisely the M6 conserved resource.
+
+The **root is exempt on both paths** — its budget is exogenous, so a tool it leaves
+unconstrained is genuinely unbounded rather than absent. A grant of **zero** is always
+allowed, even for an undeclared tool: it strictly tightens the child, and for a node with
+no budget for that tool it is the only way to constrain the child at all. `__le__` itself
+is unchanged; the rules live at the graph layer, where the notion of "in-flow" exists.
+
+`FlowConservationError` reports `in_flow=None` for an undeclared dimension. Undeclared is
+not a budget of zero, and an audit artifact that conflates the two misstates the rule it
+is evidence for.
 
 This matters directly for §8: arm 3 gives the aggregator "0 experiments", which must
 materialize as `per_tool_limits == {"exp": 0}` and never as an omitted key.
@@ -307,11 +325,14 @@ every downstream residual for the remainder of a sweep. Three limits are deliber
 - **Abandoned nodes are still verified.** Abandonment is the timeout case, and a
   timed-out node is the likeliest of all to have overspent; excusing it would let
   `verify()` certify a graph whose total consumption exceeds the root budget.
-  `abandon()` freezes the node's in-flow, consumption and out-flow into a snapshot, and
-  `verify()` checks abandoned nodes against that frozen triple — live values would let
-  the refund it triggered, or a later release of one of its out-edges, quietly clear a
-  real overspend. The node is presumed to stop consuming at that point; consumption
-  recorded against a node after it was declared dead is outside the model.
+  `abandon()` freezes the node's in-flow and out-flow into a snapshot, and `verify()`
+  checks abandoned nodes against those frozen budget sides — live values would let the
+  refund it triggered, or a later release of one of its out-edges, quietly clear a real
+  overspend. **Consumption is always read live**, including after death: freezing it too
+  would reopen the same hole through the other door, since a node could then spend
+  without limit post-mortem and still be certified. What post-mortem spending can hide is
+  bounded by the refund, because the frozen in-flow is the pre-refund one — reclaiming
+  budget is a reporting change, not a licence to spend it.
 
 ### 6.4 Concurrency boundary
 
@@ -334,8 +355,15 @@ New file `tests/core/test_delegation_graph.py`, mirroring `tests/core/test_deleg
 | 6 | `abandon()` refunds stranded budget; downstream marked unreachable | The M4b timeout failure mode |
 | 7 | `None`-as-unbounded arithmetic across every dimension | §3.4 bug class |
 | 8 | `iterations` tracked and enforced | §5.3 |
-| 9 | An abandoned node that overspent still fails `verify()` | §6.3, the laundering hole |
-| 10 | A per-tool grant the source's in-flow does not constrain is rejected | §5.2, the M6 conserved resource |
+| 9 | An abandoned node that overspent still fails `verify()`, including when the overspend is recorded *after* abandonment | §6.3, the laundering hole and its second door |
+| 10 | A per-tool grant the source's in-flow does not constrain is rejected; a grant of zero is not | §5.2, the M6 conserved resource |
+| 11 | Consuming a tool the in-flow never funded fails at any node; the root is exempt | §5.2 consumption path |
+
+The generated DAGs carry a per-tool `exp` budget alongside tokens, cost and aggregate
+tool invocations, and conserve all four. Cost is granted in exact binary fractions rather
+than decimal cents: cents are not representable in binary floating point, so a generator
+using them saturates a few ulps above the true residual and the test then fails on its own
+rounding instead of on the law.
 
 Tests 1 and 2 are cross-checked by mutation: excusing abandoned nodes in `verify()`, and
 double-counting fan-in in `in_flow()`, must each fail on every seed. A property test that
