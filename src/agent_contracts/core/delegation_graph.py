@@ -239,6 +239,17 @@ class DelegationGraph:
         self._edges[key] = edge
         return edge
 
+    @staticmethod
+    def _is_funded(in_flow: ResourceVector) -> bool:
+        """True if ``in_flow`` carries budget in at least one dimension.
+
+        ``None`` counts as funded: it means unbounded, never zero.
+        """
+        scalars = (in_flow.tokens, in_flow.cost_usd, in_flow.tool_invocations, in_flow.iterations)
+        if any(value is None or value > 0 for value in scalars):
+            return True
+        return any(count > 0 for count in in_flow.per_tool.values())
+
     def _require_per_tool_propagation(
         self, source: str, amount: ResourceVector, source_in_flow: ResourceVector
     ) -> None:
@@ -297,6 +308,11 @@ class DelegationGraph:
                 continue
             if not self.contributing_edges(name):
                 problems.append(f"node '{name}' is an orphan: no in-edge funds it")
+            elif not self._is_funded(self.in_flow(name)):
+                problems.append(
+                    f"node '{name}' is funded with nothing: its in-edges exist but "
+                    f"every dimension of its in-flow is zero"
+                )
 
         for name in self._nodes:
             in_flow = self.in_flow(name)
@@ -543,6 +559,25 @@ class DelegationGraph:
         sibling edges in any order yields the same final state. Computing
         against live in-flow instead would make each sibling's refund depend on
         how many siblings released first.
+
+        **Precondition: the target must be done consuming on this edge.** The
+        release is exact — and order-independent across siblings — only if no
+        consumption is recorded at ``target`` between sibling releases. Two
+        consequences of releasing early, neither of them enforced here:
+
+        * ``target``'s ``Contract`` is materialized once and cached by
+          :meth:`contract_for`; a release does **not** shrink it, so its
+          :class:`~agent_contracts.core.monitor.ResourceMonitor` keeps
+          authorizing the pre-release budget. Only the graph-level residual
+          shrinks.
+        * ``release`` then consume then :meth:`abandon` over-refunds: the
+          release already paid out a share of a pool that later consumption
+          shrank.
+
+        This is documented rather than enforced because requiring the target to
+        be terminal would break legitimate staged-release use. Callers that
+        cannot guarantee the precondition should abandon the node instead,
+        which snapshots and settles it in one step.
         """
         key = f"{source}->{target}"
         edge = self._edges.get(key)

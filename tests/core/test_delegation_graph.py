@@ -214,6 +214,27 @@ def test_seal_rejects_orphan_node():
     assert any("orphan" in problem for problem in excinfo.value.problems)
 
 
+def test_seal_flags_a_node_funded_with_nothing():
+    """An all-zero edge is legal but funds nothing; testing edge *existence*
+    alone would seal such a node clean."""
+    from agent_contracts.core.delegation_graph import GraphLintError
+
+    graph = DelegationGraph(make_root())
+    graph.add_node("z")
+    graph.allocate(DelegationGraph.ROOT, "z")
+    with pytest.raises(GraphLintError) as excinfo:
+        graph.seal()
+    assert any("z" in problem for problem in excinfo.value.problems)
+
+
+def test_seal_accepts_a_node_funded_only_with_a_tool_budget():
+    graph = DelegationGraph(make_root())
+    graph.add_node("z")
+    graph.allocate(DelegationGraph.ROOT, "z", per_tool={"exp": 3})
+    graph.seal()
+    assert graph.is_sealed
+
+
 def test_seal_reports_all_problems_not_just_first():
     from agent_contracts.core.delegation_graph import GraphLintError
 
@@ -422,6 +443,27 @@ def test_release_of_fully_consumed_edge_refunds_nothing():
     assert graph.release("scout_a", "aggregator").tokens == 0
 
 
+def test_release_is_exact_when_the_target_consumes_no_further():
+    """Pins ``release()``'s documented precondition.
+
+    With the target done consuming, the sibling refunds sum exactly to the
+    unused budget, the target retains exactly what it spent, and the result is
+    the same in either order.
+    """
+    graph = _diamond()
+    graph.monitor_for("aggregator").usage.add_tokens(20_000)
+
+    refunded = (
+        graph.release("scout_b", "aggregator").tokens
+        + graph.release("scout_a", "aggregator").tokens
+    )
+
+    assert refunded == 10_000  # exactly the unused budget, nothing invented
+    assert graph.in_flow("aggregator").tokens == 20_000  # exactly what it spent
+    assert graph.residual("aggregator").tokens == 0
+    graph.verify()
+
+
 def test_double_release_rejected():
     graph = _diamond()
     graph.release("scout_a", "aggregator")
@@ -525,6 +567,31 @@ def test_release_then_abandon_does_not_double_refund():
     assert edge.amount.tokens >= 0
 
 
+def test_release_of_unknown_edge_rejected():
+    graph = _diamond()
+    with pytest.raises(KeyError, match="unknown edge"):
+        graph.release("scout_a", "scout_b")
+
+
+def test_abandon_root_rejected():
+    graph = _diamond()
+    with pytest.raises(ValueError, match="cannot abandon the root"):
+        graph.abandon(DelegationGraph.ROOT)
+
+
+def test_abandon_twice_rejected():
+    graph = _diamond()
+    graph.abandon("scout_a")
+    with pytest.raises(ValueError, match="already abandoned"):
+        graph.abandon("scout_a")
+
+
+def test_abandon_unknown_node_rejected():
+    graph = _diamond()
+    with pytest.raises(KeyError):
+        graph.abandon("nope")
+
+
 def test_public_api_exports():
     from agent_contracts.core import (
         CycleError,
@@ -533,9 +600,13 @@ def test_public_api_exports():
         GraphLintError,
         ResourceVector,
     )
+    from agent_contracts.core import delegation_graph as submodule
 
     assert DelegationGraph.ROOT == "root"
+    assert DelegationGraph is submodule.DelegationGraph
     assert issubclass(FlowConservationError, ConservationViolationError)
     assert ResourceVector.ZERO.tokens == 0
-    assert CycleError is not None
-    assert GraphLintError is not None
+    assert CycleError is submodule.CycleError
+    assert issubclass(CycleError, Exception)
+    assert GraphLintError is submodule.GraphLintError
+    assert issubclass(GraphLintError, Exception)
