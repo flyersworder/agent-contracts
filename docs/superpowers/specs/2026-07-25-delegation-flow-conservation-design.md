@@ -86,6 +86,18 @@ The current law is the special case where every non-root node has exactly one
 in-edge. This is a strict generalization; no existing behavior changes. §7 test 1
 verifies this empirically rather than by assertion.
 
+Two qualifications, both verified by tests rather than left implicit:
+
+- **Equivalence is exact at `reserve_ratio=0`.** `ContractingCapability` optionally
+  withholds a coordination reserve (`remaining_tokens` subtracts `reserved_tokens`),
+  and the flow graph has no analogue: a reserve is a policy about *how much of an
+  in-flow to delegate*, not a conservation constraint. At `reserve_ratio > 0` the two
+  laws differ by exactly the reserve, which the cross-validation test asserts.
+- **`residual()` is signed; `remaining_tokens` clamps at zero.** The tree law reports
+  `0` both for "exactly spent" and "overspent"; a graph residual goes negative so an
+  overrun stays visible to `verify()`. This is deliberate — the flow invariant needs to
+  see the deficit, not a floor.
+
 ### 3.2 Soundness
 
 **Claim.** If the local invariant holds at every node, then `Σ_v C(v) ≤ B(root)`.
@@ -185,9 +197,24 @@ single readable line.
 `seal()` validates:
 
 - acyclicity of the budget graph;
-- every non-root node has at least one in-edge (no node starved of budget);
+- every non-root node has at least one in-edge, and that in-edge funds it with
+  something (an all-zero edge exists but starves the node just the same);
 - no node's out-flow already exceeds its in-flow;
-- per-tool allocations are consistent with parents' `per_tool_limits`.
+- no node's out-edges name a per-tool budget its own in-flow does not constrain.
+
+The per-tool rule needs stating precisely, because `ResourceVector.__le__` compares
+only the keys the *budget* side names — the convention `AllocationRecord` already
+documents. A tool absent from a node's in-flow is therefore *unconstrained*, not zero,
+so without an explicit rule a node funded with no experiment budget could grant
+experiments without limit. `allocate()` enforces the rule edge by edge: a per-tool key
+the source's in-flow does not constrain is rejected with `FlowConservationError`. The
+**root is exempt** — its budget is exogenous, so a tool it leaves unconstrained is
+genuinely unbounded rather than absent. `seal()` re-checks the same property across the
+whole graph. `__le__` itself is unchanged; the propagation rule lives at the graph
+layer, where the notion of "in-flow" exists.
+
+This matters directly for §8: arm 3 gives the aggregator "0 experiments", which must
+materialize as `per_tool_limits == {"exp": 0}` and never as an omitted key.
 
 It reports **all** problems found, not just the first. The graph engineering field
 guide names graph linting as an unshipped open problem; this is a budget-flavored
@@ -206,9 +233,10 @@ and the M6 arms need comparable per-arm iteration counts.
 
 | Point | Check | Failure |
 |---|---|---|
-| `allocate()` | source's out-flow ≤ source's in-flow (satisfiability) | `FlowConservationError`, fail fast in build phase |
+| `allocate()` | source's consumption + prospective out-flow ≤ source's in-flow | `FlowConservationError`, fail fast in build phase |
+| `allocate()` | source's in-flow constrains every per-tool key granted (root exempt) | `FlowConservationError` naming the tool |
 | `allocate()` | edge would not create a cycle (DFS from target for source) | `CycleError` |
-| `seal()` | acyclicity, orphans, per-tool consistency | aggregated report of all problems |
+| `seal()` | orphans, unfunded nodes, out-flow ≤ in-flow, per-tool propagation | aggregated report of all problems |
 | runtime | node `v`'s invariant on every monitor update | existing enforcement path |
 
 The runtime check requires **no new enforcement code**. Because each node's `Contract`
@@ -221,6 +249,13 @@ layer owns only the edges.
 
 `FlowConservationError` carries `node_id`, `dimension`, `in_flow`, `consumed`,
 `out_flow`, `deficit`, and `contributing_edges`.
+
+`consumed` and `out_flow` are reported as the separate quantities they are: a node that
+delegated nothing and overspent 40k is a consumption overrun, and describing it as an
+out-flow of 40k would make the audit artifact wrong exactly where it is most needed. The
+message phrasing follows the call site — "would over-allocate" for the build-phase check
+in `allocate()`, where the out-flow is prospective, versus a runtime violation at
+`check_node()`.
 
 `contributing_edges` is an audit trail, not blame assignment. The invariant is checked
 at `v`, so `v` is at fault. Parents are only ever accountable for their own out-flow.
@@ -247,10 +282,36 @@ leaves `scout_b` only 3k; reversing the order swaps them. A 30-seed sweep would 
 depend on the order releases happen to fire. LIFO and first-come fail the same way.
 Each edge may be released at most once.
 
+**Precondition on `release`: the target must be done consuming on that edge.** The
+formula above is exact, and sibling order irrelevant, only while `consumed(v)` does not
+move between releases. Two consequences, documented rather than enforced — requiring a
+terminal target would break legitimate staged releases:
+
+- `v`'s `Contract` is materialized once and cached by `contract_for()`. A release does
+  **not** shrink it, so `v`'s `ResourceMonitor` keeps authorizing the pre-release
+  budget; only the graph-level residual shrinks.
+- `release` → consume → `abandon` over-refunds, because the release already paid out a
+  share of a pool that the later consumption shrank.
+
 `abandon(node)` refunds unconsumed allocation to parents proportionally and marks
 downstream nodes unreachable. This exists because M4b produced 8 `planner_reasoner`
 timeouts at k=59; in a DAG those become stranded allocations that silently corrupt
-every downstream residual for the remainder of a sweep.
+every downstream residual for the remainder of a sweep. Three limits are deliberate:
+
+- **Only in-edges are refunded.** Budget the dead node already delegated downstream
+  stays stranded at the child, which may still be running; abandoning the child too is
+  what reclaims it.
+- **Reclaimed budget is not re-delegatable in v1.** `allocate()` is build-phase only, so
+  a refund changes accounting and reporting — the parent's residual, and what `verify()`
+  will certify — but nothing can re-spend it inside the sealed graph.
+- **Abandoned nodes are still verified.** Abandonment is the timeout case, and a
+  timed-out node is the likeliest of all to have overspent; excusing it would let
+  `verify()` certify a graph whose total consumption exceeds the root budget.
+  `abandon()` freezes the node's in-flow, consumption and out-flow into a snapshot, and
+  `verify()` checks abandoned nodes against that frozen triple — live values would let
+  the refund it triggered, or a later release of one of its out-edges, quietly clear a
+  real overspend. The node is presumed to stop consuming at that point; consumption
+  recorded against a node after it was declared dead is outside the model.
 
 ### 6.4 Concurrency boundary
 
@@ -273,6 +334,12 @@ New file `tests/core/test_delegation_graph.py`, mirroring `tests/core/test_deleg
 | 6 | `abandon()` refunds stranded budget; downstream marked unreachable | The M4b timeout failure mode |
 | 7 | `None`-as-unbounded arithmetic across every dimension | §3.4 bug class |
 | 8 | `iterations` tracked and enforced | §5.3 |
+| 9 | An abandoned node that overspent still fails `verify()` | §6.3, the laundering hole |
+| 10 | A per-tool grant the source's in-flow does not constrain is rejected | §5.2, the M6 conserved resource |
+
+Tests 1 and 2 are cross-checked by mutation: excusing abandoned nodes in `verify()`, and
+double-counting fan-in in `in_flow()`, must each fail on every seed. A property test that
+survives such a mutation is not carrying the claim it appears to.
 
 **No new test dependency.** Tests 1 and 2 want property-based generation, but the
 project uses no `hypothesis` across its 1073 tests. A seeded pseudo-random DAG
