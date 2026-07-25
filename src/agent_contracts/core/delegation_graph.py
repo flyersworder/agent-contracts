@@ -25,14 +25,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from agent_contracts.core.contract import Contract
 from agent_contracts.core.delegation import ConservationViolationError
 from agent_contracts.core.monitor import ResourceMonitor
 from agent_contracts.core.resource_vector import ResourceVector
-
-if TYPE_CHECKING:
-    from agent_contracts.core.contract import Contract
 
 
 class CycleError(Exception):
@@ -290,6 +288,63 @@ class DelegationGraph:
 
     def contributing_edges(self, name: str) -> list[str]:
         return [e.key for e in self._edges.values() if e.target == name]
+
+    # ------------------------------------------------------------------ run
+
+    def contract_for(self, name: str) -> Contract:
+        """Materialize ``name``'s Contract with its summed in-flow as budget.
+
+        The same object is returned on every call, so node-level monitoring
+        stays attached to one contract.
+        """
+        self._require_sealed()
+        self._require_node(name)
+        node = self._nodes[name]
+        if node.contract is None:
+            node.contract = Contract(
+                id=node.node_id,
+                name=name,
+                resources=self.in_flow(name).to_constraints(),
+                **node.contract_kwargs,
+            )
+        return node.contract
+
+    def monitor_for(self, name: str) -> ResourceMonitor:
+        """Monitor for ``name``, bound to its materialized contract.
+
+        Node-level enforcement is the existing ``ResourceMonitor`` machinery:
+        because the contract carries the summed in-flow as its constraints,
+        strict/lenient modes, callbacks, and per-tool priority all apply
+        unchanged. The graph layer owns only the edges.
+        """
+        self._require_sealed()
+        self._require_node(name)
+        node = self._nodes[name]
+        if node.monitor is None:
+            node.monitor = ResourceMonitor(self.contract_for(name).resources)
+        return node.monitor
+
+    def residual(self, name: str) -> ResourceVector:
+        """in-flow - own consumption - out-flow."""
+        self._require_node(name)
+        return self.in_flow(name) - self._consumed(name) - self.out_flow(name)
+
+    def check_node(self, name: str) -> None:
+        """Raise FlowConservationError if ``name``'s invariant is violated."""
+        self._require_node(name)
+        commitment = self._consumed(name) + self.out_flow(name)
+        if not commitment <= self.in_flow(name):
+            self._raise_flow_error(name, commitment)
+
+    def verify(self) -> None:
+        """Check the invariant at every non-abandoned node."""
+        for name, node in self._nodes.items():
+            if not node.abandoned:
+                self.check_node(name)
+
+    def _require_sealed(self) -> None:
+        if not self._sealed:
+            raise RuntimeError("graph must be sealed before materializing contracts")
 
     # ------------------------------------------------------------ internal
 

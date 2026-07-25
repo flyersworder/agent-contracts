@@ -167,3 +167,76 @@ def test_double_seal_is_idempotent():
     graph.seal()
     graph.seal()
     assert graph.is_sealed
+
+
+def test_contract_for_sums_in_flow():
+    graph = DelegationGraph(make_root())
+    for name in ("scout_a", "scout_b", "aggregator"):
+        graph.add_node(name)
+    graph.allocate(DelegationGraph.ROOT, "scout_a", tokens=40_000)
+    graph.allocate(DelegationGraph.ROOT, "scout_b", tokens=40_000)
+    graph.allocate("scout_a", "aggregator", tokens=15_000)
+    graph.allocate("scout_b", "aggregator", tokens=15_000)
+    graph.seal()
+    contract = graph.contract_for("aggregator")
+    assert contract.resources.tokens == 30_000
+    assert contract.id == "root-contract/aggregator"
+
+
+def test_contract_for_before_seal_rejected():
+    graph = DelegationGraph(make_root())
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", tokens=10)
+    with pytest.raises(RuntimeError, match="seal"):
+        graph.contract_for("child")
+
+
+def test_contract_for_is_stable_across_calls():
+    graph = DelegationGraph(make_root())
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", tokens=10)
+    graph.seal()
+    assert graph.contract_for("child") is graph.contract_for("child")
+
+
+def test_residual_is_in_flow_minus_consumption_minus_out_flow():
+    graph = DelegationGraph(make_root())
+    graph.add_node("mid")
+    graph.add_node("leaf")
+    graph.allocate(DelegationGraph.ROOT, "mid", tokens=1000)
+    graph.allocate("mid", "leaf", tokens=400)
+    graph.seal()
+    graph.monitor_for("mid").usage.add_tokens(100)
+    assert graph.residual("mid").tokens == 500
+
+
+def test_check_node_raises_when_consumption_breaks_invariant():
+    graph = DelegationGraph(make_root())
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", tokens=100)
+    graph.seal()
+    graph.monitor_for("child").usage.add_tokens(101)
+    with pytest.raises(FlowConservationError) as excinfo:
+        graph.check_node("child")
+    assert excinfo.value.node_id == "child"
+
+
+def test_verify_checks_every_node():
+    graph = DelegationGraph(make_root())
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", tokens=100)
+    graph.seal()
+    graph.verify()  # clean
+    graph.monitor_for("child").usage.add_tokens(101)
+    with pytest.raises(FlowConservationError):
+        graph.verify()
+
+
+def test_node_monitor_enforces_summed_budget_via_existing_machinery():
+    graph = DelegationGraph(make_root())
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", tokens=100)
+    graph.seal()
+    monitor = graph.monitor_for("child")
+    monitor.usage.add_tokens(101)
+    assert any(v.resource == "tokens" for v in monitor.check_constraints())
