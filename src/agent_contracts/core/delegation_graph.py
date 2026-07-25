@@ -59,6 +59,11 @@ class FlowConservationError(ConservationViolationError):
     ``contributing_edges`` is an audit trail of who funded the node, not blame
     assignment: the invariant is checked at ``node_id``, so that node is at
     fault. Parents are accountable only for their own out-flow.
+
+    ``in_flow`` is ``None`` when the node's in-flow does not declare the failing
+    dimension at all. Undeclared is not a budget of zero, and an audit artifact
+    that conflates the two misreports the whole per-tool propagation rule; the
+    ``deficit`` is then the entire unfunded amount.
     """
 
     def __init__(
@@ -226,7 +231,9 @@ class DelegationGraph:
         source_in_flow = self.in_flow(source)
         self._require_per_tool_propagation(source, amount, source_in_flow)
         source_consumed = self._consumed(source)
-        if not source_consumed + prospective_out <= source_in_flow:
+        if self._violates(
+            source, in_flow=source_in_flow, consumed=source_consumed, out_flow=prospective_out
+        ):
             self._raise_flow_error(
                 source,
                 in_flow=source_in_flow,
@@ -264,19 +271,24 @@ class DelegationGraph:
 
         The root is exempt: its budget is exogenous, so a tool it leaves
         unconstrained is genuinely unbounded rather than absent.
+
+        A grant of **zero** is always allowed. It strictly tightens the child —
+        an explicit limit of 0 where the child would otherwise inherit no key
+        at all — and for a node with no budget for that tool it is the only way
+        to constrain the child, which is exactly M6 arm 3's aggregator.
         """
         if source == self.ROOT:
             return
         for tool in sorted(amount.per_tool):
-            if tool in source_in_flow.per_tool:
-                continue
             granted = amount.per_tool[tool]
+            if tool in source_in_flow.per_tool or granted == 0:
+                continue
             raise FlowConservationError(
                 f"node '{source}' cannot grant tool '{tool}': its in-flow does not "
                 f"constrain that tool, so the grant would be unbounded downstream",
                 node_id=source,
                 dimension=f"tool:{tool}",
-                in_flow=0,
+                in_flow=None,  # undeclared, which is not a budget of zero
                 consumed=0,
                 out_flow=granted,
                 deficit=granted,
@@ -321,8 +333,10 @@ class DelegationGraph:
                 problems.append(f"node '{name}' out-flow exceeds in-flow")
             if name == self.ROOT:
                 continue
-            for tool in sorted(out.per_tool):
-                if tool not in in_flow.per_tool:
+            for tool, granted in sorted(out.per_tool.items()):
+                # A grant of zero only tightens the child; see
+                # `_require_per_tool_propagation`.
+                if granted > 0 and tool not in in_flow.per_tool:
                     problems.append(
                         f"node '{name}' grants tool '{tool}' that its in-flow does not constrain"
                     )
@@ -435,7 +449,7 @@ class DelegationGraph:
         """
         self._require_node(name)
         in_flow, consumed, out_flow = self._flow_state(name)
-        if not consumed + out_flow <= in_flow:
+        if self._violates(name, in_flow=in_flow, consumed=consumed, out_flow=out_flow):
             self._raise_flow_error(name, in_flow=in_flow, consumed=consumed, out_flow=out_flow)
 
     def verify(self) -> None:
@@ -455,11 +469,45 @@ class DelegationGraph:
         return self._nodes[name].snapshot
 
     def _flow_state(self, name: str) -> tuple[ResourceVector, ResourceVector, ResourceVector]:
-        """``(in_flow, consumed, out_flow)`` to check ``name``'s invariant against."""
+        """``(in_flow, consumed, out_flow)`` to check ``name``'s invariant against.
+
+        For an abandoned node the two *budget* sides are frozen — refunds and
+        later releases have moved them — but consumption is read **live**.
+        Freezing consumption too would let a node keep spending after it was
+        declared dead and still be certified. The frozen pre-refund in-flow is
+        the generous side of the comparison, so an honest node keeps the
+        refunded amount as slack rather than sitting on the boundary.
+        """
         snapshot = self._nodes[name].snapshot
         if snapshot is not None:
-            return snapshot.in_flow, snapshot.consumed, snapshot.out_flow
+            return snapshot.in_flow, self._consumed(name), snapshot.out_flow
         return self.in_flow(name), self._consumed(name), self.out_flow(name)
+
+    def _violates(
+        self,
+        name: str,
+        *,
+        in_flow: ResourceVector,
+        consumed: ResourceVector,
+        out_flow: ResourceVector,
+    ) -> bool:
+        """True when ``consumption + out-flow <= in-flow`` fails at ``name``.
+
+        The scalar dimensions are ``ResourceVector.__le__``. The per-tool ones
+        need the extra clause below, because ``__le__`` compares only the keys
+        the budget side names: a tool missing from a node's in-flow would
+        otherwise be *vacuously* compliant, and a node could consume an
+        experiment budget nobody granted it. Undeclared means zero for every
+        node except the root, whose budget is exogenous.
+        """
+        commitment = consumed + out_flow
+        if not commitment <= in_flow:
+            return True
+        if name == self.ROOT:
+            return False
+        return any(
+            count > 0 for tool, count in commitment.per_tool.items() if tool not in in_flow.per_tool
+        )
 
     def _require_sealed(self) -> None:
         if not self._sealed:
@@ -533,11 +581,29 @@ class DelegationGraph:
             allocated = getattr(out_flow, dimension) or 0
             if limit is not None and used + allocated > limit:
                 raise_for(dimension, limit, used, allocated, dimension)
-        for tool, limit in in_flow.per_tool.items():
+        tools = set(in_flow.per_tool) | set(consumed.per_tool) | set(out_flow.per_tool)
+        for tool in sorted(tools):
             used = consumed.per_tool.get(tool, 0)
             allocated = out_flow.per_tool.get(tool, 0)
-            if used + allocated > limit:
-                raise_for(f"tool:{tool}", limit, used, allocated, f"tool '{tool}'")
+            if tool in in_flow.per_tool:
+                limit = in_flow.per_tool[tool]
+                if used + allocated > limit:
+                    raise_for(f"tool:{tool}", limit, used, allocated, f"tool '{tool}'")
+            elif name != self.ROOT and used + allocated > 0:
+                # Undeclared, which is not the same as a budget of zero: the
+                # payload reports in_flow=None so the audit trail keeps the
+                # distinction the propagation rule is built on.
+                raise FlowConservationError(
+                    f"node '{name}' {verb} tool '{tool}': its in-flow does not fund "
+                    f"that tool at all (consumption {used} + out-flow {allocated})",
+                    node_id=name,
+                    dimension=f"tool:{tool}",
+                    in_flow=None,
+                    consumed=used,
+                    out_flow=allocated,
+                    deficit=used + allocated,
+                    contributing_edges=self.contributing_edges(name),
+                )
         raise FlowConservationError(
             f"node '{name}' violates flow conservation",
             node_id=name,
@@ -613,9 +679,13 @@ class DelegationGraph:
           build-phase only, so a refund changes accounting and reporting — the
           parent's residual, and what ``verify()`` will certify — but nothing
           can re-spend it within the sealed graph.
-        * **The node is presumed to stop consuming.** Its invariant is frozen
-          into an :class:`AbandonSnapshot` at this moment; consumption recorded
-          against a node after it was declared dead is outside the model.
+        * **Post-mortem spending is still counted, up to the refund.** The
+          snapshot freezes only the two budget sides; consumption is always
+          read live, so a node that keeps spending after being declared dead is
+          still checked. What it can hide is bounded by what it gave back: the
+          check is against the *pre-refund* in-flow, so consumption up to the
+          refunded amount passes. Reclaiming the refund is a reporting change,
+          not a licence to spend it.
         """
         self._require_node(name)
         if name == self.ROOT:

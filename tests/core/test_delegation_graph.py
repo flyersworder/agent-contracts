@@ -94,6 +94,82 @@ def test_per_tool_grant_of_a_tool_the_source_lacks_is_rejected():
     assert excinfo.value.node_id == "mid"
 
 
+def test_consuming_a_tool_the_in_flow_does_not_fund_is_a_violation():
+    """Conserving per-tool on the grant path alone left the consumption path
+    vacuously compliant: a node whose in-flow omits a tool could spend it
+    without limit, which is the M6 conserved resource."""
+    graph = DelegationGraph(make_root())  # root constrains exp to 59
+    graph.add_node("mid")
+    graph.allocate(DelegationGraph.ROOT, "mid", tokens=1_000, tool_invocations=1_000)
+    graph.seal()
+    for _ in range(150):
+        graph.monitor_for("mid").usage.add_tool_invocation("exp")
+
+    with pytest.raises(FlowConservationError) as excinfo:
+        graph.verify()
+    error = excinfo.value
+    assert error.node_id == "mid"
+    assert error.dimension == "tool:exp"
+    assert error.consumed == 150
+    # Undeclared is not a budget of zero, and the audit trail must say so.
+    assert error.in_flow is None
+    assert "does not fund" in str(error)
+
+
+def test_root_may_consume_a_tool_it_leaves_unconstrained():
+    root = Contract(id="r", name="R", resources=ResourceConstraints(tokens=1_000))
+    graph = DelegationGraph(root)
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", tokens=10)
+    graph.seal()
+    for _ in range(5):
+        graph.monitor_for(DelegationGraph.ROOT).usage.add_tool_invocation("exp")
+    graph.verify()
+
+
+def test_consuming_a_funded_tool_within_budget_is_fine():
+    graph = DelegationGraph(make_root())
+    graph.add_node("mid")
+    graph.allocate(DelegationGraph.ROOT, "mid", tool_invocations=10, per_tool={"exp": 10})
+    graph.seal()
+    for _ in range(10):
+        graph.monitor_for("mid").usage.add_tool_invocation("exp")
+    graph.verify()
+    graph.monitor_for("mid").usage.add_tool_invocation("exp")
+    with pytest.raises(FlowConservationError):
+        graph.verify()
+
+
+def test_zero_grant_of_an_undeclared_tool_is_allowed():
+    """A grant of zero tightens the child; it cannot make anything unbounded.
+
+    After per-tool conservation on the consumption path, a zero grant is the
+    only way a node with no budget for a tool can constrain its child at all —
+    and M6 arm 3's aggregator is exactly that node.
+    """
+    graph = DelegationGraph(make_root())
+    graph.add_node("mid")
+    graph.add_node("aggregator")
+    graph.allocate(DelegationGraph.ROOT, "mid", tokens=1_000, tool_invocations=10)
+    graph.allocate("mid", "aggregator", tokens=100, per_tool={"exp": 0})
+    graph.seal()
+    assert graph.contract_for("aggregator").resources.per_tool_limits == {"exp": 0}
+    graph.verify()
+
+
+def test_propagation_error_reports_the_tool_as_undeclared_not_zero():
+    graph = DelegationGraph(make_root())
+    graph.add_node("mid")
+    graph.add_node("leaf")
+    graph.allocate(DelegationGraph.ROOT, "mid", tokens=1_000)
+    with pytest.raises(FlowConservationError) as excinfo:
+        graph.allocate("mid", "leaf", per_tool={"exp": 5})
+    error = excinfo.value
+    assert error.in_flow is None  # undeclared, not a budget of zero
+    assert error.deficit == 5
+    assert "does not constrain" in str(error)
+
+
 def test_root_may_grant_a_tool_it_leaves_unconstrained():
     """The root's budget is exogenous: an unconstrained tool at the root is
     unbounded, not absent."""
@@ -539,6 +615,24 @@ def test_overspent_abandoned_node_stays_flagged_after_downstream_release():
     graph.release("scout_a", "aggregator")
     with pytest.raises(FlowConservationError):
         graph.verify()
+
+
+def test_consumption_recorded_after_abandonment_is_still_caught():
+    """Freezing consumption at the moment of death reopened C1 by another door:
+    a node could keep spending post-mortem and verify() would certify it."""
+    graph = DelegationGraph(make_root(tokens=100_000))
+    graph.add_node("a")
+    graph.allocate(DelegationGraph.ROOT, "a", tokens=100_000)
+    graph.seal()
+    graph.monitor_for("a").usage.add_tokens(10_000)
+    graph.abandon("a")
+    graph.verify()  # honest so far
+
+    graph.monitor_for("a").usage.add_tokens(140_000)  # total 150_000 vs a 100_000 budget
+    with pytest.raises(FlowConservationError) as excinfo:
+        graph.verify()
+    assert excinfo.value.node_id == "a"
+    assert excinfo.value.consumed == 150_000
 
 
 def test_abandon_snapshot_records_pre_refund_state():

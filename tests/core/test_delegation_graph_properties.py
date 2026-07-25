@@ -14,7 +14,10 @@ SEEDS = [0, 1, 2, 3, 5, 8, 13, 21, 34, 55]
 
 ROOT_TOKENS = 100_000
 ROOT_COST = 100.0
-ROOT_TOOLS = 400
+ROOT_EXP = 200
+ROOT_TOOLS = 2 * ROOT_EXP
+# 1/64 of a dollar: exactly representable in binary, unlike a cent.
+COST_UNIT = 1 / 64
 
 
 def _root(tokens: int = 1_000_000) -> Contract:
@@ -22,12 +25,15 @@ def _root(tokens: int = 1_000_000) -> Contract:
 
 
 def _multi_root() -> Contract:
-    """Root budget spanning three conserved dimensions, not tokens alone."""
+    """Root budget spanning four conserved dimensions, not tokens alone."""
     return Contract(
         id="root",
         name="Root",
         resources=ResourceConstraints(
-            tokens=ROOT_TOKENS, cost_usd=ROOT_COST, tool_invocations=ROOT_TOOLS
+            tokens=ROOT_TOKENS,
+            cost_usd=ROOT_COST,
+            tool_invocations=ROOT_TOOLS,
+            per_tool_limits={"exp": ROOT_EXP},
         ),
     )
 
@@ -152,6 +158,38 @@ def test_residual_may_go_negative_where_remaining_tokens_clamps():
     assert graph.residual(DelegationGraph.ROOT).tokens == -500
 
 
+def _grant(graph: DelegationGraph, rng: random.Random, source: str, target: str) -> bool:
+    """Fund ``target`` from ``source`` with at most half of ``source``'s headroom.
+
+    Returns False when the source is too poor to fund anything. Every grant
+    keeps ``tool_invocations == 2 * per_tool["exp"]``, an invariant the root
+    budget also satisfies, so both tool dimensions saturate exactly and the
+    aggregate is never a mere copy of the per-tool count.
+
+    Cost is granted in whole ``COST_UNIT`` (1/64 dollar) steps. Decimal cents
+    are not representable in binary floating point, so a generator using them
+    makes ``in_flow - out_flow`` land a few ulps *above* the true residual;
+    saturating on that value then trips the invariant by ~1e-15 and the test
+    fails on the generator's rounding rather than on the law. Powers of two are
+    exact, which keeps the telescoping equality meaningful.
+    """
+    headroom = graph.residual(source)
+    exp_room = headroom.per_tool.get("exp", 0)
+    cost_units = round(headroom.cost_usd / COST_UNIT)
+    if headroom.tokens < 2 or cost_units < 2 or exp_room < 2:
+        return False
+    experiments = rng.randint(1, exp_room // 2)
+    graph.allocate(
+        source,
+        target,
+        tokens=rng.randint(1, headroom.tokens // 2),
+        cost_usd=rng.randint(1, cost_units // 2) * COST_UNIT,
+        tool_invocations=2 * experiments,
+        per_tool={"exp": experiments},
+    )
+    return True
+
+
 def _random_dag(rng: random.Random) -> tuple[DelegationGraph, list[str]]:
     """Build a random DAG in which every node is funded and at least one fans in.
 
@@ -160,13 +198,19 @@ def _random_dag(rng: random.Random) -> tuple[DelegationGraph, list[str]]:
     candidate, in random order, and takes as many as it wants among those with
     headroom; each allocation takes at most half the funder's headroom, so with
     at most 7 nodes the root retains at least ``ROOT_TOKENS / 2**7`` and can
-    always fund. Node ``n1`` is forced to take two funders (the root and
-    ``n0``), so every generated graph contains a genuine fan-in — a tree would
-    make the telescoping test vacuous, since a tree is the case the pre-existing
+    always fund.
+
+    Fan-in is guaranteed *structurally*, not by luck of the seed: ``n0`` gets a
+    fixed quarter of the root — large enough to fund anything downstream — and
+    ``n1`` is then funded by both the root and ``n0``. A generator that relied
+    on a random grant to leave ``n0`` solvent would fail on an unlucky seed,
+    which breaks the generator rather than the invariant under test. A tree
+    would make the telescoping test vacuous: a tree is the case the pre-existing
     law already covered.
 
-    Allocations span tokens, cost and tool invocations together: conserving only
-    tokens would leave the other dimensions' arithmetic untested.
+    Allocations span tokens, cost, tool invocations and a per-tool experiment
+    budget together: conserving only tokens leaves the other dimensions'
+    arithmetic — and, for per-tool, the whole M6 conserved resource — untested.
     """
     graph = DelegationGraph(_multi_root())
     names = [DelegationGraph.ROOT]
@@ -175,43 +219,52 @@ def _random_dag(rng: random.Random) -> tuple[DelegationGraph, list[str]]:
         graph.add_node(name)
         names.append(name)
 
-    for target_index in range(1, len(names)):
+    graph.allocate(
+        DelegationGraph.ROOT,
+        "n0",
+        tokens=ROOT_TOKENS // 4,
+        cost_usd=ROOT_COST / 4,
+        tool_invocations=2 * (ROOT_EXP // 4),
+        per_tool={"exp": ROOT_EXP // 4},
+    )
+    for source in (DelegationGraph.ROOT, "n0"):
+        assert _grant(graph, rng, source, "n1"), f"'{source}' must be able to fund the fan-in node"
+
+    for target_index in range(3, len(names)):
         target = names[target_index]
         candidates = names[:target_index]
         rng.shuffle(candidates)
-        # n1 must fan in; everyone else takes between one and all candidates.
-        wanted = 2 if target == "n1" else rng.randint(1, len(candidates))
+        wanted = rng.randint(1, len(candidates))
         funded = 0
         for source in candidates:
-            headroom = graph.residual(source)
-            if headroom.tokens < 2 or headroom.cost_usd < 0.02 or headroom.tool_invocations < 2:
-                continue
-            graph.allocate(
-                source,
-                target,
-                tokens=rng.randint(1, headroom.tokens // 2),
-                cost_usd=round(rng.uniform(0.01, headroom.cost_usd / 2), 2),
-                tool_invocations=rng.randint(1, headroom.tool_invocations // 2),
-            )
-            funded += 1
-            if funded == wanted:
-                break
+            if _grant(graph, rng, source, target):
+                funded += 1
+                if funded == wanted:
+                    break
         assert funded > 0, f"generator left '{target}' unfunded; root should always have headroom"
-        if target == "n1":
-            assert funded == 2, "generator must produce at least one fan-in node"
     return graph, names
 
 
 def _saturate(graph: DelegationGraph, names: list[str]) -> None:
-    """Every node consumes its entire residual in every dimension."""
+    """Every node consumes its entire residual in every dimension.
+
+    Experiments are consumed by name and the rest of the aggregate tool budget
+    anonymously. Because every grant keeps ``tool_invocations == 2 * exp``, and
+    a named invocation counts against both, consuming ``e`` experiments and
+    then ``e`` unnamed invocations saturates both dimensions exactly.
+    """
     for name in names:
         headroom = graph.residual(name)
+        usage = graph.monitor_for(name).usage
         if headroom.tokens > 0:
-            graph.monitor_for(name).usage.add_tokens(headroom.tokens)
+            usage.add_tokens(headroom.tokens)
         if headroom.cost_usd > 0:
-            graph.monitor_for(name).usage.add_cost(headroom.cost_usd)
-        for _ in range(max(0, headroom.tool_invocations)):
-            graph.monitor_for(name).usage.add_tool_invocation("probe")
+            usage.add_cost(headroom.cost_usd)
+        experiments = headroom.per_tool.get("exp", 0)
+        for _ in range(max(0, experiments)):
+            usage.add_tool_invocation("exp")
+        for _ in range(max(0, graph.residual(name).tool_invocations)):
+            usage.add_tool_invocation()
 
 
 @pytest.mark.parametrize("seed", SEEDS)
@@ -238,9 +291,32 @@ def test_local_invariants_imply_global_bound(seed):
     consumed = [ResourceVector.from_usage(graph.monitor_for(name).usage) for name in names]
     assert sum(vector.tokens for vector in consumed) == ROOT_TOKENS
     assert sum(vector.tool_invocations for vector in consumed) == ROOT_TOOLS
-    # Cost is the one float dimension; refunds and shares divide exactly but
-    # summation order does not, so compare within float tolerance.
-    assert sum(vector.cost_usd for vector in consumed) == pytest.approx(ROOT_COST, rel=1e-9)
+    assert sum(vector.per_tool.get("exp", 0) for vector in consumed) == ROOT_EXP
+    # Exact even for the float dimension, because every grant is a whole
+    # COST_UNIT: see `_grant`. Verified exact across 500 seeds, not just these.
+    assert sum(vector.cost_usd for vector in consumed) == ROOT_COST
+
+
+@pytest.mark.parametrize("seed", SEEDS)
+def test_consuming_an_unfunded_tool_is_caught_anywhere_in_the_graph(seed):
+    """Per-tool conservation on the consumption path, at every node.
+
+    A tool a node's in-flow never named is unfunded, not unconstrained — the
+    scalar dimensions still have headroom here, so only the per-tool clause can
+    catch this.
+    """
+    rng = random.Random(seed)
+    graph, names = _random_dag(rng)
+    graph.seal()
+
+    victim = rng.choice([name for name in names if name != DelegationGraph.ROOT])
+    graph.monitor_for(victim).usage.add_tool_invocation("unfunded")
+
+    with pytest.raises(FlowConservationError) as excinfo:
+        graph.verify()
+    assert excinfo.value.node_id == victim
+    assert excinfo.value.dimension == "tool:unfunded"
+    assert excinfo.value.in_flow is None
 
 
 @pytest.mark.parametrize("seed", SEEDS)
