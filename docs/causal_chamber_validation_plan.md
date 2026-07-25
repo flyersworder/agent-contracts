@@ -759,6 +759,15 @@ default.
 > §7 text below describes execution plan for path (2); path (1) simply
 > skips it.
 
+> **📍 DECIDED (2026-07-25): path (1).** Cross-pillar transfer is deferred to a
+> journal extension, and **M6 becomes the loop-vs-graph topology benchmark**
+> specified in §7.7. The trigger was external: "loop engineering" (named
+> 2026-06-07) and "graph engineering" (named ~2026-07-18) put multi-agent
+> topology on the field's agenda, and the critical reviews of both note there
+> is no comparative benchmark. Our M4b pilot already contains two of the three
+> arms one would need, so the timelier contribution is the benchmark rather
+> than the transfer study. §7.1–§7.6 below stand as the journal-extension plan.
+
 ### 7.1 What the cross-pillar evidence has to show
 
 A single property: **governance gains observed in one pillar replicate in
@@ -898,6 +907,88 @@ domain-general."
 This is the section reviewers will read most carefully. It deserves a full
 section, not a subsection.
 
+### 7.7 M6 (revised): the loop-vs-graph topology benchmark
+
+**Research question.** At matched total budget, does graph topology help or
+hurt?
+
+The chamber budget `k/M` is the fraction of the 59 available experiments an
+agent may run, so the conserved resource is *experiment selections* — the
+per-tool budget the framework's delegation graph conserves (whitepaper §4.6).
+
+**Three arms:**
+
+```
+Arm 1  LOOP (llm_only)          root ──────────────► 59 experiments
+       already run in M4b
+
+Arm 2  CHAIN (planner_reasoner) root ──► planner ──► reasoner
+       already run in M4b              (delegated split)
+
+Arm 3  FAN-IN (new)             root ──┬─► scout_a (⌈k/2⌉ exp) ─┐
+       needs DAG conservation           └─► scout_b (⌊k/2⌋ exp) ─┴─► aggregator (0 exp)
+                                        scouts always sum to exactly k
+```
+
+The split rule generalizes to every budget level: `scout_a` gets `⌈k/2⌉`,
+`scout_b` gets `⌊k/2⌋`, the aggregator gets `0`. At `k/M = 0.10` (`k = 6`) that
+is 3 and 3; at `0.50` (`k = 30`), 15 and 15. The aggregator spends tokens on the
+merge but no experiment selections, so the conserved resource stays matched.
+
+**Grant the aggregator an explicit zero**, not an omitted key. Per-tool limits
+have no deny-by-default semantics, so an omitted key materializes as
+*unconstrained*, not zero — an explicit `per_tool={"exp": 0}` is what makes the
+matched-budget control enforceable rather than merely detectable after the fact.
+
+**Matrix.** LT chamber, `k/M ∈ {0.10, 0.50, 1.00}`, 30 seeds. Arms 1 and 2
+already exist in `runs/m4-pilot.parquet` at the same model, seeds, budgets, and
+scoring, so **new compute is 90 cells** (~$1–2, hours not days). Arm 3 registers
+as a new variant in the M4a AgentSpec registry. WT is a stretch goal contingent
+on M5's WT data.
+
+**Reuse-validity guard.** Before trusting the M4b arms, re-run a 5-cell subset
+of `llm_only` (1 budget × 5 seeds) and confirm it reproduces the May numbers
+within noise. If the harness drifted, we find out for 5 cells rather than in the
+final figure.
+
+**Pre-registered hypotheses:**
+
+| | Hypothesis | Status |
+|---|---|---|
+| H-A | Chain underperforms loop at matched budget | Already supported — M4b: F1 0.397 vs 0.75 |
+| H-B | Fan-in recovers delegation cost via exploration diversity | **Open — this is the experiment** |
+| H-C | Conservation compliance is 100% across all arms | The governance claim |
+
+H-B is deliberately the *strongest* form of the opposing claim: two scouts
+select different experiments, so their union may cover more causal structure
+than one agent's 59 sequential picks — the ensemble effect underlying
+adversarial-verify and council patterns. Against it, each scout sees less data
+and the aggregator may introduce merge error. Testing the strongest version is
+what makes a negative result credible rather than a strawman.
+
+H-C is what keeps this a contracting result rather than a causal-discovery
+topology benchmark — the same reasoning by which the UNCONTRACTED baselines are
+non-negotiable for M5. Note the scope from whitepaper §4.6: verification
+certifies `B(root) + Σ refunds` once a node is abandoned, and M4b's timeouts are
+exactly the abandonment case, so H-C should be reported as a certification
+claim, not a containment claim.
+
+**Metrics and figures.** Per cell: SHD, F1, plus total tokens, experiments used,
+iterations, conservation compliance, wall time, error status. Figures: (a) SHD
+and F1 versus budget, one line per topology arm; (b) a "topology tax" plot
+showing the delta against the single loop at matched budget. Following R8's
+framing, results are effect sizes with confidence intervals rather than binary
+effect/no-effect — fan-in winning identifies *when* graph structure pays, which
+neither camp has established; fan-in losing is a strong negative result against
+the field's central claim at 270 cells and 30 seeds. The outcome to avoid is not
+a bad result but an underpowered one.
+
+**Prerequisite, and a gap to close first.** The DAG conservation capability
+shipped in v0.4.0 (`core/delegation_graph.py`). One gap remains: `add_iteration()`
+is not wired into any production call path and `iterations` is absent from
+`ResourceUsage.to_dict()`, so the per-cell iteration metric above would read
+uniformly zero until that is closed.
+
 ---
 
 ## 8. The chamber pipeline as code
@@ -942,7 +1033,7 @@ descoped (see §10). The technical strand of M1 no longer waits on Paphos.
 | M3 | 2026-06-22 → 07-12 | ✅ 2026-05-08 | **Five** baseline agents implemented | All five variants (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner) run end-to-end on a single budget cell; produce coherent adjacency-matrix outputs |
 | M4 | 2026-07-13 → 07-26 | ✅ **2026-05-18** | Pilot sweep + M4c checkpointing | LT × 3 budgets × 5 variants × 30 seeds = 450 runs; **442 ok / 8 timeouts** (1.8% error rate, all planner_reasoner k=59); acceptance criteria PASS (Pareto monotonic, Random dominated). M4c JSONL checkpoint sidecar landed (commit `856beb8`). Headline: LLM-only at k/M=1.00 hits SHD=26 / F1=0.75. |
 | **M5** | 2026-07-27 → 08-23 | **next (target ~2-3 weeks from 05-19)** | **Trimmed M5**: WT sweep + UNCONTRACTED + Pro robustness | **Revised scope** (see §6.1 callout): 360 WT CONTRACTED + 270 UNCONTRACTED + 270 Pro robustness = **900 new runs** (LT 450 already done). Headline Pareto figure (Figure 6.1: 5 lines for LT, 4 for WT) generated with Flash/Pro overlay. Recommend running on VPS (`173.212.217.40`, provisioned 2026-05-18). |
-| M6 | 2026-08-24 → 09-13 | **OPTIONAL** | Cross-pillar transfer study (§7) | **Now optional** per §7 callout — M4b's dramatic effect makes chamber-pillar standalone publishable. If executed: DeepSeek-Flash calibration sweep + 2750 LLM-pipeline re-runs + Figures 7.1-7.3. If deferred: becomes journal-extension candidate. |
+| M6 | 2026-08-24 → 09-13 | **REVISED 2026-07-25** | **Loop-vs-graph topology benchmark (§7.7)** | Cross-pillar transfer (§7.1-7.6) deferred to a journal extension. M6 is now the three-arm topology study: loop / chain / fan-in at matched budget. **90 new cells** (arms 1-2 already in `runs/m4-pilot.parquet`), ~$1-2. Prerequisite shipped in v0.4.0 (`core/delegation_graph.py`); `add_iteration()` wiring still open. |
 | M7 | 2026-09-14 → 09-27 | Paper extension drafted | `paper/paper-extended.qmd` (or branch) contains new chamber-pillar section; intro and abstract rewritten. If M6 executed, also cross-pillar transfer section. |
 | M8 | 2026-09-28 → 10-XX | Submission polish | All AAMAS formatting requirements met; cover letter cites COINE acceptance; §10 1-pager attached as appendix or sidebar |
 

@@ -1011,6 +1011,121 @@ Contracting as a capability enables:
 3. **Predictable costs**: Budget allocation happens before execution, not after
 4. **Enterprise governance**: Explicit contracts with audit trails for each delegation
 
+### 4.6 Flow Conservation in Delegation Graphs
+
+Section 4.1 decomposes a task into a **tree**: every child contract has exactly
+one parent, and conservation means the sum of sibling allocations cannot exceed
+the parent's budget. That structure cannot express a node funded by two parents
+— an aggregator that merges the work of two independent scouts, a reviewer
+serving two pipelines, a shared tool budget. Under a tree law such a node is
+double-counted.
+
+**Delegation graphs** generalize the tree to a DAG `G = (V, E)` in which each
+edge carries an allocation `a(u→v)`: a resource vector over tokens, cost, tool
+invocations, per-tool counts, and iterations. A node's budget is the sum of its
+in-edges.
+
+```
+        ┌─ B ─┐              B(v)  = Σ  a(u→v)      node budget = sum of in-edges
+   A ───┤     ├─── D         C(v)  = what v itself consumes
+        └─ C ─┘
+                             Invariant at every node v:
+   A→B: 40k tokens             Σ a(u→v)  ≥  C(v) + Σ a(v→w)
+   A→C: 40k                    └in-flow┘     └own┘   └out-flow┘
+   B→D: 15k  ⎫ D's budget
+   C→D: 15k  ⎭ = 30k
+```
+
+In words: **in-flow ≥ own consumption + out-flow** — Kirchhoff's current law
+with a consumption sink at each node. The tree law of §4.1 is the special case
+in which every non-root node has exactly one in-edge.
+
+**Soundness.** If the local invariant holds at every node, then
+`Σ_v C(v) ≤ B(root)`.
+
+*Proof.* Sum the invariant over all `v ∈ V`. Every internal allocation `a(u→v)`
+appears once positively as in-flow at `v` and once negatively as out-flow at
+`u`, so internal terms cancel. Only the root's exogenous budget survives on the
+left and total system consumption on the right. ∎
+
+The corollary is what makes the law practical: **each node checks only its own
+edges, and global boundedness follows.** No global lock and no central
+accountant — the property a multi-agent system needs if its agents are to run
+concurrently without coordinating on every allocation.
+
+**Control flow may cycle; budget flow must not.** Agents legitimately loop — a
+node retries, a review council re-deliberates. The *control* graph may therefore
+contain cycles. The *budget* graph may not: a cycle would let a node refund its
+own ancestor, and the telescoping argument collapses. Edges that would close a
+budget cycle are rejected at allocation time.
+
+**Scope of the certified bound.** The proof holds for the live graph. When a
+node is abandoned — the operational case for a timed-out or crashed agent — its
+unconsumed budget is refunded to its parents and its flow state is frozen at the
+pre-refund values, so that an over-spent node stays flagged rather than having
+its violation erased by the refund. The consequence is that verification
+certifies
+
+```
+Σ_v C(v)  ≤  B(root) + Σ refunds
+```
+
+with the two coinciding in the absence of abandonment. The bound is tight: an
+abandoned node can consume up to its refunded amount before detection. This is
+a deliberate trade — checking abandoned nodes against *live* in-flow would put
+honest nodes on a knife-edge equality, since a refund drives post-refund in-flow
+to approximately `consumption + out-flow`.
+
+**Where each half of the invariant is enforced.** Materializing a node's
+contract from its summed in-flow means the existing runtime monitor enforces
+`consumption ≤ in-flow` node-locally, with strict/lenient modes, callbacks, and
+per-tool priority applying unchanged. The `+ out-flow` term has no node-local
+analogue — a node's contract does not know what it has delegated — and is
+enforced by graph-level verification alone.
+
+**Per-tool conservation** holds on both paths: a node may not *grant* a tool its
+in-flow does not constrain, and may not *consume* one either. The asymmetry
+worth stating is that granting is *prevented* at allocation time, while
+consuming an undeclared tool is *detected* at verification. Per-tool limits have
+no deny-by-default semantics, so a node can physically issue the calls before
+anything fires. Granting an explicit zero converts detection into prevention.
+
+**Reclamation.** When a node finishes under budget or dies, an edge reclaims its
+share of the unused budget proportionally — computed against the *original*
+allocations rather than live ones, so that releasing sibling edges in any order
+yields the same result. Computing against live values instead makes each
+sibling's refund depend on how many siblings released first, which would make
+any multi-seed experiment non-reproducible.
+
+**Graph linting.** Sealing a graph validates it once and freezes its topology:
+acyclicity, no node left unfunded, no node whose out-flow already exceeds its
+in-flow, and no per-tool grant its funding does not support. All problems are
+reported together rather than one per attempt.
+
+**Empirical validation.** Three properties are checked by executable tests
+rather than asserted. Tree equivalence is verified by running the graph and the
+tree implementations over identical scenarios and comparing their accounting
+directly, which also surfaced the two places they legitimately differ: the tree
+law's optional coordination reserve has no graph analogue, and a tree's
+remaining budget clamps at zero where a graph residual goes negative so an
+overrun stays visible. Telescoping soundness is verified by generating random
+DAGs, saturating every node's residual, and asserting `Σ C(v) = B(root)`
+exactly — the identity, not merely the inequality, because an inequality with
+slack cannot detect a double-counted allocation.
+
+Both tests are **mutation-checked**, which is what distinguishes a property test
+from a decorative one. An earlier revision of the soundness test consumed a
+random fraction of each node's residual and asserted the inequality; injecting a
+fan-in double-count into it passed on every seed, because the bound had roughly
+twice the slack the defect needed to hide in. Saturating consumption and
+asserting the identity turned the same test into one that fails on every seed
+containing fan-in. The shipped suite is checked against four independent
+mutations — restoring the skip of abandoned nodes, double-counting fan-in on the
+scalar dimensions, double-counting it on per-tool counts alone, and dropping the
+undeclared-tool clause — each of which fails between 1 and 22 tests. Fan-in is
+structural in the generator rather than incidental to the seed list, verified
+across 500 seeds.
+
 ---
 
 ## 5. Implementation Architecture
