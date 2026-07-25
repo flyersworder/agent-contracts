@@ -456,12 +456,28 @@ Pre-registered: H-A chain underperforms loop (already supported: F1 0.397 vs
 0.75); **H-B fan-in recovers delegation cost via exploration diversity — open,
 this is the experiment**; H-C conservation compliance 100%.
 
-Prerequisite shipped in **v0.4.0** (`core/delegation_graph.py`). **Open gap
-before M6**: `add_iteration()` is not called from any production path and
-`iterations` is missing from `ResourceUsage.to_dict()`, so §7.7's per-cell
-iteration metric would read uniformly zero. Also grant the aggregator an
-explicit `per_tool={"exp": 0}` — an omitted key means *unconstrained*, not
-zero, so the matched-budget control would otherwise be unenforceable.
+Prerequisite shipped in **v0.4.0** (`core/delegation_graph.py`). **No open
+blockers.** When building the fan-in arm, grant the aggregator an explicit
+`per_tool={"exp": 0}` — an omitted key means *unconstrained*, not zero, so the
+matched-budget control would otherwise be unenforceable rather than merely
+detectable after the fact.
+
+**Retracted (2026-07-25): the `add_iteration()` "gap" was a phantom.** An
+earlier note here claimed M6 was blocked on wiring `ResourceUsage.add_iteration()`.
+Wrong twice over. The chamber pipeline calls `litellm.completion` directly via
+its own `_CountingLLM` (`orchestrator.py:239`) and never touches a
+`ResourceMonitor`, so wiring the framework integrations would not reach chamber
+cells at all. And the metric already exists as **`n_llm_calls`**, populated for
+every LLM-variant ok-cell in `runs/m4-pilot.parquet` (6 / 30 / 59-60 across the
+three budgets; null for `random` and `greedy_ig` because they issue no LLM
+calls). Lesson: check whether the consumer actually goes through the framework
+before calling something a blocker for it.
+
+**Separate, real gap (not an M6 blocker)**: `ResourceConstraints.iterations` is
+honored only by Google ADK (→ `max_llm_calls`) and Claude Agent SDK (→
+`max_turns`). LiteLLM, LangChain, and LangGraph neither track nor enforce it,
+and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
+`recursion_limit` (corrected 2026-07-25). Worth closing for library users.
 
 **M4c (mostly complete after May 17 work)**
 - Checkpointing / resume from partial Parquet ✅ (commit `856beb8`)
