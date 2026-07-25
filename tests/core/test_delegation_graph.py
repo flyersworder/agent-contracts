@@ -442,6 +442,39 @@ def test_float_dimension_violation_does_not_round_away():
     assert error.requested > error.available
 
 
+def test_allocate_exact_cost_budget_three_way_split_succeeds():
+    """Regression for the cost-axis float tolerance fix (PR 77 finding 1).
+
+    0.1 + 0.1 + 0.1 != 0.3 in IEEE-754; the third allocate() used to raise
+    FlowConservationError on an exact-budget split for no real reason.
+    """
+    root = Contract(id="root", name="Root", resources=ResourceConstraints(cost_usd=0.3))
+    graph = DelegationGraph(root)
+    for name in ("a", "b", "c"):
+        graph.add_node(name)
+        graph.allocate(DelegationGraph.ROOT, name, cost_usd=0.1)  # must not raise
+
+
+def test_allocate_genuine_cost_overrun_still_raises():
+    root = Contract(id="root", name="Root", resources=ResourceConstraints(cost_usd=0.3))
+    graph = DelegationGraph(root)
+    graph.add_node("a")
+    with pytest.raises(FlowConservationError):
+        graph.allocate(DelegationGraph.ROOT, "a", cost_usd=0.4)
+
+
+def test_allocate_token_overrun_by_one_still_raises():
+    """The token axis is integer-valued and must keep exact comparison —
+    the cost-axis tolerance fix must not leak into it."""
+    root = Contract(id="root", name="Root", resources=ResourceConstraints(tokens=10))
+    graph = DelegationGraph(root)
+    graph.add_node("a")
+    graph.add_node("b")
+    graph.allocate(DelegationGraph.ROOT, "a", tokens=6)
+    with pytest.raises(FlowConservationError):
+        graph.allocate(DelegationGraph.ROOT, "b", tokens=5)  # 6 + 5 = 11 > 10
+
+
 def test_verify_checks_every_node():
     graph = DelegationGraph(make_root())
     graph.add_node("child")

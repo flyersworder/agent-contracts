@@ -31,7 +31,7 @@ from typing import Any
 from agent_contracts.core.contract import Contract
 from agent_contracts.core.delegation import ConservationViolationError
 from agent_contracts.core.monitor import ResourceMonitor
-from agent_contracts.core.resource_vector import ResourceVector
+from agent_contracts.core.resource_vector import _COST_EPSILON, ResourceVector
 
 
 class CycleError(Exception):
@@ -583,7 +583,12 @@ class DelegationGraph:
             limit = getattr(in_flow, dimension)
             used = getattr(consumed, dimension) or 0
             allocated = getattr(out_flow, dimension) or 0
-            if limit is not None and used + allocated > limit:
+            # Match ResourceVector.__le__'s cost-axis tolerance here too: the
+            # gating `_violates()` call already applied it, so an attribution
+            # walk that compares cost exactly could disagree with that
+            # verdict and fall through to the "unknown dimension" catch-all.
+            tolerance = _COST_EPSILON if dimension == "cost_usd" else 0.0
+            if limit is not None and used + allocated > limit + tolerance:
                 raise_for(dimension, limit, used, allocated, dimension)
         tools = set(in_flow.per_tool) | set(consumed.per_tool) | set(out_flow.per_tool)
         for tool in sorted(tools):

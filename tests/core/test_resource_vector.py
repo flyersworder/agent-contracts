@@ -98,3 +98,38 @@ def test_is_finite():
 def test_zero_is_all_zeros():
     assert ResourceVector.ZERO.tokens == 0
     assert ResourceVector.ZERO.per_tool == {}
+
+
+# --------------------------------------------------------------- finding 1
+# Cost-axis float tolerance (PR 77 review). Mirrors the 0.3.2 fix already
+# applied to `delegation.py`'s tree conservation law.
+
+
+def test_le_cost_axis_tolerates_float_noise_at_exact_budget():
+    used = (
+        ResourceVector(cost_usd=0.1) + ResourceVector(cost_usd=0.1) + ResourceVector(cost_usd=0.1)
+    )
+    budget = ResourceVector(cost_usd=0.3)
+    assert used.cost_usd != 0.3  # confirm the float noise this test guards against
+    assert used <= budget
+
+
+def test_le_cost_axis_rejects_genuine_overrun():
+    assert not (ResourceVector(cost_usd=0.4) <= ResourceVector(cost_usd=0.3))
+
+
+def test_le_token_axis_stays_exact_no_tolerance():
+    """The integer axes must not inherit the cost-axis tolerance."""
+    assert not (ResourceVector(tokens=11) <= ResourceVector(tokens=10))
+
+
+def test_cost_epsilon_matches_delegation_module():
+    """`delegation.py` is intentionally untouched (see CHANGELOG 0.4.0's
+    "core/delegation.py is untouched"), so `resource_vector.py` cannot import
+    its private `_COST_EPSILON` without coupling the two modules. Each
+    module defines its own copy instead; this test pins them equal so the
+    tree and flow conservation laws cannot silently drift apart.
+    """
+    from agent_contracts.core import delegation, resource_vector
+
+    assert resource_vector._COST_EPSILON == delegation._COST_EPSILON

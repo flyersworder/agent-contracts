@@ -20,6 +20,16 @@ if TYPE_CHECKING:
 
     from agent_contracts.core.monitor import ResourceUsage
 
+# Absolute tolerance for cost-axis (USD, float) conservation comparisons.
+# `agent_contracts.core.delegation` defines the identical constant for the
+# tree conservation law (0.3.2 fix). It is duplicated here rather than
+# imported: `delegation.py` is intentionally untouched by the DAG
+# generalization (see CHANGELOG 0.4.0, "core/delegation.py is untouched"),
+# and importing its private constant would couple this module to that one's
+# internals. `test_cost_epsilon_matches_delegation_module` pins the two
+# constants equal so they cannot silently drift apart.
+_COST_EPSILON = 1e-9
+
 
 def _add(a: Any, b: Any) -> Any:
     """Add two values, treating None as unbounded."""
@@ -37,13 +47,18 @@ def _sub(a: Any, b: Any) -> Any:
     return a - b
 
 
-def _le(a: Any, b: Any) -> bool:
-    """Compare two values, treating None as unbounded."""
+def _le(a: Any, b: Any, tolerance: float = 0.0) -> bool:
+    """Compare two values, treating None as unbounded.
+
+    ``tolerance`` absorbs IEEE-754 representation error on the cost axis
+    (e.g. 0.1 + 0.1 + 0.1 != 0.3). The integer-valued axes must keep exact
+    comparison and pass the default of 0.0.
+    """
     if b is None:
         return True
     if a is None:
         return False
-    return bool(a <= b)
+    return bool(a <= b + tolerance)
 
 
 @dataclass(frozen=True)
@@ -89,7 +104,7 @@ class ResourceVector:
     def __le__(self, other: ResourceVector) -> bool:
         scalars_ok = (
             _le(self.tokens, other.tokens)
-            and _le(self.cost_usd, other.cost_usd)
+            and _le(self.cost_usd, other.cost_usd, tolerance=_COST_EPSILON)
             and _le(self.tool_invocations, other.tool_invocations)
             and _le(self.iterations, other.iterations)
         )
