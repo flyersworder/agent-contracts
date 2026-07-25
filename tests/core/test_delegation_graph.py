@@ -118,3 +118,52 @@ def test_allocate_to_unknown_node_rejected():
     graph = DelegationGraph(make_root())
     with pytest.raises(KeyError):
         graph.allocate(DelegationGraph.ROOT, "nope", tokens=10)
+
+
+def test_seal_accepts_valid_graph():
+    graph = DelegationGraph(make_root())
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", tokens=10)
+    graph.seal()
+    assert graph.is_sealed
+
+
+def test_seal_rejects_orphan_node():
+    from agent_contracts.core.delegation_graph import GraphLintError
+
+    graph = DelegationGraph(make_root())
+    graph.add_node("orphan")
+    with pytest.raises(GraphLintError) as excinfo:
+        graph.seal()
+    assert any("orphan" in problem for problem in excinfo.value.problems)
+
+
+def test_seal_reports_all_problems_not_just_first():
+    from agent_contracts.core.delegation_graph import GraphLintError
+
+    graph = DelegationGraph(make_root())
+    graph.add_node("orphan_a")
+    graph.add_node("orphan_b")
+    with pytest.raises(GraphLintError) as excinfo:
+        graph.seal()
+    assert len(excinfo.value.problems) == 2
+
+
+def test_allocate_after_seal_rejected():
+    graph = DelegationGraph(make_root())
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", tokens=10)
+    graph.seal()
+    with pytest.raises(RuntimeError, match="sealed"):
+        graph.add_node("late")
+    with pytest.raises(RuntimeError, match="sealed"):
+        graph.allocate(DelegationGraph.ROOT, "child", tokens=1)
+
+
+def test_double_seal_is_idempotent():
+    graph = DelegationGraph(make_root())
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", tokens=10)
+    graph.seal()
+    graph.seal()
+    assert graph.is_sealed

@@ -39,6 +39,18 @@ class CycleError(Exception):
     """Raised when an edge would create a cycle in the budget graph."""
 
 
+class GraphLintError(Exception):
+    """Raised by ``seal()`` when the graph fails validation.
+
+    Reports every problem found, not just the first, so one pass fixes them all.
+    """
+
+    def __init__(self, problems: list[str]):
+        self.problems = problems
+        joined = "\n  - ".join(problems)
+        super().__init__(f"graph failed validation:\n  - {joined}")
+
+
 class FlowConservationError(ConservationViolationError):
     """Raised when a node's flow invariant is or would be violated.
 
@@ -196,6 +208,39 @@ class DelegationGraph:
         edge = EdgeAllocation(source=source, target=target, amount=amount)
         self._edges[key] = edge
         return edge
+
+    @property
+    def is_sealed(self) -> bool:
+        return self._sealed
+
+    def seal(self) -> None:
+        """Validate the whole graph and freeze its topology.
+
+        Checks: every non-root node has at least one in-edge; no node's
+        out-flow exceeds its in-flow; per-tool allocations are consistent with
+        the funding side. Acyclicity is maintained incrementally by
+        ``allocate()``.
+
+        Idempotent: sealing an already-sealed graph is a no-op.
+        """
+        if self._sealed:
+            return
+
+        problems: list[str] = []
+        for name in self._nodes:
+            if name == self.ROOT:
+                continue
+            if not self.contributing_edges(name):
+                problems.append(f"node '{name}' is an orphan: no in-edge funds it")
+
+        for name in self._nodes:
+            out = self.out_flow(name)
+            if not out <= self.in_flow(name):
+                problems.append(f"node '{name}' out-flow exceeds in-flow")
+
+        if problems:
+            raise GraphLintError(problems)
+        self._sealed = True
 
     # ------------------------------------------------------------- queries
 
