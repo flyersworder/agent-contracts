@@ -228,15 +228,24 @@ No cross-parent arbitration is needed.
 
 ### 6.3 Refunds are proportional
 
-`release(u, v)` returns edge `(u→v)`'s share of `v`'s residual:
+`release(u, v)` returns edge `(u→v)`'s share of `v`'s unused budget. Let `orig(u→v)` be
+the edge's allocation as originally granted and `ORIG(v) = Σ orig(·→v)`:
 
 ```
-refund(u→v) = a(u→v) / Σ_in a(·→v) × residual(v)
+pool(v)      = ORIG(v) − consumed(v) − out_flow(v)        floored at 0
+refund(u→v)  = orig(u→v) / ORIG(v) × pool(v)              integers rounded down
 ```
 
-The alternatives (LIFO, first-come) are **order-dependent**, which would make a
-30-seed sweep non-reproducible depending on the order releases happen to fire.
-Proportional refunds are order-independent by construction.
+**Shares are computed against original allocations, not live ones.** This is what makes
+releases order-independent: a sibling's release changes neither `ORIG(v)` nor
+`pool(v)`, so every edge's share is fixed the moment consumption is known, and the
+shares sum exactly to the unused budget.
+
+Computing against *live* in-flow would not have this property. With two siblings each
+funding 15k of a 30k node that consumed 20k, releasing `scout_a` first reclaims 5k and
+leaves `scout_b` only 3k; reversing the order swaps them. A 30-seed sweep would then
+depend on the order releases happen to fire. LIFO and first-come fail the same way.
+Each edge may be released at most once.
 
 `abandon(node)` refunds unconsumed allocation to parents proportionally and marks
 downstream nodes unreachable. This exists because M4b produced 8 `planner_reasoner`
