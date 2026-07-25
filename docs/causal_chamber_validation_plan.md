@@ -973,8 +973,10 @@ certifies `B(root) + Σ refunds` once a node is abandoned, and M4b's timeouts ar
 exactly the abandonment case, so H-C should be reported as a certification
 claim, not a containment claim.
 
-**Metrics and figures.** Per cell: SHD, F1, plus total tokens, experiments used,
-iterations, conservation compliance, wall time, error status. Figures: (a) SHD
+**Metrics and figures.** Per cell: SHD, F1, plus `tokens_in` / `tokens_out`,
+experiments used, `n_llm_calls`, conservation compliance, `wall_time_seconds`,
+`status`. Every one of these is already a column in `runs/m4-pilot.parquet` —
+the sweep needs no new instrumentation. Figures: (a) SHD
 and F1 versus budget, one line per topology arm; (b) a "topology tax" plot
 showing the delta against the single loop at matched budget. Following R8's
 framing, results are effect sizes with confidence intervals rather than binary
@@ -983,11 +985,20 @@ neither camp has established; fan-in losing is a strong negative result against
 the field's central claim at 270 cells and 30 seeds. The outcome to avoid is not
 a bad result but an underpowered one.
 
-**Prerequisite, and a gap to close first.** The DAG conservation capability
-shipped in v0.4.0 (`core/delegation_graph.py`). One gap remains: `add_iteration()`
-is not wired into any production call path and `iterations` is absent from
-`ResourceUsage.to_dict()`, so the per-cell iteration metric above would read
-uniformly zero until that is closed.
+**Prerequisite.** The DAG conservation capability shipped in v0.4.0
+(`core/delegation_graph.py`). Nothing else blocks this sweep.
+
+> **Correction (2026-07-25).** An earlier revision of this section listed
+> "wire up `ResourceUsage.add_iteration()`" as a gap to close before M6, on the
+> grounds that the per-cell iteration metric would otherwise read zero. That was
+> wrong on two counts. The chamber pipeline calls `litellm.completion` directly
+> through its own `_CountingLLM` (`orchestrator.py:239`) and never touches a
+> `ResourceMonitor`, so wiring the framework's integrations would not reach these
+> cells at all. And the metric already exists: `n_llm_calls` is populated for
+> every LLM-variant ok-cell in the M4b pilot (6/30/59-60 across the three
+> budgets; null for `random` and `greedy_ig`, correctly, since they issue no LLM
+> calls). The framework's `iterations` axis is a separate concern that M6 does
+> not depend on — see the note under §9.
 
 ---
 
@@ -1033,7 +1044,15 @@ descoped (see §10). The technical strand of M1 no longer waits on Paphos.
 | M3 | 2026-06-22 → 07-12 | ✅ 2026-05-08 | **Five** baseline agents implemented | All five variants (Random, GreedyIG-lite, LLM-only, LLM+PC, Planner+Reasoner) run end-to-end on a single budget cell; produce coherent adjacency-matrix outputs |
 | M4 | 2026-07-13 → 07-26 | ✅ **2026-05-18** | Pilot sweep + M4c checkpointing | LT × 3 budgets × 5 variants × 30 seeds = 450 runs; **442 ok / 8 timeouts** (1.8% error rate, all planner_reasoner k=59); acceptance criteria PASS (Pareto monotonic, Random dominated). M4c JSONL checkpoint sidecar landed (commit `856beb8`). Headline: LLM-only at k/M=1.00 hits SHD=26 / F1=0.75. |
 | **M5** | 2026-07-27 → 08-23 | **next (target ~2-3 weeks from 05-19)** | **Trimmed M5**: WT sweep + UNCONTRACTED + Pro robustness | **Revised scope** (see §6.1 callout): 360 WT CONTRACTED + 270 UNCONTRACTED + 270 Pro robustness = **900 new runs** (LT 450 already done). Headline Pareto figure (Figure 6.1: 5 lines for LT, 4 for WT) generated with Flash/Pro overlay. Recommend running on VPS (`173.212.217.40`, provisioned 2026-05-18). |
-| M6 | 2026-08-24 → 09-13 | **REVISED 2026-07-25** | **Loop-vs-graph topology benchmark (§7.7)** | Cross-pillar transfer (§7.1-7.6) deferred to a journal extension. M6 is now the three-arm topology study: loop / chain / fan-in at matched budget. **90 new cells** (arms 1-2 already in `runs/m4-pilot.parquet`), ~$1-2. Prerequisite shipped in v0.4.0 (`core/delegation_graph.py`); `add_iteration()` wiring still open. |
+| M6 | 2026-08-24 → 09-13 | **REVISED 2026-07-25** | **Loop-vs-graph topology benchmark (§7.7)** | Cross-pillar transfer (§7.1-7.6) deferred to a journal extension. M6 is now the three-arm topology study: loop / chain / fan-in at matched budget. **90 new cells** (arms 1-2 already in `runs/m4-pilot.parquet`), ~$1-2. Prerequisite shipped in v0.4.0 (`core/delegation_graph.py`); no open blockers. |
+
+**Framework note, not an M6 blocker.** `ResourceConstraints.iterations` is
+honored only by the Google ADK integration (mapped to `max_llm_calls`) and the
+Claude Agent SDK integration (mapped to `max_turns`). LiteLLM, LangChain, and
+LangGraph neither track nor enforce it, and `core/contract.py`'s docstring
+claim that it maps to LangGraph's `recursion_limit` was inaccurate (corrected
+2026-07-25). Closing that gap would benefit library users; it has no bearing on
+the chamber sweeps, which bypass those integrations entirely.
 | M7 | 2026-09-14 → 09-27 | Paper extension drafted | `paper/paper-extended.qmd` (or branch) contains new chamber-pillar section; intro and abstract rewritten. If M6 executed, also cross-pillar transfer section. |
 | M8 | 2026-09-28 → 10-XX | Submission polish | All AAMAS formatting requirements met; cover letter cites COINE acceptance; §10 1-pager attached as appendix or sidebar |
 
