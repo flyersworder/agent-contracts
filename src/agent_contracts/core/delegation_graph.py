@@ -132,8 +132,11 @@ class AbandonSnapshot:
     node's live in-flow, and a later release of one of its out-edges shrinks
     its live out-flow. Checking an abandoned node against *live* values would
     therefore let those follow-on movements quietly clear an overspend that
-    really happened. ``verify()`` checks abandoned nodes against this frozen
-    triple instead, so an over-spent node stays flagged for good.
+    really happened. ``verify()`` freezes the two *budget* sides — in-flow
+    and out-flow — against this snapshot instead, so an over-spent node stays
+    flagged for good. Consumption is read live rather than from here;
+    ``consumed`` is retained purely as an audit record of the state the node
+    died in, not as a check input.
     """
 
     in_flow: ResourceVector
@@ -443,9 +446,10 @@ class DelegationGraph:
     def check_node(self, name: str) -> None:
         """Raise FlowConservationError if ``name``'s invariant is violated.
 
-        An abandoned node is checked against its :class:`AbandonSnapshot` — the
-        flow state it died in — rather than against live values, which the
-        refund it triggered has since moved.
+        An abandoned node has its two *budget* sides — in-flow and out-flow —
+        checked against its :class:`AbandonSnapshot`, the state it died in,
+        because the refund it triggered has since moved the live values.
+        Consumption is still read live; see :meth:`_flow_state`.
         """
         self._require_node(name)
         in_flow, consumed, out_flow = self._flow_state(name)

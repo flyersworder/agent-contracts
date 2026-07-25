@@ -116,6 +116,28 @@ The corollary is the design's whole point: **each node checks only its own edges
 global boundedness follows.** No global lock, no central accountant — which is what a
 multi-agent org graph needs and what graph engineering currently has no answer for.
 
+**Scope of what `verify()` certifies.** The proof above sums the invariant as checked
+against each node's *live* in-flow, consumption, and out-flow. `verify()` establishes
+that premise directly for live nodes. For an abandoned node it does not: per §6.3, the
+check is against the node's frozen, pre-refund in-flow rather than its live in-flow,
+because checking against live values would let the very refund abandonment triggered
+launder a real overspend. What `verify()` actually certifies is therefore the looser
+
+```
+Σ_v C(v) ≤ B(root) + Σ refunds
+```
+
+not the tighter bound the theorem states. Absent abandonment the two coincide — no
+refunds means frozen and live in-flow are identical, and `Σ_v C(v) ≤ B(root)` holds
+exactly as proven. The bound is tight, not merely a conservative estimate: an abandoned
+node can consume up to the amount it was refunded, and no more, without `verify()`
+flagging it — that budget still sits inside its frozen in-flow. This is a deliberate,
+bounded residual (§6.3's "second door"), accepted because the alternative — freezing
+consumption too — reopens the same hole from the other side by letting a dead node
+spend without limit post-mortem. It is a scope statement on what the verifier
+certifies, not a defect in the theorem: the theorem is about the live graph, and holds
+for it.
+
 ### 3.3 Control flow may cycle; budget flow must not
 
 Graph engineering explicitly wants loops inside graphs — a node retries, a council
@@ -257,19 +279,29 @@ and the M6 arms need comparable per-arm iteration counts.
 | `seal()` | orphans, unfunded nodes, out-flow ≤ in-flow, per-tool propagation | aggregated report of all problems |
 | runtime | node `v`'s invariant on every monitor update | existing enforcement path |
 
-The runtime check requires **no new enforcement code**. Because each node's `Contract`
-is materialized with its summed in-flow as `ResourceConstraints`, the existing
-`ResourceMonitor.check_constraints()` already enforces the invariant at that node,
-including strict/lenient modes, callbacks, and per-tool priority ordering. The graph
-layer owns only the edges.
+The runtime check requires **no new enforcement code**, but only for part of the
+invariant. Because each node's `Contract` is materialized from its in-flow unmodified
+(`contract_for()` passes `in_flow(name)` straight through), the existing
+`ResourceMonitor.check_constraints()` enforces `consumed ≤ in_flow` at that node,
+node-locally, including strict/lenient modes, callbacks, and per-tool priority ordering.
+It does **not** enforce the invariant's `+ out_flow` term, because the materialized
+contract never sees a node's out-flow — an internal node with in-flow 40k and out-flow
+15k gets a 40k contract from the monitor's point of view, so consuming 30k passes the
+monitor (`check_constraints()` returns `[]`) even though `consumed + out_flow = 45k`
+exceeds in-flow and `verify()` correctly raises. The `+ out_flow` term is enforced by
+`verify()` / `check_node()` alone; the monitor only ever sees `consumed ≤ in_flow`. The
+graph layer owns the edges and this half of the check.
 
-**One exception, stated rather than glossed:** `ResourceConstraints.per_tool_limits` has
-no deny-by-default notion, so a monitor cannot flag a tool its constraints never mention.
-Use of an *undeclared* tool is therefore caught by `verify()` / `check_node()` alone, not
-by the node-local monitor. Every other dimension, and every declared per-tool limit, is
-enforced node-locally as described above. Contracting a node with an explicit `0` for the
-tools it must not use (M6 arm 3's aggregator) restores node-local enforcement, which is
-one more reason a zero grant has to be legal.
+**A second exception, the same class of distinction:** `ResourceConstraints.per_tool_limits`
+has no deny-by-default notion, so a monitor cannot flag a tool its constraints never
+mention. Use of an *undeclared* tool is therefore **post-hoc detection at `verify()` /
+`check_node()`, not prevention** — a node can physically make the calls before
+`verify()` ever runs, since nothing at call time stops it. Contracting a node with an
+explicit `0` for the tools it must not use (M6 arm 3's aggregator) is what turns
+detection into prevention: an explicit zero restores node-local enforcement, which is
+one more reason a zero grant has to be legal. Every dimension covered by a declared
+limit, and the `consumed ≤ in_flow` term of every dimension, is enforced node-locally
+as described above; the `+ out_flow` term and undeclared-tool use are not.
 
 ### 6.2 Violation payload and blame
 
