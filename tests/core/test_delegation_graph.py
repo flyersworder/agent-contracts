@@ -685,6 +685,40 @@ def test_consumption_recorded_after_abandonment_is_still_caught():
     assert excinfo.value.consumed == 150_000
 
 
+def test_verify_certified_bound_is_root_budget_plus_refund_not_root_budget_alone():
+    """Pins the guarantee `verify()` actually establishes (PR 77 finding 3).
+
+    The module and `verify()` docstrings previously overclaimed the
+    unqualified `sum(consumption) <= root budget`. What is actually
+    certified is `sum(consumption) <= root budget + sum(refunds)`: an
+    abandoned node is checked against its frozen pre-refund in-flow, so it
+    may consume up to its full original allocation, while the parent
+    independently gets to re-spend the same amount once it is refunded.
+    Total consumption below is *exactly* root budget + refund (1x the
+    refund, not 2x).
+    """
+    root = Contract(id="root", name="Root", resources=ResourceConstraints(tokens=100))
+    graph = DelegationGraph(root)
+    graph.add_node("a")
+    graph.add_node("b")
+    graph.allocate(DelegationGraph.ROOT, "a", tokens=100)
+    graph.allocate("a", "b", tokens=100)
+    graph.seal()
+
+    graph.monitor_for("b").usage.add_tokens(20)
+    refund = graph.abandon("b")
+    assert refund.tokens == 80
+
+    graph.monitor_for("a").usage.add_tokens(refund.tokens)  # parent respends the refund
+    graph.monitor_for("b").usage.add_tokens(80)  # dead node spends up to its frozen cap
+
+    graph.verify()  # certifies despite the double-counted 80
+
+    total_consumption = graph.monitor_for("a").usage.tokens + graph.monitor_for("b").usage.tokens
+    assert total_consumption == 180
+    assert total_consumption == root.resources.tokens + refund.tokens
+
+
 def test_abandon_snapshot_records_pre_refund_state():
     graph = _diamond()
     graph.monitor_for("scout_a").usage.add_tokens(1_000)

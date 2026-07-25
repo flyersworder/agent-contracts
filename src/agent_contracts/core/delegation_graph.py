@@ -11,7 +11,13 @@ node is::
 Summing this over all nodes telescopes: every internal allocation appears once
 as in-flow at its head and once as out-flow at its tail, so only the root's
 exogenous budget and total system consumption survive. Local checks therefore
-imply the global bound ``sum(consumption) <= root budget``.
+establish ``sum(consumption) <= root budget + sum(refunds)``, which coincides
+with the unqualified ``root budget`` only when nothing is abandoned.
+Abandonment freezes a dead node's two budget sides against its pre-refund
+snapshot (see :class:`AbandonSnapshot`), so the refund it triggers becomes
+slack that the node itself, or the parent it refunded, may still spend. See
+:meth:`DelegationGraph.verify` for why abandoned nodes stay checked despite
+this gap.
 
 The *control* graph may contain cycles (a node retries, a council
 re-deliberates); the *budget* graph must not, or the telescoping argument
@@ -461,8 +467,15 @@ class DelegationGraph:
 
         Abandoned nodes are *not* excused. Abandonment is the timeout case, and
         a timed-out node is the likeliest of all to have overspent; excusing it
-        would let ``verify()`` certify a graph whose total consumption exceeds
-        the root budget.
+        would let an over-spent node's violation be erased by the very refund
+        its abandonment triggered.
+
+        What this certifies is ``sum(consumption) <= root budget +
+        sum(refunds)``, not the unqualified ``root budget`` — see the module
+        docstring for the telescoping argument this bound comes from. An
+        abandoned node is checked against its frozen pre-refund in-flow, so
+        it may consume up to exactly the amount it refunded before this
+        flags it; the excess is bounded by that refund, not a multiple of it.
         """
         for name in self._nodes:
             self.check_node(name)
