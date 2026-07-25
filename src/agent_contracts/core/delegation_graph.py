@@ -416,7 +416,13 @@ class DelegationGraph:
         return node.monitor
 
     def residual(self, name: str) -> ResourceVector:
-        """in-flow - own consumption - out-flow."""
+        """in-flow - own consumption - out-flow.
+
+        Always computed from live values, abandoned nodes included: a residual
+        reports what the graph holds *now*, after any refund. It is
+        :meth:`check_node` — not this — that judges an abandoned node against
+        the state it died in.
+        """
         self._require_node(name)
         return self.in_flow(name) - self._consumed(name) - self.out_flow(name)
 
