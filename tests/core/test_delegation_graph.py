@@ -341,3 +341,19 @@ def test_release_then_abandon_does_not_double_refund():
     assert graph.residual("scout_a").tokens == scout_a_before
     edge = next(e for e in graph.edges() if e.key == "scout_a->aggregator")
     assert edge.amount.tokens >= 0
+
+
+def test_public_api_exports():
+    from agent_contracts.core import (
+        CycleError,
+        DelegationGraph,
+        FlowConservationError,
+        GraphLintError,
+        ResourceVector,
+    )
+
+    assert DelegationGraph.ROOT == "root"
+    assert issubclass(FlowConservationError, ConservationViolationError)
+    assert ResourceVector.ZERO.tokens == 0
+    assert CycleError is not None
+    assert GraphLintError is not None
