@@ -90,7 +90,7 @@ This document tracks development progress and key decisions for the Agent Contra
   - Sidecar: `runs/m4-pilot.jsonl` (450 lines, kept for audit).
 
 **Metrics**:
-- **Tests**: 1029 passing (chamber pillar adds ~250 tests on top of the framework's ~780)
+- **Tests**: 1224 passing / 1 skipped (chamber pillar ~250; delegation graphs ~150)
 - **Coverage**: 81%+
 - **Integrations**: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, **Causal Chambers**
 
@@ -167,6 +167,41 @@ This document tracks development progress and key decisions for the Agent Contra
 - `core/contract.py` - `ResourceConstraints.per_tool_limits: dict[str, int]`
 - `core/monitor.py` - `ResourceUsage.tool_usage_by_name: dict[str, int]`
 - `core/monitor.py` - Per-tool limit checking in `check_constraints()`
+
+### Delegation Graphs / Flow Conservation (Jul 25, v0.4.0) ⭐
+**Value**: Budget conservation for multi-parent delegation (fan-in), which the
+tree law double-counts
+
+`ContractingCapability` models a **tree** — every child has exactly one parent.
+`DelegationGraph` generalizes it to a **DAG** where budget flows along edges.
+Invariant at every node: `in-flow ≥ own consumption + out-flow`. Local checks
+imply the global bound `Σ C(v) ≤ B(root)` by telescoping (internal allocations
+appear once as in-flow at the head and once as out-flow at the tail, so they
+cancel) — meaning **no global lock and no central accountant**.
+
+**Key semantics worth remembering** (all learned the hard way in review):
+- **Control flow may cycle; budget flow must not.** A budget cycle lets a node
+  refund its own ancestor and collapses the proof. Cycle-creating edges rejected.
+- **Refunds are computed against ORIGINAL allocations, not live ones** — that is
+  what makes releasing sibling edges order-independent. Live values make each
+  sibling's refund depend on release order, which would break reproducibility.
+- **Verification certifies `B(root) + Σ refunds`, not `B(root)`,** once a node is
+  abandoned. Frozen pre-refund in-flow keeps an over-spent node flagged; the cost
+  is that an abandoned node can consume up to its refund before detection.
+- **Per-tool is conserved on BOTH paths** — granting is *prevented* at allocate
+  time, consuming an undeclared tool is *detected* at verify time. No
+  deny-by-default, so an omitted key = unconstrained, NOT zero. Grant explicit
+  zeros when you mean zero.
+- **The monitor enforces `consumed ≤ in_flow` only.** The `+ out_flow` term has no
+  node-local analogue and is verify()'s job alone.
+- Not thread-safe. Reclaimed budget is not re-delegatable in v1.
+
+**Files**:
+- `core/delegation_graph.py` — `DelegationGraph`, `EdgeAllocation`, `GraphNode`,
+  `FlowConservationError`, `CycleError`, `GraphLintError`
+- `core/resource_vector.py` — `ResourceVector` (`None` = unbounded, never zero)
+- `core/delegation.py` — **untouched**; equivalence verified by cross-validation test
+- Whitepaper §4.6 for the proof and its scope
 
 ### Indeterminacy-Aware LLM-as-Judge (Dec 23) ⭐
 **Value**: Robust quality evaluation accounting for rating ambiguity
@@ -404,17 +439,29 @@ refinement rather than headline material. Essentials below are non-negotiable.
    command; the sidecar skips the 442 ok cells and only re-attempts the 8
    errors). Worth doing before declaring M5 complete.
 
-**Now-optional: M6 (cross-pillar transfer study, plan §7)**
+**M6 REVISED (2026-07-25): loop-vs-graph topology benchmark (plan §7.7)**
 
-Post-M4b reassessment: M6 was load-bearing under the original "modest
-chamber effect needs cross-pillar bridge" assumption. M4b's dramatic effect
-makes chamber pillar standalone publishable. Two paths now both viable:
+The deferred choice between "§7 cross-pillar" and "skip §7" was resolved by
+an external trigger: **loop engineering** (named 2026-06-07, Addy Osmani) and
+**graph engineering** (named ~2026-07-18) put multi-agent topology on the
+field's agenda, and critical reviews of both note there is **no comparative
+benchmark**. We already hold two of the three arms.
 
-- (1) Defer §7 to a journal extension → submit single-pillar to AAMAS 2027,
-  unblock M7 drafting ~3 weeks earlier.
-- (2) Execute §7 as originally planned → two-pillar paper.
+M6 is now a three-arm topology study at matched budget — loop (`llm_only`),
+chain (`planner_reasoner`), and a new **fan-in** arm (2 scouts → aggregator).
+Arms 1-2 are already in `runs/m4-pilot.parquet`, so new compute is **90 cells
+(~$1-2)**. Cross-pillar transfer (§7.1-7.6) becomes the journal extension.
 
-Defer the decision until M5 is underway and the WT result is in hand.
+Pre-registered: H-A chain underperforms loop (already supported: F1 0.397 vs
+0.75); **H-B fan-in recovers delegation cost via exploration diversity — open,
+this is the experiment**; H-C conservation compliance 100%.
+
+Prerequisite shipped in **v0.4.0** (`core/delegation_graph.py`). **Open gap
+before M6**: `add_iteration()` is not called from any production path and
+`iterations` is missing from `ResourceUsage.to_dict()`, so §7.7's per-cell
+iteration metric would read uniformly zero. Also grant the aggregator an
+explicit `per_tool={"exp": 0}` — an omitted key means *unconstrained*, not
+zero, so the matched-budget control would otherwise be unenforceable.
 
 **M4c (mostly complete after May 17 work)**
 - Checkpointing / resume from partial Parquet ✅ (commit `856beb8`)
@@ -457,9 +504,9 @@ Defer the decision until M5 is underway and the WT result is in hand.
 
 ---
 
-*Last Updated: 2026-06-20 (8 Dependabot PRs merged #59–#66; google-adk 1.x→2.x silent major bump captured — see Dependency Notes)*
-*Status: Production-ready, 1073 tests passing (1 skipped), 90% coverage*
+*Last Updated: 2026-07-25 (v0.4.0 — delegation graphs / flow conservation; M6 revised to the loop-vs-graph topology benchmark)*
+*Status: Production-ready, v0.4.0, 1224 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
-*Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar*
+*Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
 *Pilot dataset: `runs/m4-pilot.parquet` (450 cells, 442 ok, 8 timeouts) — submission-ready for AAMAS 2027 / ECAI 2027*
-*Next: M5 (WT chamber + 5 budget levels), VPS migration (already provisioned)*
+*Next: M5 (WT + UNCONTRACTED + Pro robustness), then M6 topology benchmark (§7.7)*

@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-25
+
+### Added
+
+**Delegation graphs (flow conservation)**
+
+- `DelegationGraph` generalizes budget conservation from a tree to a DAG, so a node can be funded by more than one parent. `ContractingCapability` modelled a strict hierarchy — every child had exactly one parent — which cannot express an aggregator merging two independent workers, or any shared downstream budget. Under the tree law such a node was double-counted.
+- The invariant checked at every node is `in-flow ≥ own consumption + out-flow`. Local checks imply the global bound `Σ consumption ≤ root budget` by a telescoping argument: every internal allocation appears once as in-flow at its head and once as out-flow at its tail, so internal terms cancel. This means node-level checks need no global lock and no central accountant. See whitepaper §4.6.
+- `ResourceVector`: resource arithmetic (`+`, `-`, `<=`) across tokens, cost, tool invocations, iterations, and per-tool counts, with `None` meaning *unbounded* rather than zero on every axis.
+- `seal()` validates a graph once and freezes its topology, reporting every problem it finds rather than one per attempt: budget cycles, unfunded nodes, out-flow already exceeding in-flow, and per-tool grants the funding does not support.
+- `release()` reclaims an edge's proportional share of a target's unused budget, computed against *original* allocations so that releasing sibling edges in any order yields the same result. Computing against live values would make each sibling's refund depend on release order.
+- `abandon()` handles a node that timed out or crashed: it refunds the node's unconsumed budget to its parents and freezes its flow state, so an over-spent node stays flagged instead of having its violation erased by the refund.
+- Per-tool budget is conserved on both paths — a node may neither grant nor consume a tool its in-flow does not constrain. Granting is *prevented* at allocation time; consuming an undeclared tool is *detected* at verification, since per-tool limits have no deny-by-default semantics. Granting an explicit zero converts detection into prevention.
+- `FlowConservationError` subclasses the existing `ConservationViolationError`, so code already catching conservation failures also catches flow failures. It carries the node, dimension, in-flow, consumption, out-flow, deficit, and the funding edges as an audit trail.
+- Exported from `agent_contracts.core`: `DelegationGraph`, `ResourceVector`, `EdgeAllocation`, `GraphNode`, `FlowConservationError`, `CycleError`, `GraphLintError`.
+
+**Iteration tracking**
+
+- `ResourceUsage.iterations` and `add_iteration()`. `ResourceConstraints.iterations` had been a declared budget since 0.1.0 but was never tracked, so the limit could not be enforced. `ResourceMonitor.check_constraints()` now reports an `iterations` violation. Note that `add_iteration()` is not yet called from any integration — wiring it into the LLM call paths, and adding `iterations` to `ResourceUsage.to_dict()`, remains open.
+
+### Changed
+
+- `core/delegation.py` is untouched. The tree law remains the single-parent special case of the flow law, and the equivalence is verified by a test that runs both implementations over identical scenarios and compares their accounting. That test also documents the two places they legitimately differ: the tree law's optional coordination reserve has no graph analogue, and a tree's remaining budget clamps at zero where a graph residual goes negative so an overrun stays visible.
+
+### Notes
+
+- **What verification certifies under abandonment.** The telescoping proof holds for the live graph. Because an abandoned node is checked against its frozen pre-refund in-flow, verification certifies `Σ consumption ≤ root budget + Σ refunds`, with the two coinciding when nothing is abandoned. The bound is tight — an abandoned node can consume up to its refunded amount before detection. Checking against *live* in-flow instead would put honest nodes on a knife-edge equality, since a refund drives post-refund in-flow to approximately `consumption + out-flow`.
+- `ResourceVector.per_tool` is a read-only mapping (`MappingProxyType` over a defensive copy), matching the existing `ResourceConstraints.per_tool_limits` convention. `ResourceVector.ZERO` is a module-level singleton returned verbatim by several `DelegationGraph` queries, so a plain mutable dict here would have let a caller poison it — and every other graph's zero reads — through one returned reference.
+- **Where each half of the invariant is enforced.** Materializing a node's contract from its summed in-flow means the existing `ResourceMonitor` enforces `consumption ≤ in-flow` node-locally, with strict/lenient modes and callbacks applying unchanged. The `+ out-flow` term has no node-local analogue — a contract does not know what it has delegated — and is enforced by graph-level verification alone.
+- `DelegationGraph` is not thread-safe. `allocate`, `release`, and `abandon` each read then write shared residuals.
+- Reclaimed budget is not re-delegatable in v1: allocation is a build-phase operation and reclamation a run-phase one, so refunds change accounting and reporting but nothing can re-spend them. `abandon()` likewise refunds only a node's in-edges; budget it had already delegated downstream stays with the child.
+
 ## [0.3.2] - 2026-05-20
 
 ### Fixed
@@ -107,7 +139,8 @@ explicit resource constraints and temporal boundaries.
 - License changed from CC-BY-4.0 (paper) to Apache-2.0 (software)
 - PyPI package name: `ai-agent-contracts` (the name `agent-contracts` was already taken)
 
-[Unreleased]: https://github.com/flyersworder/agent-contracts/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/flyersworder/agent-contracts/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/flyersworder/agent-contracts/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/flyersworder/agent-contracts/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/flyersworder/agent-contracts/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/flyersworder/agent-contracts/compare/v0.2.0...v0.3.0

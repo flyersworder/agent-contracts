@@ -86,6 +86,43 @@ contract = Contract(
 )
 ```
 
+### Delegation Graphs (Multi-Parent Budgets)
+
+When one agent is funded by several others — an aggregator merging two workers,
+a shared reviewer — a strict hierarchy cannot express it without double-counting.
+`DelegationGraph` models delegation as a DAG where budget flows along edges:
+
+```python
+from agent_contracts import Contract, ResourceConstraints
+from agent_contracts.core import DelegationGraph
+
+root = Contract(
+    id="research",
+    name="Research",
+    resources=ResourceConstraints(tokens=100_000, per_tool_limits={"web_search": 20}),
+)
+
+graph = DelegationGraph(root)
+for name in ("scout_a", "scout_b", "aggregator"):
+    graph.add_node(name)
+
+graph.allocate("root", "scout_a", tokens=40_000, per_tool={"web_search": 10})
+graph.allocate("root", "scout_b", tokens=40_000, per_tool={"web_search": 10})
+graph.allocate("scout_a", "aggregator", tokens=15_000, per_tool={"web_search": 0})
+graph.allocate("scout_b", "aggregator", tokens=15_000, per_tool={"web_search": 0})
+
+graph.seal()  # validates the whole graph, then freezes its topology
+
+graph.contract_for("aggregator").resources.tokens  # 30_000 — the sum of its in-edges
+graph.verify()                                     # every node satisfies the invariant
+```
+
+The invariant at every node is `in-flow ≥ own consumption + out-flow`. Because
+that is a purely local check, and internal allocations cancel when summed across
+the graph, satisfying it everywhere guarantees total consumption never exceeds
+the root budget — with no global lock and no central accountant. See
+[whitepaper §4.6](docs/whitepaper.md) for the proof and its scope.
+
 ### Pre-Execution Hooks (Custom Policy)
 
 Add custom governance logic that runs before every constraint check:
@@ -609,4 +646,4 @@ If you use this framework in your research, please cite:
 
 ---
 
-**Version**: 0.3.0 | **Last Updated**: March 28, 2026 | **Status**: Production Ready ⭐
+**Version**: 0.4.0 | **Last Updated**: July 25, 2026 | **Status**: Production Ready ⭐

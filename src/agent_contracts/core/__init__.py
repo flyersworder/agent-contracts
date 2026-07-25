@@ -28,6 +28,14 @@ from agent_contracts.core.delegation import (
     ContractingCapability,
     DelegationSummary,
 )
+from agent_contracts.core.delegation_graph import (
+    CycleError,
+    DelegationGraph,
+    EdgeAllocation,
+    FlowConservationError,
+    GraphLintError,
+    GraphNode,
+)
 from agent_contracts.core.enforcement import (
     CheckContext,
     CheckHook,
@@ -62,6 +70,7 @@ from agent_contracts.core.prompts import (
     generate_adaptive_instruction,
     generate_budget_prompt,
 )
+from agent_contracts.core.resource_vector import ResourceVector
 from agent_contracts.core.skillspec import SkillSpec
 from agent_contracts.core.tokens import (
     CostEstimate,
@@ -95,14 +104,20 @@ __all__ = [
     "ContractingCapability",
     "CoordinationPattern",
     "CostEstimate",
+    "CycleError",
     "DeadlineType",
+    "DelegationGraph",
     "DelegationSummary",
+    "EdgeAllocation",
     "EnforcementAction",
     "EnforcementCallback",
     "EnforcementEvent",
     "ExecutionConfig",
     "ExecutionLog",
     "ExecutionResult",
+    "FlowConservationError",
+    "GraphLintError",
+    "GraphNode",
     "HookResult",
     "InputSpecification",
     "OutputSpecification",
@@ -110,6 +125,7 @@ __all__ = [
     "ResourceConstraints",
     "ResourceMonitor",
     "ResourceUsage",
+    "ResourceVector",
     "SkillSpec",
     "StrategyRecommendation",
     "SuccessCriterion",

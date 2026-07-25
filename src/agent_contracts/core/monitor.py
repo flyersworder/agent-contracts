@@ -34,6 +34,7 @@ class ResourceUsage:
         memory_mb: Peak memory usage in MB
         compute_seconds: Total CPU time in seconds
         cost_usd: Total cost in USD
+        iterations: Total agent loop iterations
         start_time: When tracking started
         last_updated: When usage was last updated
         metadata: Additional usage metadata
@@ -50,6 +51,7 @@ class ResourceUsage:
     memory_mb: float = 0.0
     compute_seconds: float = 0.0
     cost_usd: float = 0.0
+    iterations: int = 0
 
     start_time: datetime = field(default_factory=datetime.now)
     last_updated: datetime = field(default_factory=datetime.now)
@@ -68,6 +70,7 @@ class ResourceUsage:
             "memory_mb",
             "compute_seconds",
             "cost_usd",
+            "iterations",
         ]:
             value = getattr(self, field_name)
             if value < 0:
@@ -127,6 +130,12 @@ class ResourceUsage:
         """Record a web search."""
         with self._lock:
             self.web_searches += 1
+            self.last_updated = datetime.now()
+
+    def add_iteration(self) -> None:
+        """Record one agent loop iteration."""
+        with self._lock:
+            self.iterations += 1
             self.last_updated = datetime.now()
 
     def add_tool_invocation(self, tool_name: str | None = None) -> None:
@@ -386,6 +395,18 @@ class ResourceMonitor:
                     resource="tool_invocations",
                     limit=self.constraints.tool_invocations,
                     actual=self.usage.tool_invocations,
+                )
+            )
+
+        if (
+            self.constraints.iterations is not None
+            and self.usage.iterations > self.constraints.iterations
+        ):
+            violations.append(
+                ViolationInfo(
+                    resource="iterations",
+                    limit=self.constraints.iterations,
+                    actual=self.usage.iterations,
                 )
             )
 
