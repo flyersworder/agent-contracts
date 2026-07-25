@@ -85,14 +85,19 @@ def test_local_invariants_imply_global_bound(seed):
             assert graph.contributing_edges(name), f"'{name}' must be funded"
     graph.seal()
 
+    # Saturate: every node consumes its ENTIRE residual. Consuming a random
+    # fraction instead leaves roughly 2x slack under the bound, which lets a
+    # diamond that double-counts its in-flow pass undetected on all 10 seeds
+    # (verified by mutation testing). Saturation makes the telescoping identity
+    # tight, so the assertion below is an equality, not a loose inequality.
     for name in names:
         headroom = graph.residual(name).tokens
         if headroom and headroom > 0:
-            graph.monitor_for(name).usage.add_tokens(rng.randint(0, headroom))
+            graph.monitor_for(name).usage.add_tokens(headroom)
 
     graph.verify()  # every local invariant holds
 
     total_consumed = sum(
         ResourceVector.from_usage(graph.monitor_for(name).usage).tokens for name in names
     )
-    assert total_consumed <= root_tokens
+    assert total_consumed == root_tokens
