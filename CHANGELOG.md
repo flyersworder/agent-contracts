@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The sdist now ships only the library, its test suite, and metadata** — 2.9 MB to 196 KB, a 93% reduction. Every previous release published the whole repository, so `ai_agent_contracts-0.4.0.tar.gz` carried 2.6 MB of experiment pipelines and figures from `evaluation/`, 1.7 MB of run output from `results/` (a single 984 KB JSON file among it), plus `benchmarks/`, `docs/`, `uv.lock`, and the project's AI memory file. None of it is needed to build, install, or verify the package. `pyproject.toml` gains an explicit `[tool.hatch.build.targets.sdist]` allowlist, so new top-level directories cannot start shipping unnoticed.
+
+  `tests/evaluation` is excluded along with the `evaluation/` package it covers — those tests failed collection from an sdist in any environment, since their subject was never present. The remaining suite runs from the extracted archive: 876 passed, 24 skipped.
+
+  **The wheel is unaffected** — rebuilt after this change it is bit-for-bit identical (sha256 `104b99ee…`) to the wheel published for 0.4.0, so `pip install ai-agent-contracts` is unchanged. Only source installs, mirrors, and downstream packagers see the difference.
+
 ## [0.4.0] - 2026-07-25
 
 ### Added

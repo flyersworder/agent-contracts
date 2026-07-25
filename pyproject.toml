@@ -80,6 +80,37 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_contracts"]
 
+# The sdist ships what is needed to build the package and verify that build —
+# the library and its test suite — plus the metadata files. Everything else in
+# this repository is research apparatus, not part of the distribution:
+# `evaluation/` and `results/` hold experiment pipelines, figures, and run
+# output (2.6 MB and 1.7 MB respectively); `benchmarks/` holds demo scripts;
+# `docs/` is published on GitHub and linked from the README; `uv.lock` pins a
+# development environment that an installer resolves fresh anyway.
+#
+# This is an explicit allowlist rather than an exclude list so that new
+# top-level directories do not silently start shipping. `LICENSE` is listed
+# because `project.license` is declared as text, so hatchling does not infer it.
+#
+# `tests/evaluation` is excluded because it tests the `evaluation/` package,
+# which the sdist does not ship — those tests fail collection with
+# `ModuleNotFoundError: No module named 'evaluation'` no matter what the
+# installing environment does. The remaining tests exercise the shipped
+# library; `tests/integrations` additionally needs the optional extras.
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/pyproject.toml",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/SECURITY.md",
+]
+exclude = [
+    "/tests/evaluation",
+]
+
 [tool.ruff]
 # Target Python 3.12+
 target-version = "py312"
