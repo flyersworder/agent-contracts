@@ -475,6 +475,23 @@ def test_allocate_token_overrun_by_one_still_raises():
         graph.allocate(DelegationGraph.ROOT, "b", tokens=5)  # 6 + 5 = 11 > 10
 
 
+def test_zero_singleton_cannot_be_poisoned_through_graph_query():
+    """Regression for the shared-mutable-ZERO-singleton fix (PR 77 finding 2).
+
+    ``out_flow`` returns ``ResourceVector.ZERO`` verbatim when a node has no
+    out-edges. If ``per_tool`` were still a plain mutable dict, mutating the
+    returned vector would poison every future ZERO read across every graph.
+    """
+    graph_one = DelegationGraph(make_root())
+    graph_two = DelegationGraph(make_root())
+    out_flow = graph_one.out_flow(DelegationGraph.ROOT)
+    assert out_flow.per_tool == {}
+    with pytest.raises(TypeError):
+        out_flow.per_tool["poison"] = 1  # type: ignore[index]
+    assert "poison" not in graph_two.out_flow(DelegationGraph.ROOT).per_tool
+    assert "poison" not in ResourceVector.ZERO.per_tool
+
+
 def test_verify_checks_every_node():
     graph = DelegationGraph(make_root())
     graph.add_node("child")

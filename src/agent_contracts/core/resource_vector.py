@@ -11,6 +11,7 @@ is unconstrained; a tool absent from an amount counts as zero.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from agent_contracts.core.contract import ResourceConstraints
@@ -72,6 +73,17 @@ class ResourceVector:
     per_tool: Mapping[str, int] = field(default_factory=dict)
 
     ZERO: ClassVar[ResourceVector]
+
+    def __post_init__(self) -> None:
+        # Freeze per_tool: `ResourceVector.ZERO` is a module-level singleton
+        # that `DelegationGraph.in_flow()`/`out_flow()`/`_consumed()` return
+        # verbatim whenever a node has no matching edges or no monitor. A
+        # plain mutable dict here would let a caller that mutates a returned
+        # `.per_tool` in place poison ZERO for every other graph and every
+        # future read. Defensive copy + read-only view, mirroring
+        # `ResourceConstraints.__post_init__` in contract.py (`object.__setattr__`
+        # because the dataclass is frozen).
+        object.__setattr__(self, "per_tool", MappingProxyType(dict(self.per_tool)))
 
     def __add__(self, other: ResourceVector) -> ResourceVector:
         per_tool = dict(self.per_tool)

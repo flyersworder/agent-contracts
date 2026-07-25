@@ -133,3 +133,22 @@ def test_cost_epsilon_matches_delegation_module():
     from agent_contracts.core import delegation, resource_vector
 
     assert resource_vector._COST_EPSILON == delegation._COST_EPSILON
+
+
+# --------------------------------------------------------------- finding 2
+# `per_tool` must be a read-only view, not a shared mutable dict, so that
+# `ResourceVector.ZERO` (and any other vector) cannot be poisoned via a
+# reference returned to a caller.
+
+
+def test_per_tool_is_read_only():
+    v = ResourceVector(per_tool={"exp": 3})
+    with pytest.raises(TypeError):
+        v.per_tool["exp"] = 99  # type: ignore[index]
+
+
+def test_per_tool_defensive_copy_not_aliased_to_caller_dict():
+    source = {"exp": 3}
+    v = ResourceVector(per_tool=source)
+    source["exp"] = 99
+    assert v.per_tool["exp"] == 3
