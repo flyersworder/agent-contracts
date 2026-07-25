@@ -221,6 +221,54 @@ def test_check_node_raises_when_consumption_breaks_invariant():
     assert excinfo.value.node_id == "child"
 
 
+def test_consumption_overrun_is_reported_as_consumption_not_out_flow():
+    graph = DelegationGraph(make_root(tokens=100_000))
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", tokens=100_000)
+    graph.seal()
+    graph.monitor_for("child").usage.add_tokens(140_000)
+
+    with pytest.raises(FlowConservationError) as excinfo:
+        graph.check_node("child")
+
+    error = excinfo.value
+    assert error.dimension == "tokens"
+    assert error.consumed == 140_000
+    assert error.out_flow == 0  # the node delegated nothing
+    assert error.in_flow == 100_000
+    assert error.deficit == 40_000
+    assert "out-flow 140000" not in str(error)
+    assert "consumption 140000" in str(error)
+
+
+def test_allocation_overrun_still_reports_out_flow():
+    graph = DelegationGraph(make_root(tokens=100))
+    graph.add_node("child")
+    with pytest.raises(FlowConservationError) as excinfo:
+        graph.allocate(DelegationGraph.ROOT, "child", tokens=101)
+    error = excinfo.value
+    assert error.out_flow == 101
+    assert error.consumed == 0
+    assert error.deficit == 1
+    assert "over-allocate" in str(error)
+
+
+def test_float_dimension_violation_does_not_round_away():
+    """``requested``/``available`` are inherited as ints; truncating a float
+    overrun to equality would read as no violation at all."""
+    graph = DelegationGraph(make_root(tokens=None, cost_usd=1.5))
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", cost_usd=1.5)
+    graph.seal()
+    graph.monitor_for("child").usage.add_cost(1.9)
+
+    with pytest.raises(FlowConservationError) as excinfo:
+        graph.check_node("child")
+    error = excinfo.value
+    assert error.dimension == "cost_usd"
+    assert error.requested > error.available
+
+
 def test_verify_checks_every_node():
     graph = DelegationGraph(make_root())
     graph.add_node("child")
@@ -321,11 +369,69 @@ def test_abandon_marks_downstream_unreachable():
     assert graph.is_reachable("aggregator")  # scout_b still funds it
 
 
-def test_abandoned_node_excluded_from_verify():
+def test_abandoned_node_still_checked_by_verify():
+    """Abandonment is the timeout case, and a timed-out node is the likeliest
+    to have overspent. Marking it dead must not launder its overspend."""
+    graph = _diamond()
+    # scout_a holds 40_000 and has already passed 15_000 downstream, so
+    # consuming 40_000 puts its commitment at 55_000 > 40_000.
+    graph.monitor_for("scout_a").usage.add_tokens(40_000)
+    with pytest.raises(FlowConservationError):
+        graph.verify()
+    graph.abandon("scout_a")
+    with pytest.raises(FlowConservationError) as excinfo:
+        graph.verify()
+    assert excinfo.value.node_id == "scout_a"
+
+
+def test_abandon_cannot_certify_a_budget_busting_graph():
+    graph = DelegationGraph(make_root(tokens=100_000))
+    graph.add_node("a")
+    graph.allocate(DelegationGraph.ROOT, "a", tokens=100_000)
+    graph.seal()
+    graph.monitor_for("a").usage.add_tokens(150_000)
+
+    with pytest.raises(FlowConservationError):
+        graph.verify()
+
+    graph.abandon("a")
+
+    # Total consumption is 150_000 against a root budget of 100_000; no
+    # amount of abandonment may make verify() certify that.
+    with pytest.raises(FlowConservationError):
+        graph.verify()
+
+
+def test_abandoned_honest_node_still_passes_verify():
+    graph = _diamond()
+    graph.monitor_for("scout_a").usage.add_tokens(1_000)
+    graph.abandon("scout_a")
+    graph.verify()
+
+
+def test_overspent_abandoned_node_stays_flagged_after_downstream_release():
+    """The snapshot is what makes the flag permanent.
+
+    Releasing the dead node's out-edge shrinks its live out-flow, which would
+    let a live-values check quietly clear an overspend that really happened.
+    """
     graph = _diamond()
     graph.monitor_for("scout_a").usage.add_tokens(40_000)
     graph.abandon("scout_a")
-    graph.verify()
+    graph.release("scout_a", "aggregator")
+    with pytest.raises(FlowConservationError):
+        graph.verify()
+
+
+def test_abandon_snapshot_records_pre_refund_state():
+    graph = _diamond()
+    graph.monitor_for("scout_a").usage.add_tokens(1_000)
+    graph.abandon("scout_a")
+    snapshot = graph.abandon_snapshot("scout_a")
+    assert snapshot is not None
+    assert snapshot.in_flow.tokens == 40_000  # pre-refund
+    assert snapshot.consumed.tokens == 1_000
+    assert snapshot.out_flow.tokens == 15_000
 
 
 def test_release_then_abandon_does_not_double_refund():

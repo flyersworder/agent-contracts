@@ -23,6 +23,7 @@ lands, ``allocate``/``release``/``abandon`` need a lock.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -78,10 +79,13 @@ class FlowConservationError(ConservationViolationError):
         self.out_flow = out_flow
         self.deficit = deficit
         self.contributing_edges = contributing_edges
+        # The inherited int fields round *away* from each other: a 1.9 overrun
+        # against a 1.5 budget must not truncate to 1 vs 1 and read as no
+        # violation at all.
         super().__init__(
             message,
-            requested=int(out_flow + consumed),
-            available=int(in_flow) if in_flow is not None else 0,
+            requested=math.ceil(out_flow + consumed),
+            available=math.floor(in_flow) if in_flow is not None else 0,
             parent_id=node_id,
         )
 
@@ -115,6 +119,23 @@ class EdgeAllocation:
         return f"{self.source}->{self.target}"
 
 
+@dataclass(frozen=True)
+class AbandonSnapshot:
+    """A node's flow state at the moment it was abandoned.
+
+    Abandonment refunds unconsumed budget upstream, which shrinks the dead
+    node's live in-flow, and a later release of one of its out-edges shrinks
+    its live out-flow. Checking an abandoned node against *live* values would
+    therefore let those follow-on movements quietly clear an overspend that
+    really happened. ``verify()`` checks abandoned nodes against this frozen
+    triple instead, so an over-spent node stays flagged for good.
+    """
+
+    in_flow: ResourceVector
+    consumed: ResourceVector
+    out_flow: ResourceVector
+
+
 @dataclass
 class GraphNode:
     """A node in the delegation graph."""
@@ -125,6 +146,7 @@ class GraphNode:
     contract: Contract | None = None
     monitor: ResourceMonitor | None = None
     abandoned: bool = False
+    snapshot: AbandonSnapshot | None = None
 
 
 class DelegationGraph:
@@ -171,7 +193,8 @@ class DelegationGraph:
             KeyError: if either node is unknown.
             CycleError: if the edge would create a cycle.
             ValueError: if any allocated dimension is unbounded.
-            FlowConservationError: if source's out-flow would exceed its in-flow.
+            FlowConservationError: if source's own consumption plus its
+                prospective out-flow would exceed its in-flow.
         """
         self._require_unsealed()
         self._require_node(source)
@@ -200,8 +223,16 @@ class DelegationGraph:
             raise ValueError(f"edge '{key}' already exists")
 
         prospective_out = self.out_flow(source) + amount
-        if not prospective_out <= self.in_flow(source):
-            self._raise_flow_error(source, prospective_out)
+        source_in_flow = self.in_flow(source)
+        source_consumed = self._consumed(source)
+        if not source_consumed + prospective_out <= source_in_flow:
+            self._raise_flow_error(
+                source,
+                in_flow=source_in_flow,
+                consumed=source_consumed,
+                out_flow=prospective_out,
+                kind="allocation",
+            )
 
         edge = EdgeAllocation(source=source, target=target, amount=amount)
         self._edges[key] = edge
@@ -330,17 +361,39 @@ class DelegationGraph:
         return self.in_flow(name) - self._consumed(name) - self.out_flow(name)
 
     def check_node(self, name: str) -> None:
-        """Raise FlowConservationError if ``name``'s invariant is violated."""
+        """Raise FlowConservationError if ``name``'s invariant is violated.
+
+        An abandoned node is checked against its :class:`AbandonSnapshot` — the
+        flow state it died in — rather than against live values, which the
+        refund it triggered has since moved.
+        """
         self._require_node(name)
-        commitment = self._consumed(name) + self.out_flow(name)
-        if not commitment <= self.in_flow(name):
-            self._raise_flow_error(name, commitment)
+        in_flow, consumed, out_flow = self._flow_state(name)
+        if not consumed + out_flow <= in_flow:
+            self._raise_flow_error(name, in_flow=in_flow, consumed=consumed, out_flow=out_flow)
 
     def verify(self) -> None:
-        """Check the invariant at every non-abandoned node."""
-        for name, node in self._nodes.items():
-            if not node.abandoned:
-                self.check_node(name)
+        """Check the invariant at every node, abandoned nodes included.
+
+        Abandoned nodes are *not* excused. Abandonment is the timeout case, and
+        a timed-out node is the likeliest of all to have overspent; excusing it
+        would let ``verify()`` certify a graph whose total consumption exceeds
+        the root budget.
+        """
+        for name in self._nodes:
+            self.check_node(name)
+
+    def abandon_snapshot(self, name: str) -> AbandonSnapshot | None:
+        """The flow state ``name`` was abandoned in, or ``None`` if it is live."""
+        self._require_node(name)
+        return self._nodes[name].snapshot
+
+    def _flow_state(self, name: str) -> tuple[ResourceVector, ResourceVector, ResourceVector]:
+        """``(in_flow, consumed, out_flow)`` to check ``name``'s invariant against."""
+        snapshot = self._nodes[name].snapshot
+        if snapshot is not None:
+            return snapshot.in_flow, snapshot.consumed, snapshot.out_flow
+        return self.in_flow(name), self._consumed(name), self.out_flow(name)
 
     def _require_sealed(self) -> None:
         if not self._sealed:
@@ -370,39 +423,55 @@ class DelegationGraph:
             stack.extend(e.target for e in self._edges.values() if e.source == current)
         return False
 
-    def _raise_flow_error(self, name: str, prospective_out: ResourceVector) -> None:
-        """Identify the first violated dimension and raise."""
-        available = self.in_flow(name)
-        consumed = self._consumed(name)
+    def _raise_flow_error(
+        self,
+        name: str,
+        *,
+        in_flow: ResourceVector,
+        consumed: ResourceVector,
+        out_flow: ResourceVector,
+        kind: str = "runtime",
+    ) -> None:
+        """Identify the first violated dimension and raise.
+
+        ``consumed`` and ``out_flow`` are reported as the separate quantities
+        they are: a node that delegated nothing and overspent must not be
+        described as over-allocating. ``kind`` selects the phrasing —
+        ``"allocation"`` for the build-phase check in :meth:`allocate`, where
+        the out-flow is prospective, ``"runtime"`` for :meth:`check_node`.
+        """
+        verb = "would over-allocate" if kind == "allocation" else "violates flow conservation on"
+
+        def raise_for(
+            dimension: str,
+            limit: float,
+            used: float,
+            allocated: float,
+            what: str,
+        ) -> None:
+            raise FlowConservationError(
+                f"node '{name}' {verb} {what}: consumption {used} + "
+                f"out-flow {allocated} exceeds in-flow {limit}",
+                node_id=name,
+                dimension=dimension,
+                in_flow=limit,
+                consumed=used,
+                out_flow=allocated,
+                deficit=used + allocated - limit,
+                contributing_edges=self.contributing_edges(name),
+            )
+
         for dimension in ("tokens", "cost_usd", "tool_invocations", "iterations"):
-            limit = getattr(available, dimension)
-            requested = getattr(prospective_out, dimension)
-            if limit is not None and requested is not None and requested > limit:
-                raise FlowConservationError(
-                    f"node '{name}' would over-allocate {dimension}: "
-                    f"out-flow {requested} exceeds in-flow {limit}",
-                    node_id=name,
-                    dimension=dimension,
-                    in_flow=limit,
-                    consumed=getattr(consumed, dimension) or 0,
-                    out_flow=requested,
-                    deficit=requested - limit,
-                    contributing_edges=self.contributing_edges(name),
-                )
-        for tool, limit in available.per_tool.items():
-            requested = prospective_out.per_tool.get(tool, 0)
-            if requested > limit:
-                raise FlowConservationError(
-                    f"node '{name}' would over-allocate tool '{tool}': "
-                    f"out-flow {requested} exceeds in-flow {limit}",
-                    node_id=name,
-                    dimension=f"tool:{tool}",
-                    in_flow=limit,
-                    consumed=consumed.per_tool.get(tool, 0),
-                    out_flow=requested,
-                    deficit=requested - limit,
-                    contributing_edges=self.contributing_edges(name),
-                )
+            limit = getattr(in_flow, dimension)
+            used = getattr(consumed, dimension) or 0
+            allocated = getattr(out_flow, dimension) or 0
+            if limit is not None and used + allocated > limit:
+                raise_for(dimension, limit, used, allocated, dimension)
+        for tool, limit in in_flow.per_tool.items():
+            used = consumed.per_tool.get(tool, 0)
+            allocated = out_flow.per_tool.get(tool, 0)
+            if used + allocated > limit:
+                raise_for(f"tool:{tool}", limit, used, allocated, f"tool '{tool}'")
         raise FlowConservationError(
             f"node '{name}' violates flow conservation",
             node_id=name,
@@ -449,6 +518,19 @@ class DelegationGraph:
         A node that times out or crashes otherwise leaves a stranded
         allocation that silently corrupts every downstream residual for the
         rest of a run — the failure mode the M4b pilot produced 8 times.
+
+        Three limits are deliberate and must not be read as more than they are:
+
+        * **Only in-edges are refunded.** Budget the dead node had already
+          delegated downstream stays stranded at the child, which may still be
+          running. Abandoning the child too is what reclaims it.
+        * **Reclaimed budget is not re-delegatable in v1.** ``allocate()`` is
+          build-phase only, so a refund changes accounting and reporting — the
+          parent's residual, and what ``verify()`` will certify — but nothing
+          can re-spend it within the sealed graph.
+        * **The node is presumed to stop consuming.** Its invariant is frozen
+          into an :class:`AbandonSnapshot` at this moment; consumption recorded
+          against a node after it was declared dead is outside the model.
         """
         self._require_node(name)
         if name == self.ROOT:
@@ -457,6 +539,11 @@ class DelegationGraph:
         if node.abandoned:
             raise ValueError(f"node '{name}' already abandoned")
 
+        node.snapshot = AbandonSnapshot(
+            in_flow=self.in_flow(name),
+            consumed=self._consumed(name),
+            out_flow=self.out_flow(name),
+        )
         reclaimed = ResourceVector.ZERO
         for edge in list(self._edges.values()):
             # Skip edges already released: `_refund_share` computes the pool
