@@ -459,7 +459,12 @@ class DelegationGraph:
 
         reclaimed = ResourceVector.ZERO
         for edge in list(self._edges.values()):
-            if edge.target == name:
+            # Skip edges already released: `_refund_share` computes the pool
+            # from ORIGINAL in-flow, so a released edge would compute the same
+            # share a second time, drive its amount negative, and double-credit
+            # the parent. This is not the forbidden "filter flow queries on
+            # released" — in_flow/out_flow stay unfiltered; only refunds skip.
+            if edge.target == name and not edge.released:
                 share = self._refund_share(edge, name)
                 edge.amount = edge.amount - share
                 edge.released = True

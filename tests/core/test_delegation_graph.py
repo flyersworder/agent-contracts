@@ -326,3 +326,18 @@ def test_abandoned_node_excluded_from_verify():
     graph.monitor_for("scout_a").usage.add_tokens(40_000)
     graph.abandon("scout_a")
     graph.verify()
+
+
+def test_release_then_abandon_does_not_double_refund():
+    graph = _diamond()
+    graph.monitor_for("aggregator").usage.add_tokens(20_000)
+    first = graph.release("scout_a", "aggregator").tokens
+    assert first == 5_000
+
+    scout_a_before = graph.residual("scout_a").tokens
+    graph.abandon("aggregator")
+
+    # scout_a's edge was already refunded; abandon must not refund it again.
+    assert graph.residual("scout_a").tokens == scout_a_before
+    edge = next(e for e in graph.edges() if e.key == "scout_a->aggregator")
+    assert edge.amount.tokens >= 0
