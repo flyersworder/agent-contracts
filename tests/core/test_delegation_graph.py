@@ -240,3 +240,89 @@ def test_node_monitor_enforces_summed_budget_via_existing_machinery():
     monitor = graph.monitor_for("child")
     monitor.usage.add_tokens(101)
     assert any(v.resource == "tokens" for v in monitor.check_constraints())
+
+
+def _diamond() -> DelegationGraph:
+    graph = DelegationGraph(make_root())
+    for name in ("scout_a", "scout_b", "aggregator"):
+        graph.add_node(name)
+    graph.allocate(DelegationGraph.ROOT, "scout_a", tokens=40_000)
+    graph.allocate(DelegationGraph.ROOT, "scout_b", tokens=40_000)
+    graph.allocate("scout_a", "aggregator", tokens=15_000)
+    graph.allocate("scout_b", "aggregator", tokens=15_000)
+    graph.seal()
+    return graph
+
+
+def test_release_returns_proportional_share():
+    graph = _diamond()
+    graph.monitor_for("aggregator").usage.add_tokens(20_000)  # residual 10_000
+    refund = graph.release("scout_a", "aggregator")
+    assert refund.tokens == 5_000
+
+
+def test_release_is_order_independent():
+    first = _diamond()
+    first.monitor_for("aggregator").usage.add_tokens(20_000)
+    a_then_b = (
+        first.release("scout_a", "aggregator").tokens,
+        first.release("scout_b", "aggregator").tokens,
+    )
+
+    second = _diamond()
+    second.monitor_for("aggregator").usage.add_tokens(20_000)
+    b_then_a = (
+        second.release("scout_b", "aggregator").tokens,
+        second.release("scout_a", "aggregator").tokens,
+    )
+
+    # Both siblings funded the aggregator equally, so both reclaim half the
+    # 10_000 unused tokens regardless of which released first.
+    assert a_then_b == (5_000, 5_000)
+    assert b_then_a == (5_000, 5_000)
+    assert first.residual("scout_a").tokens == second.residual("scout_a").tokens
+    assert first.residual("aggregator").tokens == second.residual("aggregator").tokens
+
+
+def test_release_restores_parent_residual():
+    graph = _diamond()
+    before = graph.residual("scout_a").tokens
+    graph.monitor_for("aggregator").usage.add_tokens(20_000)
+    graph.release("scout_a", "aggregator")
+    assert graph.residual("scout_a").tokens == before + 5_000
+
+
+def test_release_of_fully_consumed_edge_refunds_nothing():
+    graph = _diamond()
+    graph.monitor_for("aggregator").usage.add_tokens(30_000)
+    assert graph.release("scout_a", "aggregator").tokens == 0
+
+
+def test_double_release_rejected():
+    graph = _diamond()
+    graph.release("scout_a", "aggregator")
+    with pytest.raises(ValueError, match="already released"):
+        graph.release("scout_a", "aggregator")
+
+
+def test_abandon_refunds_unconsumed_budget_to_parents():
+    graph = _diamond()
+    graph.monitor_for("scout_a").usage.add_tokens(1_000)
+    graph.abandon("scout_a")
+    # scout_a held 40_000, spent 1_000, passed 15_000 downstream; root reclaims 24_000
+    assert graph.residual(DelegationGraph.ROOT).tokens == 100_000 - 40_000 - 40_000 + 24_000
+
+
+def test_abandon_marks_downstream_unreachable():
+    graph = _diamond()
+    graph.abandon("scout_a")
+    assert not graph.is_reachable("scout_a")
+    assert graph.is_reachable("scout_b")
+    assert graph.is_reachable("aggregator")  # scout_b still funds it
+
+
+def test_abandoned_node_excluded_from_verify():
+    graph = _diamond()
+    graph.monitor_for("scout_a").usage.add_tokens(40_000)
+    graph.abandon("scout_a")
+    graph.verify()

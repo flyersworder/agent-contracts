@@ -420,3 +420,93 @@ class DelegationGraph:
         if node.monitor is None:
             return ResourceVector.ZERO
         return ResourceVector.from_usage(node.monitor.usage)
+
+    # -------------------------------------------------------- reclamation
+
+    def release(self, source: str, target: str) -> ResourceVector:
+        """Refund edge ``source -> target``'s share of the target's unused budget.
+
+        Shares are computed against *original* allocations, so releasing
+        sibling edges in any order yields the same final state. Computing
+        against live in-flow instead would make each sibling's refund depend on
+        how many siblings released first.
+        """
+        key = f"{source}->{target}"
+        edge = self._edges.get(key)
+        if edge is None:
+            raise KeyError(f"unknown edge '{key}'")
+        if edge.released:
+            raise ValueError(f"edge '{key}' already released")
+
+        share = self._refund_share(edge, target)
+        edge.amount = edge.amount - share
+        edge.released = True
+        return share
+
+    def abandon(self, name: str) -> ResourceVector:
+        """Mark ``name`` dead; refund its unconsumed budget to its parents.
+
+        A node that times out or crashes otherwise leaves a stranded
+        allocation that silently corrupts every downstream residual for the
+        rest of a run — the failure mode the M4b pilot produced 8 times.
+        """
+        self._require_node(name)
+        if name == self.ROOT:
+            raise ValueError("cannot abandon the root node")
+        node = self._nodes[name]
+        if node.abandoned:
+            raise ValueError(f"node '{name}' already abandoned")
+
+        reclaimed = ResourceVector.ZERO
+        for edge in list(self._edges.values()):
+            if edge.target == name:
+                share = self._refund_share(edge, name)
+                edge.amount = edge.amount - share
+                edge.released = True
+                reclaimed = reclaimed + share
+        node.abandoned = True
+        return reclaimed
+
+    def is_reachable(self, name: str) -> bool:
+        """False if ``name`` is abandoned or every path to it passes an abandoned node."""
+        self._require_node(name)
+        if self._nodes[name].abandoned:
+            return False
+        if name == self.ROOT:
+            return True
+        funders = [e.source for e in self._edges.values() if e.target == name]
+        return any(self.is_reachable(source) for source in funders)
+
+    def _refund_share(self, edge: EdgeAllocation, target: str) -> ResourceVector:
+        """Edge's proportional share of ``target``'s unused budget."""
+        originals = self.original_in_flow(target)
+        pool = originals - self._consumed(target) - self.out_flow(target)
+        assert edge.original_amount is not None  # set in __post_init__
+        return self._proportional_share(edge.original_amount, originals, pool)
+
+    @staticmethod
+    def _proportional_share(
+        original: ResourceVector, total: ResourceVector, pool: ResourceVector
+    ) -> ResourceVector:
+        """``original / total * pool``, floored at zero, integers rounded down."""
+
+        def scalar(part: float | None, whole: float | None, available: float | None) -> float:
+            if part is None or not whole or available is None or available <= 0:
+                return 0.0
+            return available * (part / whole)
+
+        per_tool = {}
+        for tool, part in original.per_tool.items():
+            per_tool[tool] = int(
+                scalar(part, total.per_tool.get(tool, 0), pool.per_tool.get(tool, 0))
+            )
+
+        return ResourceVector(
+            tokens=int(scalar(original.tokens, total.tokens, pool.tokens)),
+            cost_usd=scalar(original.cost_usd, total.cost_usd, pool.cost_usd),
+            tool_invocations=int(
+                scalar(original.tool_invocations, total.tool_invocations, pool.tool_invocations)
+            ),
+            iterations=int(scalar(original.iterations, total.iterations, pool.iterations)),
+            per_tool=per_tool,
+        )
