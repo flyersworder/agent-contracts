@@ -850,3 +850,40 @@ class TestThreadSafety:
             t.join()
 
         assert len(errors) == 0, f"Concurrent access raised exceptions: {errors}"
+
+
+def test_add_iteration_increments_usage() -> None:
+    usage = ResourceUsage()
+    usage.add_iteration()
+    usage.add_iteration()
+    assert usage.iterations == 2
+
+
+def test_iterations_over_limit_reports_violation() -> None:
+    monitor = ResourceMonitor(ResourceConstraints(iterations=2))
+    for _ in range(3):
+        monitor.usage.add_iteration()
+    violations = monitor.check_constraints()
+    assert any(v.resource == "iterations" for v in violations)
+    violation = next(v for v in violations if v.resource == "iterations")
+    assert violation.limit == 2
+    assert violation.actual == 3
+
+
+def test_iterations_at_limit_is_not_a_violation() -> None:
+    monitor = ResourceMonitor(ResourceConstraints(iterations=2))
+    for _ in range(2):
+        monitor.usage.add_iteration()
+    assert not any(v.resource == "iterations" for v in monitor.check_constraints())
+
+
+def test_iterations_unlimited_when_none() -> None:
+    monitor = ResourceMonitor(ResourceConstraints())
+    for _ in range(100):
+        monitor.usage.add_iteration()
+    assert not any(v.resource == "iterations" for v in monitor.check_constraints())
+
+
+def test_negative_iterations_rejected() -> None:
+    with pytest.raises(ValueError, match="iterations must be non-negative"):
+        ResourceUsage(iterations=-1)

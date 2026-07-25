@@ -171,8 +171,6 @@ def _generate_budget_section(contract: Contract, current_usage: ResourceUsage | 
 
     # Iterations limit (maps to LLM calls in multi-turn execution)
     if resources.iterations is not None:
-        # Note: We don't track iterations in ResourceUsage currently,
-        # so we show total limit without usage tracking
         lines.append(
             f"- LLM Calls: {resources.iterations} maximum (plan your reasoning steps accordingly)"
         )
