@@ -1573,8 +1573,16 @@ Append to the same file:
 
 ```python
 def _random_dag(rng: random.Random, root_tokens: int) -> tuple[DelegationGraph, list[str]]:
-    """Build a random DAG. Node i may only receive edges from nodes < i, which
-    guarantees acyclicity by construction."""
+    """Build a random DAG in which every node is funded.
+
+    Node ``i`` only ever receives edges from nodes ``< i``, so the result is
+    acyclic by construction. Each target is offered candidates in random order
+    and takes the first one or two with headroom; the root is always a
+    candidate and each allocation takes at most half the funder's headroom, so
+    with at most 7 nodes the root retains at least ``root_tokens / 2**7``
+    tokens and can always fund. Every node therefore gets at least one in-edge,
+    the graph always seals, and the test never skips.
+    """
     graph = DelegationGraph(_root(root_tokens))
     names = [DelegationGraph.ROOT]
     for i in range(rng.randint(2, 7)):
@@ -1585,12 +1593,18 @@ def _random_dag(rng: random.Random, root_tokens: int) -> tuple[DelegationGraph, 
     for target_index in range(1, len(names)):
         target = names[target_index]
         candidates = names[:target_index]
-        funders = rng.sample(candidates, k=rng.randint(1, min(2, len(candidates))))
-        for source in funders:
+        rng.shuffle(candidates)
+        wanted = rng.randint(1, min(2, len(candidates)))
+        funded = 0
+        for source in candidates:
             headroom = graph.residual(source).tokens
-            if headroom is None or headroom <= 1:
+            if headroom is None or headroom < 2:
                 continue
             graph.allocate(source, target, tokens=rng.randint(1, headroom // 2))
+            funded += 1
+            if funded == wanted:
+                break
+        assert funded > 0, f"generator left '{target}' unfunded; root should always have headroom"
     return graph, names
 
 
@@ -1601,10 +1615,9 @@ def test_local_invariants_imply_global_bound(seed):
     root_tokens = 100_000
     graph, names = _random_dag(rng, root_tokens)
 
-    # Prune orphans so the graph seals, then spend up to each node's residual.
-    for name in list(names):
-        if name != DelegationGraph.ROOT and not graph.contributing_edges(name):
-            pytest.skip("generator produced an orphan; seed exercises a different shape")
+    for name in names:
+        if name != DelegationGraph.ROOT:
+            assert graph.contributing_edges(name), f"'{name}' must be funded"
     graph.seal()
 
     for name in names:
@@ -1623,7 +1636,7 @@ def test_local_invariants_imply_global_bound(seed):
 - [ ] **Step 4: Run the tests**
 
 Run: `uv run pytest tests/core/test_delegation_graph_properties.py -v`
-Expected: PASS. Skips are acceptable when the generator produces an orphan; if every seed skips, widen the generator rather than weakening the assertion.
+Expected: PASS, 20 parametrized cases, **zero skips**. A skip here is a bug in the generator, not an acceptable outcome — every seed must reach `graph.verify()` and assert the global bound.
 
 - [ ] **Step 5: Run the full suite with coverage**
 
