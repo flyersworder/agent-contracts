@@ -145,8 +145,13 @@ class ResourceConstraints:
         reasoning_effort: How deeply model should think ("low"/"medium"/"high") (None = auto)
         api_calls: Maximum API calls allowed (None = unlimited)
         iterations: Maximum agent loop iterations (None = unlimited).
-            For Google ADK, this maps to RunConfig.max_llm_calls.
-            For LangGraph, this maps to recursion_limit.
+            Honored by the Google ADK integration (mapped to
+            RunConfig.max_llm_calls) and the Claude Agent SDK integration
+            (mapped to max_turns). The LiteLLM, LangChain, and LangGraph
+            integrations do NOT currently track or enforce it — setting it
+            has no effect there. ResourceUsage.iterations exists and
+            ResourceMonitor.check_constraints() reports a violation when it
+            is exceeded, but nothing in the library increments it yet.
         web_searches: Maximum web searches allowed (None = unlimited)
         tool_invocations: Maximum tool uses allowed (None = unlimited)
         per_tool_limits: Per-tool invocation limits (tool_name -> max_calls)
