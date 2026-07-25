@@ -263,6 +263,14 @@ is materialized with its summed in-flow as `ResourceConstraints`, the existing
 including strict/lenient modes, callbacks, and per-tool priority ordering. The graph
 layer owns only the edges.
 
+**One exception, stated rather than glossed:** `ResourceConstraints.per_tool_limits` has
+no deny-by-default notion, so a monitor cannot flag a tool its constraints never mention.
+Use of an *undeclared* tool is therefore caught by `verify()` / `check_node()` alone, not
+by the node-local monitor. Every other dimension, and every declared per-tool limit, is
+enforced node-locally as described above. Contracting a node with an explicit `0` for the
+tools it must not use (M6 arm 3's aggregator) restores node-local enforcement, which is
+one more reason a zero grant has to be legal.
+
 ### 6.2 Violation payload and blame
 
 `FlowConservationError` carries `node_id`, `dimension`, `in_flow`, `consumed`,
