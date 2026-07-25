@@ -224,6 +224,7 @@ class DelegationGraph:
 
         prospective_out = self.out_flow(source) + amount
         source_in_flow = self.in_flow(source)
+        self._require_per_tool_propagation(source, amount, source_in_flow)
         source_consumed = self._consumed(source)
         if not source_consumed + prospective_out <= source_in_flow:
             self._raise_flow_error(
@@ -238,6 +239,39 @@ class DelegationGraph:
         self._edges[key] = edge
         return edge
 
+    def _require_per_tool_propagation(
+        self, source: str, amount: ResourceVector, source_in_flow: ResourceVector
+    ) -> None:
+        """Reject a per-tool grant the source's own in-flow does not constrain.
+
+        ``ResourceVector.__le__`` compares only the keys the *budget* side
+        names — the convention ``AllocationRecord`` already documents — so a
+        tool missing from a node's in-flow is unconstrained rather than zero.
+        Without this rule a node funded with no experiment budget could grant
+        experiments without limit, and the M6 conserved resource is exactly
+        that per-tool dimension.
+
+        The root is exempt: its budget is exogenous, so a tool it leaves
+        unconstrained is genuinely unbounded rather than absent.
+        """
+        if source == self.ROOT:
+            return
+        for tool in sorted(amount.per_tool):
+            if tool in source_in_flow.per_tool:
+                continue
+            granted = amount.per_tool[tool]
+            raise FlowConservationError(
+                f"node '{source}' cannot grant tool '{tool}': its in-flow does not "
+                f"constrain that tool, so the grant would be unbounded downstream",
+                node_id=source,
+                dimension=f"tool:{tool}",
+                in_flow=0,
+                consumed=0,
+                out_flow=granted,
+                deficit=granted,
+                contributing_edges=self.contributing_edges(source),
+            )
+
     @property
     def is_sealed(self) -> bool:
         return self._sealed
@@ -246,9 +280,11 @@ class DelegationGraph:
         """Validate the whole graph and freeze its topology.
 
         Checks: every non-root node has at least one in-edge; no node's
-        out-flow exceeds its in-flow; per-tool allocations are consistent with
-        the funding side. Acyclicity is maintained incrementally by
-        ``allocate()``.
+        out-flow exceeds its in-flow; no node names a per-tool budget in its
+        out-edges that its own in-flow does not constrain (the root excepted —
+        its budget is exogenous). Acyclicity is maintained incrementally by
+        ``allocate()``, which also rejects the per-tool case edge by edge; the
+        lint here is the independent whole-graph check.
 
         Idempotent: sealing an already-sealed graph is a no-op.
         """
@@ -263,9 +299,17 @@ class DelegationGraph:
                 problems.append(f"node '{name}' is an orphan: no in-edge funds it")
 
         for name in self._nodes:
+            in_flow = self.in_flow(name)
             out = self.out_flow(name)
-            if not out <= self.in_flow(name):
+            if not out <= in_flow:
                 problems.append(f"node '{name}' out-flow exceeds in-flow")
+            if name == self.ROOT:
+                continue
+            for tool in sorted(out.per_tool):
+                if tool not in in_flow.per_tool:
+                    problems.append(
+                        f"node '{name}' grants tool '{tool}' that its in-flow does not constrain"
+                    )
 
         if problems:
             raise GraphLintError(problems)

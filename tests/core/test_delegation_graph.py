@@ -7,6 +7,7 @@ from agent_contracts.core.delegation_graph import (
     DelegationGraph,
     FlowConservationError,
 )
+from agent_contracts.core.resource_vector import ResourceVector
 
 
 def make_root(**kwargs) -> Contract:
@@ -73,6 +74,81 @@ def test_per_tool_over_allocation_raises():
     graph.add_node("child")
     with pytest.raises(FlowConservationError):
         graph.allocate(DelegationGraph.ROOT, "child", per_tool={"exp": 60})
+
+
+def test_per_tool_grant_of_a_tool_the_source_lacks_is_rejected():
+    """The conserved resource in M6 *is* the per-tool dimension.
+
+    ``ResourceVector.__le__`` compares only the keys the budget side names, so
+    a node whose in-flow omits a tool would otherwise be free to hand that tool
+    out without limit.
+    """
+    graph = DelegationGraph(make_root())  # root constrains exp to 59
+    graph.add_node("mid")
+    graph.add_node("leaf")
+    graph.allocate(DelegationGraph.ROOT, "mid", tokens=1_000, tool_invocations=150)
+
+    with pytest.raises(FlowConservationError) as excinfo:
+        graph.allocate("mid", "leaf", per_tool={"exp": 150})
+    assert "exp" in str(excinfo.value)
+    assert excinfo.value.node_id == "mid"
+
+
+def test_root_may_grant_a_tool_it_leaves_unconstrained():
+    """The root's budget is exogenous: an unconstrained tool at the root is
+    unbounded, not absent."""
+    root = Contract(id="r", name="R", resources=ResourceConstraints(tokens=1_000))
+    graph = DelegationGraph(root)
+    graph.add_node("child")
+    graph.allocate(DelegationGraph.ROOT, "child", per_tool={"exp": 10})
+    assert graph.in_flow("child").per_tool == {"exp": 10}
+
+
+def test_per_tool_propagates_down_a_chain():
+    graph = DelegationGraph(make_root())
+    graph.add_node("mid")
+    graph.add_node("leaf")
+    graph.allocate(DelegationGraph.ROOT, "mid", per_tool={"exp": 30})
+    graph.allocate("mid", "leaf", per_tool={"exp": 10})
+    graph.seal()
+    assert graph.contract_for("leaf").resources.per_tool_limits == {"exp": 10}
+
+
+def test_zero_per_tool_grant_is_constrained_not_unconstrained():
+    """M6 arm 3 gives the aggregator zero experiments; that must materialize as
+    a limit of 0, never as an absent (i.e. unlimited) key."""
+    graph = DelegationGraph(make_root())
+    graph.add_node("mid")
+    graph.add_node("aggregator")
+    graph.allocate(DelegationGraph.ROOT, "mid", tokens=10, per_tool={"exp": 30})
+    graph.allocate("mid", "aggregator", tokens=5, per_tool={"exp": 0})
+    graph.seal()
+    assert graph.contract_for("aggregator").resources.per_tool_limits == {"exp": 0}
+    monitor = graph.monitor_for("aggregator")
+    monitor.usage.add_tool_invocation("exp")
+    assert any(v.resource == "tool:exp" for v in monitor.check_constraints())
+
+
+def test_seal_lints_out_edges_naming_a_tool_the_in_flow_does_not_constrain():
+    from agent_contracts.core.delegation_graph import EdgeAllocation, GraphLintError
+
+    graph = DelegationGraph(make_root())
+    graph.add_node("mid")
+    graph.add_node("leaf")
+    graph.allocate(DelegationGraph.ROOT, "mid", tokens=1_000)
+    graph.allocate("mid", "leaf", tokens=10)
+    # allocate() rejects this at build time; the seal() lint is the independent
+    # whole-graph check, so exercise it by planting the edge directly.
+    graph._edges["mid->leaf"] = EdgeAllocation(
+        source="mid",
+        target="leaf",
+        amount=ResourceVector(
+            tokens=10, cost_usd=0.0, tool_invocations=0, iterations=0, per_tool={"exp": 5}
+        ),
+    )
+    with pytest.raises(GraphLintError) as excinfo:
+        graph.seal()
+    assert any("exp" in problem for problem in excinfo.value.problems)
 
 
 def test_unbounded_parent_allows_any_finite_allocation():
