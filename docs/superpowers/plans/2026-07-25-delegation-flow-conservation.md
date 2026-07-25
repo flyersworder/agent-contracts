@@ -1435,7 +1435,12 @@ Append to `DelegationGraph`:
 
         reclaimed = ResourceVector.ZERO
         for edge in list(self._edges.values()):
-            if edge.target == name:
+            # Skip edges already released: `_refund_share` computes the pool
+            # from ORIGINAL in-flow, so a released edge would compute the same
+            # share a second time, drive its amount negative, and double-credit
+            # the parent. This is not the forbidden "filter flow queries on
+            # released" — in_flow/out_flow stay unfiltered; only refunds skip.
+            if edge.target == name and not edge.released:
                 share = self._refund_share(edge, name)
                 edge.amount = edge.amount - share
                 edge.released = True
@@ -1620,17 +1625,22 @@ def test_local_invariants_imply_global_bound(seed):
             assert graph.contributing_edges(name), f"'{name}' must be funded"
     graph.seal()
 
+    # Saturate: every node consumes its ENTIRE residual. Consuming a random
+    # fraction instead leaves roughly 2x slack under the bound, which lets a
+    # diamond that double-counts its in-flow pass undetected on all 10 seeds
+    # (verified by mutation testing). Saturation makes the telescoping identity
+    # tight, so the assertion below is an equality, not a loose inequality.
     for name in names:
         headroom = graph.residual(name).tokens
         if headroom and headroom > 0:
-            graph.monitor_for(name).usage.add_tokens(rng.randint(0, headroom))
+            graph.monitor_for(name).usage.add_tokens(headroom)
 
     graph.verify()  # every local invariant holds
 
     total_consumed = sum(
         ResourceVector.from_usage(graph.monitor_for(name).usage).tokens for name in names
     )
-    assert total_consumed <= root_tokens
+    assert total_consumed == root_tokens
 ```
 
 - [ ] **Step 4: Run the tests**
@@ -1641,7 +1651,7 @@ Expected: PASS, 20 parametrized cases, **zero skips**. A skip here is a bug in t
 - [ ] **Step 5: Run the full suite with coverage**
 
 Run: `uv run pytest -q --cov=agent_contracts --cov-report=term:skip-covered`
-Expected: 1145 passed, 1 skipped (Task 7 adds 2 tests × 10 seeds); coverage at or above 90%.
+Expected: 1146 passed, 1 skipped (Task 7 adds 2 tests × 10 seeds on top of Task 6's 1126); coverage at or above 90%.
 
 - [ ] **Step 6: Commit**
 
@@ -1709,7 +1719,7 @@ Add each name to `__all__`, keeping the list's existing ordering convention.
 - [ ] **Step 4: Run the full suite**
 
 Run: `uv run pytest -q`
-Expected: 1146 passed, 1 skipped.
+Expected: 1147 passed, 1 skipped.
 
 - [ ] **Step 5: Verify the docs example runs**
 
