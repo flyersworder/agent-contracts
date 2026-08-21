@@ -90,7 +90,7 @@ This document tracks development progress and key decisions for the Agent Contra
   - Sidecar: `runs/m4-pilot.jsonl` (450 lines, kept for audit).
 
 **Metrics**:
-- **Tests**: 1224 passing / 1 skipped (chamber pillar ~250; delegation graphs ~150)
+- **Tests**: 1235 passing / 1 skipped (chamber pillar ~250; delegation graphs ~150)
 - **Coverage**: 81%+
 - **Integrations**: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, **Causal Chambers**
 
@@ -365,6 +365,79 @@ resolved dependency set dropped from **202 → 151 packages (51 removed, 0 added
   `uv sync`. Chamber sweeps use the `chambers` extra + DeepSeek-via-LiteLLM
   (not ADK), so sweeps are unaffected — but the install footprint will shift.
 
+### The httpx2 / MCP 2.0 split (Aug 21, 2026, PR #86)
+
+A full `uv lock --upgrade` (151 → 153 packages). The HTTP client ecosystem
+has **forked into two coexisting distributions**, and this repo now resolves
+both at once.
+
+- **`httpx2` is a separate PyPI package, not httpx version 2.0.** Classic
+  `httpx` is still at 0.28.1 (its own next major sits unreleased in `1.0.dev*`
+  prereleases). `httpx2` renames *both* the distribution and the import
+  namespace — the wheel installs top-level `httpx2/`, so `import httpx` and
+  `import httpx2` are different modules and the two **cannot collide**. That
+  rename is what let each consumer migrate on its own schedule.
+- **Who moved**: `openai` 3.x (`httpx2<3,>=2.7.0`), `anthropic` 1.x
+  (`httpx2<3,>=2.0.0`), `mcp` 2.x (`httpx2>=2.5.0`). **Who did not**:
+  `litellm` 1.97 still requires `httpx<1.0` **and** caps `openai<3.0.0`.
+- **Net effect here**: litellm pins us to `openai` 2.54.0 (classic httpx;
+  it offers httpx2 only via an opt-in `[httpx2]` extra — the bridge release),
+  while `mcp` 2.0 pulls `httpx2` in through `claude-agent-sdk`. Both stacks
+  are installed: **httpx 0.28.1 + httpx2 2.12.0**. Not a bug; expect the
+  duplicated HTTP footprint until litellm crosses over.
+- **MCP 2.0 reaches us transitively only — we never `import mcp`.**
+  `Capabilities.mcp_servers` emits the *provider-side* remote-MCP tool schema
+  for LiteLLM (`type: "mcp"`, `server_url`, `require_approval`), which is a
+  wire format independent of the Python SDK; `claude_agent_sdk.py` passes
+  servers through to the CLI. Every v2 breaking change (`FastMCP` →
+  `MCPServer`, the consolidated `Client`) is in surface we do not touch.
+  **mcp 1.x is now security-fixes-only**, so 2.0 is the maintained path, not
+  an optional bump. Latent: **v2 enables OpenTelemetry tracing by default** —
+  dormant here since we never instantiate a server or client.
+- **Package churn**: added `httpx2`, `httpcore2`, `httpx2-jsfetch`,
+  `mcp-types` (v2 splits every protocol type into its own lock-step package),
+  `narwhals`, `ast-serialize`, `joserfc`, `python-discovery`, `truststore`.
+  Removed `httpx-sse`, `pyopenssl`, and the `typer`/`rich`/`shellingham` CLI
+  stack that mcp 1.x pulled in.
+- **Verification**: 1235 passed / 1 skipped / 91% cov; `mypy 2.3.1 --strict`
+  clean. Crucially, **passing tests are not sufficient evidence here** — every
+  integration wraps its SDK import in `try/except ImportError` that stubs the
+  symbols to `Any`, so the suite stays green with an SDK completely broken.
+  All six `*_AVAILABLE` flags were confirmed `True` at runtime; that is what
+  actually validates `claude-agent-sdk` 0.1.50 → 0.2.143 across the mcp 1→2
+  boundary.
+
+### Dependency floors raised to tested versions (Aug 21, 2026, PR #86)
+
+Follow-through on the google-adk lesson above. The declared floors had drifted
+far below what CI exercises — `langchain>=0.3.0` while testing 1.3.16,
+`langgraph>=0.2.0` while testing 1.2.11, `google-adk>=1.18.0` while testing
+2.7.1, `pandas>=2.0` while testing 3.0.5 — which made the published support
+claim unverifiable. Floors now sit at the tested `major.minor`.
+
+**Re-locking after the change produced a byte-identical resolution**, so this
+corrected published metadata without moving a single installed version. No
+ceilings were added (deliberate call — keeps users free to adopt new majors);
+the pre-existing `numpy <2.6` bound is retained. Note this means a silent
+major jump like google-adk's is still *possible*; the floor raise makes the
+claim honest, it does not prevent recurrence.
+
+### pre-commit / CI linter skew (Aug 21, 2026, PR #86)
+
+`ruff-pre-commit` was pinned at v0.15.7 while the dev group had moved to ruff
+0.16.4 — **hooks and CI were running different linter versions**, which is why
+ruff 0.16's newly-promoted `UP042` had never surfaced. `pre-commit autoupdate`
+realigned them (ruff v0.16.4, uv-pre-commit 0.12.5, markdownlint v0.49.1).
+Worth re-checking whenever the ruff dev pin moves.
+
+UP042 flagged two `class X(str, Enum)` definitions in `benchmarks/governance/`
+(CI lints only `src/` and `tests/`, so these were reachable only via
+pre-commit's all-files scan). Migrated to `enum.StrEnum`. **This is not a
+cosmetic swap** — a `str`+`Enum` mixin renders as `"X.A"` under `str()` and
+f-strings, while `StrEnum` renders the *value*, `"a"`. It was safe here only
+because every stringification in those modules goes through an explicit
+`.value`. Check that before applying UP042 anywhere else.
+
 ## File Structure
 
 ```
@@ -520,8 +593,8 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
 
 ---
 
-*Last Updated: 2026-07-25 (v0.4.0 — delegation graphs / flow conservation; M6 revised to the loop-vs-graph topology benchmark)*
-*Status: Production-ready, v0.4.0, 1224 tests passing (1 skipped), 91% coverage*
+*Last Updated: 2026-08-21 (dependency graph upgraded into the httpx2 / MCP 2.0 era; floors raised to tested versions — PR #86)*
+*Status: Production-ready, v0.4.0, 1235 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
 *Pilot dataset: `runs/m4-pilot.parquet` (450 cells, 442 ok, 8 timeouts) — submission-ready for AAMAS 2027 / ECAI 2027*
