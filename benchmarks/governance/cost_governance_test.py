@@ -37,7 +37,7 @@ For each question:
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import cast
 
@@ -46,7 +46,7 @@ from benchmarks.research_agent.evaluator import QualityEvaluator
 from benchmarks.research_agent.uncontracted_agent import UncontractedResearchAgent
 
 
-class QuestionComplexity(str, Enum):
+class QuestionComplexity(StrEnum):
     """Complexity levels for questions."""
 
     SIMPLE = "simple"  # Basic factual questions
