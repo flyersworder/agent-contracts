@@ -31,7 +31,7 @@ Test questions with different budget levels:
 
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -40,7 +40,7 @@ from benchmarks.research_agent.contracted_agent import ContractedResearchAgent
 from benchmarks.research_agent.evaluator import QualityEvaluator
 
 
-class BudgetLevel(str, Enum):
+class BudgetLevel(StrEnum):
     """Budget constraint levels."""
 
     GENEROUS = "generous"  # 100% of typical usage
