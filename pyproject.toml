@@ -1,7 +1,7 @@
 [project]
 name = "ai-agent-contracts"
 # Version must match src/agent_contracts/__init__.py:__version__
-version = "0.4.0"
+version = "0.5.0"
 description = "A formal framework for governing autonomous AI agents through explicit resource constraints and temporal boundaries"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -84,7 +84,8 @@ packages = ["src/agent_contracts"]
 # the library and its test suite — plus the metadata files. Everything else in
 # this repository is research apparatus, not part of the distribution:
 # `evaluation/` and `results/` hold experiment pipelines, figures, and run
-# output (2.6 MB and 1.7 MB respectively); `benchmarks/` holds demo scripts;
+# output (2.6 MB and 212 KB respectively, measured in the published 0.4.0
+# sdist); `benchmarks/` holds demo scripts;
 # `docs/` is published on GitHub and linked from the README; `uv.lock` pins a
 # development environment that an installer resolves fresh anyway.
 #

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-22
+
 ### Changed
 
 - **The dependency graph moved into the `httpx2` / MCP 2.0 era** (151 → 153 packages). The HTTP client ecosystem has forked, and this project now resolves both halves of it at once. `httpx2` is a *separate distribution*, not httpx version 2.0 — classic `httpx` remains at 0.28.1, and `httpx2` renames both the package and the import namespace (`import httpx2`), so the two are distinct modules that cannot collide. `openai` 3.x, `anthropic` 1.x, and `mcp` 2.x have crossed over; `litellm` 1.97 has not, and additionally caps `openai<3.0.0`. The result is `httpx` 0.28.1 and `httpx2` 2.12.0 installed side by side — expected, not a resolution fault, and it persists until litellm migrates.
@@ -17,13 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Dependency floors raised to the versions actually under test.** The declared floors had drifted well below what CI exercises — `langchain>=0.3.0` while testing 1.3.16, `langgraph>=0.2.0` while testing 1.2.11, `google-adk>=1.18.0` while testing 2.7.1, `pandas>=2.0` while testing 3.0.5 — so the package advertised support for combinations that were never verified. Floors now sit at the tested `major.minor`.
 
-  This narrows what the extras will install: `pip install ai-agent-contracts[langchain]` no longer resolves LangChain 0.3.x, and the equivalent applies to the `langgraph`, `google-adk`, `claude-agent-sdk`, `eval`, and `chambers` extras. **The base package is effectively unaffected** — its only runtime dependency is `python-dotenv`, whose floor moved 1.0.0 → 1.2. No upper bounds were introduced, so adopting a new major of any integration remains possible without waiting on a release here; the pre-existing `numpy<2.6` bound is retained. Re-locking after the change produced a byte-identical resolution, so no installed version moved.
+  This narrows what the extras will install: `pip install ai-agent-contracts[langchain]` no longer resolves LangChain 0.3.x, and the equivalent applies to the `langgraph`, `google-adk`, `claude-agent-sdk`, `eval`, and `chambers` extras. **The base package is effectively unaffected** — its only runtime dependency is `python-dotenv`, whose floor moved 1.0.0 → 1.2. No upper bounds were introduced, so adopting a new major of any integration remains possible without waiting on a release here; the pre-existing `numpy<2.6` bound is retained. Re-locking after the *floor change alone* produced a byte-identical resolution, so raising the floors moved no installed version; the separate refresh below does move two.
 
-- **The sdist now ships only the library, its test suite, and metadata** — 2.9 MB to 196 KB, a 93% reduction. Every previous release published the whole repository, so `ai_agent_contracts-0.4.0.tar.gz` carried 2.6 MB of experiment pipelines and figures from `evaluation/`, 1.7 MB of run output from `results/` (a single 984 KB JSON file among it), plus `benchmarks/`, `docs/`, `uv.lock`, and the project's AI memory file. None of it is needed to build, install, or verify the package. `pyproject.toml` gains an explicit `[tool.hatch.build.targets.sdist]` allowlist, so new top-level directories cannot start shipping unnoticed.
+- **Dependency refresh at release time.** `claude-agent-sdk` 0.2.143 → 0.2.144, and `scipy` 1.18.0 → 1.18.1 in the dev group. Everything else re-resolved unchanged — 153 packages before and after, nothing added or removed. Both sit inside floors this release already declares, so no `Requires-Dist` line moves and the published metadata is unaffected.
 
-  `tests/evaluation` is excluded along with the `evaluation/` package it covers — those tests failed collection from an sdist in any environment, since their subject was never present. The remaining suite runs from the extracted archive: 876 passed, 24 skipped.
+  One packaging caveat worth knowing: **`claude-agent-sdk` 0.2.144 publishes no `win_amd64` wheel**, where 0.2.143 did. Windows installs therefore fall back to its sdist. That sdist installs cleanly — it is pure Python — but it does not carry the ~100 MB bundled Claude Code CLI that the platform wheels do, so `query()` needs a `claude` binary on `PATH` there. Import-time capability checks such as `CLAUDE_AGENT_SDK_AVAILABLE` are unaffected, and this project's tests stub the SDK, so nothing here changes on any platform. Users needing the bundled CLI on Windows should pin `claude-agent-sdk==0.2.143` until upstream restores the wheel.
 
-  **The wheel is unaffected** — rebuilt after this change it is bit-for-bit identical (sha256 `104b99ee…`) to the wheel published for 0.4.0, so `pip install ai-agent-contracts` is unchanged. Only source installs, mirrors, and downstream packagers see the difference.
+- **The sdist now ships only the library, its test suite, and metadata** — from 2.39 MB to under 200 KB, a 92% reduction. Every previous release published the whole repository, so `ai_agent_contracts-0.4.0.tar.gz` carried 2.6 MB of experiment pipelines and figures from `evaluation/`, 212 KB of run output from `results/`, and a 734 KB `uv.lock` (the single largest file in the archive), plus `benchmarks/`, `docs/`, `.github/`, and `claude.md` — the project's AI development-memory file, which records internal infrastructure notes that have no business on a package index. None of it is needed to build, install, or verify the package. `pyproject.toml` gains an explicit `[tool.hatch.build.targets.sdist]` allowlist, so new top-level directories cannot start shipping unnoticed.
+
+  `tests/evaluation` is excluded along with the `evaluation/` package it covers — those tests failed collection from an sdist in any environment, since their subject was never present. One test *outside* that directory reaches into `evaluation/` as well (`TestM2SmokeRoundTrip`, which imports the chamber scoring helpers); dropping the package turned it from passing to failing, so it now skips when `evaluation` is not importable. The remaining suite runs clean from the extracted archive: with every extra installed, 899 passed and that 1 skipped.
+
+  **The wheel's code is unchanged, but the wheel is not identical to 0.4.0's.** The allowlist governs the source archive alone: extracting the published `0.4.0` wheel alongside this one gives the same file list, differing in just two modules — the `__version__` string and the docstring correction under *Fixed* below. What does change materially is `.dist-info/METADATA`, because the floor raise above rewrites every `Requires-Dist` line. So `pip install ai-agent-contracts` installs the same code as 0.4.0, resolved against the narrowed floors; the sdist shrink is visible only to source installs, mirrors, and downstream packagers.
+
+### Fixed
+
+- **`ResourceConstraints.iterations` documented a mapping that does not exist.** The docstring claimed the constraint maps to `recursion_limit` under LangGraph. It never did. `iterations` is honored by the Google ADK integration (as `RunConfig.max_llm_calls`) and the Claude Agent SDK integration (as `max_turns`); the LiteLLM, LangChain, and LangGraph integrations neither track nor enforce it, so setting it there has no effect. `ResourceUsage.iterations` exists and `ResourceMonitor.check_constraints()` reports a violation when the limit is exceeded, but nothing in the library increments the counter yet. Runtime behavior is unchanged — only the documented claim was wrong.
 
 ## [0.4.0] - 2026-07-25
 
@@ -157,7 +167,8 @@ explicit resource constraints and temporal boundaries.
 - License changed from CC-BY-4.0 (paper) to Apache-2.0 (software)
 - PyPI package name: `ai-agent-contracts` (the name `agent-contracts` was already taken)
 
-[Unreleased]: https://github.com/flyersworder/agent-contracts/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/flyersworder/agent-contracts/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/flyersworder/agent-contracts/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/flyersworder/agent-contracts/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/flyersworder/agent-contracts/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/flyersworder/agent-contracts/compare/v0.3.0...v0.3.1

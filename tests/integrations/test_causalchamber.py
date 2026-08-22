@@ -17,6 +17,7 @@ This file holds three kinds of tests:
 
 from __future__ import annotations
 
+import importlib.util
 from typing import Any
 
 import pytest
@@ -85,6 +86,14 @@ class TestM1ApiSurface:
 requires_causalchamber = pytest.mark.skipif(
     not CAUSAL_CHAMBER_AVAILABLE,
     reason="causalchamber not installed — install with pip install 'ai-agent-contracts[chambers]'",
+)
+
+# `evaluation/` is research apparatus and is deliberately absent from the sdist
+# (see the sdist allowlist in pyproject.toml). Tests that reach into it must
+# therefore skip rather than fail when running from an installed archive.
+requires_evaluation_pkg = pytest.mark.skipif(
+    importlib.util.find_spec("evaluation") is None,
+    reason="`evaluation/` is not shipped in the sdist; run from a repository checkout",
 )
 
 
@@ -312,6 +321,7 @@ class TestM2RunLoop:
 
 
 @requires_causalchamber
+@requires_evaluation_pkg
 class TestM2SmokeRoundTrip:
     """M2 acceptance round-trip: oracle agent → SHD=0, F1=1."""
 

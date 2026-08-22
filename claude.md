@@ -438,6 +438,24 @@ f-strings, while `StrEnum` renders the *value*, `"a"`. It was safe here only
 because every stringification in those modules goes through an explicit
 `.value`. Check that before applying UP042 anywhere else.
 
+### claude-agent-sdk 0.2.144 dropped its Windows wheel (Aug 22, 2026, v0.5.0)
+
+0.2.143 shipped five wheels (macOS arm64/x86_64, manylinux aarch64/x86_64,
+**win_amd64**); 0.2.144 ships four — the Windows one is gone, and 0.2.144 is
+the latest release, so nothing upstream has restored it yet. Windows installs
+fall back to the 345 KB sdist, which **installs cleanly** (pure Python) but
+without the ~100 MB bundled Claude Code CLI the platform wheels carry, so
+`query()` then needs `claude` on `PATH`. Verified by installing the sdist with
+`--no-binary :all:`: import succeeds, 1.0 MB on disk, no bundled binary.
+
+Nothing here breaks: `CLAUDE_AGENT_SDK_AVAILABLE` only tests importability, the
+suite stubs the SDK, and CI is ubuntu-only. Recorded because it is the mirror
+image of the google-adk lesson above — there a *transitive* major rode in
+unnoticed; here a *platform wheel silently disappeared* at the same version
+floor. Neither shows up as a requirement-string change, so only inspecting the
+resolved artifacts catches them. Re-check on the next SDK bump; pin
+`claude-agent-sdk==0.2.143` if a Windows contributor needs the bundled CLI.
+
 ## File Structure
 
 ```
@@ -593,8 +611,8 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
 
 ---
 
-*Last Updated: 2026-08-21 (dependency graph upgraded into the httpx2 / MCP 2.0 era; floors raised to tested versions — PR #86)*
-*Status: Production-ready, v0.4.0, 1235 tests passing (1 skipped), 91% coverage*
+*Last Updated: 2026-08-22 (release 0.5.0: dependency refresh, floors raised to tested versions, slimmed sdist)*
+*Status: Production-ready, v0.5.0, 1235 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
 *Pilot dataset: `runs/m4-pilot.parquet` (450 cells, 442 ok, 8 timeouts) — submission-ready for AAMAS 2027 / ECAI 2027*
