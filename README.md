@@ -646,4 +646,4 @@ If you use this framework in your research, please cite:
 
 ---
 
-**Version**: 0.4.0 | **Last Updated**: July 25, 2026 | **Status**: Production Ready ⭐
+**Version**: 0.5.0 | **Last Updated**: August 22, 2026 | **Status**: Production Ready ⭐
