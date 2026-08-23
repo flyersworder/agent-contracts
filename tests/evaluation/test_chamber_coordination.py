@@ -130,3 +130,31 @@ def test_aggregator_funding_keeps_a_margin_over_the_p95_call():
     a95 = 38752
     graph = build_fan_in_graph(k=30, c95=2303, a95=a95)
     assert graph.in_flow("aggregator").tokens >= 1.5 * a95
+
+
+def test_per_role_budgets_track_the_dearer_scout():
+    """The roles are not interchangeable and must not share one figure.
+
+    Measured through the production provider order, the targeted role costs
+    4.7x the plain one. A shared `c95` under-funds whichever scout reasons
+    harder, and the resulting conservation violations are calibration
+    artifacts rather than real overruns.
+    """
+    graph = build_fan_in_graph(k=30, c95=5969, a95=8557, c95_b=18136)
+    assert graph.in_flow("scout_b").tokens > graph.in_flow("scout_a").tokens
+    graph.verify()
+
+
+def test_fixed_overhead_funds_calls_outside_the_selection_loop():
+    """The team arm's two negotiation rounds are per scout, not per pick."""
+    plain = build_fan_in_graph(k=30, c95=2809, a95=8557)
+    team = build_fan_in_graph(k=30, c95=2809, a95=8557, fixed_overhead=2 * 5001)
+    for node in ("scout_a", "scout_b"):
+        delta = team.in_flow(node).tokens - plain.in_flow(node).tokens
+        assert delta == 2 * 5001
+
+
+def test_symmetric_call_keeps_the_old_behaviour():
+    """`c95_b=None` means both scouts are budgeted identically."""
+    graph = build_fan_in_graph(k=30, c95=2809, a95=8557)
+    assert graph.in_flow("scout_a").tokens == graph.in_flow("scout_b").tokens

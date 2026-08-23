@@ -540,31 +540,49 @@ def _budget_fraction(budget_k: int, menu_size: int) -> float:
     return min(1.0, budget_k / menu_size)
 
 
-# 95th-percentile per-call token costs, from spec §4's table. `c95` is one
-# capped selection call; `a95` is one uncapped aggregation call, isolable
-# because `llm_only` issues exactly k+1 calls. These size the fan-in graph's
-# edges; they do not gate anything at runtime.
+# Per-role 95th-percentile call costs in INPUT+OUTPUT tokens -- what
+# `token_meter` actually counts -- measured 2026-08-23 through the production
+# provider order at k=30.
 #
-# NOTE (2026-08-23): these were measured under M4b's implicit reasoning
-# effort. Pinning `_SELECTION_REASONING_EFFORT="low"` roughly doubled observed
-# per-call selection cost (M4b ~509 tokens/call against ~984 today), so `c95`
-# is conservative-low. It is a sizing input for certification arithmetic, not
-# an enforced cap, so an underestimate shows up as a conservation finding
-# rather than a truncated cell -- but it should be re-measured in the
-# pre-flight calibration run before the full sweep.
-_LADDER_C95: dict[int, int] = {6: 1350, 30: 2303, 45: 2778}
-_LADDER_A95: dict[int, int] = {6: 21163, 30: 38752, 45: 39191}
+# Two things this table encodes that a single `c95` could not:
+#
+#   * The roles are not interchangeable. The targeted framing costs 4.7x the
+#     plain one (10,379 median against 2,205). Budgeting both at one figure
+#     under-funds whichever scout reasons harder, and the resulting
+#     conservation violations are calibration artifacts, not real overruns.
+#   * Providers must be pinned to measure this at all. An unpinned calibration
+#     put broad and targeted within 3% of each other; pinning the order the
+#     orchestrator actually uses showed the 4.7x gap. Measure through the
+#     production path, not a convenient approximation.
+#
+# Sizing is p95, per spec §4. Reconciliation is heavy-tailed (2,354 to 22,627
+# observed), so some cells will exceed their grant. That is reported as an
+# observed conservation rate rather than hidden by over-provisioning, which
+# would make H-C vacuous and push every call below P2's window.
+_ROLE_C95: dict[str, int] = {"plain": 2809, "broad": 5969, "targeted": 18136}
+_A95_RECONCILE = 8557
+_C95_NEGOTIATE = 5001
 
 _LADDER_ARMS = frozenset({"fan_in_homog", "fan_in_spec", "team"})
 _LADDER_NODES = ("scout_a", "scout_b", "aggregator")
 
 
-def _ladder_calibration(budget_k: int) -> tuple[int, int]:
-    """`(c95, a95)` for a budget, falling back to the nearest tabled one."""
-    if budget_k in _LADDER_C95:
-        return _LADDER_C95[budget_k], _LADDER_A95[budget_k]
-    nearest = min(_LADDER_C95, key=lambda k: abs(k - budget_k))
-    return _LADDER_C95[nearest], _LADDER_A95[nearest]
+def _ladder_calibration(spec_name: str) -> tuple[int, int, int, int]:
+    """`(c95_a, c95_b, a95, fixed_overhead)` for one ladder arm.
+
+    Keyed by arm rather than by budget: per-call cost is driven by the role's
+    prompt, not by `k`, which only sets how many calls are made.
+    """
+    if spec_name == "fan_in_spec":  # rung 2: broad + targeted
+        return _ROLE_C95["broad"], _ROLE_C95["targeted"], _A95_RECONCILE, 0
+    if spec_name == "team":  # rung 4: plain, plus two negotiation rounds each
+        return (
+            _ROLE_C95["plain"],
+            _ROLE_C95["plain"],
+            _A95_RECONCILE,
+            2 * _C95_NEGOTIATE,
+        )
+    return _ROLE_C95["plain"], _ROLE_C95["plain"], _A95_RECONCILE, 0
 
 
 def _build_agent_kwargs(
@@ -697,8 +715,14 @@ def run_cell(
         if spec.name in _LADDER_ARMS:
             from evaluation.chamber_pipeline.coordination import build_fan_in_graph
 
-            c95, a95 = _ladder_calibration(budget_k)
-            graph = build_fan_in_graph(k=budget_k, c95=c95, a95=a95)
+            c95_a, c95_b, a95, overhead = _ladder_calibration(spec.name)
+            graph = build_fan_in_graph(
+                k=budget_k,
+                c95=c95_a,
+                a95=a95,
+                c95_b=c95_b,
+                fixed_overhead=overhead,
+            )
             meter = counting_llm
             extra = {
                 "node_monitors": {n: graph.monitor_for(n) for n in _LADDER_NODES},

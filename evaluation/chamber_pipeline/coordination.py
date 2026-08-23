@@ -38,7 +38,13 @@ def overlap_fraction(chosen_a: list[str], chosen_b: list[str]) -> float | None:
     return shared / min(len(set(chosen_a)), len(set(chosen_b)))
 
 
-def build_fan_in_graph(k: int, c95: int, a95: int) -> DelegationGraph:
+def build_fan_in_graph(
+    k: int,
+    c95: int,
+    a95: int,
+    c95_b: int | None = None,
+    fixed_overhead: int = 0,
+) -> DelegationGraph:
     """Budget graph for the fan-in rungs: two scouts feeding one aggregator.
 
     This is the topology a tree cannot express (whitepaper §4.6 P2). The
@@ -49,8 +55,16 @@ def build_fan_in_graph(k: int, c95: int, a95: int) -> DelegationGraph:
     Args:
         k: Total intervention budget, split between the scouts. An odd budget
             gives the remainder to ``scout_a``.
-        c95: 95th-percentile tokens for one selection call.
+        c95: 95th-percentile tokens for one of ``scout_a``'s selection calls.
         a95: 95th-percentile tokens for one aggregation call.
+        c95_b: Same for ``scout_b``; defaults to ``c95``. The roles are NOT
+            interchangeable — measured through the production provider order,
+            the targeted role costs 4.7x the plain one (10,379 median tokens
+            against 2,205), so one shared figure under-budgets whichever scout
+            reasons harder and produces conservation violations that are
+            calibration artifacts rather than real overruns.
+        fixed_overhead: Per-scout tokens for calls outside the selection loop,
+            such as the team arm's two negotiation rounds.
 
     Returns:
         A sealed graph with nodes ``scout_a``, ``scout_b``, ``aggregator``.
@@ -68,7 +82,12 @@ def build_fan_in_graph(k: int, c95: int, a95: int) -> DelegationGraph:
     # would have demonstrated nothing about P2, and the aggregator would have
     # been over-provisioned 2x besides.
     forward = math.ceil(0.75 * a95)
-    scout_tokens = math.ceil(2 * c95 * math.ceil(k / 2)) + forward
+    c95_b = c95 if c95_b is None else c95_b
+    tokens_a = math.ceil(2 * c95 * math.ceil(k / 2)) + forward + fixed_overhead
+    tokens_b = math.ceil(2 * c95_b * (k // 2)) + forward + fixed_overhead
+    # The root must fund whichever scout is dearer, twice over, or sealing
+    # fails before a single cell runs.
+    scout_tokens = max(tokens_a, tokens_b)
     root = Contract(
         id=f"m6-root-k{k}",
         name="M6 root",
@@ -92,14 +111,14 @@ def build_fan_in_graph(k: int, c95: int, a95: int) -> DelegationGraph:
     graph.allocate(
         DelegationGraph.ROOT,
         "scout_a",
-        tokens=scout_tokens,
+        tokens=tokens_a,
         tool_invocations=math.ceil(k / 2),
         per_tool={"intervene": math.ceil(k / 2), "observe": 0},
     )
     graph.allocate(
         DelegationGraph.ROOT,
         "scout_b",
-        tokens=scout_tokens,
+        tokens=tokens_b,
         tool_invocations=k // 2,
         per_tool={"intervene": k // 2, "observe": 0},
     )
