@@ -1,7 +1,7 @@
 # M6 — Coordination Ladder: Design Spec
 
 **Date:** 2026-08-22 (rev. 2026-08-23, two independent review rounds — see §11)
-**Status:** Approved design, pending implementation plan
+**Status:** Approved design; theory track complete (gate cleared 2026-08-23), implementation track pending
 **Target:** AAMAS 2027 main track (COINE area). Abstract 2026-10-01, paper 2026-10-08.
 **Supersedes:** `docs/causal_chamber_validation_plan.md` §7.7 (see §10)
 
@@ -39,21 +39,39 @@ The chamber is an **instrument for measuring coordination**, nothing more.
 ## 2. Theory: six propositions
 
 Theory is load-bearing: the empirical section may return null on every accuracy
-comparison. §4.6 of `docs/whitepaper.md` currently states P1 as a proof and
-P2–P6 as prose. All six must become numbered propositions with proofs.
+comparison. §4.6 of `docs/whitepaper.md` now states all six as numbered
+propositions, each with a proof and an executable artifact in
+`tests/core/test_delegation_graph_propositions.py`.
+
+**Gate outcome (2026-08-23, six days early): PASS — 5 of 5.** All of P2–P6 have
+a passing artifact (13 tests). P3 was **falsified as stated and restated**; the
+other four survived unchanged. AAMAS 2027 main track remains the target.
 
 | | Proposition | Status | Risk |
 |---|---|---|---|
-| **P1** | Soundness. Local invariant `in-flow ≥ consumption + out-flow` at every node ⇒ `Σ C(v) ≤ B(root)` | proof exists (telescoping) | low — but it is Kirchhoff, and cannot carry the paper alone |
-| **P2** | Tree insufficiency. ∃ DAG *G* with fan-in and execution *E* such that tree-based accounting certifies *E* while `Σ C(v) > B(root)` | asserted only | low |
-| **P3** | Necessity of budget acyclicity. If budget cycles are permitted, ∃ *G*, *E* satisfying the local invariant at every node with `Σ C(v) > B(root)` | asserted only | low |
-| **P4** | Tightness under abandonment. Verification certifies `Σ C(v) ≤ B(root) + Σ refunds`, and ∃ *E* achieving equality | asserted only | medium — needs an explicit construction |
-| **P5** | Confluence of reclamation. Refunds computed against *original* allocations ⇒ final residuals are independent of edge-release order; live-value refunds admit a counterexample | asserted only; `_proportional_share` gives the formula | medium |
-| **P6** | Locality separation. `consumption ≤ in-flow` is node-locally decidable; the `+ out-flow` term is not, under a stated definition of node-local | asserted only | **high** — needs a precise model of "node-local" or it is hand-waving |
+| **P1** | Soundness. Local invariant `in-flow ≥ consumption + out-flow` at every node ⇒ `Σ C(v) ≤ B(root)` | proved, §4.6 P1 | low — retained as the easy half; weight rests on P2–P6 |
+| **P2** | Tree insufficiency. ∃ DAG *G* with fan-in and execution *E* such that tree-based accounting certifies *E* while `Σ C(v) > B(root)` | **proved**, `test_p2_*` (3 tests) | resolved — counterexample: tree admits 110 against B(root)=100 |
+| **P3** | ~~Necessity of budget acyclicity for the static bound.~~ **Restated:** the static bound is cycle-robust; acyclicity is necessary for refund propagation to be well-founded, and is enforced structurally — `allocate()` refuses a cycle-closing edge before inspecting its amount | **restated**, `test_p3_*` (5 tests) | **as stated it was FALSE** — the static bound is cycle-robust; acyclicity buys well-founded reclamation, enforced at allocation time (zero amounts included) |
+| **P4** | Tightness under abandonment. Verification certifies `Σ C(v) ≤ B(root) + Σ refunds`; **tightness is per-node** — an abandoned node may consume up to exactly its frozen pre-refund in-flow, and one unit more is caught | **proved**, `test_p4_abandonment_bound_is_tight` | resolved — tightness is per-node (frozen pre-refund in-flow), not global: `B(root)+Σrefunds` is unsaturable in v1 |
+| **P5** | Confluence of reclamation. Refunds computed against *original* allocations ⇒ final residuals are independent of edge-release order; live-value refunds admit a counterexample | **proved**, `test_p5_*` (3 tests) | resolved — confluent over 200 random graphs; live-value variant is order-dependent |
+| **P6** | Locality separation. `consumption ≤ in-flow` is node-locally decidable; the `+ out-flow` term is not, under a stated definition of node-local | **proved**, `test_p6_locality_separation` | resolved — definition pinned to (own contract, own usage); monitor decides in-flow half, misses out-flow half |
 
-**Go/no-go gate (2026-08-29):** if fewer than three of P2–P6 survive contact with
-a real proof, abandon the AAMAS main-track target. Fall back to deliberate
-Findings submission, or defer to a later venue with M5 data included.
+**Go/no-go gate (2026-08-29): CLEARED 2026-08-23.** The gate required three of
+P2–P6 to survive contact with a real proof; five did. The implementation track
+is unblocked.
+
+Two results changed the paper rather than merely confirming it. **P3 was
+falsified**: the telescoping sum cancels every internal edge whether or not the
+edge set contains a cycle, so acyclicity is nowhere used in the static bound —
+169 random cyclic allocations saturate `B(root)` exactly as 399 acyclic ones do.
+§4.6's previous claim that a budget cycle "collapses" the argument was wrong and
+is now corrected. What acyclicity actually buys is structural: `allocate()`
+refuses a cycle-closing edge before inspecting its amount, so cyclic reclamation
+is unreachable rather than merely detectable. **P4's tightness turned out to be
+per-node, not global** — reclaimed budget is not re-delegatable in v1, so
+`B(root) + Σ refunds` cannot be saturated; the sharp statement is that an
+abandoned node may consume up to its frozen pre-refund in-flow and one unit more
+is caught.
 
 ---
 
