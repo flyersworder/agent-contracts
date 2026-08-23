@@ -29,20 +29,36 @@ if TYPE_CHECKING:
     from agent_contracts.core.delegation_graph import DelegationGraph
 
 
-def _in_edge_tokens(graph: DelegationGraph, node: str) -> list[int]:
-    return [e.amount.tokens or 0 for e in graph.edges() if e.target == node]
+def _in_edge_tokens(graph: DelegationGraph, node: str) -> list[int | None]:
+    """In-edge token grants, preserving `None`.
+
+    `None` is `ResourceVector`'s *unbounded* sentinel, never zero. Collapsing
+    it to 0 would report an unbounded parent as contributing nothing: a node
+    with one unbounded edge and one 6,418-token edge would get
+    `max_tree_fragment == 6418`, and with two unbounded edges every positive
+    call would read as refused by every tree encoding.
+    """
+    return [e.amount.tokens for e in graph.edges() if e.target == node]
 
 
-def dag_capacity(graph: DelegationGraph, node: str) -> int:
+def _is_unbounded(values: list[int | None]) -> bool:
+    return any(v is None for v in values)
+
+
+def dag_capacity(graph: DelegationGraph, node: str) -> int | None:
     """``sum_i a_i`` -- the largest indivisible call the DAG law admits.
 
     The node's contract is materialized from its summed in-flow, so a single
-    request is charged once against the pooled total.
+    request is charged once against the pooled total. ``None`` if any in-edge
+    is unbounded.
     """
-    return sum(_in_edge_tokens(graph, node))
+    values = _in_edge_tokens(graph, node)
+    if _is_unbounded(values):
+        return None
+    return sum(v for v in values if v is not None)
 
 
-def max_tree_fragment(graph: DelegationGraph, node: str) -> int:
+def max_tree_fragment(graph: DelegationGraph, node: str) -> int | None:
     """``max_i a_i`` -- the largest indivisible call any tree encoding admits.
 
     Under the split encoding the node is represented by one fragment per
@@ -50,7 +66,9 @@ def max_tree_fragment(graph: DelegationGraph, node: str) -> int:
     The best a tree can do is therefore its single largest in-edge.
     """
     incoming = _in_edge_tokens(graph, node)
-    return max(incoming) if incoming else 0
+    if _is_unbounded(incoming):
+        return None
+    return max((v for v in incoming if v is not None), default=0)
 
 
 def fragmentation_factor(graph: DelegationGraph, node: str) -> float:
@@ -60,9 +78,12 @@ def fragmentation_factor(graph: DelegationGraph, node: str) -> float:
     quantifies -- and 1.0 for a single-parent node, where the encodings agree.
     """
     largest = max_tree_fragment(graph, node)
-    if largest == 0:
+    capacity = dag_capacity(graph, node)
+    if largest is None or capacity is None or largest == 0:
+        # An unbounded fragment forfeits nothing; neither does a node with no
+        # funding at all.
         return 1.0
-    return dag_capacity(graph, node) / largest
+    return capacity / largest
 
 
 def tree_would_refuse(graph: DelegationGraph, node: str, tokens: int) -> bool | None:
@@ -71,6 +92,7 @@ def tree_would_refuse(graph: DelegationGraph, node: str, tokens: int) -> bool | 
     Returns ``None`` -- undefined, not ``False`` -- in the two cases where the
     comparison carries no evidence:
 
+    * no call was made at all (``tokens <= 0``);
     * the node has fewer than two parents, so P2 does not apply at all;
     * the call exceeds ``sum_i a_i``, where the DAG cannot fund it either, so
       a tree's refusal says nothing about the encoding.
@@ -78,9 +100,17 @@ def tree_would_refuse(graph: DelegationGraph, node: str, tokens: int) -> bool | 
     Collapsing either case to ``False`` would let cells that tested nothing
     dilute the reported refusal rate.
     """
+    if tokens <= 0:
+        # No call was made (an early-return cell, or a provider response with
+        # no usage block). Reporting False would record a cell that tested
+        # nothing as positive evidence that a tree encoding would have coped.
+        return None
     incoming = _in_edge_tokens(graph, node)
-    if len(incoming) < 2:
+    if len(incoming) < 2 or _is_unbounded(incoming):
+        # An unbounded parent could fund any call, so no tree encoding is
+        # forced to refuse and the comparison carries no evidence.
         return None
-    if tokens > sum(incoming):
+    bounded = [v for v in incoming if v is not None]
+    if tokens > sum(bounded):
         return None
-    return tokens > max(incoming)
+    return tokens > max(bounded)

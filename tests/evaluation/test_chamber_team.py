@@ -124,3 +124,72 @@ def test_exclude_narrows_the_menu_without_touching_the_prompt(make_ladder_adapte
         rendered_menu = call["messages"][-1]["content"].partition("Menu:\n")[2]
         for name in banned:
             assert name not in rendered_menu
+
+
+@requires_causalchamber
+def test_scout_b_spends_its_full_budget_at_a_large_budget(make_ladder_adapter, conflict_llm):
+    """Regression: the exclusion set must not starve scout_b.
+
+    `exclude` narrows the menu and so feeds `actual_spend = min(spend,
+    len(available))`. An earlier guard checked only `contested` against the
+    full menu, ignoring `set(chosen_a)` -- the larger half of the exclusion --
+    so scout_b returned 14 picks against a budget of 22 while conservation
+    still passed and nothing flagged it.
+    """
+    adapter = make_ladder_adapter(conflict_llm, k=20)
+    team_agents(adapter, seed=0, scout_a_budget=10, scout_b_budget=10, llm=conflict_llm)
+    graph = adapter.delegation_graph
+    assert graph.monitor_for("scout_a").usage.get_tool_usage("intervene") == 10
+    assert graph.monitor_for("scout_b").usage.get_tool_usage("intervene") == 10
+
+
+def test_parse_name_list_does_not_match_prefixes():
+    """WT has `actuators_random_walk_1` through `_16`.
+
+    Plain substring containment invents a claim the scout never made, which
+    inflates `contested` and over-excludes the other scout.
+    """
+    from evaluation.chamber_pipeline.agents import _parse_name_list
+
+    menu = [f"actuators_random_walk_{i}" for i in (1, 10, 12, 16)]
+    resp = {
+        "choices": [
+            {"message": {"content": "actuators_random_walk_10 and actuators_random_walk_12"}}
+        ]
+    }
+    assert _parse_name_list(resp, menu) == [
+        "actuators_random_walk_10",
+        "actuators_random_walk_12",
+    ]
+
+
+@requires_causalchamber
+def test_negotiation_calls_carry_a_temperature(make_ladder_adapter, counting_llm):
+    """The propose prompts differ only by the letter A/B.
+
+    Without a temperature both scouts return the same claim list, and the
+    negotiation contributes noise instead of a split.
+    """
+    from evaluation.chamber_pipeline.agents import (
+        _NEGOTIATE_MAX_TOKENS,
+        _SCOUT_TEMPERATURE,
+    )
+
+    adapter = make_ladder_adapter(counting_llm)
+    team_agents(adapter, seed=0, scout_a_budget=1, scout_b_budget=1, llm=counting_llm)
+    negotiation = [c for c in counting_llm.calls if c["max_tokens"] == _NEGOTIATE_MAX_TOKENS]
+    assert negotiation
+    for call in negotiation:
+        assert call["temperature"] == _SCOUT_TEMPERATURE
+
+
+@requires_causalchamber
+def test_negotiation_outcome_is_recorded(make_ladder_adapter, conflict_llm):
+    """`n_contested` makes rung 4's mechanism measurable.
+
+    Without it a team whose scouts never agree on a split is indistinguishable
+    from one whose negotiation worked.
+    """
+    adapter = make_ladder_adapter(conflict_llm)
+    team_agents(adapter, seed=0, scout_a_budget=2, scout_b_budget=2, llm=conflict_llm)
+    assert adapter.coordination_stats["n_contested"] >= 0

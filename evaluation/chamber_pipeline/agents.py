@@ -63,11 +63,8 @@ LLMCallable = Callable[..., Any]
 # Per-LLM-call output cap for the selection step. Without a cap, the
 # model (DeepSeek v4 Flash specifically) generates ~1300 output tokens
 # of verbose reasoning for what is fundamentally a "pick one item from
-# this list" task. With this cap, per-call latency drops from ~37s to
-# ~1.5-3s — making the M4 pilot wall-time-feasible. The expected
-# response is just one menu name (~15-30 chars), so 200 tokens is
-# generous headroom for any reasoning prefix the model insists on.
-# Tests can monkey-patch this if they need different behavior.
+# this list" task. Tests can monkey-patch this if they need different
+# behavior.
 # Raised 200 -> 2048 on 2026-08-23. The old cap could not hold a single
 # selection call: measured on the real 59-item LT menu, DeepSeek v4 Flash 0423
 # spends 821 reasoning tokens at the provider default, 976 at `high`, 475 at
@@ -441,10 +438,12 @@ def _llm_select_loop(
             appearing in the prompt. Used by the team arm's collision
             backstop. Deliberately not routed through `starting_chosen`,
             which would render the excluded names into the prompt as an
-            "Already spent" block -- destroying the blindness of the execution
-            phase -- and would also feed `actual_spend = min(spend,
-            len(available))`, silently under-spending the scout and breaking
-            matched-budget comparability.
+            "Already spent" block, destroying the blindness of the execution
+            phase. NOTE that `exclude` narrows the menu and therefore DOES
+            feed `actual_spend = min(spend, len(available))`, exactly as
+            `starting_chosen` would: the two differ only in prompt rendering,
+            never on the spend axis. A caller excluding many names must top up
+            the selectable pool itself, or the scout silently under-spends.
         temperature: Sampling temperature forwarded to the completion call.
             None (the default) omits the argument entirely rather than
             passing null, so rungs 0 and 3 reach the provider byte-identically
@@ -480,13 +479,11 @@ def _llm_select_loop(
         # Compose the "already chosen" view: prior phase + this phase so far.
         all_chosen = starting_chosen + chosen
         messages = prompt_builder(menu, remaining, all_chosen)
-        # Cap output to ~200 tokens. The expected response is just one
-        # menu name (~15-30 chars / ~5-10 tokens), but DeepSeek v4 Flash
-        # without max_tokens generates ~1300 output tokens of verbose
-        # reasoning per call (verified empirically during M4b debugging).
-        # 200 leaves ample headroom for the model's reasoning prefix
-        # while bringing per-call latency from ~37s back down to ~1.5-3s.
-        # Callers wanting a different cap can monkey-patch _SELECTION_MAX_TOKENS.
+        # See `_SELECTION_MAX_TOKENS` for why 200 was untenable once
+        # providers began counting reasoning tokens against `max_tokens`.
+        # Note the cap is NOT a hard bound when `reasoning.effort` is set:
+        # responses routinely exceed it and still finish with `stop`, so
+        # effort -- not max_tokens -- is the real cost control.
         extra: dict[str, Any] = {
             "extra_body": {"reasoning": {"effort": _SELECTION_REASONING_EFFORT}}
         }
@@ -584,8 +581,26 @@ def llm_only_agent(
     # Cap output for the adjacency-emission step. Larger than the
     # selection cap because the response encodes the full directed-edge
     # JSON map for ~38-node chambers. See _ADJACENCY_MAX_TOKENS docstring.
-    response = llm(model=model, messages=adj_messages, max_tokens=_ADJACENCY_MAX_TOKENS)
-    return parse_adjacency_response(response, nodes)
+    response = llm(
+        model=model,
+        messages=adj_messages,
+        max_tokens=_ADJACENCY_MAX_TOKENS,
+        # Pinned like every other call. This is the pipeline's largest
+        # reasoning call and the one with a documented history of returning
+        # empty content when reasoning consumed the budget, so leaving it to
+        # track a provider default is the worst place to do so.
+        extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+    )
+    adjacency = parse_adjacency_response(response, nodes)
+    # Record a degenerate emission. This is the M4b failure mode -- the model
+    # spends its budget on hidden reasoning and returns empty content -- and
+    # it degrades to an all-zero graph rather than raising, so without a
+    # counter it is indistinguishable from a genuine "no edges" answer.
+    if not adjacency.to_numpy().any():
+        recorder = getattr(llm, "record_selection_fallback", None)
+        if recorder is not None:
+            recorder()
+    return adjacency
 
 
 def llm_pc_agent(
@@ -893,17 +908,26 @@ def fan_in_agents(
 
 
 def _parse_name_list(response: Any, menu: list[str]) -> list[str]:
-    """Every menu name appearing in a response, in order, deduplicated."""
+    """Every menu name appearing in a response, deduplicated, in menu order.
+
+    Matches on word boundaries, longest name first, exactly as
+    `parse_selection_response` does. Plain substring containment is wrong on
+    any menu with prefix relationships: WT has `actuators_random_walk_1`
+    through `_16`, so a response naming only `_10` and `_12` also matches
+    `_1` -- inventing a claim the scout never made, inflating `contested`,
+    and over-excluding the other scout.
+    """
     from evaluation.chamber_pipeline.llm_planner import _response_text
 
     text = _response_text(response) or ""
-    seen: set[str] = set()
-    out: list[str] = []
-    for name in menu:
-        if name in text and name not in seen:
-            seen.add(name)
-            out.append(name)
-    return out
+    claimed: list[str] = []
+    for name in sorted(menu, key=len, reverse=True):
+        if not re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text):
+            continue
+        if any(name in longer for longer in claimed):
+            continue  # a longer name already matched here
+        claimed.append(name)
+    return [n for n in menu if n in claimed]
 
 
 def team_agents(
@@ -952,6 +976,11 @@ def team_agents(
                 model=model,
                 messages=build_negotiate_propose_prompt(menu, budget, role),
                 max_tokens=_NEGOTIATE_MAX_TOKENS,
+                # The two propose prompts differ only by the letter A/B, so
+                # without a temperature both scouts return the same claim list
+                # and the negotiation contributes noise instead of a split --
+                # the degeneracy `_SCOUT_TEMPERATURE` exists to prevent.
+                temperature=_SCOUT_TEMPERATURE,
                 extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
             )
         return _parse_name_list(proposal, menu)
@@ -965,6 +994,11 @@ def team_agents(
                 model=model,
                 messages=build_negotiate_revise_prompt(menu, budget, own, other),
                 max_tokens=_NEGOTIATE_MAX_TOKENS,
+                # The two propose prompts differ only by the letter A/B, so
+                # without a temperature both scouts return the same claim list
+                # and the negotiation contributes noise instead of a split --
+                # the degeneracy `_SCOUT_TEMPERATURE` exists to prevent.
+                temperature=_SCOUT_TEMPERATURE,
                 extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
             )
         return _parse_name_list(revised, menu)
@@ -972,16 +1006,27 @@ def team_agents(
     revised_a = revise(scout_a_budget, proposed_a, proposed_b, "scout_a")
     revised_b = revise(scout_b_budget, proposed_b, proposed_a, "scout_b")
 
-    # Deterministic backstop. Applied to the EXECUTED selections, not just the
-    # proposals: the scouts execute blind after negotiating, so filtering only
-    # what they proposed leaves them free to re-collide.
+    # Turn the negotiation into the actual split. An earlier version had both
+    # scouts run a blind loop and merely removed contested names from
+    # scout_b's menu, which was wrong three ways: the negotiated lists had no
+    # bearing on what either scout executed, so rung 4 was rung 1 with extra
+    # LLM calls; names scout_a claimed but never picked were queried by
+    # nobody; and the anti-starvation guard looked only at `contested`, not at
+    # the full exclusion, so scout_b silently under-spent -- 14 picks against
+    # a budget of 22, measured on the real LT menu.
+    claim_a = list(revised_a or proposed_a)
+    claim_b = [n for n in (revised_b or proposed_b) if n not in set(claim_a)]
     contested = set(revised_a) & set(revised_b)
-    # Never starve scout_b. If honouring every contested claim for scout_a
-    # would leave too few experiments to spend its budget on, split the
-    # contested set alternately instead of assigning it wholesale.
-    if len(menu) - len(contested) < scout_b_budget:
-        contested = set(sorted(contested)[::2])
 
+    # Top up from what neither scout claimed so each can spend its full
+    # budget. Matched budget across rungs is the comparison the ladder rests
+    # on, and a short scout would read as a coordination result.
+    spare = [m for m in menu if m not in set(claim_a) | set(claim_b)]
+    for claim, budget in ((claim_a, scout_a_budget), (claim_b, scout_b_budget)):
+        while len(claim) < budget and spare:
+            claim.append(spare.pop(0))
+
+    all_names = set(menu)
     with adapter.as_node("scout_a"):
         chosen_a, dfs_a = _llm_select_loop(
             adapter,
@@ -991,6 +1036,7 @@ def team_agents(
             spend=scout_a_budget,
             prompt_builder=build_select_prompt,
             temperature=_SCOUT_TEMPERATURE,
+            exclude=all_names - set(claim_a),
         )
     with adapter.as_node("scout_b"):
         chosen_b, dfs_b = _llm_select_loop(
@@ -1001,7 +1047,7 @@ def team_agents(
             spend=scout_b_budget,
             prompt_builder=build_select_prompt,
             temperature=_SCOUT_TEMPERATURE,
-            exclude=set(chosen_a) | contested,
+            exclude=(all_names - set(claim_b)) | set(chosen_a),
         )
 
     with adapter.as_node("aggregator"):
@@ -1022,6 +1068,11 @@ def team_agents(
     adapter.coordination_stats = {
         "overlap_frac": overlap_fraction(chosen_a, chosen_b),
         "n_experiments_distinct": len(seen),
+        # How many claims the negotiation failed to resolve. Without this the
+        # rung's defining mechanism is unmeasurable: a `team` arm whose
+        # scouts never actually agree on a split looks identical to one whose
+        # negotiation worked.
+        "n_contested": len(contested),
     }
     if not dfs:
         return _empty_adjacency(nodes)

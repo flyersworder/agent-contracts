@@ -41,11 +41,18 @@ class RecordingLLM:
         model: str,
         messages: list[dict[str, str]],
         max_tokens: int | None = None,
+        temperature: float | None = None,
         **_: Any,
     ) -> dict:
         idx = len(self.calls)
         self.calls.append(
-            {"model": model, "messages": messages, "idx": idx, "max_tokens": max_tokens}
+            {
+                "model": model,
+                "messages": messages,
+                "idx": idx,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+            }
         )
         self.total_tokens += 100  # stands in for _CountingLLM's accumulation
         return {"choices": [{"message": {"content": self._responder(idx, messages)}}]}

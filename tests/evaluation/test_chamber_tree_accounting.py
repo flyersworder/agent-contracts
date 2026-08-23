@@ -121,3 +121,58 @@ def test_run_record_carries_the_p2_measurement_columns():
     assert df.max_tree_fragment.iloc[0] == max_tree_fragment(graph, "aggregator")
     assert df.overlap_frac.iloc[0] == pytest.approx(0.25)
     assert bool(df.conservation_certified.iloc[0]) is True
+
+
+def test_the_graph_refuses_to_create_an_unbounded_in_edge():
+    """Why the `None` handling below can never bite in practice.
+
+    `allocate()` rejects `tokens=None` outright, so no real graph reaches the
+    unbounded case -- the same shape as P3's cycle refusal, where the hazard
+    is made unconstructible rather than detected.
+    """
+    from agent_contracts.core.contract import Contract, ResourceConstraints
+    from agent_contracts.core.delegation_graph import DelegationGraph
+
+    root = Contract(id="u", name="u", resources=ResourceConstraints(tokens=None))
+    graph = DelegationGraph(root)
+    graph.add_node("p")
+    with pytest.raises(ValueError, match="finite"):
+        graph.allocate(DelegationGraph.ROOT, "p", tokens=None)
+
+
+def test_helpers_treat_none_as_unbounded_not_zero():
+    """`None` is ResourceVector's *unbounded* sentinel, never zero.
+
+    Unreachable through `allocate` today, but these functions are exported for
+    general graphs and `EdgeAllocation.amount` is typed to permit it.
+    Collapsing `None` to 0 would report an unbounded parent as contributing
+    nothing: one unbounded edge beside a 6,418-token edge would give
+    `max_tree_fragment == 6418`, and two unbounded edges would make every
+    positive call read as refused by every tree encoding.
+    """
+    from types import SimpleNamespace
+
+    from evaluation.chamber_pipeline.tree_accounting import (
+        dag_capacity,
+        fragmentation_factor,
+    )
+
+    def edge(target, tokens):
+        return SimpleNamespace(target=target, amount=SimpleNamespace(tokens=tokens))
+
+    fake = SimpleNamespace(edges=lambda: [edge("agg", None), edge("agg", 6418)])
+    assert max_tree_fragment(fake, "agg") is None
+    assert dag_capacity(fake, "agg") is None
+    assert fragmentation_factor(fake, "agg") == 1.0
+    assert tree_would_refuse(fake, "agg", 7000) is None
+
+    bounded = SimpleNamespace(edges=lambda: [edge("agg", 6418), edge("agg", 6418)])
+    assert max_tree_fragment(bounded, "agg") == 6418
+    assert tree_would_refuse(bounded, "agg", 7000) is True
+
+
+def test_a_call_that_never_happened_is_not_evidence():
+    """Zero tokens means the aggregator never ran, not that a tree coped."""
+    graph = _graph()
+    assert tree_would_refuse(graph, "aggregator", 0) is None
+    assert tree_would_refuse(graph, "aggregator", -1) is None

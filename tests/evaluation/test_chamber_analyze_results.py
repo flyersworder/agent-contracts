@@ -222,11 +222,15 @@ class TestPlotPareto:
         agg = aggregate_pareto(df)
 
         ax = plot_pareto(agg, chamber="lt")
-        # Five variants — verify each shows up in the legend (more
-        # robust than counting Line2D objects, which errorbar inflates
-        # by adding cap lines).
+        # Every variant PRESENT IN THE DATA shows up in the legend (more
+        # robust than counting Line2D objects, which errorbar inflates by
+        # adding cap lines). Compared against the data rather than against
+        # all of VARIANT_LABELS: the ladder arms are registered and styled
+        # but absent from this fixture, and a legend entry for a variant with
+        # no cells would be the bug, not the fix.
         legend_labels = {t.get_text() for t in ax.get_legend().get_texts()}
-        assert legend_labels == set(VARIANT_LABELS.values())
+        expected = {VARIANT_LABELS[v] for v in agg["agent_name"].unique()}
+        assert legend_labels == expected
         # Title mentions chamber.
         assert "LT" in ax.get_title()
 
@@ -435,3 +439,30 @@ def test_variant_color_label_keys_match_order() -> None:
     """The three variant-keyed dicts share the same key set."""
     assert set(VARIANT_COLORS.keys()) == set(VARIANT_LABELS.keys())
     assert set(VARIANT_ORDER) == set(VARIANT_COLORS.keys())
+
+
+def test_every_registered_variant_has_full_plot_styling():
+    """A registered arm missing from these tables is silently dropped.
+
+    Every figure and summary table iterates `VARIANT_ORDER`, so an arm absent
+    from it renders as nothing at all -- no error, no warning, just a missing
+    curve in the paper's headline figure.
+    """
+    from evaluation.chamber_pipeline.analyze_results import (
+        VARIANT_COLORS,
+        VARIANT_LABELS,
+        VARIANT_LINESTYLES,
+        VARIANT_MARKERS,
+        VARIANT_ORDER,
+    )
+    from evaluation.chamber_pipeline.orchestrator import AGENT_REGISTRY
+
+    registered = {spec.name for spec in AGENT_REGISTRY}
+    assert registered <= set(VARIANT_ORDER), registered - set(VARIANT_ORDER)
+    for table in (
+        VARIANT_COLORS,
+        VARIANT_LABELS,
+        VARIANT_MARKERS,
+        VARIANT_LINESTYLES,
+    ):
+        assert registered <= set(table), registered - set(table)

@@ -1404,3 +1404,53 @@ def test_tokens_do_not_gate_tool_calls():
     assert monitor.can_use_tool("intervene") is True  # baseline
     monitor.usage.add_tokens(10**9)
     assert monitor.can_use_tool("intervene") is True  # tokens still do not gate
+
+
+class TestLadderSelfDescription:
+    """Ladder arms describe their own wiring instead of being name-matched.
+
+    Four separate string-literal lookups meant a sixth rung could be added,
+    import cleanly, and silently receive plain-role budgets -- under-funding a
+    targeted scout 6.5x and producing conservation violations that read as
+    real overruns.
+    """
+
+    def test_only_ladder_arms_declare_scout_roles(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import AGENT_REGISTRY
+
+        ladder = {s.name for s in AGENT_REGISTRY if s.is_ladder_arm}
+        assert ladder == {"fan_in_homog", "fan_in_spec", "team"}
+
+    def test_calibration_refuses_a_non_ladder_arm(self) -> None:
+        """A silent plain-role fallthrough is what this replaces."""
+        from evaluation.chamber_pipeline.orchestrator import (
+            _ladder_calibration,
+            get_spec,
+        )
+
+        with pytest.raises(ValueError, match="not a ladder arm"):
+            _ladder_calibration(get_spec("llm_pc"))
+
+    def test_roles_drive_the_budget_not_the_arm_name(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import (
+            _ladder_calibration,
+            get_spec,
+        )
+
+        homog_a, homog_b, _, homog_oh = _ladder_calibration(get_spec("fan_in_homog"))
+        spec_a, spec_b, _, _ = _ladder_calibration(get_spec("fan_in_spec"))
+        _, _, _, team_oh = _ladder_calibration(get_spec("team"))
+
+        assert homog_a == homog_b  # both plain
+        assert spec_b > spec_a  # targeted costs more than broad
+        assert homog_oh == 0  # no negotiation rounds
+        assert team_oh > 0  # two rounds, funded at the same 2x margin
+
+    def test_every_declared_role_has_a_calibration_figure(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import _ROLE_C95, AGENT_REGISTRY
+
+        for spec in AGENT_REGISTRY:
+            if spec.scout_roles is None:
+                continue
+            for role in spec.scout_roles:
+                assert role in _ROLE_C95, f"{spec.name} declares unknown role {role!r}"

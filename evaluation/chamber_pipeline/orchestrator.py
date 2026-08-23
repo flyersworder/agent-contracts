@@ -39,8 +39,8 @@ import logging
 import threading
 import time
 import traceback
-from collections.abc import Callable, Iterable, Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Iterator, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
 from agent_contracts.core.delegation import ConservationViolationError
@@ -107,6 +107,19 @@ class AgentSpec:
     accepts_llm: bool = False
     kind: str = "non_llm"  # "non_llm" | "llm_single" | "llm_multi"
     extra_kwargs: tuple[str, ...] = ()
+    # --- M6 ladder self-description -------------------------------------
+    # These make an arm describe its own wiring instead of being special-cased
+    # by name in four places. A new rung that forgets its roles is not a
+    # silent fallthrough to the plain-role budget -- which would under-fund a
+    # targeted scout 6.5x and produce conservation violations that read as
+    # real overruns -- it simply is not a ladder arm.
+    scout_roles: tuple[str, str] | None = None
+    negotiation_rounds: int = 0
+    static_kwargs: Mapping[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_ladder_arm(self) -> bool:
+        return self.scout_roles is not None
 
     def is_compatible(self, chamber: ChamberId) -> bool:
         """True iff this agent runs on the given chamber.
@@ -175,6 +188,7 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         accepts_llm=True,
         kind="llm_multi",
         extra_kwargs=("scout_a_budget", "scout_b_budget"),
+        scout_roles=("plain", "plain"),
     ),
     AgentSpec(
         name="fan_in_spec",
@@ -183,6 +197,8 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         accepts_llm=True,
         kind="llm_multi",
         extra_kwargs=("scout_a_budget", "scout_b_budget"),
+        scout_roles=("broad", "targeted"),
+        static_kwargs={"differentiate": True},
     ),
     AgentSpec(
         name="team",
@@ -191,6 +207,8 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         accepts_llm=True,
         kind="llm_multi",
         extra_kwargs=("scout_a_budget", "scout_b_budget"),
+        scout_roles=("plain", "plain"),
+        negotiation_rounds=2,
     ),
 )
 
@@ -563,26 +581,21 @@ _ROLE_C95: dict[str, int] = {"plain": 2809, "broad": 5969, "targeted": 18136}
 _A95_RECONCILE = 8557
 _C95_NEGOTIATE = 5001
 
-_LADDER_ARMS = frozenset({"fan_in_homog", "fan_in_spec", "team"})
 _LADDER_NODES = ("scout_a", "scout_b", "aggregator")
 
 
-def _ladder_calibration(spec_name: str) -> tuple[int, int, int, int]:
+def _ladder_calibration(spec: AgentSpec) -> tuple[int, int, int, int]:
     """`(c95_a, c95_b, a95, fixed_overhead)` for one ladder arm.
 
-    Keyed by arm rather than by budget: per-call cost is driven by the role's
-    prompt, not by `k`, which only sets how many calls are made.
+    Read off the spec rather than matched on the arm's name: per-call cost is
+    driven by the role's prompt, not by `k`, and a name-keyed lookup silently
+    returns plain-role figures for any arm it does not recognise.
     """
-    if spec_name == "fan_in_spec":  # rung 2: broad + targeted
-        return _ROLE_C95["broad"], _ROLE_C95["targeted"], _A95_RECONCILE, 0
-    if spec_name == "team":  # rung 4: plain, plus two negotiation rounds each
-        return (
-            _ROLE_C95["plain"],
-            _ROLE_C95["plain"],
-            _A95_RECONCILE,
-            2 * _C95_NEGOTIATE,
-        )
-    return _ROLE_C95["plain"], _ROLE_C95["plain"], _A95_RECONCILE, 0
+    if spec.scout_roles is None:
+        raise ValueError(f"{spec.name!r} is not a ladder arm")
+    role_a, role_b = spec.scout_roles
+    overhead = spec.negotiation_rounds * (2 * _C95_NEGOTIATE)
+    return _ROLE_C95[role_a], _ROLE_C95[role_b], _A95_RECONCILE, overhead
 
 
 def _build_agent_kwargs(
@@ -627,8 +640,7 @@ def _build_agent_kwargs(
         kwargs["scout_b_budget"] = budget_k // 2
         kwargs["scout_a_budget"] = budget_k - budget_k // 2
 
-    if spec.name == "fan_in_spec":
-        kwargs["differentiate"] = True
+    kwargs.update(spec.static_kwargs)
 
     return kwargs
 
@@ -712,10 +724,10 @@ def run_cell(
     try:
         extra: dict[str, Any] = {}
         graph = None
-        if spec.name in _LADDER_ARMS:
+        if spec.is_ladder_arm:
             from evaluation.chamber_pipeline.coordination import build_fan_in_graph
 
-            c95_a, c95_b, a95, overhead = _ladder_calibration(spec.name)
+            c95_a, c95_b, a95, overhead = _ladder_calibration(spec)
             graph = build_fan_in_graph(
                 k=budget_k,
                 c95=c95_a,
@@ -819,12 +831,21 @@ def run_cell(
 
             agg_tokens = cell_graph.monitor_for("aggregator").usage.tokens
             frag = max_tree_fragment(cell_graph, "aggregator")
-            refuse = tree_would_refuse(cell_graph, "aggregator", agg_tokens)
-            try:
-                cell_graph.verify()
-                certified = True
-            except ConservationViolationError:
-                certified = False
+            # Only score a cell whose aggregator actually spent. On an
+            # early-return cell (zero budget, empty menu) it spends nothing,
+            # and `tree_would_refuse(..., 0)` is a hard False -- recording a
+            # cell that tested nothing as positive evidence that a tree
+            # encoding would have coped, which is precisely the diluted
+            # refusal rate the function's None contract exists to prevent.
+            refuse = (
+                tree_would_refuse(cell_graph, "aggregator", agg_tokens) if agg_tokens > 0 else None
+            )
+            if agg_tokens > 0:
+                try:
+                    cell_graph.verify()
+                    certified = True
+                except ConservationViolationError:
+                    certified = False
 
         # PC variants populate degeneracy count; llm_only doesn't run PC.
         n_pc_degen: int | None = None if spec.name == "llm_only" else handler.count
@@ -851,6 +872,7 @@ def run_cell(
             providers_used=providers_used,
             overlap_frac=coord.get("overlap_frac"),
             n_experiments_distinct=coord.get("n_experiments_distinct"),
+            n_contested=coord.get("n_contested"),
             conservation_certified=certified,
             aggregator_tokens=agg_tokens,
             max_tree_fragment=frag,
@@ -1142,7 +1164,7 @@ def _read_llm_metrics(
 ) -> tuple[int | None, int | None, int | None, float | None, int | None]:
     """Extract (n_llm_calls, tokens_in, tokens_out, cost_usd, fallbacks).
 
-    Returns (None, None, None, None) when the wrapper is None
+    Returns a 5-tuple of Nones when the wrapper is None
     (non-LLM variant). When the wrapper saw at least one call, all
     four are populated — even if the wrapped target reported zero
     tokens (e.g., FakeLLM). When the wrapper saw zero calls (LLM

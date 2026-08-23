@@ -63,6 +63,10 @@ VARIANT_COLORS: dict[str, str] = {
     "llm_only": "#ff7f0e",  # orange — pure LLM
     "llm_pc": "#2ca02c",  # green — main hybrid
     "planner_reasoner": "#d62728",  # red — multi-agent ⭐
+    # M6 coordination ladder
+    "fan_in_homog": "#9467bd",  # purple — ensemble
+    "fan_in_spec": "#8c564b",  # brown — parallel roles
+    "team": "#e377c2",  # pink — negotiation
 }
 
 VARIANT_LABELS: dict[str, str] = {
@@ -71,6 +75,9 @@ VARIANT_LABELS: dict[str, str] = {
     "llm_only": "LLM-only",
     "llm_pc": "LLM+PC",
     "planner_reasoner": "Planner+Reasoner",
+    "fan_in_homog": "Ensemble (fan-in)",
+    "fan_in_spec": "Parallel roles (fan-in)",
+    "team": "Team (negotiation)",
 }
 
 # Marker + linestyle per variant so curves stay distinguishable when the
@@ -81,6 +88,9 @@ VARIANT_MARKERS: dict[str, str] = {
     "llm_only": "^",
     "llm_pc": "D",
     "planner_reasoner": "v",
+    "fan_in_homog": "P",
+    "fan_in_spec": "X",
+    "team": "*",
 }
 
 VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
@@ -89,6 +99,9 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "llm_only": "-",
     "llm_pc": "-.",
     "planner_reasoner": (0, (3, 1, 1, 1, 1, 1)),
+    "fan_in_homog": (0, (5, 1)),
+    "fan_in_spec": (0, (1, 1)),
+    "team": (0, (3, 5, 1, 5)),
 }
 
 # Variant rendering order in legend (matches plan §5.3 description top-to-bottom).
@@ -98,6 +111,12 @@ VARIANT_ORDER: tuple[str, ...] = (
     "llm_only",
     "llm_pc",
     "planner_reasoner",
+    # M6 ladder, in rung order. Every figure and summary table iterates this
+    # tuple, so an arm missing here is silently dropped from the output --
+    # no error, no warning, just an absent curve.
+    "fan_in_homog",
+    "fan_in_spec",
+    "team",
 )
 
 

@@ -119,6 +119,14 @@ PILOT_SPEC = SweepSpec(
     configuration="standard",
 )
 
+M6_SPEC = SweepSpec(
+    chambers=("lt",),
+    budget_fractions=(0.10, 0.50, 1.00),
+    agent_names=LADDER_VARIANTS,
+    seeds=tuple(range(30)),
+    configuration="standard",
+)
+
 M5_SPEC = SweepSpec(
     chambers=("lt", "wt"),
     budget_fractions=(0.10, 0.25, 0.50, 0.75, 1.00),
@@ -150,6 +158,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--m5",
         action="store_true",
         help="Use the M5 full-sweep spec: both chambers, 5 budgets, all variants, 30 seeds.",
+    )
+    parser.add_argument(
+        "--m6",
+        action="store_true",
+        help=(
+            "Use the M6 coordination-ladder spec: LT, 3 budgets, the five "
+            "ladder rungs, 30 seeds. Typing the rungs by hand into --variants "
+            "risks a typo producing a silently smaller sweep."
+        ),
     )
 
     # Custom-sweep flags (used when no preset is selected).
@@ -264,7 +281,7 @@ def _parse_csv_list(s: str) -> list[str]:
 def _build_sweep_from_args(args: argparse.Namespace) -> SweepSpec:
     """Translate parsed argparse Namespace into a SweepSpec.
 
-    Pre-baked specs (--pilot, --m5) ignore custom-sweep flags entirely.
+    Pre-baked specs (--pilot, --m5, --m6) ignore custom-sweep flags entirely.
     Custom sweeps thread every CLI flag into the SweepSpec, including
     the per-cell timeout.
     """
@@ -283,6 +300,11 @@ def _build_sweep_from_args(args: argparse.Namespace) -> SweepSpec:
 
             return replace(M5_SPEC, cell_timeout_seconds=args.cell_timeout_seconds)
         return M5_SPEC
+
+    if getattr(args, "m6", False):
+        if args.cell_timeout_seconds is not None:
+            return replace(M6_SPEC, cell_timeout_seconds=args.cell_timeout_seconds)
+        return M6_SPEC
 
     # Custom sweep.
     chambers = tuple(_parse_csv_list(args.chambers))

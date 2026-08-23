@@ -400,3 +400,40 @@ class TestEmptySeedsDryRun:
             ]
         )
         assert rc == 0
+
+
+class TestM6Spec:
+    """The ladder preset. Typing five rung names by hand invites a typo that
+    produces a silently smaller sweep rather than an error."""
+
+    def test_m6_runs_the_five_ladder_rungs(self) -> None:
+        from evaluation.chamber_pipeline.run_experiment import (
+            LADDER_VARIANTS,
+            M6_SPEC,
+        )
+
+        assert M6_SPEC.agent_names == LADDER_VARIANTS
+        assert set(LADDER_VARIANTS) == {
+            "llm_pc",
+            "fan_in_homog",
+            "fan_in_spec",
+            "planner_reasoner",
+            "team",
+        }
+
+    def test_every_ladder_variant_is_registered(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import get_spec
+        from evaluation.chamber_pipeline.run_experiment import LADDER_VARIANTS
+
+        for name in LADDER_VARIANTS:
+            assert get_spec(name).name == name
+
+    def test_m6_flag_selects_the_ladder_spec(self) -> None:
+        from evaluation.chamber_pipeline.run_experiment import (
+            M6_SPEC,
+            _build_sweep_from_args,
+            build_arg_parser,
+        )
+
+        args = build_arg_parser().parse_args(["--m6"])
+        assert _build_sweep_from_args(args) == M6_SPEC

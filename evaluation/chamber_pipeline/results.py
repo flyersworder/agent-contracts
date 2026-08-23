@@ -87,6 +87,11 @@ class RunRecord:
             undefined, not zero, since zero is the perfectly-disjoint success
             case. Only set for the fan-in and team rungs.
         n_experiments_distinct: Distinct experiments the cell queried in total.
+        n_contested: For the team rung, how many experiment claims the
+            negotiation failed to resolve. Without it the rung's defining
+            mechanism is unmeasurable -- a team whose scouts never agree on a
+            split looks identical to one whose negotiation worked. None for
+            every other arm.
         conservation_certified: Whether `DelegationGraph.verify()` passed at
             the end of the cell (hypothesis H-C).
         aggregator_tokens: Tokens the aggregator spent on its single
@@ -158,6 +163,7 @@ class RunRecord:
     n_selection_fallbacks: int | None = None
     overlap_frac: float | None = None
     n_experiments_distinct: int | None = None
+    n_contested: int | None = None
     conservation_certified: bool | None = None
     aggregator_tokens: int | None = None
     max_tree_fragment: int | None = None
