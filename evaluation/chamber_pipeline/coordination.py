@@ -55,7 +55,19 @@ def build_fan_in_graph(k: int, c95: int, a95: int) -> DelegationGraph:
     Returns:
         A sealed graph with nodes ``scout_a``, ``scout_b``, ``aggregator``.
     """
-    forward = math.ceil(1.5 * a95)
+    # Each scout forwards 0.75*a95, so the aggregator holds 1.5*a95 -- a 50%
+    # margin over the 95th-percentile aggregation call -- while NEITHER scout
+    # alone can fund it. That inequality is the point of the arm, not an
+    # accident of budgeting: it puts the reconciliation call inside P2's
+    # incompleteness window, `max_i a_i < c <= sum_i a_i`, where the DAG law
+    # admits the call and no tree encoding does.
+    #
+    # An earlier draft forwarded 1.5*a95 EACH. That funds the aggregator to
+    # 3*a95 and leaves every single fragment (1.5*a95) already larger than the
+    # call it has to make -- a tree encoding would have succeeded, the arm
+    # would have demonstrated nothing about P2, and the aggregator would have
+    # been over-provisioned 2x besides.
+    forward = math.ceil(0.75 * a95)
     scout_tokens = math.ceil(2 * c95 * math.ceil(k / 2)) + forward
     root = Contract(
         id=f"m6-root-k{k}",

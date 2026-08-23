@@ -60,7 +60,7 @@ from evaluation.chamber_pipeline.coordination import build_fan_in_graph  # noqa:
 def test_fan_in_graph_seals_and_funds_the_aggregator():
     graph = build_fan_in_graph(k=30, c95=2303, a95=38752)
     assert graph.is_sealed
-    forward = math.ceil(1.5 * 38752)
+    forward = math.ceil(0.75 * 38752)
     assert graph.in_flow("aggregator").tokens == 2 * forward
     assert graph.in_flow("scout_a").per_tool["intervene"] == 15
     assert graph.in_flow("scout_b").per_tool["intervene"] == 15
@@ -108,3 +108,25 @@ def test_fan_in_graph_conserves_the_intervention_budget():
 
 def test_fan_in_graph_verifies_before_any_consumption():
     build_fan_in_graph(k=30, c95=2303, a95=38752).verify()
+
+
+def test_the_aggregation_call_lands_in_p2s_incompleteness_window():
+    """The arm must actually exercise the proposition it exists to test.
+
+    P2's window is `max_i a_i < c <= sum_i a_i`: the aggregator can afford its
+    reconciliation call only by pooling both forwards. If either bound fails
+    the arm demonstrates nothing -- below the window a single tree fragment
+    suffices, above it not even the DAG can fund the call.
+    """
+    a95 = 38752
+    graph = build_fan_in_graph(k=30, c95=2303, a95=a95)
+    incoming = [e.amount.tokens for e in graph.edges() if e.target == "aggregator"]
+    assert len(incoming) == 2  # genuinely multi-parent
+    assert max(incoming) < a95, "a single scout could fund it; no tree failure"
+    assert a95 <= sum(incoming), "not even the DAG could fund it"
+
+
+def test_aggregator_funding_keeps_a_margin_over_the_p95_call():
+    a95 = 38752
+    graph = build_fan_in_graph(k=30, c95=2303, a95=a95)
+    assert graph.in_flow("aggregator").tokens >= 1.5 * a95

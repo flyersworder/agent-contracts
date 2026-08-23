@@ -82,6 +82,23 @@ class RunRecord:
             was partly random; equal to `n_llm_calls` means it was entirely
             random. None for non-LLM variants and for cells recorded before
             this field existed (the M4b pilot).
+        overlap_frac: Fraction of the smaller scout selection also chosen by
+            the other scout. None when either scout selected nothing --
+            undefined, not zero, since zero is the perfectly-disjoint success
+            case. Only set for the fan-in and team rungs.
+        n_experiments_distinct: Distinct experiments the cell queried in total.
+        conservation_certified: Whether `DelegationGraph.verify()` passed at
+            the end of the cell (hypothesis H-C).
+        aggregator_tokens: Tokens the aggregator spent on its single
+            indivisible reconciliation call.
+        max_tree_fragment: The largest single parent grant into the
+            aggregator -- the biggest indivisible call any tree encoding of
+            the same grants could fund.
+        tree_would_refuse: Whether `aggregator_tokens` landed in whitepaper
+            §4.6 P2's incompleteness window, `max_i a_i < c <= sum_i a_i`,
+            where the DAG law admits the call and no tree encoding does. None
+            when the comparison carries no evidence: fewer than two parents,
+            or a call neither encoding could fund.
         model_id: The model identifier requested for this cell.
         reasoning_effort: The reasoning effort requested, or "unset" when the
             call relied on the provider default. Recorded because a pinned
@@ -139,6 +156,12 @@ class RunRecord:
     wall_time_seconds: float | None = None
     n_llm_calls: int | None = None
     n_selection_fallbacks: int | None = None
+    overlap_frac: float | None = None
+    n_experiments_distinct: int | None = None
+    conservation_certified: bool | None = None
+    aggregator_tokens: int | None = None
+    max_tree_fragment: int | None = None
+    tree_would_refuse: bool | None = None
     model_id: str | None = None
     reasoning_effort: str | None = None
     providers_used: str | None = None
