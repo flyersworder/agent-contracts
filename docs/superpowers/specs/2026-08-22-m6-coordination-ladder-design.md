@@ -452,9 +452,13 @@ window. M6 takes precedence; M5 resumes October.
 
 1. `per_tool={"exp": 0}` → `per_tool={"intervene": 0, "observe": 0}`. The wrong
    key fails silently; the missing key leaves a side channel
-2. H-A ("chain underperforms loop") is **already refuted on accuracy** by M4b at
-   matched inference; restate as "no consistent accuracy effect; coordination's
-   cost is reliability"
+2. H-A ("chain underperforms loop") is **unresolved, not refuted** (sharpened
+   2026-08-23). M4b at matched inference gives chain−loop deltas of −0.028 /
+   +0.007 / −0.027 at k = 6 / 30 / 59 against a pooled MDE of ~0.036 — all
+   below it, so the data licenses neither direction. Restate as "no accuracy
+   effect this design can resolve (equivalence bound ±0.036 F1);
+   coordination's measurable cost is reliability." Note n≈55 per arm would be
+   needed to resolve the observed ~0.03 gap
 3. Arm 1 was `llm_only`, which confounds topology with inference. Rung 0 is now
    `llm_pc`
 4. §7.7's claim of "no comparative benchmark" is **false as of April 2026**

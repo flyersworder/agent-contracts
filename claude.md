@@ -552,9 +552,29 @@ per-cell basis matters: M4b LLM cells averaged **7.2 min**, `planner_reasoner`
 **8.7 min / $0.0196**; the 4.7 min/cell implied by the headline is contaminated
 by 180 non-LLM cells averaging 0.15s. Estimate from LLM cells only.
 
-Pre-registered: H-A chain underperforms loop (already supported: F1 0.397 vs
-0.75); **H-B fan-in recovers delegation cost via exploration diversity — open,
-this is the experiment**; H-C conservation compliance 100%.
+Pre-registered: **H-A chain underperforms loop — OPEN, not supported**
+(corrected 2026-08-23); **H-B fan-in recovers delegation cost via exploration
+diversity — open, this is the experiment**; H-C conservation compliance 100%.
+
+**H-A correction (2026-08-23).** This line previously read "already supported:
+F1 0.397 vs 0.75". That compared the chain against **`llm_only`**, which is
+**not a rung on the ladder** — spec §10.3 replaced it with `llm_pc` precisely
+because it confounds topology with inference. Against the actual loop rung,
+measured on `runs/m4-pilot.parquet` via `analyze_results --ladder`:
+
+| k | chain (`planner_reasoner`) | loop (`llm_pc`) | delta | pooled MDE | verdict |
+|---|---|---|---|---|---|
+| 6 | 0.190 | 0.218 | −0.028 | 0.036 | below MDE |
+| 30 | 0.386 | 0.379 | **+0.007** | 0.036 | below MDE |
+| 59 | 0.398 | 0.425 | −0.027 | 0.036 | below MDE |
+
+All three below the minimum detectable effect at n=30, under both the per-arm
+and pooled-SD bounds, and k=30 points the wrong way. `llm_only` really does
+reach F1 0.746 at k=59 — that M4b finding stands — but it is a statement about
+inference, not about coordination topology. **At the observed SD, resolving a
+~0.03 gap needs n≈55 per arm; M6 at n=30 will report "below MDE" for H-A
+however it runs.** That is a reportable equivalence bound, not a null, and the
+analyzer prints the MDE beside every delta so it cannot be read as one.
 
 Prerequisite shipped in **v0.4.0** (`core/delegation_graph.py`). **No open
 blockers.** When building the fan-in arm, grant the aggregator an explicit
