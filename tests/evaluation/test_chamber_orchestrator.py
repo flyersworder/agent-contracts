@@ -1478,7 +1478,10 @@ class TestProvisioningIsWired:
         from evaluation.chamber_pipeline.coordination import build_fan_in_graph
         from evaluation.chamber_pipeline.orchestrator import _PROVISION_MULTIPLE
 
-        assert _PROVISION_MULTIPLE >= 3, "the tail needs more than a 2x margin"
+        # Pinned exactly. `>= 3` let a 4 -> 3 mutation through, a 25% cut in
+        # every scout grant, and under-provisioning reads as a coordination
+        # result rather than as a budgeting error.
+        assert _PROVISION_MULTIPLE == 4
         base = build_fan_in_graph(k=30, c95=2205, a95=8557, multiple=1)
         scaled = build_fan_in_graph(k=30, c95=2205, a95=8557, multiple=_PROVISION_MULTIPLE)
         forward = scaled.in_flow("aggregator").tokens // 2
@@ -1498,3 +1501,37 @@ def test_m6_runs_the_specified_budgets_not_the_pilots() -> None:
 
     ks = [_budget_k_for("lt", f) for f in M6_SPEC.budget_fractions]
     assert ks == [6, 30, 45], ks
+
+
+class TestConservationIsNotGatedOnAggregatorSpend:
+    """`verify()` is graph-wide; only `tree_would_refuse` is aggregator-only.
+
+    Gating both on aggregator spend let a cell whose SCOUTS overran, but whose
+    aggregator reported no usage, record `certified=None` -- dropping out of
+    H-C's denominator instead of counting as the failure it is, and biasing
+    the reported compliance rate upward. Reverting the ungating previously
+    left the whole suite green.
+    """
+
+    def test_a_scout_overrun_is_recorded_as_a_failure_not_as_unmeasured(
+        self,
+    ) -> None:
+        import inspect
+
+        from evaluation.chamber_pipeline import orchestrator
+
+        src = inspect.getsource(orchestrator.run_cell)
+        certify = src[src.index("cell_graph.verify()") - 400 :]
+        certify = certify[: certify.index("except ConservationViolationError")]
+        assert "agg_tokens > 0" not in certify, "verify() must not be gated on aggregator spend"
+
+    def test_a_graph_whose_scouts_overran_does_not_verify(self) -> None:
+        """The condition the gate used to hide."""
+        from agent_contracts.core.delegation import ConservationViolationError
+        from evaluation.chamber_pipeline.coordination import build_fan_in_graph
+
+        graph = build_fan_in_graph(k=6, c95=2205, a95=8557, multiple=4)
+        graph.monitor_for("scout_a").usage.add_tokens(10**7)
+        assert graph.monitor_for("aggregator").usage.tokens == 0
+        with pytest.raises(ConservationViolationError):
+            graph.verify()

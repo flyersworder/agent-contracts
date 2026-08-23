@@ -124,9 +124,14 @@ M6_SPEC = SweepSpec(
     # {6, 30, 45}, NOT the pilot's {6, 30, 59}. At k=59 the budget equals the
     # whole 59-item menu, so two blind scouts drawing 30 and 29 cover ~44
     # distinct experiments against `llm_pc`'s 59 -- a 25% coverage deficit
-    # baked into the top budget point, which is the confound spec §3 rules
-    # out. 0.51 -> 30 and 0.76 -> 45.
-    budget_fractions=(0.10, 0.51, 0.76),
+    # baked into the top budget point, the confound spec §3 rules out.
+    #
+    # The middle fraction stays 0.50, matching PILOT_SPEC exactly. 0.51 gives
+    # the same k=30 but a different `budget_fraction`, and the analyzer groups
+    # and plots on that column -- so reused pilot rows at 0.50 and new rows at
+    # 0.51 would render as two separate Pareto points at the same budget, and
+    # the mid-budget rung-vs-rung comparison would compare nothing.
+    budget_fractions=(0.10, 0.50, 0.76),
     agent_names=LADDER_VARIANTS,
     seeds=tuple(range(30)),
     configuration="standard",

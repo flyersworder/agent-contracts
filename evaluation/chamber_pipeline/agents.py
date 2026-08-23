@@ -1018,7 +1018,14 @@ def team_agents(
     # between-seed variance, while `overlap_frac` reads 0.0 and `n_contested`
     # reads 0 -- indistinguishable from a perfect split. Unlike the selection
     # loop, this path had no recorder at all.
-    negotiation_failures = sum(1 for src in (source_a, source_b) if not src)
+    # All four parses, not two scouts. Counting only scouts whose `revised or
+    # proposed` is empty misses the likelier and more damaging case: both
+    # propose rounds parse but both REVISE rounds return prose, which reduces
+    # rung 4 to one-shot proposals with no negotiation at all while reporting
+    # zero failures.
+    negotiation_failures = sum(
+        1 for parsed in (proposed_a, proposed_b, revised_a, revised_b) if not parsed
+    )
     # `contested` is measured from the lists actually used, not from
     # `revised_*`: when a revise reply is unparseable the code falls back to
     # the proposals, and reading the discarded list reports 0 conflicts for a
@@ -1031,16 +1038,38 @@ def team_agents(
     claim_a = list(source_a)[:scout_a_budget]
     claim_b = [n for n in source_b if n not in set(claim_a)][:scout_b_budget]
 
-    # Partition the REST of the menu between the two scouts as well, so each
-    # selects from a pool strictly larger than its budget. Narrowing a scout's
-    # menu to exactly its claim makes `actual_spend == len(available)` and the
-    # selection loop inert -- verified: the queried set was byte-identical
-    # whether the selection LLM returned the first menu item, the last, or
-    # "GARBAGE". The negotiation should decide WHERE each scout explores; the
-    # selection loop still decides what it picks there.
+    # Partition the REST of the menu between the scouts, so each selects from
+    # a pool strictly larger than its budget. Two constraints, and an earlier
+    # version satisfied only the first:
+    #
+    #  * The pool must EXCEED the budget, or `actual_spend ==
+    #    len(available)`, every name in the pool is queried, and the selection
+    #    loop is inert -- verified: the queried set was byte-identical whether
+    #    the selection LLM returned the first menu item, the last, or
+    #    "GARBAGE".
+    #  * The pool must never fall SHORT of the budget, or the scout silently
+    #    under-spends. A plain `rest[0::2]` / `rest[1::2]` split does fall
+    #    short once the claims are large: at k=45 with a full claim, measured
+    #    23 + 18 = 41 of 45, reported `status=ok` with conservation certified.
+    #    Each scout's shortfall is therefore reserved BEFORE the leftover is
+    #    divided.
+    #
+    # `rest` is shuffled on a seeded RNG rather than sliced by parity. The
+    # menu order is fixed and groups by variable family and intervention
+    # strength, so `rest[0::2]` handed scout_a 0 of 3 `osr_c` and 0 of 2 `red`
+    # experiments on LT -- the same blind spot in all 30 seeds, since nothing
+    # about the slice depends on the seed.
     rest = [m for m in menu if m not in set(claim_a) | set(claim_b)]
-    pool_a = set(claim_a) | set(rest[0::2])
-    pool_b = set(claim_b) | set(rest[1::2])
+    _random.Random(seed).shuffle(rest)
+    need_a = max(0, scout_a_budget - len(claim_a))
+    need_b = max(0, scout_b_budget - len(claim_b))
+    take_a, take_b, leftover = (
+        rest[:need_a],
+        rest[need_a : need_a + need_b],
+        rest[need_a + need_b :],
+    )
+    pool_a = set(claim_a) | set(take_a) | set(leftover[0::2])
+    pool_b = set(claim_b) | set(take_b) | set(leftover[1::2])
 
     all_names = set(menu)
     with adapter.as_node("scout_a"):

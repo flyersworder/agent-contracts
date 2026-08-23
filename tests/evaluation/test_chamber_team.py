@@ -195,35 +195,68 @@ def test_negotiation_outcome_is_recorded(make_ladder_adapter, conflict_llm):
     assert adapter.coordination_stats["n_contested"] >= 0
 
 
-@requires_causalchamber
-def test_the_selection_loop_is_not_inert(make_ladder_adapter):
-    """What the selection LLM returns must change what gets queried.
+def _queried(adapter) -> set[str]:
+    return {
+        e["data"]["experiment_name"]
+        for e in adapter.events
+        if e.get("type") == "tool_use" and "experiment_name" in e["data"]
+    }
 
-    Narrowing each scout's menu to exactly its claim makes
-    `actual_spend == len(available)`, so every name in the pool is queried
-    whatever the model says -- rung 4 would pay k selection calls for
-    nothing, and the rung-4-vs-rung-1 contrast would confound negotiation
-    with "adaptive selection removed".
+
+@requires_causalchamber
+def test_the_selection_loop_changes_which_experiments_are_queried(
+    make_ladder_adapter,
+):
+    """Varying ONLY the selection response must change the queried set.
+
+    The negotiation answer is held fixed. An earlier version of this test
+    varied both, so the pools differed between runs and the sets differed for
+    that reason -- it passed even when selection was made fully inert by
+    truncating each pool to exactly its budget.
     """
     from tests.evaluation.conftest import RecordingLLM, _menu_from
 
-    def make(sel):
+    def queried(sel):
         def responder(idx, msgs):
             names = _menu_from(msgs)
-            return sel(names) if names else ""
+            if not names:
+                return ""
+            if len(names) > 30:  # negotiation renders the whole menu: FIXED
+                return "\n".join(names[:5])
+            return sel(names)
 
         llm = RecordingLLM(responder)
-        # Negotiation prompts render their menu the same way, so claim lists
-        # come from the same helper; the split is what we hold fixed.
         adapter = make_ladder_adapter(llm, k=20)
         team_agents(adapter, seed=0, scout_a_budget=10, scout_b_budget=10, llm=llm)
-        graph = adapter.delegation_graph
-        return graph.monitor_for("scout_a").usage.get_tool_usage("intervene")
+        return _queried(adapter)
 
-    # Both spend their full budget either way -- that is F2's guarantee --
-    # but the *identity* of the picks must differ.
-    assert make(lambda n: n[0]) == 10
-    assert make(lambda n: n[-1]) == 10
+    first, last = queried(lambda n: n[0]), queried(lambda n: n[-1])
+    assert len(first) == 20 and len(last) == 20  # matched budget holds
+    assert first != last, "selection is inert: identical queries either way"
+
+
+@requires_causalchamber
+def test_matched_budget_holds_at_the_largest_ladder_budget(make_ladder_adapter):
+    """k=45 is where the pool split fell short.
+
+    A plain `rest[0::2]` / `rest[1::2]` gave 23 + 18 = 41 of 45 once the
+    claims were large, with `status=ok` and conservation certified. k=6 and
+    k=30 never triggered it, so a test at a smaller budget proves nothing.
+    """
+    from tests.evaluation.conftest import RecordingLLM, _menu_from
+
+    def responder(idx, msgs):
+        names = _menu_from(msgs)
+        if not names:
+            return ""
+        if len(names) > 30:  # negotiation: claim a full budget's worth
+            return "\n".join(names[:23])
+        return names[0]
+
+    llm = RecordingLLM(responder)
+    adapter = make_ladder_adapter(llm, k=45)
+    team_agents(adapter, seed=0, scout_a_budget=23, scout_b_budget=22, llm=llm)
+    assert len(_queried(adapter)) == 45
 
 
 @requires_causalchamber
