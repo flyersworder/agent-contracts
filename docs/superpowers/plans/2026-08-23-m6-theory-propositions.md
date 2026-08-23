@@ -34,7 +34,7 @@ The spec states P2 over *executions* ("tree accounting certifies an execution ex
   - `permitted_total(edges, root_budget) -> int` — the maximum total consumption the allocation physically permits, `Σ_v max(0, in_flow(v) − out_flow(v))`. The `max(0, …)` matters: a node cannot spend a negative amount, so an over-committed node does not offset its neighbours.
   - `tree_admits(edges, root_budget) -> bool` — whether a drop-policy tree accountant approves the grants.
 
-- [ ] **Step 1: Write the two helpers and the failing assertion**
+- [x] **Step 1: Write the two helpers and the failing assertion**
 
 ```python
 # tests/core/test_delegation_graph_propositions.py
@@ -109,12 +109,12 @@ def test_p2_tree_admits_an_allocation_permitting_more_than_the_root_budget():
     assert permitted_total(edges, 100) == 110   # a:20 + b:0 + d:60 + e:30
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p2_tree_admits -v`
 Expected: PASS. If `permitted_total` returns 100 rather than 110, the `max(0, …)` clamp was dropped — an over-committed `b` is silently offsetting the rest.
 
-- [ ] **Step 3: Show the DAG law rejects the same allocation**
+- [x] **Step 3: Show the DAG law rejects the same allocation**
 
 ```python
 def test_p2_dag_law_rejects_the_over_commitment():
@@ -145,19 +145,19 @@ def test_p2_dag_law_accepts_the_same_graph_without_the_over_commitment():
 
 `FlowConservationError` subclasses `ConservationViolationError`, so the `pytest.raises` above catches either.
 
-- [ ] **Step 4: Run both**
+- [x] **Step 4: Run both**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p2 -v`
 Expected: 3 PASS.
 
-- [ ] **Step 5: Mutation-check**
+- [x] **Step 5: Mutation-check**
 
 Change `tree_admits` to keep every edge (delete the `kept` filter). `test_p2_tree_admits_an_allocation_permitting_more_than_the_root_budget` must then FAIL, because a complete accountant sees `b`'s 60 against its 50 and refuses. Restore afterwards.
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p2_tree_admits -v`
 Expected: FAIL while mutated, PASS after restoring. If it passes while mutated, `tree_admits` is not checking every node.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/core/test_delegation_graph_propositions.py
@@ -177,7 +177,7 @@ git commit -m "test: P2 tree accounting admits an over-committed allocation"
 - Consumes: `permitted_total` from Task 1.
 - Produces: nothing consumed by later tasks.
 
-- [ ] **Step 1: Test whether the static bound survives cycles**
+- [x] **Step 1: Test whether the static bound survives cycles**
 
 ```python
 def test_p3_static_bound_survives_budget_cycles():
@@ -186,12 +186,12 @@ def test_p3_static_bound_survives_budget_cycles():
     assert permitted_total(edges, 100) == 100
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p3_static -v`
 Expected: PASS — cycles telescope like any other internal edge. If it FAILS, P3 stands as written; record that and skip to Step 5.
 
-- [ ] **Step 3: Search for a cyclic counterexample, and assert the search was not vacuous**
+- [x] **Step 3: Search for a cyclic counterexample, and assert the search was not vacuous**
 
 ```python
 import random
@@ -252,12 +252,12 @@ def test_p3_mutation_dropping_the_clamp_breaks_the_identity():
 
 Three guards. `_is_valid_allocation` rejects edge sets that are not allocations at all — an unfiltered generator breaches the budget because a node forwards what it never received, which says nothing about cycles. The two `>= 50` counts keep both populations non-empty. And the identity plus the mutation test is what makes the pair non-vacuous: measured empirically, every accepted allocation returns exactly 100, so `<= 100` could never have failed.
 
-- [ ] **Step 4: Run both tests**
+- [x] **Step 4: Run both tests**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p3 -v`
 Expected: PASS, with both counts above 50. The claim carried is *equality across both populations*: cyclic allocations saturate B(root) exactly as acyclic ones do, so the telescoping argument never uses acyclicity.
 
-- [ ] **Step 5: Assert the property that is actually enforced**
+- [x] **Step 5: Assert the property that is actually enforced**
 
 The cyclic-refund scenario cannot be built and then tested: `allocate()` calls
 `_reaches()` before inspecting any amount, so the graph is unconstructible. The
@@ -297,14 +297,14 @@ def test_p3_zero_amount_does_not_exempt_a_cycle():
 
 Add `CycleError` to the imports at the top of the module.
 
-- [ ] **Step 6: Run and record the restatement**
+- [x] **Step 6: Run and record the restatement**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p3 -v`
 Expected: all PASS.
 
 Record in the task notes: **P3 restated** — acyclicity is necessary for reclamation to be well-founded, not for the static bound, which is cycle-robust. Update §2 of the spec accordingly in Task 6.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tests/core/test_delegation_graph_propositions.py
@@ -322,7 +322,7 @@ git commit -m "test: P3 - static bound survives cycles; acyclicity is a reclamat
 - Consumes: `DelegationGraph.abandon`, `.verify`, `.monitor_for`, `.abandon_snapshot`.
 - Produces: nothing consumed by later tasks.
 
-- [ ] **Step 1: State the bound that is actually achievable in v1**
+- [x] **Step 1: State the bound that is actually achievable in v1**
 
 `Σ C(v) == B(root) + Σ refunds` **cannot be saturated**: a refund returns to the
 parent and reclaimed budget is not re-delegatable in v1, so total spend maxes out
@@ -358,7 +358,7 @@ def test_p4_abandonment_bound_is_tight():
         graph.verify()
 ```
 
-- [ ] **Step 2: Run and correct to the real API**
+- [x] **Step 2: Run and correct to the real API**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p4 -v`
 Expected: PASS. Two API facts, both verified: `add_tokens` lives on
@@ -367,19 +367,19 @@ Expected: PASS. Two API facts, both verified: `add_tokens` lives on
 `reasoning_tokens + text_tokens` gives 0 because a plain `add_tokens(n)` splits
 nothing. Check what `abandon()` returns before asserting on `.tokens`.
 
-- [ ] **Step 3: Find the exact tightness point**
+- [x] **Step 3: Find the exact tightness point**
 
 If `verify()` raises earlier than the construction predicts, reduce the
 post-abandon spend one token at a time until it passes, then assert on that
 exact value and on the value one greater. The test must pin the boundary, not
 straddle it.
 
-- [ ] **Step 4: Run to confirm both halves**
+- [x] **Step 4: Run to confirm both halves**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p4 -v`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/core/test_delegation_graph_propositions.py
@@ -397,7 +397,7 @@ git commit -m "test: P4 abandonment bound is tight at B(root) + refunds"
 - Consumes: `DelegationGraph.release`, `_proportional_share` semantics (refunds computed against **original** allocations).
 - Produces: nothing consumed by later tasks.
 
-- [ ] **Step 1: Write the property test over release orders**
+- [x] **Step 1: Write the property test over release orders**
 
 ```python
 import itertools
@@ -428,12 +428,12 @@ def test_p5_release_order_does_not_change_residuals():
     assert all(r == results[0] for r in results), results
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p5_release_order -v`
 Expected: PASS.
 
-- [ ] **Step 3: Mutation-check by simulating live-value refunds**
+- [x] **Step 3: Mutation-check by simulating live-value refunds**
 
 Add a test-local reimplementation that computes each edge's refund against the node's *live* residual rather than its original allocation, and assert that this version **is** order-dependent. This is the counterexample half of P5.
 
@@ -454,12 +454,12 @@ def test_p5_live_value_refunds_are_order_dependent():
     assert forward != reverse
 ```
 
-- [ ] **Step 4: Run both halves**
+- [x] **Step 4: Run both halves**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p5 -v`
 Expected: 2 PASS. If Step 3 fails (the live version turns out order-independent too), pick a more asymmetric allocation — unequal edge amounts and partial consumption at `d` — until the dependence shows.
 
-- [ ] **Step 5: Extend to genuinely random graphs**
+- [x] **Step 5: Extend to genuinely random graphs**
 
 The randomised version must build a *different* graph each iteration and
 compare release orders **within** that graph. Building a random graph and then
@@ -486,7 +486,7 @@ def test_p5_confluence_holds_on_random_two_parent_graphs():
             assert snapshot == base, (trial, params, order, snapshot, base)
 ```
 
-- [ ] **Step 6: Run and commit**
+- [x] **Step 6: Run and commit**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p5 -v`
 Expected: 3 PASS.
@@ -509,7 +509,7 @@ P6 claims `consumption <= in-flow` is node-locally decidable while the `+ out-fl
 - Consumes: `DelegationGraph.check_node`, `.monitor_for`, `.verify`.
 - Produces: nothing consumed by later tasks.
 
-- [ ] **Step 1: Write the definition down as a docstring before any code**
+- [x] **Step 1: Write the definition down as a docstring before any code**
 
 ```python
 def test_p6_locality_separation():
@@ -522,7 +522,7 @@ def test_p6_locality_separation():
     """
 ```
 
-- [ ] **Step 2: Write the test showing the monitor decides the in-flow half alone**
+- [x] **Step 2: Write the test showing the monitor decides the in-flow half alone**
 
 ```python
     graph = DelegationGraph(make_root(100))
@@ -536,7 +536,7 @@ def test_p6_locality_separation():
     assert monitor.check_constraints() != []        # local knowledge suffices
 ```
 
-- [ ] **Step 3: Write the test showing out-flow is invisible to that same monitor**
+- [x] **Step 3: Write the test showing out-flow is invisible to that same monitor**
 
 ```python
     graph2 = DelegationGraph(make_root(100))
@@ -552,7 +552,7 @@ def test_p6_locality_separation():
         graph2.check_node("w")                # only the graph can see it
 ```
 
-- [ ] **Step 4: Run both halves**
+- [x] **Step 4: Run both halves**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -k p6 -v`
 Expected: PASS.
@@ -563,7 +563,7 @@ false — contract materialization already folds out-flow in. If it fails on a
 type or attribute error, that is a test bug, not a falsified proposition. Only
 the first outcome goes in the gate tally.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add tests/core/test_delegation_graph_propositions.py
@@ -582,32 +582,32 @@ git commit -m "test: P6 locality separation under an explicit node-local definit
 - Consumes: the pass/fail record from Tasks 1–5.
 - Produces: the gate decision that the implementation track's sweep launch depends on.
 
-- [ ] **Step 1: Tally the surviving propositions**
+- [x] **Step 1: Tally the surviving propositions**
 
 Run: `uv run pytest tests/core/test_delegation_graph_propositions.py -v`
 
 Count how many of P2–P6 have a passing executable artifact **and** a statement that survived contact with it unchanged. A proposition that had to be restated (P3 is expected to) still counts as surviving — restated, not abandoned.
 
-- [ ] **Step 2: Apply the gate**
+- [x] **Step 2: Apply the gate**
 
 If **three or more** of P2–P6 survive, continue to Step 3.
 
 If **fewer than three**, stop and write the re-target decision into the spec's §2: target AAMAS Findings deliberately, or defer to a later venue with M5 data. Do not proceed to Step 3, and notify before the implementation track launches its sweep.
 
-- [ ] **Step 3: Rewrite §4.6 as numbered propositions**
+- [x] **Step 3: Rewrite §4.6 as numbered propositions**
 
 Replace each prose paragraph with a numbered proposition, its assumptions, its proof, and a pointer to the test that exercises it. Keep the existing Kirchhoff framing for P1 but state plainly that it is the easy half; the paper's theoretical weight rests on P2–P6.
 
-- [ ] **Step 4: Update the spec's §2 status column**
+- [x] **Step 4: Update the spec's §2 status column**
 
 Change each row's Status from "asserted only" to "proved, `test_pN_*`" or "restated (see §4.6)" or "failed the gate".
 
-- [ ] **Step 5: Verify nothing else regressed**
+- [x] **Step 5: Verify nothing else regressed**
 
 Run: `uv run pytest tests/core/ -q`
 Expected: all pass, no change to pre-existing test counts.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add docs/whitepaper.md docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md
