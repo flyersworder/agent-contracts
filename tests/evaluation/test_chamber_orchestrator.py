@@ -1625,3 +1625,95 @@ class TestModelOverride:
             ["--variants", "llm_pc", "--out", "x.parquet", "--model", "openrouter/x/y-0731"]
         )
         assert args.model == "openrouter/x/y-0731"
+
+
+class TestParallelSweep:
+    """M4c: cells run at ~1.3% CPU, so serial execution wastes the machine.
+
+    Process-level, not threads. `_PcDegeneracyHandler` attaches to the global
+    `evaluation.chamber_pipeline.inference` logger for the duration of a cell,
+    so N concurrent cells in one process would give every handler every other
+    cell's records and silently corrupt `n_pc_degeneracy`. Processes make that
+    impossible rather than relying on a correct thread-affinity filter.
+    """
+
+    def _spec(self) -> SweepSpec:
+        return SweepSpec(
+            chambers=("lt",),
+            budget_fractions=(0.10,),
+            agent_names=("random",),
+            seeds=(0, 1, 2, 3),
+            configuration="standard",
+        )
+
+    def test_parallel_matches_serial_exactly(self) -> None:
+        """Same cells, same seeds -> same scores. Concurrency must not
+        perturb a result; the cell seeds are the only randomness source."""
+        serial = run_sweep(self._spec())
+        parallel = run_sweep(self._spec(), max_workers=2)
+        assert [r.status for r in parallel] == [r.status for r in serial]
+        assert [(r.agent_name, r.budget_k, r.seed) for r in parallel] == [
+            (r.agent_name, r.budget_k, r.seed) for r in serial
+        ]
+        assert [r.shd for r in parallel] == [r.shd for r in serial]
+        assert [r.f1 for r in parallel] == [r.f1 for r in serial]
+
+    def test_records_come_back_in_cell_order_not_completion_order(self) -> None:
+        """Reproducibility: Parquet row order must not depend on which worker
+        finished first.
+
+        Tests `order_by_cell_index` directly with DELIBERATELY shuffled input.
+        An earlier version ran two live pools and compared them, which proved
+        nothing: `random` cells are fast and uniform, so completion order
+        equals submission order and the test passed with the reordering
+        deleted entirely.
+        """
+        from evaluation.chamber_pipeline.orchestrator import order_by_cell_index
+
+        serial = run_sweep(self._spec())
+        # Simulate workers finishing in reverse, then middle-out.
+        scrambled = [(3, serial[3]), (1, serial[1]), (0, serial[0]), (2, serial[2])]
+        assert [r.seed for r in order_by_cell_index(scrambled)] == [r.seed for r in serial]
+
+    def test_max_workers_actually_dispatches_to_the_parallel_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Guards against the parallel branch silently falling back to serial:
+        a sweep that quietly runs serially still returns correct records, just
+        10x slower, and no other test would notice."""
+        from evaluation.chamber_pipeline import orchestrator as _orch
+
+        called: list[int] = []
+
+        def _fake(sweep, cells, on_cell, model, max_workers, llm):  # type: ignore[no-untyped-def]
+            called.append(max_workers)
+            return []
+
+        monkeypatch.setattr(_orch, "_run_sweep_parallel", _fake)
+        run_sweep(self._spec(), max_workers=4)
+        assert called == [4]
+
+    def test_on_cell_fires_once_per_cell(self) -> None:
+        """The CLI writes the checkpoint sidecar from this callback. It must
+        run in the PARENT, once per cell, so sidecar appends stay serial and
+        the checkpoint needs no locking of its own."""
+        seen: list[tuple[str, int]] = []
+        run_sweep(
+            self._spec(),
+            max_workers=2,
+            on_cell=lambda rec, idx, total: seen.append((rec.agent_name, rec.seed)),
+        )
+        assert len(seen) == 4
+        assert len(set(seen)) == 4
+
+    def test_a_non_picklable_llm_is_refused_up_front(self) -> None:
+        """Fail loudly at the call, not with an opaque pickling error 400
+        cells into a paid sweep."""
+        with pytest.raises(ValueError, match="max_workers"):
+            run_sweep(self._spec(), max_workers=2, llm=lambda **kw: {})
+
+    def test_default_is_the_untouched_serial_path(self) -> None:
+        import inspect
+
+        sig = inspect.signature(run_sweep)
+        assert sig.parameters["max_workers"].default is None

@@ -1042,12 +1042,36 @@ def count_cells(sweep: SweepSpec, *, exclude_skipped: bool = False) -> int:
     return sum(1 for spec, chamber, *_ in iter_sweep_cells(sweep) if spec.is_compatible(chamber))
 
 
+def _run_cell_in_worker(
+    args: tuple[str, ChamberId, ConfigId, int, int, float, float | None, str | None],
+) -> RunRecord:
+    """Child-process entry point for the parallel sweep.
+
+    Takes the spec NAME, not the `AgentSpec`. `AgentSpec.static_kwargs` is a
+    `MappingProxyType`, which is not picklable, so shipping the dataclass to
+    a worker fails at submit time. The child re-resolves through the registry
+    instead -- the same object the parent would have used.
+    """
+    spec_name, chamber, configuration, budget_k, seed, pc_alpha, timeout, model = args
+    return run_cell(
+        spec=get_spec(spec_name),
+        chamber=chamber,
+        configuration=configuration,
+        budget_k=budget_k,
+        seed=seed,
+        pc_alpha=pc_alpha,
+        cell_timeout_seconds=timeout,
+        model=model,
+    )
+
+
 def run_sweep(
     sweep: SweepSpec,
     llm: LLMCallable | None = None,
     on_cell: Callable[[RunRecord, int, int], None] | None = None,
     skip_keys: set[tuple[str, str, str, int, int]] | None = None,
     model: str | None = None,
+    max_workers: int | None = None,
 ) -> list[RunRecord]:
     """Run a full sweep and return all RunRecords.
 
@@ -1080,6 +1104,9 @@ def run_sweep(
         raw_cells = filter_done_cells(raw_cells, skip_keys, configuration=sweep.configuration)
     cells = list(raw_cells)
     total = len(cells)
+    if max_workers is not None and max_workers > 1:
+        return _run_sweep_parallel(sweep, cells, on_cell, model, max_workers, llm)
+
     records: list[RunRecord] = []
     for idx, (spec, chamber, budget_k, _fraction, seed) in enumerate(cells):
         record = run_cell(
@@ -1097,6 +1124,91 @@ def run_sweep(
         if on_cell is not None:
             on_cell(record, idx, total)
     return records
+
+
+def order_by_cell_index(completed: list[tuple[int, RunRecord]]) -> list[RunRecord]:
+    """Restore cell-grid order from `(cell_index, record)` pairs.
+
+    `as_completed` yields whichever worker finished first, so without this
+    the Parquet row order would depend on scheduling -- two identical sweeps
+    would produce byte-different files and a resumed sweep would interleave
+    differently from a fresh one.
+
+    Kept as a pure function rather than inline because the inline version was
+    untestable: with fast uniform cells, completion order happens to equal
+    submission order, so a test against a live pool passes whether or not the
+    reordering exists.
+    """
+    return [record for _, record in sorted(completed, key=lambda pair: pair[0])]
+
+
+def _run_sweep_parallel(
+    sweep: SweepSpec,
+    cells: list[tuple[AgentSpec, ChamberId, int, float, int]],
+    on_cell: Callable[[RunRecord, int, int], None] | None,
+    model: str | None,
+    max_workers: int,
+    llm: LLMCallable | None,
+) -> list[RunRecord]:
+    """Run `cells` across a process pool, returning them in CELL order.
+
+    Processes, not threads, for two reasons that both corrupt data silently
+    rather than raising:
+
+      * `_PcDegeneracyHandler` attaches to the global
+        `evaluation.chamber_pipeline.inference` logger for a cell's duration.
+        Concurrent cells in one process would each receive every other cell's
+        records, so `n_pc_degeneracy` would count the whole pool.
+      * `_invoke_with_timeout` leaks a daemon thread on every timeout, since
+        a worker stuck in openssl's `SSL_read` cannot be cancelled. In one
+        process those accumulate for the whole sweep; per worker they stay
+        bounded and the worker keeps serving.
+
+    `on_cell` is invoked in the PARENT, once per completed cell. That keeps
+    the CLI's checkpoint-sidecar append single-threaded, so the checkpoint
+    layer needs no locking of its own.
+
+    Returns records ordered by the cell grid, never by completion order --
+    Parquet row order must not depend on which worker finished first.
+    """
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+
+    if llm is not None:
+        raise ValueError(
+            "max_workers > 1 cannot ship a custom `llm` to worker processes "
+            "(callables such as FakeLLM are generally not picklable). Pass "
+            "llm=None so each worker lazy-imports litellm, or run serially."
+        )
+
+    total = len(cells)
+    payloads = [
+        (
+            spec.name,
+            chamber,
+            sweep.configuration,
+            budget_k,
+            seed,
+            sweep.pc_alpha,
+            sweep.cell_timeout_seconds,
+            model,
+        )
+        for (spec, chamber, budget_k, _fraction, seed) in cells
+    ]
+
+    completed: list[tuple[int, RunRecord]] = []
+    with ProcessPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_run_cell_in_worker, p): i for i, p in enumerate(payloads)}
+        for fut in as_completed(futures):
+            i = futures[fut]
+            record = fut.result()
+            completed.append((i, record))
+            if on_cell is not None:
+                # `len(completed) - 1`, not `i`: the callback's index is a
+                # progress counter, and out-of-order cell indices would make
+                # the CLI's ETA jump backwards.
+                on_cell(record, len(completed) - 1, total)
+
+    return order_by_cell_index(completed)
 
 
 # ---------------------------------------------------------------------------

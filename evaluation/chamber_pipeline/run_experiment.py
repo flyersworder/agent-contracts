@@ -268,6 +268,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help=(
+            "Run cells across this many worker PROCESSES. Default (None) is "
+            "the serial path. Cells are ~1.3%% CPU (nearly all LLM network "
+            "wait), so concurrency well above the core count is productive; "
+            "each worker holds the chamber dataset, so budget ~500 MB apiece."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the cell grid + count, do not invoke agents.",
@@ -556,7 +567,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         sys.stdout.flush()
 
-    new_records = run_sweep(sweep, llm=llm, on_cell=progress, skip_keys=skip_keys, model=args.model)
+    new_records = run_sweep(
+        sweep,
+        llm=llm,
+        on_cell=progress,
+        skip_keys=skip_keys,
+        model=args.model,
+        max_workers=args.max_workers,
+    )
 
     # Consolidate from sidecar (NOT the in-memory list) so the final
     # Parquet contains both the prior records and the new ones. Reading
