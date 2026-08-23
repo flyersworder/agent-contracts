@@ -15,14 +15,22 @@
 - **Reuse safety is non-negotiable.** Rungs 0 (`llm_pc`) and 3 (`planner_reasoner`) must behave identically before and after every task. Every new parameter defaults to the current behaviour. Task 1 adds the regression test that pins this and it must stay green through Task 8.
 - **The metered tool key is `"intervene"`**, never `"exp"`. `_require_per_tool_propagation` short-circuits on `granted == 0`, so a zero-grant on an unknown key raises nothing.
 - **Grant `"observe"` an explicit zero too.** `create_contracted_chamber_agent` inserts that key only when `observation_budget > 0` (`causalchamber.py:496-498`) and `can_use_tool` treats an absent key as unlimited (`monitor.py:605-609`).
-- **Never reuse `_SELECTION_MAX_TOKENS = 200` for a reasoning call.** DeepSeek v4 Flash spends the cap on reasoning tokens and returns empty `content`. New calls get `_RECONCILE_MAX_TOKENS` / `_NEGOTIATE_MAX_TOKENS`, sized 4–8× expected content.
+- **`_SELECTION_MAX_TOKENS` is 2048 and `_SELECTION_REASONING_EFFORT` is
+  `"low"`, both pinned (2026-08-23).** The old 200 cap could not hold a
+  single selection call once providers began counting reasoning tokens
+  against `max_tokens`: all four returned `finish_reason=length` with empty
+  content and the loop fell back to `rng.choice`. Effort is pinned because
+  a pinned model snapshot does **not** pin behaviour — DeepSeek raised the
+  default under unchanged 0423 weights on 2026-08-13. Validated by a 6-cell
+  replication against M4b: SHD p=0.152, F1 p=0.758, 0/36 fallbacks.
+- **Never reuse a selection-sized cap for a reasoning call.** DeepSeek v4 Flash spends the cap on reasoning tokens and returns empty `content`. New calls get `_RECONCILE_MAX_TOKENS` / `_NEGOTIATE_MAX_TOKENS`, sized 4–8× expected content.
 - **Scout seeds are `2*seed` and `2*seed + 1`**, never `seed` and `seed + 1` — M4b seeds are contiguous `0..29`, so `seed + 1` collides with the next cell's scout_a. **But the seed alone does not decorrelate the scouts**: `_llm_select_loop` uses it only for the fallback RNG reached on an off-menu or duplicate response (`agents.py:435-441`). On the happy path rung 1's two scouts receive byte-identical messages. Diversity there must come from an **explicit `temperature`**, passed through to the completion call and recorded per cell — no `temperature` appears anywhere in `orchestrator.py` today, so leaving it to the provider default makes H-B uncontrolled and unreproducible.
 - Token budgets are **non-binding at execution**: node monitors record tokens for certification arithmetic and must not halt on the token dimension. Interventions are live-gated.
 - `mypy 2.3.1 --strict` clean; `uv run pytest -q` green after every task.
 
 ---
 
-### Task 1: Additive per-node metering and token attribution
+### Task 1: Additive per-node metering and token attribution  ✅ shipped
 
 Two things must be true at once, and getting either wrong silently guts a headline claim:
 
@@ -247,7 +255,7 @@ git commit -m "feat(chamber): additive per-node metering, token attribution, zer
 
 ---
 
-### Task 2: Blind role prompts and output caps
+### Task 2: Blind role prompts and output caps  ✅ shipped
 
 `build_reasoner_select_prompt` frames the task as refining "the Planner's picks (which appear in the `already_chosen` block)" (`llm_planner.py:162-177`). With `starting_chosen=None` that block is empty and the system message references nothing, so it cannot be reused blind.
 
@@ -342,7 +350,7 @@ git commit -m "feat(chamber): blind scout role prompts and reconcile/negotiate t
 
 ---
 
-### Task 3: Overlap metric
+### Task 3: Overlap metric  ✅ shipped
 
 **Files:**
 - Create: `evaluation/chamber_pipeline/coordination.py`
@@ -405,7 +413,7 @@ git commit -m "feat(chamber): overlap_fraction metric"
 
 ---
 
-### Task 4: The fan-in graph builder
+### Task 4: The fan-in graph builder  ✅ shipped
 
 **Files:**
 - Modify: `evaluation/chamber_pipeline/coordination.py`
@@ -413,7 +421,15 @@ git commit -m "feat(chamber): overlap_fraction metric"
 
 **Interfaces:**
 - Produces: `build_fan_in_graph(k: int, c95: int, a95: int) -> DelegationGraph` with nodes `scout_a`, `scout_b`, `aggregator`, sealed, using the §4 formulas:
-  `F = ceil(1.5*a95)`, `S = ceil(2*c95*ceil(k/2)) + F`, root `tokens = 2*S`.
+  `F = ceil(0.75*a95)`, `S = ceil(2*c95*ceil(k/2)) + F`, root `tokens = 2*S`.
+
+  > **Revised 2026-08-23.** `F` was `ceil(1.5*a95)`. That funded the
+  > aggregator to `3*a95` and made every single fragment larger than the
+  > `~a95` call it has to make, so a tree encoding would have succeeded
+  > and the arm would have demonstrated nothing about P2 while being
+  > over-provisioned 2x. At `0.75*a95` the aggregator keeps a 50% margin
+  > over the p95 call and neither scout alone can fund it — the
+  > inequality the arm exists to exercise.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -426,7 +442,7 @@ from evaluation.chamber_pipeline.coordination import build_fan_in_graph
 def test_fan_in_graph_seals_and_funds_the_aggregator():
     graph = build_fan_in_graph(k=30, c95=2303, a95=38752)
     assert graph.is_sealed
-    F = math.ceil(1.5 * 38752)
+    F = math.ceil(0.75 * 38752)
     assert graph.in_flow("aggregator").tokens == 2 * F
     assert graph.in_flow("scout_a").per_tool["intervene"] == 15
     assert graph.in_flow("scout_b").per_tool["intervene"] == 15
@@ -468,7 +484,7 @@ from agent_contracts.core.delegation_graph import DelegationGraph
 
 
 def build_fan_in_graph(k: int, c95: int, a95: int) -> DelegationGraph:
-    forward = math.ceil(1.5 * a95)
+    forward = math.ceil(0.75 * a95)
     scout_tokens = math.ceil(2 * c95 * math.ceil(k / 2)) + forward
     root = Contract(
         id=f"m6-root-k{k}",
@@ -1038,7 +1054,16 @@ git commit -m "feat(chamber): register ensemble/parallel-roles/team arms"
 
 ---
 
-### Task 8: Tree-accounting scorer and result schema
+### Task 8: P2 measurement (tree incompleteness) and result schema  ✅ shipped
+
+> **Revised 2026-08-23 after P2 was restated.** This task originally scored
+> `tree_certified_bound = 2S + F`, the over-certification of a **drop-policy**
+> accountant. That version of P2 was withdrawn: checked against this
+> framework's own `ContractingCapability`, the natural (split) encoding is
+> *sound* and refuses the over-commitment the claim relied on. Only a
+> drop-policy accountant, which no real implementation uses, is unsound.
+> Scoring it would have measured a strawman. The task now measures the
+> surviving result, **incompleteness**. Shipped in commit `861c69d`.
 
 **Files:**
 - Create: `evaluation/chamber_pipeline/tree_accounting.py`
@@ -1047,70 +1072,67 @@ git commit -m "feat(chamber): register ensemble/parallel-roles/team arms"
 
 **Interfaces:**
 - Produces:
-  - `tree_certified_bound(graph: DelegationGraph) -> int` — the total-consumption bound a drop-policy tree accountant would certify
-  - `dag_certified_bound(graph: DelegationGraph) -> int` — `B(root)` plus refunds
-  - `RunRecord` gains `overlap_frac: float | None`, `n_experiments_distinct: int | None`, `conservation_certified: bool | None`, `tree_accounting_bound: int | None`
+  - `dag_capacity(graph, node) -> int` — `sum_i a_i`, the largest indivisible
+    call the DAG law admits
+  - `max_tree_fragment(graph, node) -> int` — `max_i a_i`, the largest any tree
+    encoding admits, since an indivisible call must charge one fragment
+  - `fragmentation_factor(graph, node) -> float` — `sum_i a_i / max_i a_i`; the
+    factor-of-`m` penalty P2 quantifies, 1.0 for a single-parent node
+  - `tree_would_refuse(graph, node, tokens) -> bool | None`
+  - `RunRecord` gains `overlap_frac`, `n_experiments_distinct`,
+    `conservation_certified`, `aggregator_tokens`, `max_tree_fragment`,
+    `tree_would_refuse`
 
-- [ ] **Step 1: Write the failing test**
-
-```python
-from evaluation.chamber_pipeline.coordination import build_fan_in_graph
-from evaluation.chamber_pipeline.tree_accounting import (
-    dag_certified_bound,
-    tree_certified_bound,
-)
-
-
-def test_tree_bound_exceeds_dag_bound_on_a_fan_in_graph():
-    graph = build_fan_in_graph(k=30, c95=2303, a95=38752)
-    assert tree_certified_bound(graph) > dag_certified_bound(graph)
-
-
-def test_the_gap_equals_the_second_parents_forward():
-    graph = build_fan_in_graph(k=30, c95=2303, a95=38752)
-    gap = tree_certified_bound(graph) - dag_certified_bound(graph)
-    assert gap == graph.in_flow("aggregator").tokens // 2
-```
-
-- [ ] **Step 2: Run to verify it fails**
-
-Run: `uv run pytest tests/evaluation/test_chamber_tree_accounting.py -v`
-Expected: FAIL with ImportError.
-
-- [ ] **Step 3: Implement**
-
-The asymmetry is the whole point, and getting it wrong collapses the gap to zero. A dropped edge is **invisible to its source but real at its target**: the accountant does not know `scout_b` forwarded `F`, yet the aggregator genuinely holds `2F`.
-
-So for each node, permitted spend = *real* in-flow minus *accountant-visible* out-flow, clamped at zero:
+**The measurement.** P2 restated: for a node with `m >= 2` in-edges, an
+indivisible consumption `c` with
 
 ```
-root          2S - 2S = 0
-scout_a        S -  F
-scout_b        S -  0 = S      <- its forward to the aggregator is invisible
-aggregator    2F -  0 = 2F     <- but the aggregator really holds both forwards
-                        -----
-tree_certified_bound  = 2S + F
+max_i a(u_i -> v)  <  c  <=  sum_i a(u_i -> v)
 ```
 
-`dag_certified_bound` returns `B(root)` plus any refunds recorded on the graph, which for a freshly sealed graph is `2S`. The gap is therefore exactly `F`, the double-counted forward from the dropped second parent — the empirical form of P2.
+is admitted by the DAG law and by no tree encoding — by merge (no parent holds
+the sum), by split (`c` exceeds every fragment), or soundly by drop. So the
+per-cell question is not "how much did a tree over-certify" but **"would every
+tree encoding have refused this call"**.
 
-Summing "the budget the forest makes available" instead gives `(S−F) + S + F = 2S`, no gap at all, and both tests fail. Note also that `build_fan_in_graph` goes through `DelegationGraph.allocate`, which *refuses* the over-commitment P2 is about — so the scorer must model the counterfactual explicitly rather than re-running anything.
+`tree_would_refuse` returns `None` — not `False` — in the two cases that carry
+no evidence: fewer than two parents (P2 does not apply), and `tokens` above
+`sum_i a_i` (the DAG cannot fund it either, so a tree's refusal says nothing
+about the encoding). Collapsing either to `False` lets cells that tested
+nothing dilute the reported refusal rate, the same way a `0.0` overlap would
+hide a degenerate scout.
 
-- [ ] **Step 4: Add the four result columns**
+Nothing re-runs the counterfactual: `DelegationGraph.allocate` refuses
+over-commitment by construction, so the tree encoding is modelled from the
+edge amounts directly.
 
-Add them to `RunRecord` as optional fields defaulting to `None`, following the existing pattern at `results.py:120-145`. Populate them in `run_cell` with `getattr(adapter, "coordination_stats", {})` and `getattr(adapter, "delegation_graph", None)` — rungs 0 and 3 set neither, and a bare attribute access raises `AttributeError` on every reused-arm cell.
+**Budget prerequisite (fixed in Task 4).** The arm must actually reach the
+window. An earlier `build_fan_in_graph` forwarded `ceil(1.5*a95)` from *each*
+scout, funding the aggregator to `3*a95` and leaving every single fragment
+(`1.5*a95`) already larger than the `~a95` call it makes — a tree encoding
+would have succeeded and every cell would report `tree_would_refuse=False`.
+The forward is now `ceil(0.75*a95)`: a 50% margin over the p95 call in total,
+and insufficient from either scout alone. Both bounds are pinned by
+`test_the_aggregation_call_lands_in_p2s_incompleteness_window`.
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 1: Write the failing tests** — see
+  `tests/evaluation/test_chamber_tree_accounting.py`; cover both window bounds,
+  both `None` cases, and the single-parent case.
 
-Run: `uv run pytest -q`
-Expected: all green. Confirm existing Parquet round-trip tests still pass with the new optional columns.
+- [x] **Step 2: Run to verify they fail** — `ModuleNotFoundError`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 3: Implement `tree_accounting.py`.**
 
-```bash
-git add evaluation/chamber_pipeline/tree_accounting.py evaluation/chamber_pipeline/results.py tests/evaluation/test_chamber_tree_accounting.py
-git commit -m "feat(chamber): tree-accounting counterfactual scorer and coordination columns"
-```
+- [x] **Step 4: Add the six result columns**, optional and defaulting to
+  `None`, following the pattern at `results.py:120-145`. Populate them in
+  `run_cell` with `getattr(adapter, "coordination_stats", {})` and
+  `getattr(adapter, "delegation_graph", None)` — rungs 0 and 3 set neither,
+  and a bare attribute access raises `AttributeError` on every reused-arm cell.
+
+- [x] **Step 5: Run the full suite**, including the Parquet round-trip with
+  the new optional columns.
+
+- [x] **Step 6: Commit.**
 
 ---
 
