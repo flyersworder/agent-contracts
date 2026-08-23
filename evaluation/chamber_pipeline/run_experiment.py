@@ -121,7 +121,12 @@ PILOT_SPEC = SweepSpec(
 
 M6_SPEC = SweepSpec(
     chambers=("lt",),
-    budget_fractions=(0.10, 0.50, 1.00),
+    # {6, 30, 45}, NOT the pilot's {6, 30, 59}. At k=59 the budget equals the
+    # whole 59-item menu, so two blind scouts drawing 30 and 29 cover ~44
+    # distinct experiments against `llm_pc`'s 59 -- a 25% coverage deficit
+    # baked into the top budget point, which is the confound spec §3 rules
+    # out. 0.51 -> 30 and 0.76 -> 45.
+    budget_fractions=(0.10, 0.51, 0.76),
     agent_names=LADDER_VARIANTS,
     seeds=tuple(range(30)),
     configuration="standard",

@@ -92,6 +92,11 @@ class RunRecord:
             mechanism is unmeasurable -- a team whose scouts never agree on a
             split looks identical to one whose negotiation worked. None for
             every other arm.
+        n_negotiation_failures: For the team rung, how many negotiation
+            rounds returned nothing parseable. Non-zero means the split
+            degenerated to a menu-order partition, which produces identical
+            queries across every seed while still reporting a clean
+            `overlap_frac` of 0.0.
         conservation_certified: Whether `DelegationGraph.verify()` passed at
             the end of the cell (hypothesis H-C).
         aggregator_tokens: Tokens the aggregator spent on its single
@@ -164,6 +169,7 @@ class RunRecord:
     overlap_frac: float | None = None
     n_experiments_distinct: int | None = None
     n_contested: int | None = None
+    n_negotiation_failures: int | None = None
     conservation_certified: bool | None = None
     aggregator_tokens: int | None = None
     max_tree_fragment: int | None = None

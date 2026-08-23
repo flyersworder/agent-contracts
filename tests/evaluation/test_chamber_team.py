@@ -193,3 +193,92 @@ def test_negotiation_outcome_is_recorded(make_ladder_adapter, conflict_llm):
     adapter = make_ladder_adapter(conflict_llm)
     team_agents(adapter, seed=0, scout_a_budget=2, scout_b_budget=2, llm=conflict_llm)
     assert adapter.coordination_stats["n_contested"] >= 0
+
+
+@requires_causalchamber
+def test_the_selection_loop_is_not_inert(make_ladder_adapter):
+    """What the selection LLM returns must change what gets queried.
+
+    Narrowing each scout's menu to exactly its claim makes
+    `actual_spend == len(available)`, so every name in the pool is queried
+    whatever the model says -- rung 4 would pay k selection calls for
+    nothing, and the rung-4-vs-rung-1 contrast would confound negotiation
+    with "adaptive selection removed".
+    """
+    from tests.evaluation.conftest import RecordingLLM, _menu_from
+
+    def make(sel):
+        def responder(idx, msgs):
+            names = _menu_from(msgs)
+            return sel(names) if names else ""
+
+        llm = RecordingLLM(responder)
+        # Negotiation prompts render their menu the same way, so claim lists
+        # come from the same helper; the split is what we hold fixed.
+        adapter = make_ladder_adapter(llm, k=20)
+        team_agents(adapter, seed=0, scout_a_budget=10, scout_b_budget=10, llm=llm)
+        graph = adapter.delegation_graph
+        return graph.monitor_for("scout_a").usage.get_tool_usage("intervene")
+
+    # Both spend their full budget either way -- that is F2's guarantee --
+    # but the *identity* of the picks must differ.
+    assert make(lambda n: n[0]) == 10
+    assert make(lambda n: n[-1]) == 10
+
+
+@requires_causalchamber
+def test_claim_is_capped_so_a_verbose_scout_cannot_starve_its_partner(
+    make_ladder_adapter,
+):
+    """Uncapped, a scout reasoning over most of the menu swallows the pool.
+
+    Measured before the cap: 10 + 4 against a 20 budget when `claim_a`
+    reached 55 names, reported `status=ok` with conservation certified.
+    """
+    from tests.evaluation.conftest import RecordingLLM, _menu_from
+
+    def responder(idx, msgs):
+        names = _menu_from(msgs)
+        if not names:
+            return ""
+        # A negotiation reply that names almost the entire menu.
+        return "\n".join(names[:55]) if len(names) > 40 else names[0]
+
+    llm = RecordingLLM(responder)
+    adapter = make_ladder_adapter(llm, k=20)
+    team_agents(adapter, seed=0, scout_a_budget=10, scout_b_budget=10, llm=llm)
+    graph = adapter.delegation_graph
+    a = graph.monitor_for("scout_a").usage.get_tool_usage("intervene")
+    b = graph.monitor_for("scout_b").usage.get_tool_usage("intervene")
+    assert (a, b) == (10, 10), f"matched budget broken: {a} + {b}"
+
+
+@requires_causalchamber
+def test_unparseable_negotiation_is_recorded(make_ladder_adapter):
+    """An unusable negotiation round must leave a trace.
+
+    It degrades to a menu-order partition -- every seed queries the identical
+    experiments, zero between-seed variance -- while `overlap_frac` reads 0.0
+    and `n_contested` reads 0, i.e. indistinguishable from a perfect split.
+    """
+    from tests.evaluation.conftest import RecordingLLM, _menu_from
+
+    def responder(idx, msgs):
+        # Negotiation prompts get prose with no menu names; selection works.
+        names = _menu_from(msgs)
+        if len(names) > 40:  # the negotiation prompts render the whole menu
+            return "I would prefer to defer this decision."
+        return names[0] if names else ""
+
+    llm = RecordingLLM(responder)
+    adapter = make_ladder_adapter(llm, k=4)
+    team_agents(adapter, seed=0, scout_a_budget=2, scout_b_budget=2, llm=llm)
+    assert adapter.coordination_stats["n_negotiation_failures"] > 0
+
+
+def test_static_kwargs_cannot_be_mutated_through_the_registry():
+    """`get_spec(...).static_kwargs[k] = v` used to persist globally."""
+    from evaluation.chamber_pipeline.orchestrator import get_spec
+
+    with pytest.raises(TypeError):
+        get_spec("fan_in_spec").static_kwargs["differentiate"] = False

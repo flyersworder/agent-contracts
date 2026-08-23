@@ -140,7 +140,7 @@ def test_per_role_budgets_track_the_dearer_scout():
     harder, and the resulting conservation violations are calibration
     artifacts rather than real overruns.
     """
-    graph = build_fan_in_graph(k=30, c95=5969, a95=8557, c95_b=18136)
+    graph = build_fan_in_graph(k=30, c95=3003, a95=8557, c95_b=10379)
     assert graph.in_flow("scout_b").tokens > graph.in_flow("scout_a").tokens
     graph.verify()
 

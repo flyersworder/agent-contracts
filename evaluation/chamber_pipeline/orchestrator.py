@@ -41,6 +41,7 @@ import time
 import traceback
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from agent_contracts.core.delegation import ConservationViolationError
@@ -115,7 +116,9 @@ class AgentSpec:
     # real overruns -- it simply is not a ladder arm.
     scout_roles: tuple[str, str] | None = None
     negotiation_rounds: int = 0
-    static_kwargs: Mapping[str, Any] = field(default_factory=dict)
+    # `MappingProxyType` so a caller cannot mutate the registry through
+    # `get_spec(...).static_kwargs[k] = v`, which persisted globally.
+    static_kwargs: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     @property
     def is_ladder_arm(self) -> bool:
@@ -198,7 +201,7 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         kind="llm_multi",
         extra_kwargs=("scout_a_budget", "scout_b_budget"),
         scout_roles=("broad", "targeted"),
-        static_kwargs={"differentiate": True},
+        static_kwargs=MappingProxyType({"differentiate": True}),
     ),
     AgentSpec(
         name="team",
@@ -850,12 +853,16 @@ def run_cell(
             refuse = (
                 tree_would_refuse(cell_graph, "aggregator", agg_tokens) if agg_tokens > 0 else None
             )
-            if agg_tokens > 0:
-                try:
-                    cell_graph.verify()
-                    certified = True
-                except ConservationViolationError:
-                    certified = False
+            # NOT gated on aggregator spend. `verify()` is graph-wide, so a
+            # cell whose scouts overran but whose aggregator reported no
+            # usage would drop out of H-C's denominator instead of counting
+            # as the failure it is -- biasing the reported compliance rate
+            # upward. Only `tree_would_refuse` is aggregator-specific.
+            try:
+                cell_graph.verify()
+                certified = True
+            except ConservationViolationError:
+                certified = False
 
         # PC variants populate degeneracy count; llm_only doesn't run PC.
         n_pc_degen: int | None = None if spec.name == "llm_only" else handler.count
@@ -883,6 +890,7 @@ def run_cell(
             overlap_frac=coord.get("overlap_frac"),
             n_experiments_distinct=coord.get("n_experiments_distinct"),
             n_contested=coord.get("n_contested"),
+            n_negotiation_failures=coord.get("n_negotiation_failures"),
             conservation_certified=certified,
             aggregator_tokens=agg_tokens,
             max_tree_fragment=frag,

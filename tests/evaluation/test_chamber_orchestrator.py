@@ -1444,7 +1444,7 @@ class TestLadderSelfDescription:
         assert homog_a == homog_b  # both plain
         assert spec_b > spec_a  # targeted costs more than broad
         assert homog_oh == 0  # no negotiation rounds
-        assert team_oh > 0  # two rounds, funded at the same 2x margin
+        assert team_oh > 0  # two rounds, at the same provisioning multiple
 
     def test_every_declared_role_has_a_calibration_figure(self) -> None:
         from evaluation.chamber_pipeline.orchestrator import _ROLE_C95, AGENT_REGISTRY
@@ -1454,3 +1454,47 @@ class TestLadderSelfDescription:
                 continue
             for role in spec.scout_roles:
                 assert role in _ROLE_C95, f"{spec.name} declares unknown role {role!r}"
+
+
+class TestProvisioningIsWired:
+    """Reverting the provisioning fix must not leave the suite green.
+
+    Both `multiple=_PROVISION_MULTIPLE` at the call site and the constant
+    itself were previously unverified: deleting the argument (falling back to
+    the `multiple=2` default, halving every scout grant) and setting the
+    constant to 1 each left all tests passing. Under-provisioning reads as a
+    coordination result, so a regression here is self-disguising.
+    """
+
+    def test_run_cell_passes_the_provision_multiple(self) -> None:
+        import inspect
+
+        from evaluation.chamber_pipeline import orchestrator
+
+        src = inspect.getsource(orchestrator.run_cell)
+        assert "multiple=_PROVISION_MULTIPLE" in src
+
+    def test_the_multiple_actually_scales_the_grant(self) -> None:
+        from evaluation.chamber_pipeline.coordination import build_fan_in_graph
+        from evaluation.chamber_pipeline.orchestrator import _PROVISION_MULTIPLE
+
+        assert _PROVISION_MULTIPLE >= 3, "the tail needs more than a 2x margin"
+        base = build_fan_in_graph(k=30, c95=2205, a95=8557, multiple=1)
+        scaled = build_fan_in_graph(k=30, c95=2205, a95=8557, multiple=_PROVISION_MULTIPLE)
+        forward = scaled.in_flow("aggregator").tokens // 2
+        spendable_base = base.in_flow("scout_a").tokens - forward
+        spendable_scaled = scaled.in_flow("scout_a").tokens - forward
+        assert spendable_scaled == _PROVISION_MULTIPLE * spendable_base
+
+
+def test_m6_runs_the_specified_budgets_not_the_pilots() -> None:
+    """k=59 equals the whole menu, which spec §3 rules out.
+
+    Two blind scouts drawing 30 and 29 from 59 cover ~44 distinct experiments
+    against `llm_pc`'s 59 -- a 25% coverage deficit at the top budget point.
+    """
+    from evaluation.chamber_pipeline.orchestrator import _budget_k_for
+    from evaluation.chamber_pipeline.run_experiment import M6_SPEC
+
+    ks = [_budget_k_for("lt", f) for f in M6_SPEC.budget_fractions]
+    assert ks == [6, 30, 45], ks

@@ -591,16 +591,12 @@ def llm_only_agent(
         # track a provider default is the worst place to do so.
         extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
     )
-    adjacency = parse_adjacency_response(response, nodes)
-    # Record a degenerate emission. This is the M4b failure mode -- the model
-    # spends its budget on hidden reasoning and returns empty content -- and
-    # it degrades to an all-zero graph rather than raising, so without a
-    # counter it is indistinguishable from a genuine "no edges" answer.
-    if not adjacency.to_numpy().any():
-        recorder = getattr(llm, "record_selection_fallback", None)
-        if recorder is not None:
-            recorder()
-    return adjacency
+    # A degenerate all-zero emission -- the M4b failure mode, where the model
+    # spends its budget on hidden reasoning and returns empty content -- is
+    # already unambiguous in the record as `n_edges_predicted == 0`. Counting
+    # it into `n_selection_fallbacks` would make one column mean two
+    # different failures.
+    return parse_adjacency_response(response, nodes)
 
 
 def llm_pc_agent(
@@ -1014,17 +1010,37 @@ def team_agents(
     # nobody; and the anti-starvation guard looked only at `contested`, not at
     # the full exclusion, so scout_b silently under-spent -- 14 picks against
     # a budget of 22, measured on the real LT menu.
-    claim_a = list(revised_a or proposed_a)
-    claim_b = [n for n in (revised_b or proposed_b) if n not in set(claim_a)]
-    contested = set(revised_a) & set(revised_b)
+    source_a = revised_a or proposed_a
+    source_b = revised_b or proposed_b
+    # Count rounds that produced nothing usable. Unparseable negotiation is
+    # the documented empty-content mode, and it degrades to a MENU-ORDER
+    # partition: every seed then queries the identical experiments, with zero
+    # between-seed variance, while `overlap_frac` reads 0.0 and `n_contested`
+    # reads 0 -- indistinguishable from a perfect split. Unlike the selection
+    # loop, this path had no recorder at all.
+    negotiation_failures = sum(1 for src in (source_a, source_b) if not src)
+    # `contested` is measured from the lists actually used, not from
+    # `revised_*`: when a revise reply is unparseable the code falls back to
+    # the proposals, and reading the discarded list reports 0 conflicts for a
+    # round that resolved none.
+    contested = set(source_a) & set(source_b)
 
-    # Top up from what neither scout claimed so each can spend its full
-    # budget. Matched budget across rungs is the comparison the ladder rests
-    # on, and a short scout would read as a coordination result.
-    spare = [m for m in menu if m not in set(claim_a) | set(claim_b)]
-    for claim, budget in ((claim_a, scout_a_budget), (claim_b, scout_b_budget)):
-        while len(claim) < budget and spare:
-            claim.append(spare.pop(0))
+    # Cap each claim at its budget. Uncapped, a scout that reasons out loud
+    # over most of the menu swallows the shared pool and starves its partner:
+    # measured 10 + 4 against a 20 budget when `claim_a` reached 55 names.
+    claim_a = list(source_a)[:scout_a_budget]
+    claim_b = [n for n in source_b if n not in set(claim_a)][:scout_b_budget]
+
+    # Partition the REST of the menu between the two scouts as well, so each
+    # selects from a pool strictly larger than its budget. Narrowing a scout's
+    # menu to exactly its claim makes `actual_spend == len(available)` and the
+    # selection loop inert -- verified: the queried set was byte-identical
+    # whether the selection LLM returned the first menu item, the last, or
+    # "GARBAGE". The negotiation should decide WHERE each scout explores; the
+    # selection loop still decides what it picks there.
+    rest = [m for m in menu if m not in set(claim_a) | set(claim_b)]
+    pool_a = set(claim_a) | set(rest[0::2])
+    pool_b = set(claim_b) | set(rest[1::2])
 
     all_names = set(menu)
     with adapter.as_node("scout_a"):
@@ -1036,7 +1052,7 @@ def team_agents(
             spend=scout_a_budget,
             prompt_builder=build_select_prompt,
             temperature=_SCOUT_TEMPERATURE,
-            exclude=all_names - set(claim_a),
+            exclude=all_names - pool_a,
         )
     with adapter.as_node("scout_b"):
         chosen_b, dfs_b = _llm_select_loop(
@@ -1047,7 +1063,11 @@ def team_agents(
             spend=scout_b_budget,
             prompt_builder=build_select_prompt,
             temperature=_SCOUT_TEMPERATURE,
-            exclude=(all_names - set(claim_b)) | set(chosen_a),
+            # `| set(chosen_a)` is belt-and-braces only: `pool_a` and
+            # `pool_b` are disjoint by construction, so it never removes
+            # anything. Kept so the disjointness is not silently load-bearing
+            # on one construction alone.
+            exclude=(all_names - pool_b) | set(chosen_a),
         )
 
     with adapter.as_node("aggregator"):
@@ -1073,6 +1093,7 @@ def team_agents(
         # scouts never actually agree on a split looks identical to one whose
         # negotiation worked.
         "n_contested": len(contested),
+        "n_negotiation_failures": negotiation_failures,
     }
     if not dfs:
         return _empty_adjacency(nodes)
