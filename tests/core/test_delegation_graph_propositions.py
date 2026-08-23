@@ -7,11 +7,13 @@ test says so in minutes where a proof attempt can absorb a day.
 See docs/superpowers/plans/2026-08-23-m6-theory-propositions.md
 """
 
+import random
+
 import pytest
 
 from agent_contracts.core.contract import Contract, ResourceConstraints
 from agent_contracts.core.delegation import ConservationViolationError
-from agent_contracts.core.delegation_graph import DelegationGraph
+from agent_contracts.core.delegation_graph import CycleError, DelegationGraph
 
 ROOT = DelegationGraph.ROOT
 
@@ -92,3 +94,96 @@ def test_p2_dag_law_accepts_the_same_graph_without_the_over_commitment():
     assert graph.in_flow("d").tokens == 60
     edges = [(ROOT, "a", 50), (ROOT, "b", 50), ("a", "d", 30), ("b", "d", 30)]
     assert permitted_total(edges, 100) == 100  # exactly the root budget
+
+
+def test_p3_static_bound_survives_budget_cycles():
+    """If this PASSES, P3 as specified is false and must be restated."""
+    edges = [(ROOT, "a", 100), ("a", "b", 50), ("b", "a", 50)]
+    assert permitted_total(edges, 100) == 100
+
+
+def _is_valid_allocation(edges, root_budget):
+    """Every node forwards no more than it received."""
+    nodes = {s for s, _d, _a in edges} | {d for _s, d, _a in edges}
+    return all(_out_flow(edges, n) <= _in_flow(edges, n, root_budget) for n in nodes)
+
+
+def _generate(rng, force_cycle):
+    names = ["a", "b", "c"]
+    edges = [(ROOT, rng.choice(names), rng.randint(1, 60))]
+    for _ in range(rng.randint(1, 4)):
+        src, dst = rng.sample(names, 2)
+        edges.append((src, dst, rng.randint(1, 30)))
+    pairs = {(x, y) for x, y, _a in edges}
+    has_cycle = any((d, s) in pairs for s, d, _a in edges)
+    return edges if has_cycle == force_cycle else None
+
+
+def test_p3_cyclic_and_acyclic_allocations_saturate_identically():
+    """Valid allocations saturate B(root) exactly, cycles or not.
+
+    Assert the IDENTITY, not `<= root_budget`. The inequality is implied by
+    `_is_valid_allocation` alone -- the filter asserts the very invariant whose
+    consequence is under test -- so an inequality here can never fail and proves
+    nothing. The identity plus the acyclic control is what carries the claim:
+    the two populations behave the same, so acyclicity is nowhere used.
+    """
+    rng = random.Random(20260823)
+    counts = {True: 0, False: 0}
+    for force_cycle in (True, False):
+        for _ in range(4000):
+            edges = _generate(rng, force_cycle)
+            if edges is None or not _is_valid_allocation(edges, 100):
+                continue
+            counts[force_cycle] += 1
+            assert permitted_total(edges, 100) == 100, edges
+    assert counts[True] >= 50, f"only {counts[True]} cyclic allocations"
+    assert counts[False] >= 50, f"only {counts[False]} acyclic allocations"
+
+
+def test_p3_mutation_dropping_the_clamp_breaks_the_identity():
+    """Mutation check: without max(0, ...) an over-committed node offsets its
+    neighbours, so the identity stops detecting over-commitment."""
+
+    def unclamped(edges, rb):
+        nodes = {s for s, _d, _a in edges} | {d for _s, d, _a in edges}
+        return sum(_in_flow(edges, n, rb) - _out_flow(edges, n) for n in nodes)
+
+    over = [
+        (ROOT, "a", 50),
+        (ROOT, "b", 50),
+        ("a", "d", 30),
+        ("b", "d", 30),
+        ("b", "e", 30),
+    ]
+    assert permitted_total(over, 100) == 110  # clamped: over-commitment visible
+    assert unclamped(over, 100) == 100  # unclamped: hidden
+
+
+def test_p3_budget_cycles_are_refused_at_allocation_time():
+    """The graph cannot be built, so cyclic reclamation can never arise.
+
+    This is what acyclicity actually buys: not the static bound (see
+    test_p3_static_bound_survives_budget_cycles), but a guarantee that
+    refund propagation is well-founded, enforced structurally.
+    """
+    graph = DelegationGraph(make_root(100))
+    for name in ("a", "b"):
+        graph.add_node(name)
+    graph.allocate(ROOT, "a", tokens=50)
+    graph.allocate(ROOT, "b", tokens=50)
+    graph.allocate("a", "b", tokens=10)
+    with pytest.raises(CycleError):
+        graph.allocate("b", "a", tokens=10)  # would close the budget cycle
+
+
+def test_p3_zero_amount_does_not_exempt_a_cycle():
+    """The cycle check precedes the amount check, so zero is refused too."""
+    graph = DelegationGraph(make_root(100))
+    for name in ("a", "b"):
+        graph.add_node(name)
+    graph.allocate(ROOT, "a", tokens=50)
+    graph.allocate(ROOT, "b", tokens=50)
+    graph.allocate("a", "b", tokens=10)
+    with pytest.raises(CycleError):
+        graph.allocate("b", "a", tokens=0)
