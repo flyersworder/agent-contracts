@@ -23,21 +23,51 @@ The *control* graph may contain cycles (a node retries, a council
 re-deliberates); the *budget* graph must not, or the telescoping argument
 collapses. Cycle-creating edges are rejected.
 
-This module is not thread-safe. ``run_sweep`` is serial today; if parallelism
-lands, ``allocate``/``release``/``abandon`` need a lock.
+Concurrency has two regimes, and only one of them needs synchronization here.
+
+*Consumption* is already safe without any graph-level coordination: each node
+carries its own ``ResourceMonitor``, monitors are disjoint across nodes, and
+``ResourceUsage`` guards its own counters. Agents at distinct nodes therefore
+record usage concurrently with no cross-node lock and no central accountant --
+the property §4.6 P1's corollary claims.
+
+*Topology mutation* is not safe unsynchronized. ``allocate`` validates the
+conservation predicate and then mutates, and that check-then-act sequence
+raced: eight threads allocating 20 tokens each against a root budget of 100
+over-granted in 190 of 300 trials, reaching 140. The mutators below therefore
+take a per-graph reentrant lock. It is per graph and confined to the build and
+reclamation paths -- it does not serialize consumption.
 """
 
 from __future__ import annotations
 
+import functools
 import math
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from agent_contracts.core.contract import Contract
 from agent_contracts.core.delegation import ConservationViolationError
 from agent_contracts.core.monitor import ResourceMonitor
 from agent_contracts.core.resource_vector import _COST_EPSILON, ResourceVector
+
+
+def _synchronized[Method: Callable[..., Any]](method: Method) -> Method:
+    """Serialize a graph mutator on the owning graph's reentrant lock.
+
+    Reentrant because the mutators call one another -- ``abandon`` releases the
+    edges it is unwinding -- and a plain lock would self-deadlock.
+    """
+
+    @functools.wraps(method)
+    def wrapper(self: DelegationGraph, *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return cast("Method", wrapper)
 
 
 class CycleError(Exception):
@@ -176,6 +206,8 @@ class DelegationGraph:
         self._nodes: dict[str, GraphNode] = {}
         self._edges: dict[str, EdgeAllocation] = {}
         self._sealed = False
+        # Guards topology mutation only; consumption uses per-node monitors.
+        self._lock = threading.RLock()
 
         root = GraphNode(node_id=root_contract.id, name=self.ROOT, contract=root_contract)
         root.monitor = root_monitor or ResourceMonitor(root_contract.resources)
@@ -183,6 +215,7 @@ class DelegationGraph:
 
     # ---------------------------------------------------------------- build
 
+    @_synchronized
     def add_node(self, name: str, **contract_kwargs: Any) -> str:
         """Register a node. It carries no budget until an edge feeds it.
 
@@ -200,6 +233,7 @@ class DelegationGraph:
         )
         return node_id
 
+    @_synchronized
     def allocate(self, source: str, target: str, **resources: Any) -> EdgeAllocation:
         """Allocate budget along edge ``source -> target``.
 
@@ -308,6 +342,7 @@ class DelegationGraph:
     def is_sealed(self) -> bool:
         return self._sealed
 
+    @_synchronized
     def seal(self) -> None:
         """Validate the whole graph and freeze its topology.
 
@@ -646,6 +681,7 @@ class DelegationGraph:
 
     # -------------------------------------------------------- reclamation
 
+    @_synchronized
     def release(self, source: str, target: str) -> ResourceVector:
         """Refund edge ``source -> target``'s share of the target's unused budget.
 
@@ -685,6 +721,7 @@ class DelegationGraph:
         edge.released = True
         return share
 
+    @_synchronized
     def abandon(self, name: str) -> ResourceVector:
         """Mark ``name`` dead; refund its unconsumed budget to its parents.
 

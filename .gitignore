@@ -236,3 +236,7 @@ data/
 
 # Chamber pipeline experiment outputs (parquets, logs, figures)
 runs/
+
+# Claude Code local settings
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

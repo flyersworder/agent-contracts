@@ -255,9 +255,14 @@ class TestM2Factory:
         )
         assert a.contract.resources.per_tool_limits == {"intervene": 10, "observe": 5}
 
-    def test_zero_observation_budget_is_omitted(self) -> None:
+    def test_zero_observation_budget_is_emitted_as_a_hard_zero(self) -> None:
+        """An omitted key means *unconstrained*, so zero must be emitted.
+
+        This test previously asserted the opposite -- that the key is omitted
+        -- which codified the defect rather than catching it.
+        """
         a = create_contracted_chamber_agent(chamber="lt", intervention_budget=10)
-        assert "observe" not in a.contract.resources.per_tool_limits
+        assert a.contract.resources.per_tool_limits["observe"] == 0
 
     def test_extra_resources_merged(self) -> None:
         extras = ResourceConstraints(tokens=50_000, cost_usd=2.0)
@@ -344,3 +349,21 @@ class TestM2SmokeRoundTrip:
 
         assert shd(predicted, ground_truth) == 0
         assert f1_edges(predicted, ground_truth) == pytest.approx(1.0)
+
+
+@requires_causalchamber
+def test_default_observation_budget_is_enforced_as_zero():
+    """`observation_budget=0` means zero, not unconstrained.
+
+    `can_use_tool` treats an *absent* per-tool key as unconstrained, so
+    emitting the limit only when positive inverted the documented default:
+    every default-constructed agent could call `query_observation` without
+    bound. Regression guard for that inversion.
+    """
+    agent = create_contracted_chamber_agent(
+        chamber="lt", configuration="standard", intervention_budget=5
+    )
+    limits = agent.contract.resources.per_tool_limits
+    assert limits["observe"] == 0
+    assert agent._resource_monitor.can_use_tool("observe") is False
+    assert agent._resource_monitor.can_use_tool("intervene") is True

@@ -38,7 +38,7 @@ This document tracks development progress and key decisions for the Agent Contra
   recovered. **DeepSeek v4 Flash dominates the Pareto at high budget** when given
   the summary — rotates the §5.3 narrative (see plan).
 - **M4b re-smoke + pilot**: Pending. Re-smoke = 45 cells (~2-3hr, ~$0.50) at
-  3 seeds. Pilot = 450 cells (~24hr, ~$2) at 30 seeds. Both require
+  3 seeds. Pilot = 450 cells (~24hr, ~$2 est.) at 30 seeds. Both require
   `--cell-timeout-seconds 1800` (was 600) because the adjacency call now reasons
   for up to 10min at k/M=1.00.
 - **M4b cell-timeout root-cause fix** (May 15, commit `0d694cf`) ✅ — the
@@ -538,10 +538,19 @@ an external trigger: **loop engineering** (named 2026-06-07, Addy Osmani) and
 field's agenda, and critical reviews of both note there is **no comparative
 benchmark**. We already hold two of the three arms.
 
-M6 is now a three-arm topology study at matched budget — loop (`llm_only`),
-chain (`planner_reasoner`), and a new **fan-in** arm (2 scouts → aggregator).
+M6 is now a **five-rung coordination ladder** (respecified 2026-08-23; the
+three-arm description below is superseded by
+`docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`, which is
+authoritative): loop (`llm_pc`), ensemble, parallel-roles, chain
+(`planner_reasoner`), and team (negotiation), at k ∈ {6, 30, 45}.
 Arms 1-2 are already in `runs/m4-pilot.parquet`, so new compute is **90 cells
 (~$1-2)**. Cross-pillar transfer (§7.1-7.6) becomes the journal extension.
+**Both figures were wrong** (corrected 2026-08-23): M4b actually cost **$5.11**
+for 450 cells, and M6 as respecified is **~417 cells, 65–90h, $9–14** — see
+`docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md` §3. The
+per-cell basis matters: M4b LLM cells averaged **7.2 min**, `planner_reasoner`
+**8.7 min / $0.0196**; the 4.7 min/cell implied by the headline is contaminated
+by 180 non-LLM cells averaging 0.15s. Estimate from LLM cells only.
 
 Pre-registered: H-A chain underperforms loop (already supported: F1 0.397 vs
 0.75); **H-B fan-in recovers delegation cost via exploration diversity — open,
@@ -549,9 +558,19 @@ this is the experiment**; H-C conservation compliance 100%.
 
 Prerequisite shipped in **v0.4.0** (`core/delegation_graph.py`). **No open
 blockers.** When building the fan-in arm, grant the aggregator an explicit
-`per_tool={"exp": 0}` — an omitted key means *unconstrained*, not zero, so the
-matched-budget control would otherwise be unenforceable rather than merely
-detectable after the fact.
+`per_tool={"intervene": 0, "observe": 0}` — an omitted key means *unconstrained*,
+not zero, so
+the matched-budget control would otherwise be unenforceable rather than merely
+detectable after the fact. **The key is `"intervene"`** (the tool name
+`ContractedChamberAgent.query_intervention` meters), not `"exp"`; an earlier
+note here said `"exp"`, which fails *silently* — `DelegationGraph.
+_require_per_tool_propagation` short-circuits on `granted == 0`, so a
+zero-grant on an unknown key raises nothing while `"intervene"` stays
+unconstrained. The adapter's aggregate monitor still caps total spend, so the
+matched budget holds; what is lost is the per-role control. **`"observe"` needs
+the same explicit zero**: `create_contracted_chamber_agent` inserts that key only
+when `observation_budget > 0`, so without it the aggregator can call
+`query_observation` without bound and acquire data outside the certified budget.
 
 **Retracted (2026-07-25): the `add_iteration()` "gap" was a phantom.** An
 earlier note here claimed M6 was blocked on wiring `ResourceUsage.add_iteration()`.

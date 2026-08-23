@@ -1017,8 +1017,7 @@ Section 4.1 decomposes a task into a **tree**: every child contract has exactly
 one parent, and conservation means the sum of sibling allocations cannot exceed
 the parent's budget. That structure cannot express a node funded by two parents
 — an aggregator that merges the work of two independent scouts, a reviewer
-serving two pipelines, a shared tool budget. Under a tree law such a node is
-double-counted.
+serving two pipelines, a shared tool budget.
 
 **Delegation graphs** generalize the tree to a DAG `G = (V, E)` in which each
 edge carries an allocation `a(u→v)`: a resource vector over tokens, cost, tool
@@ -1040,48 +1039,368 @@ In words: **in-flow ≥ own consumption + out-flow** — Kirchhoff's current law
 with a consumption sink at each node. The tree law of §4.1 is the special case
 in which every non-root node has exactly one in-edge.
 
-**Soundness.** If the local invariant holds at every node, then
-`Σ_v C(v) ≤ B(root)`.
+The rest of this section states eight propositions. P2–P6 are each accompanied by
+an executable artifact in `tests/core/test_delegation_graph_propositions.py`,
+written *before* its proof; P1 is covered by the pre-existing telescoping
+property test in `tests/core/test_delegation_graph_properties.py`.
+
+Writing the artifact first was not a stylistic choice. **Three of the first six
+propositions did not survive their own artifact and are restated here** — P2's
+unsoundness claim collapsed against this framework's real tree implementation,
+P3's appeal to acyclicity turned out to be unnecessary for the bound it was
+invoked to support, and P4's bound proved saturable after a first artifact
+concealed the saturating execution by summing over the wrong nodes. Each of the
+three is stated below in the corrected form, together with what the original
+claim was and why it failed, because the failures are more instructive than the
+survivals. P7 is the one result that emerged from the exercise rather than
+surviving it: P4 and P6, once repaired, turned out to be the same fact.
+
+#### P1 — Soundness
+
+**Proposition 1.** If the local invariant `Σ a(u→v) ≥ C(v) + Σ a(v→w)` holds at
+every node, then `Σ_v C(v) ≤ B(root)`.
 
 *Proof.* Sum the invariant over all `v ∈ V`. Every internal allocation `a(u→v)`
 appears once positively as in-flow at `v` and once negatively as out-flow at
 `u`, so internal terms cancel. Only the root's exogenous budget survives on the
 left and total system consumption on the right. ∎
 
-The corollary is what makes the law practical: **each node checks only its own
-edges, and global boundedness follows.** No global lock and no central
-accountant — the property a multi-agent system needs if its agents are to run
-concurrently without coordinating on every allocation.
+This is the easy half — it is Kirchhoff's law — and we claim no novelty for it;
+the paper's theoretical weight rests on P2–P6. Its corollary is what makes the law practical: **each
+node checks only its own edges, and global boundedness follows.** No lock on the
+enforcement path and no central accountant — the property a multi-agent system
+needs if its agents are to run concurrently without coordinating on every
+consumption. P8 scopes this precisely: enforcement is lock-free, allocation is
+not, and the distinction matters.
 
-**Control flow may cycle; budget flow must not.** Agents legitimately loop — a
-node retries, a review council re-deliberates. The *control* graph may therefore
-contain cycles. The *budget* graph may not: a cycle would let a node refund its
-own ancestor, and the telescoping argument collapses. Edges that would close a
-budget cycle are rejected at allocation time.
+#### P2 — No tree encoding of a fan-in node is complete
 
-**Scope of the certified bound.** The proof holds for the live graph. When a
-node is abandoned — the operational case for a timed-out or crashed agent — its
-unconsumed budget is refunded to its parents and its flow state is frozen at the
-pre-refund values, so that an over-spent node stays flagged rather than having
-its violation erased by the refund. The consequence is that verification
-certifies
+An earlier draft of this section claimed that tree accounting is *unsound* on a
+DAG. **That claim was a strawman and has been withdrawn.** It held only against
+an accountant that resolves multiple parents by *dropping* an in-edge, which no
+real implementation does; checked against this framework's own tree law
+(`ContractingCapability`), the natural encoding refuses the over-commitment. The
+defensible result is incompleteness, and it is sharper.
 
-```
-Σ_v C(v)  ≤  B(root) + Σ refunds
-```
+Encoding a DAG node `v` with `m ≥ 2` in-edges onto a tree admits exactly three
+options, and the proposition rules out all of them.
 
-with the two coinciding in the absence of abandonment. The bound is tight: an
-abandoned node can consume up to its refunded amount before detection. This is
-a deliberate trade — checking abandoned nodes against *live* in-flow would put
-honest nodes on a knife-edge equality, since a refund drives post-refund in-flow
-to approximately `consumption + out-flow`.
+**Proposition 2.** Let `v` have in-edges `a(u₁→v), …, a(uₘ→v)`, and let `c` be an
+indivisible consumption with `maxᵢ a(uᵢ→v) < c ≤ Σᵢ a(uᵢ→v)`. Then `c` is
+admitted by the DAG's local invariant and admitted by no tree encoding of the
+same grants.
 
-**Where each half of the invariant is enforced.** Materializing a node's
-contract from its summed in-flow means the existing runtime monitor enforces
-`consumption ≤ in-flow` node-locally, with strict/lenient modes, callbacks, and
-per-tool priority applying unchanged. The `+ out-flow` term has no node-local
-analogue — a node's contract does not know what it has delegated — and is
-enforced by graph-level verification alone.
+*Proof.* By exhaustion over the encodings.
+
+*Merge* — represent `v` by one tree node funded by a single parent. That parent
+must hold `Σᵢ a(uᵢ→v)`, contradicting the grants; the allocation is refused.
+
+*Split* — represent `v` by `m` fragments, one per parent. This encoding is
+**sound**: maximum total consumption is exactly `B(root)`, and a parent that
+over-commits across its fragments is caught. But `v` is one agent, and an
+indivisible `c` must be charged to a single fragment, each of which is bounded
+by `maxᵢ a(uᵢ→v) < c`. Every charge is refused.
+
+*Drop* — retain one in-edge and discard the rest. The discarded grant is
+invisible to the accountant and real to the agent, so the scheme is unsound:
+for `B(root) = 100` with grants `root→a: 50, root→b: 50, a→d: 30, b→d: 30,
+b→e: 30`, dropping `b→d` yields an approved allocation permitting
+`a:20 + b:0 + d:60 + e:30 = 110`.
+
+Under the DAG law `v`'s contract is materialized from its summed in-flow, so `c`
+is charged once against `Σᵢ a(uᵢ→v)` and admitted. ∎
+
+**The penalty is quantitative.** Under a uniform split across `m` parents the
+largest indivisible consumption a node can make is `B/m` rather than `B` — a
+factor-of-`m` fragmentation cost that grows with the fan-in the tree is being
+asked to model. This is not a corner case for the experiments of §6: an
+aggregator that merges two scouts' findings does so in a single large model
+call, precisely the `c > maxᵢ aᵢ` regime.
+
+Note what the split encoding costs even below that threshold. Because no tree
+node carries `v`'s true budget, per-node runtime enforcement has nothing correct
+to enforce against: a monitor materialized from one fragment reports a violation
+when `v` pools its spending across both, a false positive against a budget `v`
+genuinely holds. This is the same fact as P6 seen from the other side — node-
+local enforcement needs a summed in-flow, and a tree fan-in node has none.
+Artifacts: `test_p2_merge_encoding_is_refused_no_parent_can_fund_the_node`,
+`test_p2_split_encoding_is_sound_the_real_tree_law_refuses_over_commitment`,
+`test_p2_split_encoding_cannot_execute_an_indivisible_call_within_budget`,
+`test_p2_the_dag_admits_the_same_call_and_stays_globally_bounded`,
+`test_p2_fragmentation_penalty_scales_with_the_number_of_parents`.
+
+#### P3 — What acyclicity is necessary for (restated)
+
+An earlier draft of this section asserted that a budget cycle "would let a node
+refund its own ancestor, and the telescoping argument collapses." **That is
+false, and the executable artifact is what caught it.**
+
+**Proposition 3.** The static bound of P1 is cycle-robust: the telescoping
+argument nowhere uses acyclicity. Acyclicity is necessary instead for refund
+propagation to be well-founded, and the implementation enforces it structurally,
+at allocation time.
+
+*Proof of the first clause.* Inspect the summation in P1. Each internal edge
+cancels because it appears once as in-flow at its head and once as out-flow at
+its tail. Whether the edge set contains a cycle is never consulted. ∎
+
+Empirically, 182 randomly generated cyclic allocations and 386 acyclic ones
+saturate `B(root)` at exactly 100, with no value differing between the two
+populations. Cycle membership is decided by reachability rather than by
+searching for reversed pairs; the latter finds only 2-cycles and admits 3-cycles
+into the supposedly acyclic control.
+
+The measurement that makes this evidence rather than arithmetic is a separate
+one. Restricted to *valid* allocations the identity is implied by validity
+itself — `in − out ≥ 0` everywhere means the sum telescopes exactly, whatever
+the accounting does with over-committed nodes — so a population of valid
+allocations alone cannot distinguish the accounting from a naive one. The suite
+therefore also carries 3,383 **invalid** allocations, on which permitted
+consumption strictly exceeds `B(root)` while the naive sum still reports exactly
+100. That is the population on which the two differ, and it is what licenses
+reading the identity as a fact about cycles rather than about the filter.
+
+*Proof of the second clause.* `DelegationGraph.allocate` calls its reachability
+check before it inspects the amount, so an edge closing a budget cycle raises
+`CycleError` and the graph is never constructed. Cyclic reclamation is therefore
+not a runtime hazard to be detected but a state that cannot be reached. A
+consequence worth stating, because it is stronger than the guarantee the prose
+version implied: a **zero-amount** edge closing a cycle is refused on the same
+path, so the structural guarantee does not depend on the amounts involved.
+Artifacts: `test_p3_static_bound_survives_budget_cycles`,
+`test_p3_cyclic_and_acyclic_allocations_saturate_identically`,
+`test_p3_the_clamp_binds_on_the_invalid_half`,
+`test_p3_budget_cycles_are_refused_at_allocation_time`,
+`test_p3_zero_amount_does_not_exempt_a_cycle`.
+
+**Control flow may still cycle.** Agents legitimately loop — a node retries, a
+review council re-deliberates. Only the *budget* graph is constrained.
+
+#### P4 — The certified bound under abandonment, and its tightness
+
+**Proposition 4.** When nodes may be abandoned, verification certifies
+`Σ_v C(v) ≤ B(root) + Σ refunds`, and the bound is tight in both senses: it is
+achieved exactly by a reachable execution, and per node an abandoned agent may
+consume up to exactly its frozen pre-refund in-flow before detection.
+
+*Proof.* Abandonment refunds a node's unconsumed budget to its parents and
+freezes its two *budget* sides at the pre-refund values, while consumption
+continues to be read live. Freezing consumption too would let a node keep
+spending after being declared dead and still be certified. Summing as in P1 over
+frozen in-flows yields the stated bound.
+
+For tightness, take `B(root) = 100` with grants `root→live: 40` and
+`root→doomed: 60`. Let `live` consume 40 and `doomed` consume 10, then abandon
+`doomed`, refunding 50 to the root. `doomed` continues to spend 50, reaching its
+frozen in-flow of 60 exactly. The root, whose live out-flow has fallen from 100
+to 50, then consumes the 50 it was refunded. Total consumption is
+`40 + 60 + 50 = 150 = B(root) + Σ refunds`, and `verify()` passes; one further
+unit raises `FlowConservationError`. ∎
+
+A previous draft claimed this bound was unsaturable, reasoning that reclaimed
+budget is not re-delegatable in v1. That conflated *re-delegatable* with
+*re-spendable*: a refund lands at the parent, and nothing stops the parent
+consuming it itself. The error was concealed by an artifact that summed
+consumption over the non-root nodes only — omitting the very node that received
+the refund — and reported 100 for an execution consuming 150.
+
+The trade is deliberate. Checking abandoned nodes against *live* in-flow would
+put honest nodes on a knife-edge equality, since a refund drives post-refund
+in-flow to approximately `consumption + out-flow`. The cost is the gap named
+above: with a single abandonment of a node holding `B/2`, certified consumption
+can reach `1.5 · B(root)`. Deployments that cannot tolerate that should treat
+abandonment as terminal for the subtree rather than as a refund event.
+Artifacts: `test_p4_the_certified_bound_is_exactly_saturable`,
+`test_p4_summing_over_the_wrong_node_set_hides_the_saturation`,
+`test_p4_per_node_tightness_at_the_frozen_in_flow`.
+
+#### P5 — Reclamation is confluent
+
+**Proposition 5.** Releasing a set of edges yields the same residuals in every
+order, and this depends on refunds being computed against *original*
+allocations.
+
+*Proof.* Each edge's refund is a function of its own original allocation and the
+node's original in-flow, neither of which any other release mutates; so the
+refunds form a set of independent terms and their sum is order-invariant. ∎
+
+The converse half is what gives the proposition content. A rule that prorates
+each refund against the node's *live* in-flow is order-**dependent**. With
+in-edges of 15 and 5 into a node that has consumed 5, releasing the larger edge
+first refunds `(11.25, 2.14)`; releasing the smaller first refunds
+`(10.38, 3.75)`. Confluence is thus a property of the chosen rule, not of
+reclamation in general — and the practical stake is reproducibility, since
+order-dependent refunds make any multi-seed experiment irreproducible.
+
+Both halves require asymmetry to be observable at all. With equal in-edges and
+no consumption at the shared child the refund pool equals the sum of the
+originals, every share collapses to the edge's own amount under either rule, and
+an artifact built on that fixture passes even against a live-value
+implementation. The suite therefore records consumption at the shared child and
+draws unequal edges, verified over 200 randomly parameterized two-parent graphs
+comparing release orders **within** each graph. Artifacts:
+`test_p5_release_order_does_not_change_residuals`,
+`test_p5_the_asymmetric_case_discriminates_between_refund_rules`,
+`test_p5_live_value_refunds_are_order_dependent`,
+`test_p5_confluence_holds_on_random_two_parent_graphs`.
+
+#### P6 — The two halves of the invariant separate by locality
+
+"Node-local" must be defined before this is a proposition at all. **Definition.**
+A node-local check may read only (i) the node's own contract, materialized from
+its summed in-flow, and (ii) the node's own recorded usage. It may not enumerate
+its out-edges, read another node's state, or consult the graph.
+
+**Proposition 6.** Under this definition `C(v) ≤ in-flow(v)` is node-locally
+decidable and `C(v) + out-flow(v) ≤ in-flow(v)` is not.
+
+*Proof.* For the first, materializing a node's contract from its summed in-flow
+means the existing runtime monitor decides it with no other input, and strict/
+lenient modes, callbacks, and per-tool priority apply unchanged: a node granted
+40 that records 41 reports a violation.
+
+For the second, a node's out-edges are held in the graph's edge table, to which
+its monitor has no handle. A node granted 40 that delegates 35 and consumes 30
+is in violation — 65 > 40 — yet its monitor reports none, because 30 ≤ 40 is all
+it can see. Only graph-level verification detects it. ∎
+
+**The scope of this claim is the materialization, not physics.** Allocation is
+build-phase only, and release and abandonment can only shrink an edge, so a
+node's out-flow is a static upper bound the moment the graph is sealed. Had the
+contract been materialized from the residual `in-flow − out-flow` instead, the
+node above would carry a 5-token budget and its own monitor would flag the
+30-token spend with no graph access — the separation would collapse, and the
+full invariant would become node-locally *preventable*. In-flow is nonetheless
+the right choice: a node's granted budget should not shrink as it delegates, or
+a node that plans its delegation before doing its own work would be throttled by
+its own foresight, and the reserve would be unrecoverable if a child were never
+started. P6 should therefore be read as a property of that design decision, and
+the design decision as the thing being justified. Artifacts:
+`test_p6_locality_separation`,
+`test_p6_materializing_from_residual_would_collapse_the_separation`.
+
+#### P7 — The abandonment trilemma
+
+P4 and P6 are usually read as two separate concessions: the certified bound
+degrades under abandonment, and node-local checks cannot see out-flow. They are
+one result. A node cannot detect that its own budget has been refunded, because
+the refund is an edge event and P6 puts edges outside the node-local view; so
+the only place the refund can be accounted for is the graph, and the graph
+cannot stop a node it has already declared unreachable.
+
+Two assumptions, both load-bearing and both exercised below.
+
+**(A1) Asynchrony.** Abandonment cannot distinguish a crashed node from a slow
+one. This is not a modelling convenience: in the experiments of §6, eight cells
+were abandoned at a 1,800-second timeout while blocked in a non-cancellable
+socket read, and every one of them was alive.
+
+**(A2) In-flight consumption.** A unit of consumption may be committed
+externally before it is recorded locally. A dispatched model call is billed
+whatever a local monitor subsequently decides.
+
+**Proposition 7.** Under A1 and A2, no delegation scheme satisfies all three of
+
+- **Liveness** — an abandoned node's unconsumed budget becomes available to
+  other nodes within bounded time;
+- **Safety** — total consumption never exceeds `B(root)`;
+- **Independence** — no operation blocks on the abandoned node.
+
+*Proof.* Suppose all three hold. By Liveness there is a time `t` at which a
+refund `R > 0` is available to some other node `p`, and `p` may consume it. By
+Independence, nothing at `t` was conditioned on the abandoned node `v`. By A1,
+`v` may still be running at `t`, and by A2 it may hold consumption already
+committed and not yet recorded. Nothing at `v` reflects the refund: by P6 the
+refund is an edge event and lies outside `v`'s node-local view, so `v`'s own
+accounting still shows its pre-refund allowance. Hence `v` and `p` may together
+consume `R` more than `B(root)`, contradicting Safety. ∎
+
+**The frontier is continuous and the exchange rate is 1:1.** Refunding a
+fraction `φ` of an abandoned node's residual makes `φR` reusable and admits
+over-spend of at most `φR`. Measured across `φ ∈ {0, ¼, ½, ¾, 1}`, the observed
+over-spend equals the refunded amount exactly at every point. There is no
+partial-refund policy that escapes the tradeoff, only policies that price it.
+
+**What each corner costs.** Refusing to refund (Safety + Independence) strands
+the budget: an abandoned node's unspent allowance stays committed to its own
+in-edge and no other node can reach it. Refunding only on acknowledgement
+(Safety + Liveness) requires an answer from the node that was abandoned for not
+answering. This framework takes the third corner, and P4's bound
+`Σ_v C(v) ≤ B(root) + Σ refunds` is the price, stated exactly.
+
+**Why the bound is the useful half.** The impossibility itself is the expected
+shape — asynchrony forcing a safety/liveness choice is the ambient result of
+which this is an instance, and we claim no novelty for that shape. What is new
+here is that the degradation is *exactly computable and locally attributable*:
+not "consumption may be unbounded" but "consumption may exceed `B(root)` by at
+most the sum of refunds actually issued, each attributable to a named node and
+a timestamp." An operator who can afford `1.5 · B(root)` in the worst case can
+run this scheme and know it. That is a stronger operational guarantee than an
+impossibility result usually leaves behind.
+
+**Scope.** Drop A2 — assume every unit of consumption passes a local gate
+before being committed — and the trilemma dissolves: re-materializing the
+abandoned node's contract at its consumed-so-far restores Safety with Liveness
+and Independence intact. The result is therefore specific to agents whose
+consumption is committed at a remote provider, which is to say the ones this
+framework exists to govern. Artifacts:
+`test_p7_horn_a_safety_and_independence_strands_the_budget`,
+`test_p7_horn_b_safety_and_liveness_requires_the_abandoned_node_to_stop`,
+`test_p7_horn_c_liveness_and_independence_admits_exactly_the_refund`,
+`test_p7_the_overspend_is_linear_in_the_fraction_refunded`,
+`test_p7_the_gap_is_bounded_by_the_refund_not_unbounded`,
+`test_p7_in_flight_consumption_is_load_bearing`.
+
+#### P8 — The scope of "no global lock"
+
+P1's corollary is the framework's most-quoted practical claim, and until it is
+scoped it is also its most overstated. Concurrency splits into two regimes and
+the claim holds for exactly one.
+
+**Proposition 8.** After `seal()`, the local invariant is preserved under
+arbitrary interleaving of consumption at distinct nodes, with no cross-node
+synchronization. Topology mutation is not in that set: `allocate` is a
+check-then-act on the conservation predicate and requires serialization.
+
+*Proof of the first clause.* `seal()` freezes the topology, so in-flow is
+constant during the run. Each node's contract is materialized once from its
+summed in-flow and each node carries its own monitor, so the state a node reads
+and writes is disjoint from every other node's; concurrent consumption at
+distinct nodes therefore commutes. By P6 the node-local check needs nothing
+else. ∎
+
+*Proof of the second clause.* By construction. `allocate` evaluates the
+conservation predicate against the current out-flow and then appends an edge.
+Two threads may both evaluate against the pre-mutation state and both append.
+Measured: eight threads allocating 20 tokens each against `B(root) = 100`
+over-granted in 190 of 300 trials, reaching 140 — a breach of the conservation
+law at build time, before any agent runs. ∎
+
+The implementation now takes a **per-graph reentrant lock** on the mutators,
+which closes it (0 of 300 trials, maximum granted exactly 100). The lock must be
+reentrant because `abandon` releases the edges it unwinds.
+
+**This does not weaken the claim, but it does bound it.** The lock is per graph
+and confined to the build and reclamation paths; it never serializes
+consumption, which is where the concurrency that matters lives — a sweep's
+agents spend minutes inside model calls and microseconds inside `allocate`. What
+P1's corollary buys is that *enforcement* needs no coordination, not that
+*planning* is lock-free. The honest phrasing is: **no lock on the enforcement
+path, and no central accountant at any point.** Both halves are load-bearing,
+and only the first was ever in question.
+
+Two consequences worth stating for anyone building on this. Allocation is a
+planning-time act, so serializing it costs a sweep nothing; but a system that
+allocates *adaptively during execution* would put the lock on its hot path, and
+would need edge-level rather than graph-level granularity. And `release` and
+`abandon` are run-phase operations, unlike `allocate` — they are reachable after
+`seal()` — so they are inside the lock too, which is why the trilemma of P7 is a
+statement about failure detection rather than about data races. Artifacts:
+`test_p8_concurrent_consumption_at_distinct_nodes_needs_no_graph_lock`,
+`test_p8_concurrent_allocation_cannot_breach_the_root_budget`,
+`test_p8_the_graph_lock_is_reentrant`.
+
+#### Supporting properties
 
 **Per-tool conservation** holds on both paths: a node may not *grant* a tool its
 in-flow does not constrain, and may not *consume* one either. The asymmetry
@@ -1090,28 +1409,21 @@ consuming an undeclared tool is *detected* at verification. Per-tool limits have
 no deny-by-default semantics, so a node can physically issue the calls before
 anything fires. Granting an explicit zero converts detection into prevention.
 
-**Reclamation.** When a node finishes under budget or dies, an edge reclaims its
-share of the unused budget proportionally — computed against the *original*
-allocations rather than live ones, so that releasing sibling edges in any order
-yields the same result. Computing against live values instead makes each
-sibling's refund depend on how many siblings released first, which would make
-any multi-seed experiment non-reproducible.
-
 **Graph linting.** Sealing a graph validates it once and freezes its topology:
 acyclicity, no node left unfunded, no node whose out-flow already exceeds its
 in-flow, and no per-tool grant its funding does not support. All problems are
 reported together rather than one per attempt.
 
-**Empirical validation.** Three properties are checked by executable tests
-rather than asserted. Tree equivalence is verified by running the graph and the
-tree implementations over identical scenarios and comparing their accounting
+**Empirical validation.** Beyond the per-proposition artifacts above, three
+properties of the implementation are checked by executable tests rather than
+asserted. Tree equivalence is verified by running the graph and the tree
+implementations over identical scenarios and comparing their accounting
 directly, which also surfaced the two places they legitimately differ: the tree
 law's optional coordination reserve has no graph analogue, and a tree's
 remaining budget clamps at zero where a graph residual goes negative so an
 overrun stays visible. Telescoping soundness is verified by generating random
 DAGs, saturating every node's residual, and asserting `Σ C(v) = B(root)`
-exactly — the identity, not merely the inequality, because an inequality with
-slack cannot detect a double-counted allocation.
+exactly.
 
 Both tests are **mutation-checked**, which is what distinguishes a property test
 from a decorative one. An earlier revision of the soundness test consumed a
