@@ -470,6 +470,33 @@ window. M6 takes precedence; M5 resumes October.
    coverage
 7. `~$2` for a 450-cell sweep is wrong; M4b cost **$5.11**. Also correct in
    `CLAUDE.md`
+8. **P2's measurement window is k-independent and centred on the calibration
+   constant** (added 2026-08-23, from `tree_would_refuse` probes). The window
+   is `(0.75*a95, 1.5*a95]` = (6418, 12836] tokens at every budget, because
+   `build_fan_in_graph`'s forward flow depends only on `a95`, never on `k`.
+   Actual aggregator spend is strongly k-dependent, so the measured verdicts
+   are:
+
+   | k | reconcile spend | verdict |
+   |---|---|---|
+   | 6 | ~2,826 median (max 6,375) | `False` — below the window; a tree would cope |
+   | 30 | ~8,557 median | `True` — 33% up the window |
+   | 45 | pre-flight probe pending | could exceed 12,836, which returns `None` |
+
+   **State this honestly in the paper.** `a95` is the k=30 reconcile median
+   AND sets the threshold, so a typical k=30 cell landing inside the window is
+   substantially guaranteed by construction — the arm is *built* to sit in
+   P2's incompleteness regime, as `build_fan_in_graph`'s docstring says
+   outright. The measurement therefore confirms that real token spend stays
+   inside the constructed window; it does not discover that arbitrary
+   workloads happen to fall there. Report it as a demonstration of P2, not as
+   an estimate of how often tree encodings fail in the wild.
+
+   Corollary risk at k=45: `_A95_RECONCILE` is fixed at the k=30 median for
+   every budget, so if the real k=45 reconcile is much larger the aggregator
+   can overrun a grant sized for k=30 — an H-C conservation failure that is a
+   calibration artifact, exactly the failure mode the `_ROLE_C95` comment
+   warns about for the scouts. This is what pre-flight probe 3 measures.
 
 ---
 
