@@ -596,3 +596,140 @@ def test_p6_materializing_from_residual_would_collapse_the_separation():
     actual = graph.monitor_for("w")
     actual.usage.add_tokens(30)
     assert actual.check_constraints() == []  # as materialized, it is not
+
+
+# --------------------------------------------------------------------------
+# P7 -- the abandonment trilemma
+# --------------------------------------------------------------------------
+#
+# P4 says the certified bound degrades to `B(root) + Σ refunds`, and P6 says a
+# node cannot see its own graph state. Together they are not two limitations
+# but one: under an unreliable failure detector, no scheme keeps an abandoned
+# node's budget both safe and reusable without waiting on the node it just
+# declared dead.
+#
+# Assumptions, both load-bearing and both tested below:
+#   A1 (asynchrony)  abandonment cannot distinguish a crashed node from a slow
+#                    one, so an abandoned node may still be running.
+#   A2 (in-flight)   consumption may be committed externally before it is
+#                    recorded locally, so a local gate cannot retract it.
+
+
+def _abandonment_fixture():
+    """root(100) -> live(40), doomed(60); live spends 40, doomed spends 10."""
+    graph = DelegationGraph(make_root(100))
+    for name in ("live", "doomed"):
+        graph.add_node(name)
+    graph.allocate(ROOT, "live", tokens=40)
+    graph.allocate(ROOT, "doomed", tokens=60)
+    graph.seal()
+    graph.monitor_for("live").usage.add_tokens(40)
+    graph.monitor_for("doomed").usage.add_tokens(10)
+    return graph
+
+
+def _total(graph):
+    return sum(graph.monitor_for(n).usage.tokens for n in graph.node_names())
+
+
+def test_p7_horn_a_safety_and_independence_strands_the_budget():
+    """Never refund: safe and independent, but the 50 is unreachable.
+
+    Nothing waits on `doomed` and nothing can overspend, because its unspent
+    budget stays committed to its own in-edge -- and therefore stays unusable
+    by anyone else. Liveness is what this horn gives up.
+    """
+    graph = _abandonment_fixture()
+    assert graph.residual(ROOT).tokens == 0  # the parent cannot reach it
+    graph.monitor_for("doomed").usage.add_tokens(50)
+    assert _total(graph) == 100
+    graph.verify()
+
+
+def test_p7_horn_b_safety_and_liveness_requires_the_abandoned_node_to_stop():
+    """Refund and reuse: safe and live only because `doomed` truly stopped.
+
+    Establishing that premise means obtaining an acknowledgement from a node
+    that was abandoned precisely because it stopped answering. Independence is
+    what this horn gives up.
+    """
+    graph = _abandonment_fixture()
+    refund = graph.abandon("doomed").tokens
+    assert refund == 50
+    assert graph.residual(ROOT).tokens == 50  # now reusable
+    graph.monitor_for(ROOT).usage.add_tokens(refund)
+    assert _total(graph) == 100  # doomed spends nothing more
+    graph.verify()
+
+
+def test_p7_horn_c_liveness_and_independence_admits_exactly_the_refund():
+    """The shipped scheme: nothing blocks, budget is reusable, and a node that
+    was slow rather than dead spends its frozen allowance anyway."""
+    graph = _abandonment_fixture()
+    refund = graph.abandon("doomed").tokens
+    graph.monitor_for("doomed").usage.add_tokens(50)  # A1: it was only slow
+    graph.monitor_for(ROOT).usage.add_tokens(refund)
+    assert _total(graph) == 150
+    graph.verify()  # and the over-spend is *certified*
+
+
+def test_p7_the_overspend_is_linear_in_the_fraction_refunded():
+    """The trilemma is a continuous frontier, not a binary choice.
+
+    Refunding a fraction of the abandoned budget buys exactly that much
+    reusability and admits exactly that much over-spend: the exchange rate is
+    1:1, so there is no partial-refund policy that escapes the tradeoff.
+    """
+    observed = []
+    for abandoned in range(5):
+        graph = DelegationGraph(make_root(100))
+        graph.add_node("live")
+        graph.allocate(ROOT, "live", tokens=40)
+        for i in range(4):
+            graph.add_node(f"d{i}")
+            graph.allocate(ROOT, f"d{i}", tokens=15)
+        graph.seal()
+        graph.monitor_for("live").usage.add_tokens(40)
+        refunded = sum(graph.abandon(f"d{i}").tokens for i in range(abandoned))
+        for i in range(4):
+            graph.monitor_for(f"d{i}").usage.add_tokens(15)
+        graph.monitor_for(ROOT).usage.add_tokens(refunded)
+        graph.verify()
+        observed.append((refunded, _total(graph) - 100))
+    assert observed == [(0, 0), (15, 15), (30, 30), (45, 45), (60, 60)]
+
+
+def test_p7_the_gap_is_bounded_by_the_refund_not_unbounded():
+    """The positive half: the damage is exactly Σ refunds and no more."""
+    graph = _abandonment_fixture()
+    refund = graph.abandon("doomed").tokens
+    graph.monitor_for("doomed").usage.add_tokens(50)
+    graph.monitor_for(ROOT).usage.add_tokens(refund)
+    graph.verify()
+    graph.monitor_for(ROOT).usage.add_tokens(1)
+    with pytest.raises(FlowConservationError):
+        graph.verify()
+
+
+def test_p7_in_flight_consumption_is_load_bearing():
+    """A2 is an assumption the result needs, not decoration.
+
+    Drop it -- assume every unit of consumption passes a local gate before
+    being committed -- and re-materializing the abandoned node's contract at
+    its consumed-so-far restores safety with liveness and independence intact.
+    The trilemma holds because an LLM call already dispatched is billed
+    whatever the monitor subsequently says.
+    """
+    graph = _abandonment_fixture()
+    refund = graph.abandon("doomed").tokens
+
+    gated = ResourceMonitor(ResourceConstraints(tokens=10))
+    gated.usage.add_tokens(10)  # exactly what doomed had consumed
+    gated.usage.add_tokens(1)
+    assert gated.check_constraints() != []  # the gate refuses the next unit
+    assert 40 + 10 + refund == 100  # ... and safety is restored
+
+    # With A2 the same execution is unbounded by that gate.
+    graph.monitor_for("doomed").usage.add_tokens(50)
+    graph.monitor_for(ROOT).usage.add_tokens(refund)
+    assert _total(graph) == 150

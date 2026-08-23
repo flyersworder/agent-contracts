@@ -1039,12 +1039,12 @@ In words: **in-flow ≥ own consumption + out-flow** — Kirchhoff's current law
 with a consumption sink at each node. The tree law of §4.1 is the special case
 in which every non-root node has exactly one in-edge.
 
-The rest of this section states six propositions. P2–P6 are each accompanied by
+The rest of this section states seven propositions. P2–P6 are each accompanied by
 an executable artifact in `tests/core/test_delegation_graph_propositions.py`,
 written *before* its proof; P1 is covered by the pre-existing telescoping
 property test in `tests/core/test_delegation_graph_properties.py`.
 
-Writing the artifact first was not a stylistic choice. **Three of the six
+Writing the artifact first was not a stylistic choice. **Three of the first six
 propositions did not survive their own artifact and are restated here** — P2's
 unsoundness claim collapsed against this framework's real tree implementation,
 P3's appeal to acyclicity turned out to be unnecessary for the bound it was
@@ -1052,7 +1052,8 @@ invoked to support, and P4's bound proved saturable after a first artifact
 concealed the saturating execution by summing over the wrong nodes. Each of the
 three is stated below in the corrected form, together with what the original
 claim was and why it failed, because the failures are more instructive than the
-survivals.
+survivals. P7 is the one result that emerged from the exercise rather than
+surviving it: P4 and P6, once repaired, turned out to be the same fact.
 
 #### P1 — Soundness
 
@@ -1275,6 +1276,78 @@ started. P6 should therefore be read as a property of that design decision, and
 the design decision as the thing being justified. Artifacts:
 `test_p6_locality_separation`,
 `test_p6_materializing_from_residual_would_collapse_the_separation`.
+
+#### P7 — The abandonment trilemma
+
+P4 and P6 are usually read as two separate concessions: the certified bound
+degrades under abandonment, and node-local checks cannot see out-flow. They are
+one result. A node cannot detect that its own budget has been refunded, because
+the refund is an edge event and P6 puts edges outside the node-local view; so
+the only place the refund can be accounted for is the graph, and the graph
+cannot stop a node it has already declared unreachable.
+
+Two assumptions, both load-bearing and both exercised below.
+
+**(A1) Asynchrony.** Abandonment cannot distinguish a crashed node from a slow
+one. This is not a modelling convenience: in the experiments of §6, eight cells
+were abandoned at a 1,800-second timeout while blocked in a non-cancellable
+socket read, and every one of them was alive.
+
+**(A2) In-flight consumption.** A unit of consumption may be committed
+externally before it is recorded locally. A dispatched model call is billed
+whatever a local monitor subsequently decides.
+
+**Proposition 7.** Under A1 and A2, no delegation scheme satisfies all three of
+
+- **Liveness** — an abandoned node's unconsumed budget becomes available to
+  other nodes within bounded time;
+- **Safety** — total consumption never exceeds `B(root)`;
+- **Independence** — no operation blocks on the abandoned node.
+
+*Proof.* Suppose all three hold. By Liveness there is a time `t` at which a
+refund `R > 0` is available to some other node `p`, and `p` may consume it. By
+Independence, nothing at `t` was conditioned on the abandoned node `v`. By A1,
+`v` may still be running at `t`, and by A2 it may hold consumption already
+committed and not yet recorded. Nothing at `v` reflects the refund: by P6 the
+refund is an edge event and lies outside `v`'s node-local view, so `v`'s own
+accounting still shows its pre-refund allowance. Hence `v` and `p` may together
+consume `R` more than `B(root)`, contradicting Safety. ∎
+
+**The frontier is continuous and the exchange rate is 1:1.** Refunding a
+fraction `φ` of an abandoned node's residual makes `φR` reusable and admits
+over-spend of at most `φR`. Measured across `φ ∈ {0, ¼, ½, ¾, 1}`, the observed
+over-spend equals the refunded amount exactly at every point. There is no
+partial-refund policy that escapes the tradeoff, only policies that price it.
+
+**What each corner costs.** Refusing to refund (Safety + Independence) strands
+the budget: an abandoned node's unspent allowance stays committed to its own
+in-edge and no other node can reach it. Refunding only on acknowledgement
+(Safety + Liveness) requires an answer from the node that was abandoned for not
+answering. This framework takes the third corner, and P4's bound
+`Σ_v C(v) ≤ B(root) + Σ refunds` is the price, stated exactly.
+
+**Why the bound is the useful half.** The impossibility itself is the expected
+shape — asynchrony forcing a safety/liveness choice is the ambient result of
+which this is an instance, and we claim no novelty for that shape. What is new
+here is that the degradation is *exactly computable and locally attributable*:
+not "consumption may be unbounded" but "consumption may exceed `B(root)` by at
+most the sum of refunds actually issued, each attributable to a named node and
+a timestamp." An operator who can afford `1.5 · B(root)` in the worst case can
+run this scheme and know it. That is a stronger operational guarantee than an
+impossibility result usually leaves behind.
+
+**Scope.** Drop A2 — assume every unit of consumption passes a local gate
+before being committed — and the trilemma dissolves: re-materializing the
+abandoned node's contract at its consumed-so-far restores Safety with Liveness
+and Independence intact. The result is therefore specific to agents whose
+consumption is committed at a remote provider, which is to say the ones this
+framework exists to govern. Artifacts:
+`test_p7_horn_a_safety_and_independence_strands_the_budget`,
+`test_p7_horn_b_safety_and_liveness_requires_the_abandoned_node_to_stop`,
+`test_p7_horn_c_liveness_and_independence_admits_exactly_the_refund`,
+`test_p7_the_overspend_is_linear_in_the_fraction_refunded`,
+`test_p7_the_gap_is_bounded_by_the_refund_not_unbounded`,
+`test_p7_in_flight_consumption_is_load_bearing`.
 
 #### Supporting properties
 
