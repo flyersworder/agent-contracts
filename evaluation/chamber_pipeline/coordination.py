@@ -44,6 +44,7 @@ def build_fan_in_graph(
     a95: int,
     c95_b: int | None = None,
     fixed_overhead: int = 0,
+    multiple: int = 2,
 ) -> DelegationGraph:
     """Budget graph for the fan-in rungs: two scouts feeding one aggregator.
 
@@ -65,6 +66,9 @@ def build_fan_in_graph(
             calibration artifacts rather than real overruns.
         fixed_overhead: Per-scout tokens for calls outside the selection loop,
             such as the team arm's two negotiation rounds.
+        multiple: Provisioning margin over the per-call figure, applied
+            uniformly to every role. A single stated rule, never tuned per
+            arm: tuning until every arm certifies would make H-C vacuous.
 
     Returns:
         A sealed graph with nodes ``scout_a``, ``scout_b``, ``aggregator``.
@@ -83,8 +87,8 @@ def build_fan_in_graph(
     # been over-provisioned 2x besides.
     forward = math.ceil(0.75 * a95)
     c95_b = c95 if c95_b is None else c95_b
-    tokens_a = math.ceil(2 * c95 * math.ceil(k / 2)) + forward + fixed_overhead
-    tokens_b = math.ceil(2 * c95_b * (k // 2)) + forward + fixed_overhead
+    tokens_a = math.ceil(multiple * c95 * math.ceil(k / 2)) + forward + fixed_overhead
+    tokens_b = math.ceil(multiple * c95_b * (k // 2)) + forward + fixed_overhead
     # The root must fund whichever scout is dearer, twice over, or sealing
     # fails before a single cell runs.
     scout_tokens = max(tokens_a, tokens_b)

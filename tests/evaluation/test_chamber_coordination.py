@@ -148,10 +148,10 @@ def test_per_role_budgets_track_the_dearer_scout():
 def test_fixed_overhead_funds_calls_outside_the_selection_loop():
     """The team arm's two negotiation rounds are per scout, not per pick."""
     plain = build_fan_in_graph(k=30, c95=2809, a95=8557)
-    team = build_fan_in_graph(k=30, c95=2809, a95=8557, fixed_overhead=2 * 5001)
+    team = build_fan_in_graph(k=30, c95=2809, a95=8557, fixed_overhead=4 * 4138)
     for node in ("scout_a", "scout_b"):
         delta = team.in_flow(node).tokens - plain.in_flow(node).tokens
-        assert delta == 2 * 5001
+        assert delta == 4 * 4138
 
 
 def test_symmetric_call_keeps_the_old_behaviour():

@@ -558,28 +558,37 @@ def _budget_fraction(budget_k: int, menu_size: int) -> float:
     return min(1.0, budget_k / menu_size)
 
 
-# Per-role 95th-percentile call costs in INPUT+OUTPUT tokens -- what
-# `token_meter` actually counts -- measured 2026-08-23 through the production
-# provider order at k=30.
+# Per-role MEDIAN call costs in INPUT+OUTPUT tokens -- what `token_meter`
+# actually counts -- measured 2026-08-23 through the production provider
+# order at k=30, n=8 per role.
 #
-# Two things this table encodes that a single `c95` could not:
+# Median, not p95, and the reason is statistical rather than aesthetic. At
+# n=8 a "p95" is just the maximum of eight draws, and this distribution has a
+# long tail: the same plain selection call was measured at 2,205 (median) and
+# 12,173 (one instrumented run). Sizing from that max under-provisioned
+# `fan_in_homog` so badly it failed conservation on 2 of 2 live cells while
+# the two better-funded arms passed 4 of 4 -- a budgeting artifact that would
+# have read as a coordination result. The median is the robust statistic at
+# this sample size; the tail is covered by the multiplier below.
 #
-#   * The roles are not interchangeable. The targeted framing costs 4.7x the
-#     plain one (10,379 median against 2,205). Budgeting both at one figure
-#     under-funds whichever scout reasons harder, and the resulting
-#     conservation violations are calibration artifacts, not real overruns.
-#   * Providers must be pinned to measure this at all. An unpinned calibration
-#     put broad and targeted within 3% of each other; pinning the order the
-#     orchestrator actually uses showed the 4.7x gap. Measure through the
-#     production path, not a convenient approximation.
+# Two further things this table encodes:
 #
-# Sizing is p95, per spec §4. Reconciliation is heavy-tailed (2,354 to 22,627
-# observed), so some cells will exceed their grant. That is reported as an
-# observed conservation rate rather than hidden by over-provisioning, which
-# would make H-C vacuous and push every call below P2's window.
-_ROLE_C95: dict[str, int] = {"plain": 2809, "broad": 5969, "targeted": 18136}
+#   * The roles are not interchangeable. Targeted costs 4.7x plain. Budgeting
+#     both at one figure under-funds whichever scout reasons harder.
+#   * Providers must be pinned to measure this at all. An unpinned run put
+#     broad and targeted within 3% of each other; pinning the order the
+#     orchestrator uses showed the 4.7x gap. Measure through the production
+#     path, not a convenient approximation.
+#
+# `_PROVISION_MULTIPLE` is a single uniform rule applied to every role, NOT
+# tuned per arm until each passes. Whatever compliance rate it yields is
+# reported as an observed rate; tuning until H-C reads 100% would make the
+# hypothesis vacuous.
+_PROVISION_MULTIPLE = 4
+
+_ROLE_C95: dict[str, int] = {"plain": 2205, "broad": 3003, "targeted": 10379}
 _A95_RECONCILE = 8557
-_C95_NEGOTIATE = 5001
+_C95_NEGOTIATE = 4138
 
 _LADDER_NODES = ("scout_a", "scout_b", "aggregator")
 
@@ -594,7 +603,7 @@ def _ladder_calibration(spec: AgentSpec) -> tuple[int, int, int, int]:
     if spec.scout_roles is None:
         raise ValueError(f"{spec.name!r} is not a ladder arm")
     role_a, role_b = spec.scout_roles
-    overhead = spec.negotiation_rounds * (2 * _C95_NEGOTIATE)
+    overhead = spec.negotiation_rounds * (_PROVISION_MULTIPLE * _C95_NEGOTIATE)
     return _ROLE_C95[role_a], _ROLE_C95[role_b], _A95_RECONCILE, overhead
 
 
@@ -729,6 +738,7 @@ def run_cell(
 
             c95_a, c95_b, a95, overhead = _ladder_calibration(spec)
             graph = build_fan_in_graph(
+                multiple=_PROVISION_MULTIPLE,
                 k=budget_k,
                 c95=c95_a,
                 a95=a95,
