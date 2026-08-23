@@ -990,7 +990,8 @@ class TestReadLlmMetrics:
     """The (n_llm_calls, tokens_in, tokens_out, cost_usd) extractor."""
 
     def test_none_wrapper_yields_all_none(self) -> None:
-        n, ti, to, c = _read_llm_metrics(None)
+        n, ti, to, c, fb = _read_llm_metrics(None)
+        assert fb is None
         assert (n, ti, to, c) == (None, None, None, None)
 
     def test_wrapper_with_calls_populates_all(self) -> None:
@@ -1001,22 +1002,26 @@ class TestReadLlmMetrics:
             }
         )
         wrapper(model="m", messages=[])
-        n, ti, to, c = _read_llm_metrics(wrapper)
+        n, ti, to, c, fb = _read_llm_metrics(wrapper)
         assert n == 1
         assert ti == 10
         assert to == 5
         assert c == 0.0  # no cost reported but tracked
+        assert fb == 0  # a healthy call records no selection fallback
 
     def test_wrapper_with_zero_calls_yields_n_zero_tokens_none(self) -> None:
         """LLM variant ran a budget=0 short-circuit — n_llm_calls=0 but
         token / cost fields stay None to distinguish 'tracked zero' from
         'no measurement'."""
         wrapper = _CountingLLM()
-        n, ti, to, c = _read_llm_metrics(wrapper)
+        n, ti, to, c, fb = _read_llm_metrics(wrapper)
         assert n == 0
         assert ti is None
         assert to is None
         assert c is None
+        # Zero, not None: no calls were made, so no call degraded. This stays
+        # distinguishable from a non-LLM variant, which reports None.
+        assert fb == 0
 
 
 class TestInvokeWithTimeout:

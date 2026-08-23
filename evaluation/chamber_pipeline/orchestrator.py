@@ -275,6 +275,11 @@ class _CountingLLM:
         self.total_input_tokens: int = 0
         self.total_output_tokens: int = 0
         self.total_cost_usd: float = 0.0
+        # Incremented by `_llm_select_loop` when a selection response cannot
+        # be parsed and it falls back to a random unspent experiment. Recorded
+        # per cell so a degraded run is visible in the results rather than
+        # indistinguishable from a healthy one.
+        self.selection_fallbacks: int = 0
 
     # Default LiteLLM retry count for transient failures (rate limits,
     # network blips, 5xx). LiteLLM's default is 0 — meaning the first
@@ -406,6 +411,10 @@ class _CountingLLM:
         # All providers exhausted with body-encoded errors. Return the
         # last (still-bad) response; the caller's parser will fall back.
         return response
+
+    def record_selection_fallback(self) -> None:
+        """Note that one selection call degraded to a random pick."""
+        self.selection_fallbacks += 1
 
     def _accumulate_usage(self, response: Any) -> None:
         """Best-effort usage / cost extraction; tolerant of all response shapes.
@@ -629,7 +638,13 @@ def run_cell(
         n_edges_truth = int(truth.values.sum() - truth.values.trace())
 
         finished_at = now_iso()
-        n_llm_calls_for_cell, tokens_in, tokens_out, cost_usd = _read_llm_metrics(counting_llm)
+        (
+            n_llm_calls_for_cell,
+            tokens_in,
+            tokens_out,
+            cost_usd,
+            n_selection_fallbacks,
+        ) = _read_llm_metrics(counting_llm)
 
         # PC variants populate degeneracy count; llm_only doesn't run PC.
         n_pc_degen: int | None = None if spec.name == "llm_only" else handler.count
@@ -650,6 +665,7 @@ def run_cell(
             n_edges_truth=n_edges_truth,
             wall_time_seconds=wall,
             n_llm_calls=n_llm_calls_for_cell,
+            n_selection_fallbacks=n_selection_fallbacks,
             n_pc_degeneracies=n_pc_degen,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
@@ -912,8 +928,8 @@ def _invoke_with_timeout(
 
 def _read_llm_metrics(
     counting_llm: _CountingLLM | None,
-) -> tuple[int | None, int | None, int | None, float | None]:
-    """Extract (n_llm_calls, tokens_in, tokens_out, cost_usd) from a wrapper.
+) -> tuple[int | None, int | None, int | None, float | None, int | None]:
+    """Extract (n_llm_calls, tokens_in, tokens_out, cost_usd, fallbacks).
 
     Returns (None, None, None, None) when the wrapper is None
     (non-LLM variant). When the wrapper saw at least one call, all
@@ -924,15 +940,16 @@ def _read_llm_metrics(
     zero" distinguishable from "no measurement."
     """
     if counting_llm is None:
-        return None, None, None, None
+        return None, None, None, None, None
     n = len(counting_llm.calls)
     if n == 0:
-        return 0, None, None, None
+        return 0, None, None, None, 0
     return (
         n,
         counting_llm.total_input_tokens,
         counting_llm.total_output_tokens,
         counting_llm.total_cost_usd,
+        counting_llm.selection_fallbacks,
     )
 
 

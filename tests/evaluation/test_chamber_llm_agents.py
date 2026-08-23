@@ -563,11 +563,16 @@ def test_reconcile_prompt_carries_both_scouts_selections():
         assert name in text
 
 
-def test_reconcile_and_negotiate_caps_are_far_above_the_selection_cap():
-    """Never reuse the 200-token selection cap for a reasoning call.
+def test_every_output_cap_clears_the_measured_reasoning_load():
+    """Every cap must exceed what the model actually spends thinking.
 
-    DeepSeek v4 Flash spends the cap on hidden reasoning and returns empty
-    `content`; that is the M4b root-cause bug in miniature.
+    Measured 2026-08-23 on DeepSeek v4 Flash 0423: a *selection* call -- the
+    cheapest prompt in the pipeline -- spends 976 reasoning tokens at `high`
+    effort and 475 at `low`. Reconciliation and negotiation are strictly
+    harder prompts, so their caps must clear that load with margin, and no
+    cap may sit near it. An absolute floor, not a multiple of the selection
+    cap: the earlier relative form was calibrated against a 200-token
+    selection cap that was itself the bug.
     """
     from evaluation.chamber_pipeline.agents import (
         _NEGOTIATE_MAX_TOKENS,
@@ -575,8 +580,11 @@ def test_reconcile_and_negotiate_caps_are_far_above_the_selection_cap():
         _SELECTION_MAX_TOKENS,
     )
 
-    assert _RECONCILE_MAX_TOKENS >= 20 * _SELECTION_MAX_TOKENS
-    assert _NEGOTIATE_MAX_TOKENS >= 20 * _SELECTION_MAX_TOKENS
+    worst_observed_reasoning = 976
+    for cap in (_SELECTION_MAX_TOKENS, _RECONCILE_MAX_TOKENS, _NEGOTIATE_MAX_TOKENS):
+        assert cap >= 2 * worst_observed_reasoning
+    # Reconciliation reasons over both scouts' lists; never cheaper than one pick.
+    assert _RECONCILE_MAX_TOKENS >= _SELECTION_MAX_TOKENS
 
 
 @requires_causalchamber
@@ -623,3 +631,102 @@ def test_select_loop_forwards_an_explicit_temperature():
     for call in llm.calls:
         assert call["kwargs"]["temperature"] == _SCOUT_TEMPERATURE
     assert _SCOUT_TEMPERATURE > 0.0, "a zero temperature cannot decorrelate scouts"
+
+
+# --------------------------------------------------------------------------
+# M6: selection-call reasoning budget (2026-08-23 provider regression)
+# --------------------------------------------------------------------------
+
+
+def test_selection_cap_exceeds_observed_reasoning_load():
+    """The 200-token cap could not hold a single selection call.
+
+    Measured 2026-08-23 on the real 59-item LT menu: default effort spends
+    821 reasoning tokens, `high` 976, `low` 475, `minimal` 415 -- every level
+    over 200. All four pinned providers returned `finish_reason=length` with
+    empty content, and `_llm_select_loop` silently fell back to `rng.choice`.
+    """
+    from evaluation.chamber_pipeline.agents import (
+        _SELECTION_MAX_TOKENS,
+        _SELECTION_REASONING_EFFORT,
+    )
+
+    assert _SELECTION_MAX_TOKENS >= 1500
+    assert _SELECTION_REASONING_EFFORT in {"none", "minimal", "low", "medium", "high"}
+
+
+@requires_causalchamber
+def test_selection_calls_pin_the_reasoning_effort():
+    """Effort must be explicit, not inherited from a provider default.
+
+    M4b never set it and silently tracked DeepSeek's default; that default
+    rose (M4b's observed ~509 output tokens/call vs 821 today) when three
+    effort tiers shipped on 2026-08-13. An unset parameter is an unpinned one.
+    """
+    from agent_contracts.integrations.causalchamber import (
+        create_contracted_chamber_agent,
+    )
+    from evaluation.chamber_pipeline.agents import (
+        _SELECTION_REASONING_EFFORT,
+        _llm_select_loop,
+    )
+
+    adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=2)
+    menu = adapter.available_experiments()
+    llm = FakeLLM(responder=lambda idx, msgs: menu[idx])
+    _llm_select_loop(adapter, llm, "m", seed=0)
+    assert llm.calls
+    for call in llm.calls:
+        reasoning = call["kwargs"]["extra_body"]["reasoning"]
+        assert reasoning == {"effort": _SELECTION_REASONING_EFFORT}
+
+
+@requires_causalchamber
+def test_selection_fallback_is_counted_not_silent():
+    """A degraded selection must leave a trace.
+
+    The fallback exists so a bad response degrades to random rather than
+    crashing. That graceful degradation is exactly what hid a 100% failure
+    rate, so it now increments a counter the sweep records per cell.
+    """
+    from agent_contracts.integrations.causalchamber import (
+        create_contracted_chamber_agent,
+    )
+    from evaluation.chamber_pipeline.agents import _llm_select_loop
+
+    class CountingStub(FakeLLM):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.selection_fallbacks = 0
+
+        def record_selection_fallback(self) -> None:
+            self.selection_fallbacks += 1
+
+    adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=3)
+    # Empty content is exactly what a truncated reasoning call returns.
+    llm = CountingStub(responder=lambda idx, msgs: "")
+    chosen, _ = _llm_select_loop(adapter, llm, "m", seed=0)
+    assert len(chosen) == 3  # still spends the budget
+    assert llm.selection_fallbacks == 3  # and says so
+
+
+@requires_causalchamber
+def test_no_fallback_recorded_when_selection_parses():
+    from agent_contracts.integrations.causalchamber import (
+        create_contracted_chamber_agent,
+    )
+    from evaluation.chamber_pipeline.agents import _llm_select_loop
+
+    class CountingStub(FakeLLM):
+        def __init__(self, **kw):
+            super().__init__(**kw)
+            self.selection_fallbacks = 0
+
+        def record_selection_fallback(self) -> None:
+            self.selection_fallbacks += 1
+
+    adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=3)
+    menu = adapter.available_experiments()
+    llm = CountingStub(responder=lambda idx, msgs: menu[idx])
+    _llm_select_loop(adapter, llm, "m", seed=0)
+    assert llm.selection_fallbacks == 0

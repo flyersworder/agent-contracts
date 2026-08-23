@@ -76,6 +76,12 @@ class RunRecord:
         n_llm_calls: How many times the agent invoked the LLM
             callable. None for non-LLM variants. 0 is a real
             measurement (e.g., budget=0 short-circuit).
+        n_selection_fallbacks: How many selection calls returned an
+            unparseable response and fell back to a random unspent
+            experiment. A nonzero value means the cell's "LLM selection"
+            was partly random; equal to `n_llm_calls` means it was entirely
+            random. None for non-LLM variants and for cells recorded before
+            this field existed (the M4b pilot).
         n_pc_degeneracies: How many times PC's singular-matrix
             fallback fired during this cell. Captured by a logging
             handler the orchestrator installs around each cell. None
@@ -125,6 +131,7 @@ class RunRecord:
     # --- runtime / instrumentation ---
     wall_time_seconds: float | None = None
     n_llm_calls: int | None = None
+    n_selection_fallbacks: int | None = None
     n_pc_degeneracies: int | None = None
 
     # --- LLM cost / token tracking ---

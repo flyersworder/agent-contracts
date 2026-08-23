@@ -68,7 +68,25 @@ LLMCallable = Callable[..., Any]
 # response is just one menu name (~15-30 chars), so 200 tokens is
 # generous headroom for any reasoning prefix the model insists on.
 # Tests can monkey-patch this if they need different behavior.
-_SELECTION_MAX_TOKENS = 200
+# Raised 200 -> 2048 on 2026-08-23. The old cap could not hold a single
+# selection call: measured on the real 59-item LT menu, DeepSeek v4 Flash 0423
+# spends 821 reasoning tokens at the provider default, 976 at `high`, 475 at
+# `low`, 415 at `minimal` -- every level over 200. All four pinned providers
+# returned `finish_reason=length` with EMPTY content, and the loop below then
+# fell back to `rng.choice`, silently turning LLM selection into random
+# selection. M4b (2026-05-18) was unaffected: its recorded 509-2376 output
+# tokens per call prove the calls ran to completion, because providers did not
+# then count reasoning tokens against `max_tokens`.
+_SELECTION_MAX_TOKENS = 2048
+
+# Pinned explicitly rather than inherited. M4b never set this and silently
+# tracked DeepSeek's default; that default then rose (M4b's ~509 output
+# tokens/call against 821 today) when three thinking-effort tiers shipped on
+# 2026-08-13, under a model snapshot whose weights never changed. Pinning the
+# weights does not pin the behaviour -- only setting the parameter does.
+# "low" (475 tokens) is the closest match to M4b's observed profile, which is
+# what keeps the reused rung-0 and rung-3 cells comparable.
+_SELECTION_REASONING_EFFORT = "low"
 
 # Per-LLM-call output cap for the adjacency-emission step in
 # `llm_only_agent`. Larger because the response is a JSON object
@@ -452,7 +470,9 @@ def _llm_select_loop(
         # 200 leaves ample headroom for the model's reasoning prefix
         # while bringing per-call latency from ~37s back down to ~1.5-3s.
         # Callers wanting a different cap can monkey-patch _SELECTION_MAX_TOKENS.
-        extra: dict[str, Any] = {}
+        extra: dict[str, Any] = {
+            "extra_body": {"reasoning": {"effort": _SELECTION_REASONING_EFFORT}}
+        }
         if temperature is not None:
             extra["temperature"] = temperature
         response = llm(
@@ -469,6 +489,14 @@ def _llm_select_loop(
             # random over the full menu so we still spend the slot.
             unspent = [m for m in menu if m not in all_chosen]
             name = rng.choice(unspent) if unspent else rng.choice(menu)
+            # Record it. This fallback exists so a bad response degrades to
+            # random rather than crashing, and that graceful degradation is
+            # precisely what concealed a 100% selection-failure rate for the
+            # three months after providers began counting reasoning tokens
+            # against `max_tokens`. Degradation must never again be silent.
+            recorder = getattr(llm, "record_selection_fallback", None)
+            if recorder is not None:
+                recorder()
 
         chosen.append(name)
         dfs.append(adapter.query_intervention(name))
