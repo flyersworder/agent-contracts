@@ -40,7 +40,8 @@ plugs in the five baseline agents from §5 of the validation plan.
 
 import dataclasses
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any, Literal
 
 from agent_contracts.core.contract import Contract, ResourceConstraints
@@ -121,6 +122,8 @@ class ContractedChamberAgent:
         agent: Callable[..., Any] | None = None,
         data_root: str | os.PathLike[str] = "./data/causalchamber",
         strict_mode: bool = True,
+        node_monitors: Mapping[str, ResourceMonitor] | None = None,
+        token_meter: Callable[[], int] | None = None,
     ) -> None:
         """Initialize the contracted chamber agent.
 
@@ -157,6 +160,13 @@ class ContractedChamberAgent:
         # Hand-wire monitors and enforcer (pattern from claude_agent_sdk.py /
         # litellm_wrapper.py — see §2.3 of M1 decisions doc).
         self._resource_monitor = ResourceMonitor(contract.resources)
+        # Per-node metering is ADDITIVE: a node monitor is consulted and charged
+        # *in addition to* the aggregate one, never instead of it. Replacing it
+        # would bypass the adapter's intervention_budget=k cap and silently
+        # dissolve the matched-budget guarantee the ladder depends on.
+        self._node_monitors: dict[str, ResourceMonitor] = dict(node_monitors or {})
+        self._token_meter = token_meter
+        self._active_node: str | None = None
         self._temporal_monitor = TemporalMonitor(contract)
         self._events: list[dict[str, Any]] = []
         self._enforcer = ContractEnforcer(
@@ -211,6 +221,40 @@ class ContractedChamberAgent:
 
     # ------------------------------------------------------------------ tools
 
+    @contextmanager
+    def as_node(self, name: str) -> Iterator[None]:
+        """Meter tool calls in this block against `name` as well as the aggregate.
+
+        On exit, the token delta measured by `token_meter` across the block is
+        attributed to the node's monitor. That is the only thing connecting
+        `_CountingLLM`'s totals to `DelegationGraph._consumed()`; without it
+        every node's token consumption is zero and `verify()` is trivially true.
+        """
+        if name not in self._node_monitors:
+            raise KeyError(f"no monitor registered for node {name!r}")
+        if self._active_node is not None:
+            # Nesting would charge the inner block's tokens to both nodes and
+            # silently inflate the certification arithmetic.
+            raise RuntimeError(
+                f"as_node({name!r}) nested inside as_node({self._active_node!r}); "
+                "close the outer block first"
+            )
+        start = self._token_meter() if self._token_meter is not None else None
+        self._active_node = name
+        try:
+            yield
+        finally:
+            self._active_node = None
+            if start is not None:
+                self._node_monitors[name].usage.add_tokens(self._token_meter() - start)
+
+    def _charged_monitors(self) -> list[ResourceMonitor]:
+        """Every monitor that must approve, and be charged for, a tool call."""
+        monitors = [self._resource_monitor]
+        if self._active_node is not None:
+            monitors.append(self._node_monitors[self._active_node])
+        return monitors
+
     def query_intervention(self, experiment_name: str) -> Any:
         """Spend one unit of `per_tool_limits["intervene"]` and return data.
 
@@ -243,8 +287,13 @@ class ContractedChamberAgent:
         """
         self._ensure_loaded()
 
-        # Pre-check
-        if not self._resource_monitor.can_use_tool("intervene"):
+        # Pre-check every charged monitor, not just the aggregate one.
+        for monitor in self._charged_monitors():
+            if monitor.can_use_tool("intervene"):
+                continue
+            # Report the limit that actually fired, not the aggregate one --
+            # otherwise a node blocked at 0 is reported as blocked at k.
+            limit = monitor.constraints.per_tool_limits.get("intervene")
             self._enforcer._emit_event(
                 EnforcementEvent(
                     event_type="tool_blocked",
@@ -253,8 +302,9 @@ class ContractedChamberAgent:
                     data={
                         "tool_name": "intervene",
                         "experiment_name": experiment_name,
-                        "limit": self.contract.resources.per_tool_limits.get("intervene"),
-                        "actual": self._resource_monitor.usage.get_tool_usage("intervene"),
+                        "limit": limit,
+                        "actual": monitor.usage.get_tool_usage("intervene"),
+                        "node": self._active_node,
                     },
                 )
             )
@@ -262,15 +312,15 @@ class ContractedChamberAgent:
                 raise ContractViolationError(
                     self.contract,
                     "per_tool_limit",
-                    f"intervention budget exhausted "
-                    f"(limit={self.contract.resources.per_tool_limits.get('intervene')})",
+                    f"intervention budget exhausted (limit={limit})",
                 )
 
         # Run
         df = self._dataset.get_experiment(experiment_name).as_pandas_dataframe()
 
-        # Post: charge budget + emit audit event
-        self._resource_monitor.usage.add_tool_invocation("intervene")
+        # Post: charge every monitor that approved it + emit audit event
+        for monitor in self._charged_monitors():
+            monitor.usage.add_tool_invocation("intervene")
         self._enforcer._emit_event(
             EnforcementEvent(
                 event_type="tool_use",
@@ -320,7 +370,10 @@ class ContractedChamberAgent:
             raise ValueError(f"n_samples must be positive, got {n_samples}")
         self._ensure_loaded()
 
-        if not self._resource_monitor.can_use_tool("observe"):
+        for monitor in self._charged_monitors():
+            if monitor.can_use_tool("observe"):
+                continue
+            limit = monitor.constraints.per_tool_limits.get("observe")
             self._enforcer._emit_event(
                 EnforcementEvent(
                     event_type="tool_blocked",
@@ -329,8 +382,9 @@ class ContractedChamberAgent:
                     data={
                         "tool_name": "observe",
                         "n_samples": n_samples,
-                        "limit": self.contract.resources.per_tool_limits.get("observe"),
-                        "actual": self._resource_monitor.usage.get_tool_usage("observe"),
+                        "limit": limit,
+                        "actual": monitor.usage.get_tool_usage("observe"),
+                        "node": self._active_node,
                     },
                 )
             )
@@ -338,8 +392,7 @@ class ContractedChamberAgent:
                 raise ContractViolationError(
                     self.contract,
                     "per_tool_limit",
-                    f"observation budget exhausted "
-                    f"(limit={self.contract.resources.per_tool_limits.get('observe')})",
+                    f"observation budget exhausted (limit={limit})",
                 )
 
         # Stand-in passive source: first n_samples rows of first experiment.
@@ -347,7 +400,8 @@ class ContractedChamberAgent:
         first_name = self._dataset.available_experiments()[0]
         df = self._dataset.get_experiment(first_name).as_pandas_dataframe().head(n_samples)
 
-        self._resource_monitor.usage.add_tool_invocation("observe")
+        for monitor in self._charged_monitors():
+            monitor.usage.add_tool_invocation("observe")
         self._enforcer._emit_event(
             EnforcementEvent(
                 event_type="tool_use",
@@ -452,6 +506,8 @@ def create_contracted_chamber_agent(
     extra_resources: ResourceConstraints | None = None,
     data_root: str | os.PathLike[str] = "./data/causalchamber",
     strict_mode: bool = True,
+    node_monitors: Mapping[str, ResourceMonitor] | None = None,
+    token_meter: Callable[[], int] | None = None,
 ) -> ContractedChamberAgent:
     """Build a ContractedChamberAgent with sensible defaults.
 
@@ -531,6 +587,8 @@ def create_contracted_chamber_agent(
         agent=agent,
         data_root=data_root,
         strict_mode=strict_mode,
+        node_monitors=node_monitors,
+        token_meter=token_meter,
     )
 
 
