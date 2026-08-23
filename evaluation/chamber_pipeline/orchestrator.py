@@ -616,6 +616,7 @@ def _build_agent_kwargs(
     seed: int,
     pc_alpha: float,
     llm: LLMCallable | None,
+    model: str | None = None,
 ) -> dict[str, Any]:
     """Construct the kwargs dict to pass to `spec.run`.
 
@@ -654,6 +655,13 @@ def _build_agent_kwargs(
 
     kwargs.update(spec.static_kwargs)
 
+    # AFTER static_kwargs: an explicit `--model` is a deliberate operator
+    # choice and must outrank a spec-level default, not be silently
+    # overwritten by it. Guarded on `accepts_llm` because the non-LLM agents
+    # have no `model` parameter and would raise TypeError.
+    if model is not None and spec.accepts_llm:
+        kwargs["model"] = model
+
     return kwargs
 
 
@@ -666,6 +674,7 @@ def run_cell(
     pc_alpha: float = 0.05,
     llm: LLMCallable | None = None,
     cell_timeout_seconds: float | None = None,
+    model: str | None = None,
 ) -> RunRecord:
     """Run one cell of the sweep grid and return a RunRecord.
 
@@ -799,7 +808,7 @@ def run_cell(
     # Wrap the LLM (user-supplied or lazy-imported litellm.completion)
     # in a per-cell _CountingLLM so n_llm_calls + tokens + cost can be
     # populated uniformly. Non-LLM variants get None for all four.
-    kwargs = _build_agent_kwargs(spec, budget_k, seed, pc_alpha, counting_llm)
+    kwargs = _build_agent_kwargs(spec, budget_k, seed, pc_alpha, counting_llm, model=model)
 
     t0 = time.perf_counter()
     try:
@@ -1038,6 +1047,7 @@ def run_sweep(
     llm: LLMCallable | None = None,
     on_cell: Callable[[RunRecord, int, int], None] | None = None,
     skip_keys: set[tuple[str, str, str, int, int]] | None = None,
+    model: str | None = None,
 ) -> list[RunRecord]:
     """Run a full sweep and return all RunRecords.
 
@@ -1081,6 +1091,7 @@ def run_sweep(
             pc_alpha=sweep.pc_alpha,
             llm=llm,
             cell_timeout_seconds=sweep.cell_timeout_seconds,
+            model=model,
         )
         records.append(record)
         if on_cell is not None:

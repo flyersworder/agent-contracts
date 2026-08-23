@@ -1565,3 +1565,63 @@ class TestConservationIsNotGatedOnAggregatorSpend:
         assert graph.monitor_for("aggregator").usage.tokens == 0
         with pytest.raises(ConservationViolationError):
             graph.verify()
+
+
+class TestModelOverride:
+    """`--model` makes the model a first-class, recorded sweep parameter.
+
+    DeepSeek's 0423 snapshot began reasoning ~4x harder per call on
+    2026-08-13 under unchanged weights, which took `llm_pc` k=30 from 4.1 to
+    27.4 min/cell. Comparing snapshots is therefore an experiment we have to
+    run, not a config edit -- and the model that produced each row has to be
+    recorded next to it.
+    """
+
+    def test_model_override_reaches_an_llm_agent(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import _build_agent_kwargs
+
+        kwargs = _build_agent_kwargs(
+            get_spec("llm_pc"), 6, 0, 0.05, None, model="openrouter/x/y-0731"
+        )
+        assert kwargs["model"] == "openrouter/x/y-0731"
+
+    def test_no_override_leaves_the_agent_default_untouched(self) -> None:
+        """Absent the flag, the agent signature default must still apply."""
+        from evaluation.chamber_pipeline.orchestrator import _build_agent_kwargs
+
+        assert "model" not in _build_agent_kwargs(get_spec("llm_pc"), 6, 0, 0.05, None)
+
+    def test_a_non_llm_agent_never_receives_model(self) -> None:
+        """`random_agent` has no `model` parameter; passing one is a TypeError."""
+        from evaluation.chamber_pipeline.orchestrator import _build_agent_kwargs
+
+        kwargs = _build_agent_kwargs(
+            get_spec("random"), 6, 0, 0.05, None, model="openrouter/x/y-0731"
+        )
+        assert "model" not in kwargs
+
+    def test_the_override_wins_over_static_kwargs(self) -> None:
+        """A spec-level default must not silently outrank an explicit flag."""
+        from types import MappingProxyType
+
+        from evaluation.chamber_pipeline.agents import llm_pc_agent
+        from evaluation.chamber_pipeline.orchestrator import AgentSpec, _build_agent_kwargs
+
+        spec = AgentSpec(
+            name="pinned",
+            run=llm_pc_agent,
+            chambers=("lt",),
+            kind="llm",
+            accepts_llm=True,
+            static_kwargs=MappingProxyType({"model": "openrouter/pinned/old"}),
+        )
+        kwargs = _build_agent_kwargs(spec, 6, 0, 0.05, None, model="openrouter/x/y-0731")
+        assert kwargs["model"] == "openrouter/x/y-0731"
+
+    def test_cli_exposes_model_and_run_cell_records_it(self) -> None:
+        from evaluation.chamber_pipeline.run_experiment import build_arg_parser
+
+        args = build_arg_parser().parse_args(
+            ["--variants", "llm_pc", "--out", "x.parquet", "--model", "openrouter/x/y-0731"]
+        )
+        assert args.model == "openrouter/x/y-0731"

@@ -258,6 +258,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help=(
+            "Override the LLM model id for every LLM-bearing variant "
+            "(e.g. 'openrouter/deepseek/deepseek-v4-flash-0731'). Omit to use "
+            "each agent's signature default. Recorded per cell in `model_id`."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the cell grid + count, do not invoke agents.",
@@ -546,7 +556,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         sys.stdout.flush()
 
-    new_records = run_sweep(sweep, llm=llm, on_cell=progress, skip_keys=skip_keys)
+    new_records = run_sweep(sweep, llm=llm, on_cell=progress, skip_keys=skip_keys, model=args.model)
 
     # Consolidate from sidecar (NOT the in-memory list) so the final
     # Parquet contains both the prior records and the new ones. Reading
