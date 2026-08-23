@@ -540,7 +540,7 @@ git commit -m "feat(chamber): fan-in DelegationGraph builder with per-role budge
 
 ---
 
-### Task 5: `fan_in_agents` — rungs 1 and 2
+### Task 5: `fan_in_agents` — rungs 1 and 2  ✅ shipped
 
 **Files:**
 - Modify: `evaluation/chamber_pipeline/agents.py`
@@ -830,7 +830,7 @@ git commit -m "feat(chamber): fan_in_agents for ensemble and parallel-roles rung
 
 ---
 
-### Task 6: `team_agents` — rung 4 negotiation
+### Task 6: `team_agents` — rung 4 negotiation  ✅ shipped
 
 **Files:**
 - Modify: `evaluation/chamber_pipeline/agents.py`, `evaluation/chamber_pipeline/llm_planner.py`
@@ -945,7 +945,7 @@ git commit -m "feat(chamber): team_agents with one-round allocation negotiation"
 
 ---
 
-### Task 7: Registry, kwargs, and the opt-in token cap
+### Task 7: Registry, kwargs, and the opt-in token cap  ✅ shipped
 
 **Files:**
 - Modify: `evaluation/chamber_pipeline/orchestrator.py`
@@ -1136,7 +1136,7 @@ and insufficient from either scout alone. Both bounds are pinned by
 
 ---
 
-### Task 9: Ladder figures and the power table
+### Task 9: Ladder figures and the power table  ✅ shipped
 
 **Files:**
 - Modify: `evaluation/chamber_pipeline/analyze_results.py`
