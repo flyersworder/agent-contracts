@@ -396,6 +396,7 @@ def _llm_select_loop(
     starting_chosen: list[str] | None = None,
     prompt_builder: PromptBuilder = build_select_prompt,
     temperature: float | None = None,
+    exclude: set[str] | None = None,
 ) -> tuple[list[str], list[pd.DataFrame]]:
     """Step `spend` times: prompt LLM for one experiment, query, repeat.
 
@@ -428,6 +429,14 @@ def _llm_select_loop(
             Reasoner phase to inherit the Planner's picks.
         prompt_builder: Callable returning chat messages for the
             selection prompt. Defaults to the M3b opaque-menu prompt.
+        exclude: Experiment names removed from the selectable menu WITHOUT
+            appearing in the prompt. Used by the team arm's collision
+            backstop. Deliberately not routed through `starting_chosen`,
+            which would render the excluded names into the prompt as an
+            "Already spent" block -- destroying the blindness of the execution
+            phase -- and would also feed `actual_spend = min(spend,
+            len(available))`, silently under-spending the scout and breaking
+            matched-budget comparability.
         temperature: Sampling temperature forwarded to the completion call.
             None (the default) omits the argument entirely rather than
             passing null, so rungs 0 and 3 reach the provider byte-identically
@@ -439,7 +448,7 @@ def _llm_select_loop(
         loop's spend (does not include `starting_chosen`).
     """
     full_budget = _intervention_budget(adapter)
-    menu = list(adapter.available_experiments())
+    menu = [m for m in adapter.available_experiments() if m not in (exclude or set())]
 
     if full_budget <= 0 or not menu:
         return [], []
@@ -858,6 +867,139 @@ def fan_in_agents(
 
     # Duplicates still COST budget — each query_intervention was metered — but
     # are dropped before pooling so PC does not see an inflated n.
+    seen: set[str] = set()
+    dfs: list[pd.DataFrame] = []
+    for name, frame in zip(chosen_a + chosen_b, dfs_a + dfs_b, strict=True):
+        if name not in seen:
+            seen.add(name)
+            dfs.append(frame)
+
+    adapter.coordination_stats = {
+        "overlap_frac": overlap_fraction(chosen_a, chosen_b),
+        "n_experiments_distinct": len(seen),
+    }
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+def _parse_name_list(response: Any, menu: list[str]) -> list[str]:
+    """Every menu name appearing in a response, in order, deduplicated."""
+    from evaluation.chamber_pipeline.llm_planner import _response_text
+
+    text = _response_text(response) or ""
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in menu:
+        if name in text and name not in seen:
+            seen.add(name)
+            out.append(name)
+    return out
+
+
+def team_agents(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    scout_a_budget: int,
+    scout_b_budget: int,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """Two scouts negotiate their split before executing — ladder rung 4.
+
+    One upfront round, O(1) in ``k``: each scout proposes, each sees the
+    other's proposal and revises once, a deterministic backstop resolves what
+    remains contested, and only then do both execute.
+
+    This is the ladder's only rung where a scout knows a peer exists. Rungs 1
+    and 2 stay blind so that they isolate role differentiation; making the
+    coordination explicit here is what separates the two comparisons.
+
+    The scout-to-scout channel is a Python variable, **not** a graph edge. A
+    bidirectional pair raises :class:`CycleError` regardless of carrying zero
+    tokens, because ``allocate()`` runs its reachability check before it
+    inspects the amount. Control flow may cycle; budget flow may not
+    (whitepaper §4.6 P3).
+    """
+    from evaluation.chamber_pipeline.coordination import overlap_fraction
+    from evaluation.chamber_pipeline.llm_planner import (
+        build_negotiate_propose_prompt,
+        build_negotiate_revise_prompt,
+        build_reconcile_prompt,
+    )
+
+    nodes = _node_names(adapter)
+    adapter.coordination_stats = {"overlap_frac": None, "n_experiments_distinct": 0}
+    if _intervention_budget(adapter) <= 0 or not adapter.available_experiments():
+        return _empty_adjacency(nodes)
+    llm = llm or _default_llm()
+    menu = list(adapter.available_experiments())
+
+    def negotiate(role: str, budget: int, node: str) -> list[str]:
+        with adapter.as_node(node):
+            proposal = llm(
+                model=model,
+                messages=build_negotiate_propose_prompt(menu, budget, role),
+                max_tokens=_NEGOTIATE_MAX_TOKENS,
+            )
+        return _parse_name_list(proposal, menu)
+
+    proposed_a = negotiate("A", scout_a_budget, "scout_a")
+    proposed_b = negotiate("B", scout_b_budget, "scout_b")
+
+    def revise(budget: int, own: list[str], other: list[str], node: str) -> list[str]:
+        with adapter.as_node(node):
+            revised = llm(
+                model=model,
+                messages=build_negotiate_revise_prompt(menu, budget, own, other),
+                max_tokens=_NEGOTIATE_MAX_TOKENS,
+            )
+        return _parse_name_list(revised, menu)
+
+    revised_a = revise(scout_a_budget, proposed_a, proposed_b, "scout_a")
+    revised_b = revise(scout_b_budget, proposed_b, proposed_a, "scout_b")
+
+    # Deterministic backstop. Applied to the EXECUTED selections, not just the
+    # proposals: the scouts execute blind after negotiating, so filtering only
+    # what they proposed leaves them free to re-collide.
+    contested = set(revised_a) & set(revised_b)
+    # Never starve scout_b. If honouring every contested claim for scout_a
+    # would leave too few experiments to spend its budget on, split the
+    # contested set alternately instead of assigning it wholesale.
+    if len(menu) - len(contested) < scout_b_budget:
+        contested = set(sorted(contested)[::2])
+
+    with adapter.as_node("scout_a"):
+        chosen_a, dfs_a = _llm_select_loop(
+            adapter,
+            llm,
+            model,
+            2 * seed,
+            spend=scout_a_budget,
+            prompt_builder=build_select_prompt,
+            temperature=_SCOUT_TEMPERATURE,
+        )
+    with adapter.as_node("scout_b"):
+        chosen_b, dfs_b = _llm_select_loop(
+            adapter,
+            llm,
+            model,
+            2 * seed + 1,
+            spend=scout_b_budget,
+            prompt_builder=build_select_prompt,
+            temperature=_SCOUT_TEMPERATURE,
+            exclude=set(chosen_a) | contested,
+        )
+
+    with adapter.as_node("aggregator"):
+        llm(
+            model=model,
+            messages=build_reconcile_prompt(chosen_a, chosen_b),
+            max_tokens=_RECONCILE_MAX_TOKENS,
+        )
+
     seen: set[str] = set()
     dfs: list[pd.DataFrame] = []
     for name, frame in zip(chosen_a + chosen_b, dfs_a + dfs_b, strict=True):

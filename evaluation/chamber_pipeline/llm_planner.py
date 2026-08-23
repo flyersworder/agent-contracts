@@ -279,6 +279,66 @@ def build_reconcile_prompt(
     ]
 
 
+# ---------------------------------------------------------------------------
+# Negotiation prompts for the team rung (M6 rung 4).
+#
+# This is the one rung where the scouts know a peer exists. Rungs 1 and 2 are
+# blind by construction, so keeping these prompts separate is what stops the
+# ladder's two comparisons -- role differentiation, and explicit coordination
+# -- from being confounded into one.
+# ---------------------------------------------------------------------------
+
+
+_NEGOTIATE_SYSTEM_MESSAGE = (
+    "You are one of two designers planning causal-discovery experiments on a "
+    "physical chamber. You share a fixed total budget with the other "
+    "designer, so an experiment one of you runs is one the other cannot. "
+    "Your aim is a joint plan that covers as much as possible, not the best "
+    "individual plan."
+)
+
+
+def build_negotiate_propose_prompt(
+    menu: list[str],
+    budget: int,
+    role: str,
+) -> list[dict[str, str]]:
+    """Round 1: state which experiments this scout intends to claim."""
+    user = (
+        f"You are designer {role}. You may run {budget} experiment(s).\n\n"
+        f"Menu:\n" + "\n".join(menu) + "\n\n"
+        f"List the {budget} experiment name(s) you intend to claim, one per "
+        "line, and no other commentary."
+    )
+    return [
+        {"role": "system", "content": _NEGOTIATE_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_negotiate_revise_prompt(
+    menu: list[str],
+    budget: int,
+    own: list[str],
+    other: list[str],
+) -> list[dict[str, str]]:
+    """Round 2: having seen the peer's claim, revise to reduce collisions."""
+    user = (
+        f"You may run {budget} experiment(s).\n\n"
+        "You proposed:\n" + ("\n".join(own) if own else "(nothing)") + "\n\n"
+        "The other designer proposed:\n"
+        + ("\n".join(other) if other else "(nothing)")
+        + "\n\nAny experiment you both named is wasted duplication. Revise "
+        f"your claim to {budget} experiment name(s) from the menu below, one "
+        "per line, and no other commentary.\n\n"
+        "Menu:\n" + "\n".join(menu)
+    )
+    return [
+        {"role": "system", "content": _NEGOTIATE_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
 def parse_selection_response(response: Any, menu: list[str]) -> str | None:
     """Extract one valid experiment name from an LLM completion response.
 
