@@ -90,6 +90,23 @@ _SELECTION_MAX_TOKENS = 200
 # accommodates this trivially.
 _ADJACENCY_MAX_TOKENS = 32768
 
+# Reasoning calls must never reuse `_SELECTION_MAX_TOKENS`. DeepSeek v4 Flash
+# is a reasoning model whose `reasoning_tokens` routinely reach 95% of
+# `completion_tokens`, so a 200-token cap is consumed entirely by hidden
+# reasoning and the response comes back with empty `content`. That is the M4b
+# root-cause bug; these are sized 4-8x expected content to avoid repeating it.
+_RECONCILE_MAX_TOKENS = 8192  # aggregator merges two selection lists
+_NEGOTIATE_MAX_TOKENS = 4096  # short proposals in the team arm
+
+# Rung 1's two scouts run the SAME prompt, so `seed` cannot decorrelate them:
+# `_llm_select_loop` uses it only for the fallback RNG reached on an off-menu
+# or duplicate response. On the happy path both scouts receive byte-identical
+# messages. Sampling temperature is therefore the entire diversity mechanism
+# for the homogeneous fan-in arm, and it is recorded per cell so the result is
+# reproducible. Left to the provider default, a low value would drive
+# `overlap_frac` to 1.0 and collapse rung 1 into rung 0 at double the budget.
+_SCOUT_TEMPERATURE = 1.0
+
 
 # Pattern matching the LT experiment naming convention `uniform_<TARGET>_<STRENGTH>`
 # (and WT's analogous form). The single LT outlier `uniform_reference` is the
@@ -360,6 +377,7 @@ def _llm_select_loop(
     spend: int | None = None,
     starting_chosen: list[str] | None = None,
     prompt_builder: PromptBuilder = build_select_prompt,
+    temperature: float | None = None,
 ) -> tuple[list[str], list[pd.DataFrame]]:
     """Step `spend` times: prompt LLM for one experiment, query, repeat.
 
@@ -392,6 +410,11 @@ def _llm_select_loop(
             Reasoner phase to inherit the Planner's picks.
         prompt_builder: Callable returning chat messages for the
             selection prompt. Defaults to the M3b opaque-menu prompt.
+        temperature: Sampling temperature forwarded to the completion call.
+            None (the default) omits the argument entirely rather than
+            passing null, so rungs 0 and 3 reach the provider byte-identically
+            to M4b. The fan-in arms pass `_SCOUT_TEMPERATURE`; see its comment
+            for why the seed alone cannot decorrelate two scouts.
 
     Returns:
         `(chosen_names, experiment_dfs)` — parallel lists of just THIS
@@ -429,7 +452,15 @@ def _llm_select_loop(
         # 200 leaves ample headroom for the model's reasoning prefix
         # while bringing per-call latency from ~37s back down to ~1.5-3s.
         # Callers wanting a different cap can monkey-patch _SELECTION_MAX_TOKENS.
-        response = llm(model=model, messages=messages, max_tokens=_SELECTION_MAX_TOKENS)
+        extra: dict[str, Any] = {}
+        if temperature is not None:
+            extra["temperature"] = temperature
+        response = llm(
+            model=model,
+            messages=messages,
+            max_tokens=_SELECTION_MAX_TOKENS,
+            **extra,
+        )
         name = parse_selection_response(response, menu)
 
         if name is None or name in all_chosen:

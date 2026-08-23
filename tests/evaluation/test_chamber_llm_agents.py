@@ -48,7 +48,11 @@ class FakeLLM:
           dynamic responses per-call (e.g., always return the first menu
           item from the user message).
 
-    Recorded `calls` is a list of dicts with `model`, `messages`, `idx`.
+    Recorded `calls` is a list of dicts with `model`, `messages`, `idx`, and
+    `kwargs` (everything else the caller passed, e.g. `max_tokens`,
+    `temperature`). `kwargs` is what lets a test assert that a parameter was
+    *omitted* rather than passed as None -- the distinction reuse safety turns
+    on, since rungs 0 and 3 must call the provider byte-identically to M4b.
     """
 
     def __init__(
@@ -62,9 +66,9 @@ class FakeLLM:
         self._responder = responder
         self.calls: list[dict[str, Any]] = []
 
-    def __call__(self, *, model: str, messages: list[dict[str, str]], **_: Any) -> dict:
+    def __call__(self, *, model: str, messages: list[dict[str, str]], **kwargs: Any) -> dict:
         idx = len(self.calls)
-        self.calls.append({"model": model, "messages": messages, "idx": idx})
+        self.calls.append({"model": model, "messages": messages, "idx": idx, "kwargs": kwargs})
 
         if self._responses is not None:
             if idx >= len(self._responses):
@@ -487,3 +491,135 @@ class TestAgentsHandleAttrStyleResponses:
         spent = [e["data"]["experiment_name"] for e in adapter.events if e["type"] == "tool_use"]
         assert spent == [menu[0], menu[1]]
         assert adj.shape == adapter.ground_truth().shape
+
+
+# --------------------------------------------------------------------------
+# M6 Task 2: blind role prompts
+# --------------------------------------------------------------------------
+
+
+def test_blind_scout_prompts_never_reference_already_chosen():
+    from evaluation.chamber_pipeline.llm_planner import (
+        build_scout_broad_prompt,
+        build_scout_targeted_prompt,
+    )
+
+    menu = ["uniform_t_ir_1_mid", "uniform_l_12_mid", "uniform_diode_ir_3_mid"]
+    for build in (build_scout_broad_prompt, build_scout_targeted_prompt):
+        msgs = build(menu, 3, None)
+        text = " ".join(m["content"] for m in msgs).lower()
+        assert "already_chosen" not in text
+        assert "planner" not in text
+        assert "reasoner" not in text
+        assert "other agent" not in text
+        assert "uniform_t_ir_1_mid" in text
+
+
+def test_scout_roles_differ():
+    from evaluation.chamber_pipeline.llm_planner import (
+        build_scout_broad_prompt,
+        build_scout_targeted_prompt,
+    )
+
+    a = build_scout_broad_prompt(["x"], 1, None)[0]["content"]
+    b = build_scout_targeted_prompt(["x"], 1, None)[0]["content"]
+    assert a != b
+
+
+def test_scout_prompts_match_the_prompt_builder_arity():
+    """`_llm_select_loop` calls prompt_builder(menu, remaining, all_chosen).
+
+    A two-parameter builder raises TypeError on every differentiate=True run.
+    """
+    import inspect
+
+    from evaluation.chamber_pipeline.llm_planner import (
+        build_scout_broad_prompt,
+        build_scout_targeted_prompt,
+        build_select_prompt,
+    )
+
+    reference = list(inspect.signature(build_select_prompt).parameters)
+    for build in (build_scout_broad_prompt, build_scout_targeted_prompt):
+        assert list(inspect.signature(build).parameters) == reference
+
+
+def test_scout_prompts_still_carry_own_prior_picks():
+    """`already_chosen` is the scout's OWN loop history, not another agent's."""
+    from evaluation.chamber_pipeline.llm_planner import build_scout_broad_prompt
+
+    msgs = build_scout_broad_prompt(["a", "b"], 2, ["a"])
+    user = msgs[1]["content"]
+    assert "Already spent" in user
+    assert "a" in user
+
+
+def test_reconcile_prompt_carries_both_scouts_selections():
+    from evaluation.chamber_pipeline.llm_planner import build_reconcile_prompt
+
+    msgs = build_reconcile_prompt(["exp_a1", "exp_a2"], ["exp_b1", "exp_a2"])
+    text = " ".join(m["content"] for m in msgs)
+    for name in ("exp_a1", "exp_a2", "exp_b1"):
+        assert name in text
+
+
+def test_reconcile_and_negotiate_caps_are_far_above_the_selection_cap():
+    """Never reuse the 200-token selection cap for a reasoning call.
+
+    DeepSeek v4 Flash spends the cap on hidden reasoning and returns empty
+    `content`; that is the M4b root-cause bug in miniature.
+    """
+    from evaluation.chamber_pipeline.agents import (
+        _NEGOTIATE_MAX_TOKENS,
+        _RECONCILE_MAX_TOKENS,
+        _SELECTION_MAX_TOKENS,
+    )
+
+    assert _RECONCILE_MAX_TOKENS >= 20 * _SELECTION_MAX_TOKENS
+    assert _NEGOTIATE_MAX_TOKENS >= 20 * _SELECTION_MAX_TOKENS
+
+
+@requires_causalchamber
+def test_select_loop_omits_temperature_by_default():
+    """Reuse safety: rungs 0 and 3 must call the provider exactly as in M4b.
+
+    Passing `temperature=None` is not the same as omitting the argument --
+    providers may treat an explicit null differently from an absent key -- so
+    the default path must not mention temperature at all.
+    """
+    from agent_contracts.integrations.causalchamber import (
+        create_contracted_chamber_agent,
+    )
+    from evaluation.chamber_pipeline.agents import _llm_select_loop
+
+    adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=2)
+    menu = adapter.available_experiments()
+    llm = FakeLLM(responder=lambda idx, msgs: menu[idx])
+    _llm_select_loop(adapter, llm, "m", seed=0)
+    assert llm.calls, "loop made no LLM calls"
+    for call in llm.calls:
+        assert "temperature" not in call["kwargs"]
+
+
+@requires_causalchamber
+def test_select_loop_forwards_an_explicit_temperature():
+    """Rung 1's entire diversity mechanism is this number.
+
+    Two homogeneous scouts receive byte-identical messages on the happy path
+    -- the seed only feeds the off-menu fallback RNG -- so without an explicit
+    temperature a low provider default drives `overlap_frac` to 1.0 and
+    degenerates rung 1 into rung 0 at double the budget.
+    """
+    from agent_contracts.integrations.causalchamber import (
+        create_contracted_chamber_agent,
+    )
+    from evaluation.chamber_pipeline.agents import _SCOUT_TEMPERATURE, _llm_select_loop
+
+    adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=2)
+    menu = adapter.available_experiments()
+    llm = FakeLLM(responder=lambda idx, msgs: menu[idx])
+    _llm_select_loop(adapter, llm, "m", seed=0, temperature=_SCOUT_TEMPERATURE)
+    assert llm.calls
+    for call in llm.calls:
+        assert call["kwargs"]["temperature"] == _SCOUT_TEMPERATURE
+    assert _SCOUT_TEMPERATURE > 0.0, "a zero temperature cannot decorrelate scouts"

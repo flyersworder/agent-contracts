@@ -175,6 +175,110 @@ def build_reasoner_select_prompt(
     return msgs
 
 
+# ---------------------------------------------------------------------------
+# Blind scout roles used by the fan-in arms (M6 rungs 1 and 2).
+#
+# "Blind" is the defining property: neither scout may learn that another
+# agent exists. Rung 1 runs two scouts on the SAME prompt and gets its
+# diversity from sampling temperature alone; rung 2 differentiates them by
+# role. If either prompt leaked the existence of a peer, the two rungs would
+# stop isolating role differentiation from mere ensembling, which is the
+# comparison the ladder is built to make.
+#
+# `already_chosen` here is the scout's own prior picks within its own loop --
+# never another agent's. It reaches these builders because
+# `_llm_select_loop` calls `prompt_builder(menu, remaining, all_chosen)`
+# positionally; a two-parameter builder raises TypeError on every call.
+# ---------------------------------------------------------------------------
+
+
+_SCOUT_BROAD_SYSTEM_MESSAGE = (
+    "You are designing causal-discovery experiments on a physical "
+    "chamber. You will be shown a menu of available pre-recorded "
+    "interventional experiments. Your task is to pick ONE experiment "
+    "to query next, using only the experiment names. The names encode "
+    "what each experiment perturbs and how strongly. Favour BREADTH: "
+    "prefer an experiment that perturbs a target no earlier pick has "
+    "touched, so that the set you accumulate covers as many distinct "
+    "intervention targets as possible."
+)
+
+
+_SCOUT_TARGETED_SYSTEM_MESSAGE = (
+    "You are designing causal-discovery experiments on a physical "
+    "chamber. You will be shown a menu of available pre-recorded "
+    "interventional experiments. Your task is to pick ONE experiment "
+    "to query next, using only the experiment names. The names encode "
+    "what each experiment perturbs and how strongly. Favour DEPTH: "
+    "prefer an experiment that disambiguates variables whose "
+    "relationships remain least constrained by what has been picked so "
+    "far, even if that means perturbing a target already touched."
+)
+
+
+def build_scout_broad_prompt(
+    menu: list[str],
+    remaining_budget: int,
+    already_chosen: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Coverage-seeking scout (rung 2's role A; rung 1 uses it for both).
+
+    Same user message as `build_select_prompt`; the system message asks for
+    breadth. Mentions no other agent.
+    """
+    msgs = build_select_prompt(menu, remaining_budget, already_chosen)
+    msgs[0]["content"] = _SCOUT_BROAD_SYSTEM_MESSAGE
+    return msgs
+
+
+def build_scout_targeted_prompt(
+    menu: list[str],
+    remaining_budget: int,
+    already_chosen: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Disambiguation-seeking scout (rung 2's role B).
+
+    Same user message as `build_select_prompt`; the system message asks for
+    depth. Mentions no other agent.
+    """
+    msgs = build_select_prompt(menu, remaining_budget, already_chosen)
+    msgs[0]["content"] = _SCOUT_TARGETED_SYSTEM_MESSAGE
+    return msgs
+
+
+_RECONCILE_SYSTEM_MESSAGE = (
+    "You are aggregating the experiment selections of two independent "
+    "designers who worked without knowledge of each other. Their lists "
+    "may overlap or conflict. Produce a single deduplicated ordering of "
+    "the experiments to run, most informative first, keeping every "
+    "distinct experiment exactly once."
+)
+
+
+def build_reconcile_prompt(
+    chosen_a: list[str],
+    chosen_b: list[str],
+) -> list[dict[str, str]]:
+    """Aggregator prompt: merge two scouts' selections into one ordering.
+
+    This is the aggregator's single indivisible call -- the one whose size
+    makes whitepaper §4.6 P2's fragmentation penalty concrete, since it
+    cannot be split across the two scouts' separate grants.
+    """
+    user = (
+        "Designer A selected:\n"
+        + ("\n".join(chosen_a) if chosen_a else "(nothing)")
+        + "\n\nDesigner B selected:\n"
+        + ("\n".join(chosen_b) if chosen_b else "(nothing)")
+        + "\n\nRespond with the deduplicated experiment names, one per line, "
+        "most informative first, and no other commentary."
+    )
+    return [
+        {"role": "system", "content": _RECONCILE_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
 def parse_selection_response(response: Any, menu: list[str]) -> str | None:
     """Extract one valid experiment name from an LLM completion response.
 
