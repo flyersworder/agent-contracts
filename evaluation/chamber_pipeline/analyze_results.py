@@ -212,6 +212,153 @@ def aggregate_pareto(df: pd.DataFrame) -> pd.DataFrame:
     return agg.drop(columns=["shd_std", "f1_std"])
 
 
+# M6 coordination ladder, in rung order: loop, ensemble, parallel roles,
+# chain, team. NOT `VARIANT_ORDER`, which is plan §5.1 numbering and places
+# `planner_reasoner` before the fan-in arms -- plotting the chain rung as if
+# it were less coordinated than the ensembles, which is the one axis the
+# ladder exists to order.
+LADDER_ORDER: tuple[str, ...] = (
+    "llm_pc",
+    "fan_in_homog",
+    "fan_in_spec",
+    "planner_reasoner",
+    "team",
+)
+
+# 1.96 (two-sided alpha=0.05) + 0.84 (80% power). The paper reports an
+# equivalence bound rather than a null, so every accuracy comparison is
+# printed next to the smallest difference this design could have detected.
+_MDE_Z = 2.8
+
+
+def ladder_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per (ladder rung, budget) for the M6 coordination table.
+
+    `failure_rate` is computed BEFORE dropping non-"ok" cells. Filtering
+    first makes every rate exactly 0.0, which would erase the M4b finding
+    that `planner_reasoner` timed out on 8 of 30 cells at its top budget --
+    the arm's defining weakness and half of hypothesis H-A.
+
+    Non-ladder arms are dropped. The M6 analysis reuses
+    `runs/m4-pilot.parquet` for its `llm_pc` and `planner_reasoner` rows,
+    and that file also carries `random`, `greedy_ig`, and `llm_only`.
+
+    Args:
+        df: Cell-level DataFrame from `load_records`, one chamber only.
+
+    Returns:
+        DataFrame ordered by `LADDER_ORDER` then budget, with columns:
+        agent_name, budget_k, n_cells, n_ok, failure_rate, f1_mean, f1_sd,
+        shd_mean, tokens_mean, wall_time_mean, overlap_frac_mean.
+
+    Raises:
+        ValueError: If `df` mixes chambers. LT and WT have different menu
+            sizes, so the same `budget_k` is a different budget in each and
+            averaging them describes neither.
+    """
+    if "chamber" in df.columns and df["chamber"].nunique(dropna=True) > 1:
+        found = sorted(df["chamber"].dropna().unique())
+        raise ValueError(f"ladder_frame needs a single chamber; got {found}. Filter first.")
+
+    rungs = df[df["agent_name"].isin(LADDER_ORDER)]
+    if rungs.empty:
+        return pd.DataFrame(
+            columns=[
+                "agent_name",
+                "budget_k",
+                "n_cells",
+                "n_ok",
+                "failure_rate",
+                "f1_mean",
+                "f1_sd",
+                "shd_mean",
+                "tokens_mean",
+                "wall_time_mean",
+                "overlap_frac_mean",
+            ]
+        )
+
+    # Denominator: every attempted cell. Numerator comes from ok-cells only,
+    # so the two are deliberately computed on different frames.
+    attempted = rungs.groupby(["agent_name", "budget_k"], as_index=False).agg(
+        n_cells=("seed", "count"),
+        n_ok=("status", lambda s: int((s == "ok").sum())),
+    )
+
+    ok_only = rungs[rungs["status"] == "ok"]
+    tokens = ok_only["tokens_in"].fillna(0) + ok_only["tokens_out"].fillna(0)
+    ok_only = ok_only.assign(_tokens_total=tokens)
+    # `runs/m4-pilot.parquet` predates the Task-8 columns and supplies two of
+    # the five rungs, so a hard reference here makes the ladder table
+    # unbuildable on exactly the data it exists to join. Absent optional
+    # columns read as NaN.
+    for optional in ("overlap_frac", "wall_time_seconds"):
+        if optional not in ok_only.columns:
+            ok_only = ok_only.assign(**{optional: float("nan")})
+    scored = ok_only.groupby(["agent_name", "budget_k"], as_index=False).agg(
+        f1_mean=("f1", "mean"),
+        f1_sd=("f1", "std"),
+        shd_mean=("shd", "mean"),
+        tokens_mean=("_tokens_total", "mean"),
+        wall_time_mean=("wall_time_seconds", "mean"),
+        overlap_frac_mean=("overlap_frac", "mean"),
+    )
+
+    # Left join on `attempted`: an all-error (rung, budget) has no ok-cells
+    # and so no `scored` row, but must still appear with failure_rate 1.0
+    # rather than vanishing from the table.
+    out = attempted.merge(scored, on=["agent_name", "budget_k"], how="left")
+    out["failure_rate"] = 1.0 - (out["n_ok"] / out["n_cells"])
+
+    rung_rank = {name: i for i, name in enumerate(LADDER_ORDER)}
+    out = out.sort_values(
+        by=["agent_name", "budget_k"],
+        key=lambda col: col.map(rung_rank) if col.name == "agent_name" else col,
+    ).reset_index(drop=True)
+    return out[
+        [
+            "agent_name",
+            "budget_k",
+            "n_cells",
+            "n_ok",
+            "failure_rate",
+            "f1_mean",
+            "f1_sd",
+            "shd_mean",
+            "tokens_mean",
+            "wall_time_mean",
+            "overlap_frac_mean",
+        ]
+    ]
+
+
+def minimum_detectable_effect(df: pd.DataFrame, agent: str, budget_k: int) -> float:
+    """Smallest F1 difference this design could detect at 80% power.
+
+    `2.8 * sd * sqrt(2/n)` for a two-sample comparison at n seeds per arm.
+
+    The SD is the within-arm per-cell SD over ok-cells with **ddof=1**
+    (pandas' `Series.std()` default). A NumPy implementation defaulting to
+    ddof=0 differs by sqrt(n/(n-1)) -- 1.7 % at n=30, small enough to read
+    as noise and large enough to move the equivalence bound.
+
+    Args:
+        df: Cell-level DataFrame.
+        agent: Arm name.
+        budget_k: Budget to slice on.
+
+    Returns:
+        The MDE in F1 units, or `nan` if fewer than two ok-cells exist.
+    """
+    sub = df[(df["agent_name"] == agent) & (df["budget_k"] == budget_k)]
+    sub = sub[sub["status"] == "ok"]
+    n = len(sub)
+    if n < 2:
+        return float("nan")
+    sd = float(sub["f1"].std())  # ddof=1
+    return _MDE_Z * sd * float(np.sqrt(2 / n))
+
+
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
@@ -485,6 +632,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Print plan §9 M4 acceptance check (per-variant monotonic + LLM-beats-Random).",
     )
     parser.add_argument(
+        "--ladder",
+        action="store_true",
+        help="Print the M6 coordination-ladder table (with MDE) and, with --out-dir, its panels.",
+    )
+    parser.add_argument(
         "--check-chamber",
         type=str,
         default="lt",
@@ -519,6 +671,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             plt.close(fig)
             print(f"Wrote {out_path}")
 
+    if args.ladder:
+        # One chamber only -- `ladder_frame` refuses a mixed frame, since the
+        # same budget_k is a different budget under a different menu size.
+        ladder_df = df[df["chamber"] == args.check_chamber] if "chamber" in df.columns else df
+        print()
+        print(format_ladder_summary(ladder_df))
+        if args.out_dir:
+            for written in plot_ladder(ladder_df, Path(args.out_dir)):
+                print(f"Wrote {written}")
+
     if args.check_m4_acceptance:
         result = check_m4_acceptance(agg, chamber=args.check_chamber)
         print()
@@ -528,11 +690,122 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def format_ladder_summary(df: pd.DataFrame, reference: str = "llm_pc") -> str:
+    """Render the M6 ladder table, every delta paired with its MDE.
+
+    Spec §6 reports an equivalence bound rather than a null. A bare
+    rung-vs-rung accuracy difference reads as a finding, and the ladder's
+    central risk is that the rungs land within noise of one another -- so a
+    delta smaller than the minimum detectable effect is printed as
+    "below MDE" rather than as a number the reader might interpret.
+
+    Args:
+        df: Cell-level DataFrame, one chamber only.
+        reference: Rung every other rung is compared against. Defaults to
+            the loop rung, which is hypothesis H-A's baseline.
+
+    Returns:
+        A printable multi-line table.
+    """
+    frame = ladder_frame(df)
+    if frame.empty:
+        return "No ladder cells to summarize."
+
+    header = (
+        f"{'Rung':<26}{'k':>4}{'n_ok':>6}{'fail':>7}"
+        f"{'F1':>8}{'MDE':>8}{'delta vs ' + reference:>22}"
+    )
+    lines = [header, "-" * len(header)]
+
+    for _, row in frame.iterrows():
+        rung = str(row["agent_name"])
+        budget = int(row["budget_k"])
+        mde = minimum_detectable_effect(df, rung, budget)
+        ref_rows = frame[(frame["agent_name"] == reference) & (frame["budget_k"] == budget)]
+
+        if rung == reference or ref_rows.empty:
+            verdict = "--"
+        else:
+            delta = float(row["f1_mean"]) - float(ref_rows.iloc[0]["f1_mean"])
+            ref_mde = minimum_detectable_effect(df, reference, budget)
+            # Compare against the wider of the two arms' bounds: the pair is
+            # only resolvable if it clears whichever arm is noisier.
+            bound = (
+                max(m for m in (mde, ref_mde) if not np.isnan(m))
+                if not (np.isnan(mde) and np.isnan(ref_mde))
+                else float("nan")
+            )
+            if np.isnan(bound) or abs(delta) < bound:
+                verdict = f"{delta:+.3f} (below MDE)"
+            else:
+                verdict = f"{delta:+.3f} (resolved)"
+
+        f1 = float(row["f1_mean"])
+        lines.append(
+            f"{VARIANT_LABELS.get(rung, rung):<26}{budget:>4}{int(row['n_ok']):>6}"
+            f"{row['failure_rate']:>7.2f}{f1:>8.3f}{mde:>8.3f}{verdict:>22}"
+        )
+
+    lines.append("")
+    lines.append(
+        "MDE = 2.8 * sd * sqrt(2/n), the smallest F1 difference detectable at "
+        "80% power (alpha=0.05, two-sided). A delta below it is not evidence "
+        "of equality -- only that this design cannot resolve it."
+    )
+    return "\n".join(lines)
+
+
+def plot_ladder(df: pd.DataFrame, out_dir: str | Path) -> list[Path]:
+    """Three ladder panels: accuracy, cost, and failure rate.
+
+    Rungs on the x-axis in `LADDER_ORDER`, one line per budget. Rung index
+    rather than a coordination score, because the ladder is ordinal -- the
+    spacing between rungs carries no meaning and a numeric axis would imply
+    it does.
+
+    Args:
+        df: Cell-level DataFrame, one chamber only.
+        out_dir: Directory to write the PNGs into. Created if absent.
+
+    Returns:
+        The three written paths, in panel order.
+    """
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    frame = ladder_frame(df)
+
+    panels = (
+        ("ladder_f1.png", "f1_mean", "F1 (higher is better)"),
+        ("ladder_tokens.png", "tokens_mean", "Tokens per cell"),
+        ("ladder_failures.png", "failure_rate", "Failure rate"),
+    )
+    present = [r for r in LADDER_ORDER if r in set(frame["agent_name"])]
+    xs = range(len(present))
+    written: list[Path] = []
+
+    for filename, column, ylabel in panels:
+        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+        for budget in sorted(frame["budget_k"].unique()):
+            at_budget = frame[frame["budget_k"] == budget].set_index("agent_name")
+            ys = [at_budget[column].get(rung, float("nan")) for rung in present]
+            ax.plot(list(xs), ys, marker="o", label=f"k={budget}")
+        ax.set_xticks(list(xs))
+        ax.set_xticklabels([VARIANT_LABELS.get(r, r) for r in present], rotation=20, ha="right")
+        ax.set_xlabel("Coordination rung")
+        ax.set_ylabel(ylabel)
+        ax.legend(title="Budget")
+        ax.grid(alpha=0.3)
+        fig.tight_layout()
+        target = out_path / filename
+        fig.savefig(target, dpi=150)
+        plt.close(fig)
+        written.append(target)
+
+    return written
 
 
 __all__ = [
+    "LADDER_ORDER",
     "VARIANT_COLORS",
     "VARIANT_LABELS",
     "VARIANT_ORDER",
@@ -540,8 +813,16 @@ __all__ = [
     "build_arg_parser",
     "check_m4_acceptance",
     "format_acceptance_summary",
+    "format_ladder_summary",
+    "ladder_frame",
     "load_records",
     "main",
     "make_pareto_figure",
+    "minimum_detectable_effect",
+    "plot_ladder",
     "plot_pareto",
 ]
+
+
+if __name__ == "__main__":
+    sys.exit(main())

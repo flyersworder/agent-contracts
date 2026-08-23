@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 import matplotlib
+import numpy as np
 
 matplotlib.use("Agg")  # non-interactive backend for headless tests
 
@@ -466,3 +467,234 @@ def test_every_registered_variant_has_full_plot_styling():
         VARIANT_LINESTYLES,
     ):
         assert registered <= set(table), registered - set(table)
+
+
+# ---------------------------------------------------------------------------
+# M6 coordination ladder (Task 9)
+# ---------------------------------------------------------------------------
+
+LADDER_RUNGS = ["llm_pc", "fan_in_homog", "fan_in_spec", "planner_reasoner", "team"]
+
+
+def _synthetic_ladder(n: int = 30) -> pd.DataFrame:
+    rng = np.random.default_rng(0)
+    rows = []
+    for agent in LADDER_RUNGS:
+        for k in (6, 30, 45):
+            for seed in range(n):
+                rows.append(
+                    {
+                        "chamber": "lt",
+                        "agent_name": agent,
+                        "budget_k": k,
+                        "budget_fraction": k / 59.0,
+                        "seed": seed,
+                        "status": "ok",
+                        "f1": float(rng.normal(0.4, 0.04)),
+                        "shd": 55.0,
+                        "tokens_in": 1000,
+                        "tokens_out": 500,
+                        "wall_time_seconds": 300.0,
+                        "overlap_frac": 0.3,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def test_ladder_frame_has_one_row_per_rung_and_budget() -> None:
+    from evaluation.chamber_pipeline.analyze_results import ladder_frame
+
+    out = ladder_frame(_synthetic_ladder())
+    assert len(out) == len(LADDER_RUNGS) * 3
+    assert {"f1_mean", "failure_rate", "overlap_frac_mean"} <= set(out.columns)
+
+
+def test_ladder_frame_drops_non_ladder_arms() -> None:
+    """`runs/m4-pilot.parquet` carries `random`, `greedy_ig`, and `llm_only`.
+
+    The M6 table reuses that file for its `llm_pc` and `planner_reasoner`
+    rows, so without a filter three non-rungs land in the ladder table and
+    the rung-ordered x-axis silently gains three positions.
+    """
+    from evaluation.chamber_pipeline.analyze_results import ladder_frame
+
+    df = _synthetic_ladder(n=3)
+    intruder = df[df.agent_name == "llm_pc"].copy()
+    intruder["agent_name"] = "random"
+    out = ladder_frame(pd.concat([df, intruder], ignore_index=True))
+    assert set(out.agent_name) == set(LADDER_RUNGS)
+
+
+def test_ladder_frame_rows_are_in_rung_order() -> None:
+    """Ladder order is loop, ensemble, parallel-roles, chain, team.
+
+    `VARIANT_ORDER` is plan §5.1 order, which puts `planner_reasoner` BEFORE
+    the fan-in arms -- reusing it would plot the chain rung as if it were
+    less coordinated than the ensembles.
+    """
+    from evaluation.chamber_pipeline.analyze_results import ladder_frame
+
+    out = ladder_frame(_synthetic_ladder(n=3))
+    first_seen = list(dict.fromkeys(out.agent_name))
+    assert first_seen == LADDER_RUNGS
+
+
+def test_mde_matches_the_closed_form() -> None:
+    from evaluation.chamber_pipeline.analyze_results import minimum_detectable_effect
+
+    df = _synthetic_ladder()
+    got = minimum_detectable_effect(df, "llm_pc", 30)
+    sd = df[(df.agent_name == "llm_pc") & (df.budget_k == 30)].f1.std()
+    assert abs(got - 2.8 * sd * np.sqrt(2 / 30)) < 1e-9
+
+
+def test_mde_uses_ddof_1_not_the_numpy_default() -> None:
+    """pandas `Series.std()` is ddof=1; `np.std` is ddof=0.
+
+    The two differ by sqrt(30/29) ~ 1.7 % at n=30 -- small enough to look
+    like noise, large enough to move an equivalence bound.
+    """
+    from evaluation.chamber_pipeline.analyze_results import minimum_detectable_effect
+
+    df = _synthetic_ladder()
+    sub = df[(df.agent_name == "llm_pc") & (df.budget_k == 30)].f1
+    got = minimum_detectable_effect(df, "llm_pc", 30)
+    ddof0 = 2.8 * float(np.std(sub, ddof=0)) * np.sqrt(2 / 30)
+    assert abs(got - ddof0) > 1e-4
+
+
+def test_failure_rate_counts_non_ok_cells() -> None:
+    from evaluation.chamber_pipeline.analyze_results import ladder_frame
+
+    df = _synthetic_ladder()
+    df.loc[df.index[:3], "status"] = "error"
+    out = ladder_frame(df)
+    assert out.failure_rate.max() > 0
+
+
+def test_failure_rate_is_computed_before_ok_filtering() -> None:
+    """Filtering to ok-cells first makes every failure rate exactly 0.
+
+    That is the whole point of the column for H-C: `planner_reasoner` timed
+    out on 8 of 30 cells at k=59 in M4b, and a table that reports 0% there
+    hides the arm's defining weakness.
+    """
+    from evaluation.chamber_pipeline.analyze_results import ladder_frame
+
+    df = _synthetic_ladder()
+    mask = (df.agent_name == "team") & (df.budget_k == 45)
+    idx = df[mask].index[:6]
+    df.loc[idx, "status"] = "error"
+    out = ladder_frame(df)
+    row = out[(out.agent_name == "team") & (out.budget_k == 45)].iloc[0]
+    assert row.failure_rate == pytest.approx(6 / 30)
+    assert row.n_ok == 24
+
+
+def test_ladder_frame_refuses_to_merge_two_chambers() -> None:
+    """LT and WT have different menu sizes, so k=30 is a different budget.
+
+    Silently averaging them produces a row that describes neither.
+    """
+    from evaluation.chamber_pipeline.analyze_results import ladder_frame
+
+    df = _synthetic_ladder(n=3)
+    other = df.copy()
+    other["chamber"] = "wt"
+    with pytest.raises(ValueError, match="chamber"):
+        ladder_frame(pd.concat([df, other], ignore_index=True))
+
+
+def test_plot_ladder_writes_three_panels() -> None:
+    from evaluation.chamber_pipeline.analyze_results import plot_ladder
+
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = plot_ladder(_synthetic_ladder(n=5), Path(tmp))
+        assert len(paths) == 3
+        for p in paths:
+            assert p.exists() and p.stat().st_size > 0
+
+
+def test_ladder_summary_never_prints_a_delta_without_its_mde() -> None:
+    """Spec §6: the paper reports an equivalence bound, not a null.
+
+    A rung-vs-rung accuracy difference printed bare reads as a finding. The
+    ladder's whole risk is that the rungs land within noise of each other,
+    so every delta must carry the smallest effect this design could resolve.
+    """
+    from evaluation.chamber_pipeline.analyze_results import format_ladder_summary
+
+    text = format_ladder_summary(_synthetic_ladder())
+    delta_lines = [ln for ln in text.splitlines() if "delta" in ln.lower()]
+    assert delta_lines, "summary printed no comparison at all"
+    for line in delta_lines:
+        assert "MDE" in line or "mde" in line, line
+
+
+def test_ladder_summary_marks_a_within_noise_difference() -> None:
+    """All rungs drawn from one distribution: nothing is resolvable."""
+    from evaluation.chamber_pipeline.analyze_results import format_ladder_summary
+
+    text = format_ladder_summary(_synthetic_ladder())
+    assert "below MDE" in text
+
+
+def test_ladder_summary_reports_a_real_separation_as_resolved() -> None:
+    """M4b's actual gap: F1 0.75 vs 0.40 is ~9x the MDE and must not read
+    as 'below MDE'."""
+    from evaluation.chamber_pipeline.analyze_results import format_ladder_summary
+
+    df = _synthetic_ladder()
+    mask = (df.agent_name == "team") & (df.budget_k == 45)
+    df.loc[mask, "f1"] = df.loc[mask, "f1"] + 0.35
+    text = format_ladder_summary(df)
+    team45 = [ln for ln in text.splitlines() if "Team" in ln and " 45 " in ln]
+    assert team45, text
+    assert "below MDE" not in team45[0], team45[0]
+
+
+def test_ladder_frame_tolerates_a_pre_task8_frame() -> None:
+    """`runs/m4-pilot.parquet` has no `overlap_frac` column.
+
+    M6 reuses those rows for two of its five rungs, so a hard reference to a
+    Task-8 column makes the ladder table unbuildable on exactly the data it
+    was designed to join. Absent optional columns must read as NaN, not
+    raise.
+    """
+    from evaluation.chamber_pipeline.analyze_results import ladder_frame
+
+    df = _synthetic_ladder(n=3).drop(columns=["overlap_frac"])
+    out = ladder_frame(df)
+    assert len(out) == len(LADDER_RUNGS) * 3
+    assert out["overlap_frac_mean"].isna().all()
+
+
+def test_ladder_cli_runs_as_a_module() -> None:
+    """Importing the module is not the same as running it.
+
+    Every other test imports `analyze_results`, which executes the whole file
+    top to bottom -- so a function defined AFTER the `__main__` guard is
+    reachable from tests and a `NameError` under `python -m`. Only a
+    subprocess catches that ordering.
+    """
+    import subprocess
+    import sys as _sys
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "cells.parquet"
+        _synthetic_ladder(n=3).to_parquet(path)
+        proc = subprocess.run(
+            [
+                _sys.executable,
+                "-m",
+                "evaluation.chamber_pipeline.analyze_results",
+                "--input",
+                str(path),
+                "--ladder",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parents[2],
+        )
+    assert proc.returncode == 0, proc.stderr[-2000:]
+    assert "MDE" in proc.stdout
