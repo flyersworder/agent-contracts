@@ -187,3 +187,28 @@ def test_p3_zero_amount_does_not_exempt_a_cycle():
     graph.allocate("a", "b", tokens=10)
     with pytest.raises(CycleError):
         graph.allocate("b", "a", tokens=0)
+
+
+def test_p4_abandonment_bound_is_tight():
+    graph = DelegationGraph(make_root(100))
+    for name in ("live", "doomed"):
+        graph.add_node(name)
+    graph.allocate(ROOT, "live", tokens=40)
+    graph.allocate(ROOT, "doomed", tokens=60)
+    graph.seal()
+
+    graph.monitor_for("live").usage.add_tokens(40)  # spends all of its share
+    graph.monitor_for("doomed").usage.add_tokens(10)
+    refund = graph.abandon("doomed")
+    assert refund.tokens == 50  # 60 granted - 10 spent
+
+    # The abandoned node keeps spending, up to exactly the refunded amount.
+    graph.monitor_for("doomed").usage.add_tokens(50)
+    total = sum(graph.monitor_for(n).usage.tokens for n in ("live", "doomed"))
+    assert total == 100  # == B(root); refunds unusable in v1
+    graph.verify()  # doomed sits exactly on its frozen in-flow
+
+    # One token past the frozen in-flow breaks it.
+    graph.monitor_for("doomed").usage.add_tokens(1)
+    with pytest.raises(ConservationViolationError):
+        graph.verify()
