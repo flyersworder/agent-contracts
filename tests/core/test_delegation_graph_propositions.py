@@ -272,3 +272,34 @@ def test_p5_confluence_holds_on_random_two_parent_graphs():
             if base is None:
                 base = snapshot
             assert snapshot == base, (trial, params, order, snapshot, base)
+
+
+def test_p6_locality_separation():
+    """A node-local check may read only:
+      - its own contract (materialized from its summed in-flow), and
+      - its own recorded usage.
+    It may NOT enumerate its out-edges, read another node's state, or
+    consult the graph. Claim: under this definition, `consumption <=
+    in-flow` is decidable and `consumption + out-flow <= in-flow` is not.
+    """
+    graph = DelegationGraph(make_root(100))
+    graph.add_node("w")
+    graph.allocate(DelegationGraph.ROOT, "w", tokens=40)
+    graph.seal()
+    monitor = graph.monitor_for("w")
+    monitor.usage.add_tokens(41)
+    # check_constraints() -> list[ViolationInfo] (monitor.py:311). It NEVER
+    # returns None, so assert on emptiness, not identity.
+    assert monitor.check_constraints() != []  # local knowledge suffices
+
+    graph2 = DelegationGraph(make_root(100))
+    for name in ("w", "child"):
+        graph2.add_node(name)
+    graph2.allocate(DelegationGraph.ROOT, "w", tokens=40)
+    graph2.allocate("w", "child", tokens=35)
+    graph2.seal()
+    m = graph2.monitor_for("w")
+    m.usage.add_tokens(30)  # 30 consumed + 35 delegated = 65 > 40
+    assert m.check_constraints() == []  # the monitor sees no violation
+    with pytest.raises(ConservationViolationError):
+        graph2.check_node("w")  # only the graph can see it
