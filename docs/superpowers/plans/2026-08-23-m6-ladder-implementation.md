@@ -1149,7 +1149,7 @@ and insufficient from either scout alone. Both bounds are pinned by
   - `minimum_detectable_effect(df: pd.DataFrame, agent: str, budget_k: int) -> float` — `2.8 * sd * sqrt(2/n)`
   - `plot_ladder(df, out_dir: Path) -> list[Path]` — accuracy, cost, and failure-rate panels
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```python
 import numpy as np
@@ -1197,25 +1197,25 @@ def test_failure_rate_counts_non_ok_cells():
     assert out.failure_rate.max() > 0
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `uv run pytest tests/evaluation/test_chamber_analyze_results.py -k ladder -v`
 Expected: FAIL with ImportError.
 
-- [ ] **Step 3: Implement the three functions**
+- [x] **Step 3: Implement the three functions**
 
 `ladder_frame` groups by `(agent_name, budget_k)` and aggregates; `failure_rate` is the share of cells whose `status != "ok"`, so it must be computed **before** filtering to ok-cells. `minimum_detectable_effect` uses the within-agent per-cell SD of `f1` over ok-cells, **with `ddof=1`** (pandas' `Series.std()` default). A NumPy implementation defaulting to `ddof=0` differs by `sqrt(30/29)` ≈ 1.7 % and fails the closed-form test with no hint why. `plot_ladder` writes three PNGs with rungs on the x-axis in ladder order, one line per budget.
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `uv run pytest tests/evaluation/test_chamber_analyze_results.py -v`
 Expected: PASS, existing analyzer tests unchanged.
 
-- [ ] **Step 5: Print the MDE alongside every accuracy comparison**
+- [x] **Step 5: Print the MDE alongside every accuracy comparison**
 
 Add the MDE column to the analyzer's text output. Per spec §6, the paper reports an equivalence bound, not a null — an accuracy difference below the MDE must never be printed without the MDE next to it.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add evaluation/chamber_pipeline/analyze_results.py tests/evaluation/test_chamber_analyze_results.py
