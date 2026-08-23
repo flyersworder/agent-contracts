@@ -546,7 +546,7 @@ authoritative): loop (`llm_pc`), ensemble, parallel-roles, chain
 Arms 1-2 are already in `runs/m4-pilot.parquet`, so new compute is **90 cells
 (~$1-2)**. Cross-pillar transfer (§7.1-7.6) becomes the journal extension.
 **Both figures were wrong** (corrected 2026-08-23): M4b actually cost **$5.11**
-for 450 cells, and M6 as respecified is **~390 cells, 65-95h, $9-13** — see
+for 450 cells, and M6 as respecified is **~417 cells, 65–90h, $9–14** — see
 `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md` §3. The
 per-cell basis matters: M4b LLM cells averaged **7.2 min**, `planner_reasoner`
 **8.7 min / $0.0196**; the 4.7 min/cell implied by the headline is contaminated

@@ -467,7 +467,10 @@ def create_contracted_chamber_agent(
     Args:
         chamber: Which physical chamber's dataset to load.
         intervention_budget: Max number of interventional queries.
-        observation_budget: Max number of passive observations. Defaults to 0.
+        observation_budget: Max number of passive observations. Defaults to 0,
+            which is enforced as a hard zero -- the limit is always emitted,
+            so a caller who wants unbounded observations must say so through
+            `extra_resources`, which wins on key conflicts.
         configuration: Chamber configuration variant. Defaults to "standard".
         agent: Optional callable implementing the policy under test.
         contract_id: Optional explicit contract id. Defaults to
@@ -493,9 +496,15 @@ def create_contracted_chamber_agent(
     # Build per-tool limits, merging any extra resource constraints the caller
     # supplied. Caller-provided per_tool_limits are merged with the chamber
     # tools (caller wins on key conflicts so they can override budgets).
-    per_tool_limits: dict[str, int] = {"intervene": intervention_budget}
-    if observation_budget > 0:
-        per_tool_limits["observe"] = observation_budget
+    # `observe` is emitted unconditionally, zero included. Omitting the key
+    # does not mean "no observations" -- `can_use_tool` treats an absent key as
+    # *unconstrained*, so the pre-fix `if observation_budget > 0` guard made
+    # every default-constructed agent able to call `query_observation` without
+    # limit, the opposite of what the parameter documents.
+    per_tool_limits: dict[str, int] = {
+        "intervene": intervention_budget,
+        "observe": observation_budget,
+    }
 
     if extra_resources is not None:
         # Caller-provided per_tool_limits win on key conflicts.

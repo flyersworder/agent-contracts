@@ -1,8 +1,18 @@
 """Executable artifacts for whitepaper §4.6 propositions P1-P6.
 
 Each proposition is falsified or confirmed by running code *before* its prose
-proof is written. Two of the six are suspected false as currently stated; a
-test says so in minutes where a proof attempt can absorb a day.
+proof is written. Three of the six were restated after their first artifact
+contradicted the statement they were written to support.
+
+Two rules this module learned the hard way, both from artifacts that passed
+while proving nothing:
+
+- A guard is worthless unless the population contains a case that would trip
+  it. Where a test relies on a clamp, a filter, or a branch, it must also show
+  that branch is *reached* -- see `test_p3_the_clamp_binds_on_the_invalid_half`.
+- Reference models must be the real implementation, not a hand-rolled stand-in.
+  P2's first artifact modelled a tree accountant that no real system implements
+  and whose verdict flipped with edge insertion order.
 
 See docs/superpowers/plans/2026-08-23-m6-theory-propositions.md
 """
@@ -13,8 +23,16 @@ import random
 import pytest
 
 from agent_contracts.core.contract import Contract, ResourceConstraints
-from agent_contracts.core.delegation import ConservationViolationError
-from agent_contracts.core.delegation_graph import CycleError, DelegationGraph
+from agent_contracts.core.delegation import (
+    ConservationViolationError,
+    ContractingCapability,
+)
+from agent_contracts.core.delegation_graph import (
+    CycleError,
+    DelegationGraph,
+    FlowConservationError,
+)
+from agent_contracts.core.monitor import ResourceMonitor
 
 ROOT = DelegationGraph.ROOT
 
@@ -33,57 +51,117 @@ def _out_flow(edges, node):
     return sum(a for s, _d, a in edges if s == node)
 
 
+def _nodes_of(edges):
+    return {s for s, _d, _a in edges} | {d for _s, d, _a in edges}
+
+
 def permitted_total(edges, root_budget):
     """Maximum total consumption the allocation physically permits.
 
     A node can spend whatever arrives minus whatever it forwards, and never
     less than zero -- an over-committed node cannot offset its neighbours by
-    spending negatively. That asymmetry is exactly what a tree accountant
-    misses when it cannot see one of a node's out-edges.
+    spending negatively.
     """
-    nodes = {s for s, _d, _a in edges} | {d for _s, d, _a in edges}
-    return sum(max(0, _in_flow(edges, n, root_budget) - _out_flow(edges, n)) for n in nodes)
+    return sum(
+        max(0, _in_flow(edges, n, root_budget) - _out_flow(edges, n)) for n in _nodes_of(edges)
+    )
 
 
-def tree_admits(edges, root_budget):
-    """Drop-policy tree accountant: keep one in-edge per node, ignore the rest.
+def _is_valid_allocation(edges, root_budget):
+    """Every node forwards no more than it received."""
+    return all(_out_flow(edges, n) <= _in_flow(edges, n, root_budget) for n in _nodes_of(edges))
 
-    The dropped edge is invisible to the accountant but real to the agents --
-    the receiving node still holds that budget.
+
+def _has_cycle(edges):
+    """True if the edge set contains a cycle of ANY length.
+
+    A reversed-pair test finds only 2-cycles and silently admits 3-cycles into
+    what is supposed to be an acyclic control group.
     """
-    parents = {}
+    adjacency: dict[str, set[str]] = {}
     for src, dst, _amt in edges:
-        parents.setdefault(dst, []).append(src)
-    kept = [(s, d, a) for s, d, a in edges if len(parents[d]) == 1 or s == parents[d][0]]
-    nodes = {s for s, _d, _a in kept} | {d for _s, d, _a in kept}
-    return all(_out_flow(kept, n) <= _in_flow(kept, n, root_budget) for n in nodes)
+        adjacency.setdefault(src, set()).add(dst)
+
+    def reachable(start):
+        seen, stack = set(), [start]
+        while stack:
+            for nxt in adjacency.get(stack.pop(), ()):
+                if nxt not in seen:
+                    seen.add(nxt)
+                    stack.append(nxt)
+        return seen
+
+    return any(n in reachable(n) for n in _nodes_of(edges))
 
 
-def test_p2_tree_admits_an_allocation_permitting_more_than_the_root_budget():
-    edges = [
-        (ROOT, "a", 50),
-        (ROOT, "b", 50),
-        ("a", "d", 30),
-        ("b", "d", 30),  # unrepresentable: d already has parent "a"
-        ("b", "e", 30),  # b re-grants budget it has already committed to d
-    ]
-    assert tree_admits(edges, 100) is True
-    assert permitted_total(edges, 100) == 110  # a:20 + b:0 + d:60 + e:30
+# --------------------------------------------------------------------------
+# P2 -- tree encodings of a fan-in node are incomplete
+# --------------------------------------------------------------------------
+#
+# The claim is NOT that tree accounting is unsound. Checked against the real
+# `ContractingCapability`, the natural (split) encoding is sound: it refuses
+# the over-commitment a hand-rolled drop-policy accountant admits. What no
+# tree encoding can do is admit every execution the DAG's local invariant
+# admits.
 
 
-def test_p2_dag_law_rejects_the_over_commitment():
-    graph = DelegationGraph(make_root(100))
-    for name in ("a", "b", "d", "e"):
-        graph.add_node(name)
-    graph.allocate(ROOT, "a", tokens=50)
-    graph.allocate(ROOT, "b", tokens=50)
-    graph.allocate("a", "d", tokens=30)
-    graph.allocate("b", "d", tokens=30)
+def _split_encoded_fan_in():
+    """Fan-in on a tree, encoded the only sound way: split the node.
+
+    root(100) -> a(50), b(50); a -> d_from_a(30), b -> d_from_b(30).
+    Agent `d` is one process holding 60 across two contracts.
+    """
+    root = make_root(100)
+    cap = ContractingCapability(root)
+    a = cap.create_subcontract("a", tokens=50)
+    b = cap.create_subcontract("b", tokens=50)
+    d_from_a = ContractingCapability(a).create_subcontract("d_from_a", tokens=30)
+    d_from_b = ContractingCapability(b).create_subcontract("d_from_b", tokens=30)
+    return d_from_a, d_from_b
+
+
+def test_p2_merge_encoding_is_refused_no_parent_can_fund_the_node():
+    """Encoding 1 of 3: give `d` a single contract for its true budget."""
+    cap = ContractingCapability(make_root(100))
+    a = cap.create_subcontract("a", tokens=50)
+    cap.create_subcontract("b", tokens=50)
     with pytest.raises(ConservationViolationError):
-        graph.allocate("b", "e", tokens=30)
+        ContractingCapability(a).create_subcontract("d", tokens=60)
 
 
-def test_p2_dag_law_accepts_the_same_graph_without_the_over_commitment():
+def test_p2_split_encoding_is_sound_the_real_tree_law_refuses_over_commitment():
+    """Encoding 2 of 3 is SOUND -- the unsoundness claim was a strawman.
+
+    An earlier artifact asserted that tree accounting certifies an execution
+    exceeding B(root). It reached that verdict only by modelling an accountant
+    that *drops* one in-edge. The real tree law sees both of `b`'s out-edges
+    and refuses the second.
+    """
+    cap = ContractingCapability(make_root(100))
+    cap.create_subcontract("a", tokens=50)
+    b = cap.create_subcontract("b", tokens=50)
+    cap_b = ContractingCapability(b)
+    cap_b.create_subcontract("d_from_b", tokens=30)
+    with pytest.raises(ConservationViolationError):
+        cap_b.create_subcontract("e", tokens=30)  # b has 50, has committed 30
+
+
+def test_p2_split_encoding_cannot_execute_an_indivisible_call_within_budget():
+    """Encoding 2's real cost: incompleteness, not unsoundness.
+
+    Agent `d` holds 60 and must make one indivisible 40-token call. The call
+    respects its true in-flow, and no fragment can absorb it.
+    """
+    for fragment in _split_encoded_fan_in():
+        monitor = ResourceMonitor(fragment.resources)
+        monitor.usage.add_tokens(40)
+        assert monitor.check_constraints() != [], (
+            f"{fragment.name} should refuse a 40-token charge against 30"
+        )
+
+
+def test_p2_the_dag_admits_the_same_call_and_stays_globally_bounded():
+    """The DAG pools the two grants, so the identical call is executable."""
     graph = DelegationGraph(make_root(100))
     for name in ("a", "b", "d"):
         graph.add_node(name)
@@ -92,21 +170,69 @@ def test_p2_dag_law_accepts_the_same_graph_without_the_over_commitment():
     graph.allocate("a", "d", tokens=30)
     graph.allocate("b", "d", tokens=30)
     graph.seal()
+
     assert graph.in_flow("d").tokens == 60
-    edges = [(ROOT, "a", 50), (ROOT, "b", 50), ("a", "d", 30), ("b", "d", 30)]
-    assert permitted_total(edges, 100) == 100  # exactly the root budget
+    monitor = graph.monitor_for("d")
+    monitor.usage.add_tokens(40)
+    assert monitor.check_constraints() == []  # executable under the DAG law
+    graph.verify()  # and the global bound is intact
+
+
+def test_p2_fragmentation_penalty_scales_with_the_number_of_parents():
+    """Under a uniform split across m parents the largest indivisible call is
+    B/m, not B. This is the quantitative form of the incompleteness."""
+    budget = 60
+    for parents in (2, 3, 6):
+        share = budget // parents
+        cap = ContractingCapability(make_root(1000))
+        fragments = [
+            ContractingCapability(cap.create_subcontract(f"p{i}", tokens=share)).create_subcontract(
+                f"d_from_p{i}", tokens=share
+            )
+            for i in range(parents)
+        ]
+        largest = max(f.resources.tokens for f in fragments)
+        assert largest == budget // parents
+
+        graph = DelegationGraph(make_root(1000))
+        graph.add_node("d")
+        for i in range(parents):
+            graph.add_node(f"p{i}")
+            graph.allocate(ROOT, f"p{i}", tokens=share)
+            graph.allocate(f"p{i}", "d", tokens=share)
+        graph.seal()
+        assert graph.in_flow("d").tokens == share * parents  # the DAG pools
+
+
+def test_p2_a_drop_policy_accountant_would_be_unsound_but_nobody_builds_one():
+    """Recorded for completeness: encoding 3 is the unsound one.
+
+    Dropping `b->d` hides 30 tokens that `d` still holds, so the accountant
+    approves grants permitting 110 against a root budget of 100. No real
+    implementation drops edges -- `ContractingCapability` splits -- so this
+    is the encoding the proposition rules out rather than the one it indicts.
+    """
+    edges = [
+        (ROOT, "a", 50),
+        (ROOT, "b", 50),
+        ("a", "d", 30),
+        ("b", "d", 30),
+        ("b", "e", 30),
+    ]
+    kept = [e for e in edges if e != ("b", "d", 30)]
+    assert _is_valid_allocation(kept, 100) is True  # the accountant approves
+    assert permitted_total(edges, 100) == 110  # what the agents actually hold
+
+
+# --------------------------------------------------------------------------
+# P3 -- what acyclicity is actually necessary for
+# --------------------------------------------------------------------------
 
 
 def test_p3_static_bound_survives_budget_cycles():
-    """If this PASSES, P3 as specified is false and must be restated."""
+    """P3 as originally specified is false: cycles telescope like any edge."""
     edges = [(ROOT, "a", 100), ("a", "b", 50), ("b", "a", 50)]
     assert permitted_total(edges, 100) == 100
-
-
-def _is_valid_allocation(edges, root_budget):
-    """Every node forwards no more than it received."""
-    nodes = {s for s, _d, _a in edges} | {d for _s, d, _a in edges}
-    return all(_out_flow(edges, n) <= _in_flow(edges, n, root_budget) for n in nodes)
 
 
 def _generate(rng, force_cycle):
@@ -115,58 +241,76 @@ def _generate(rng, force_cycle):
     for _ in range(rng.randint(1, 4)):
         src, dst = rng.sample(names, 2)
         edges.append((src, dst, rng.randint(1, 30)))
-    pairs = {(x, y) for x, y, _a in edges}
-    has_cycle = any((d, s) in pairs for s, d, _a in edges)
-    return edges if has_cycle == force_cycle else None
+    return edges if _has_cycle(edges) == force_cycle else None
+
+
+def _population(seed=20260823, trials=4000):
+    """Valid and invalid allocations, split by whether they contain a cycle.
+
+    Invalid allocations are kept deliberately. A population of valid ones only
+    is where P3's first artifact went wrong: validity forces in - out >= 0 at
+    every node, so the clamp in `permitted_total` never binds and the identity
+    holds by telescoping alone, whatever the clamp does.
+    """
+    rng = random.Random(seed)
+    buckets = {(c, v): [] for c in (True, False) for v in (True, False)}
+    for force_cycle in (True, False):
+        for _ in range(trials):
+            edges = _generate(rng, force_cycle)
+            if edges is None:
+                continue
+            buckets[(force_cycle, _is_valid_allocation(edges, 100))].append(edges)
+    return buckets
 
 
 def test_p3_cyclic_and_acyclic_allocations_saturate_identically():
     """Valid allocations saturate B(root) exactly, cycles or not.
 
-    Assert the IDENTITY, not `<= root_budget`. The inequality is implied by
-    `_is_valid_allocation` alone -- the filter asserts the very invariant whose
-    consequence is under test -- so an inequality here can never fail and proves
-    nothing. The identity plus the acyclic control is what carries the claim:
-    the two populations behave the same, so acyclicity is nowhere used.
+    Cycle membership is decided by reachability, so the acyclic bucket is a
+    genuine control -- a reversed-pair test admits 3-cycles into it.
     """
-    rng = random.Random(20260823)
-    counts = {True: 0, False: 0}
+    buckets = _population()
     for force_cycle in (True, False):
-        for _ in range(4000):
-            edges = _generate(rng, force_cycle)
-            if edges is None or not _is_valid_allocation(edges, 100):
-                continue
-            counts[force_cycle] += 1
+        sample = buckets[(force_cycle, True)]
+        assert len(sample) >= 50, f"only {len(sample)} valid, cycle={force_cycle}"
+        for edges in sample:
             assert permitted_total(edges, 100) == 100, edges
-    assert counts[True] >= 50, f"only {counts[True]} cyclic allocations"
-    assert counts[False] >= 50, f"only {counts[False]} acyclic allocations"
 
 
-def test_p3_mutation_dropping_the_clamp_breaks_the_identity():
-    """Mutation check: without max(0, ...) an over-committed node offsets its
-    neighbours, so the identity stops detecting over-commitment."""
+def test_p3_the_clamp_binds_on_the_invalid_half():
+    """The guard must be shown to be reached, not merely present.
 
-    def unclamped(edges, rb):
-        nodes = {s for s, _d, _a in edges} | {d for _s, d, _a in edges}
-        return sum(_in_flow(edges, n, rb) - _out_flow(edges, n) for n in nodes)
+    `permitted_total` equals B(root) exactly when the allocation is locally
+    valid, and exceeds it precisely when some node is over-committed. The
+    unclamped variant reports B(root) in both cases, so this is the assertion
+    that distinguishes them -- and it is only reachable because the population
+    admits invalid allocations.
+    """
 
-    over = [
-        (ROOT, "a", 50),
-        (ROOT, "b", 50),
-        ("a", "d", 30),
-        ("b", "d", 30),
-        ("b", "e", 30),
-    ]
-    assert permitted_total(over, 100) == 110  # clamped: over-commitment visible
-    assert unclamped(over, 100) == 100  # unclamped: hidden
+    def unclamped(edges, root_budget):
+        return sum(_in_flow(edges, n, root_budget) - _out_flow(edges, n) for n in _nodes_of(edges))
+
+    buckets = _population()
+    invalid = buckets[(True, False)] + buckets[(False, False)]
+    assert len(invalid) >= 50, f"only {len(invalid)} invalid allocations"
+
+    bound_by_clamp = 0
+    for edges in invalid:
+        assert permitted_total(edges, 100) > 100, edges
+        assert unclamped(edges, 100) == 100, edges  # the mutant cannot tell
+        bound_by_clamp += 1
+    assert bound_by_clamp >= 50
+
+    valid = buckets[(True, True)] + buckets[(False, True)]
+    for edges in valid:
+        assert permitted_total(edges, 100) == unclamped(edges, 100) == 100
 
 
 def test_p3_budget_cycles_are_refused_at_allocation_time():
-    """The graph cannot be built, so cyclic reclamation can never arise.
+    """What acyclicity actually buys: cyclic reclamation is unreachable.
 
-    This is what acyclicity actually buys: not the static bound (see
-    test_p3_static_bound_survives_budget_cycles), but a guarantee that
-    refund propagation is well-founded, enforced structurally.
+    Not the static bound (see test_p3_static_bound_survives_budget_cycles) but
+    a guarantee that refund propagation is well-founded, enforced structurally.
     """
     graph = DelegationGraph(make_root(100))
     for name in ("a", "b"):
@@ -175,7 +319,7 @@ def test_p3_budget_cycles_are_refused_at_allocation_time():
     graph.allocate(ROOT, "b", tokens=50)
     graph.allocate("a", "b", tokens=10)
     with pytest.raises(CycleError):
-        graph.allocate("b", "a", tokens=10)  # would close the budget cycle
+        graph.allocate("b", "a", tokens=10)
 
 
 def test_p3_zero_amount_does_not_exempt_a_cycle():
@@ -190,7 +334,20 @@ def test_p3_zero_amount_does_not_exempt_a_cycle():
         graph.allocate("b", "a", tokens=0)
 
 
-def test_p4_abandonment_bound_is_tight():
+# --------------------------------------------------------------------------
+# P4 -- the certified bound under abandonment, and its tightness
+# --------------------------------------------------------------------------
+
+
+def test_p4_the_certified_bound_is_exactly_saturable():
+    """`B(root) + Σ refunds` is reachable, and one unit past it is caught.
+
+    An earlier artifact claimed this bound was unsaturable because reclaimed
+    budget is not re-delegatable in v1. That conflated *re-delegatable* with
+    *re-spendable*: the refund lands at the parent, and the parent may consume
+    it itself. The artifact hid this by summing over ("live", "doomed") and
+    omitting ROOT -- the node that received the refund.
+    """
     graph = DelegationGraph(make_root(100))
     for name in ("live", "doomed"):
         graph.add_node(name)
@@ -198,24 +355,82 @@ def test_p4_abandonment_bound_is_tight():
     graph.allocate(ROOT, "doomed", tokens=60)
     graph.seal()
 
-    graph.monitor_for("live").usage.add_tokens(40)  # spends all of its share
+    graph.monitor_for("live").usage.add_tokens(40)
     graph.monitor_for("doomed").usage.add_tokens(10)
     refund = graph.abandon("doomed")
-    assert refund.tokens == 50  # 60 granted - 10 spent
+    assert refund.tokens == 50
 
-    # The abandoned node keeps spending, up to exactly the refunded amount.
+    # The abandoned node spends up to its frozen pre-refund in-flow of 60 ...
     graph.monitor_for("doomed").usage.add_tokens(50)
-    total = sum(graph.monitor_for(n).usage.tokens for n in ("live", "doomed"))
-    assert total == 100  # == B(root); refunds unusable in v1
-    graph.verify()  # doomed sits exactly on its frozen in-flow
+    # ... and ROOT spends the 50 it was refunded, its live out-flow having
+    # fallen from 100 to 50.
+    graph.monitor_for(ROOT).usage.add_tokens(50)
 
-    # One token past the frozen in-flow breaks it.
-    graph.monitor_for("doomed").usage.add_tokens(1)
-    with pytest.raises(ConservationViolationError):
+    total = sum(graph.monitor_for(n).usage.tokens for n in graph.node_names())
+    assert total == 150  # == B(root) + Σ refunds, exactly
+    graph.verify()
+
+    graph.monitor_for(ROOT).usage.add_tokens(1)
+    with pytest.raises(FlowConservationError):
         graph.verify()
 
 
-def _two_parent_graph(a=40, b=40, ad=10, bd=10):
+def test_p4_summing_over_the_wrong_node_set_hides_the_saturation():
+    """Regression guard for how the false claim survived review.
+
+    Restricting the sum to the non-root nodes reports 100 for the same
+    execution that in fact consumes 150. Any total must range over
+    `graph.node_names()`.
+    """
+    graph = DelegationGraph(make_root(100))
+    for name in ("live", "doomed"):
+        graph.add_node(name)
+    graph.allocate(ROOT, "live", tokens=40)
+    graph.allocate(ROOT, "doomed", tokens=60)
+    graph.seal()
+    graph.monitor_for("live").usage.add_tokens(40)
+    graph.monitor_for("doomed").usage.add_tokens(10)
+    graph.abandon("doomed")
+    graph.monitor_for("doomed").usage.add_tokens(50)
+    graph.monitor_for(ROOT).usage.add_tokens(50)
+
+    partial = sum(graph.monitor_for(n).usage.tokens for n in ("live", "doomed"))
+    complete = sum(graph.monitor_for(n).usage.tokens for n in graph.node_names())
+    assert partial == 100
+    assert complete == 150
+    assert ROOT in graph.node_names()
+
+
+def test_p4_per_node_tightness_at_the_frozen_in_flow():
+    """The per-node half: an abandoned node is caught one unit past its
+    frozen pre-refund in-flow, independently of what its parent does."""
+    graph = DelegationGraph(make_root(100))
+    graph.add_node("doomed")
+    graph.allocate(ROOT, "doomed", tokens=60)
+    graph.seal()
+    graph.monitor_for("doomed").usage.add_tokens(10)
+    graph.abandon("doomed")
+
+    graph.monitor_for("doomed").usage.add_tokens(50)  # exactly 60
+    graph.verify()
+    graph.monitor_for("doomed").usage.add_tokens(1)
+    with pytest.raises(FlowConservationError):
+        graph.verify()
+
+
+# --------------------------------------------------------------------------
+# P5 -- reclamation is confluent
+# --------------------------------------------------------------------------
+
+
+def _two_parent_graph(a=40, b=40, ad=10, bd=10, consumed=0):
+    """Fan-in graph with consumption recorded at the shared child.
+
+    `consumed` is not decoration. With zero consumption the refund pool equals
+    the sum of the originals and every share collapses to the edge's own
+    amount under *either* refund rule, so the artifact cannot tell the two
+    apart. Consumption at `d` is what makes the proportional split observable.
+    """
     graph = DelegationGraph(make_root(100))
     for name in ("a", "b", "d"):
         graph.add_node(name)
@@ -224,54 +439,105 @@ def _two_parent_graph(a=40, b=40, ad=10, bd=10):
     graph.allocate("a", "d", tokens=ad)
     graph.allocate("b", "d", tokens=bd)
     graph.seal()
+    if consumed:
+        graph.monitor_for("d").usage.add_tokens(consumed)
     return graph
 
 
 def test_p5_release_order_does_not_change_residuals():
-    orders = list(itertools.permutations([("a", "d"), ("b", "d")]))
     results = []
-    for order in orders:
-        graph = _two_parent_graph()
+    for order in itertools.permutations([("a", "d"), ("b", "d")]):
+        graph = _two_parent_graph(ad=15, bd=5, consumed=5)
         for src, dst in order:
             graph.release(src, dst)
         results.append({n: graph.residual(n).tokens for n in graph.node_names()})
     assert all(r == results[0] for r in results), results
 
 
+def test_p5_the_asymmetric_case_discriminates_between_refund_rules():
+    """Guard that the fixture reaches the regime where the rules differ.
+
+    With unequal in-edges and nonzero consumption the two parents' refunds are
+    unequal; with the degenerate ad == bd, consumed == 0 fixture they are not,
+    and a live-value implementation passes the confluence test unchanged.
+    """
+    graph = _two_parent_graph(ad=15, bd=5, consumed=5)
+    before = {n: graph.residual(n).tokens for n in graph.node_names()}
+    graph.release("a", "d")
+    graph.release("b", "d")
+    after = {n: graph.residual(n).tokens for n in graph.node_names()}
+    gained = {n: after[n] - before[n] for n in ("a", "b")}
+    # Pool = 20 granted - 5 consumed = 15, split 15:5 -> 11.25 and 3.75, each
+    # truncated to int. The unequal shares are the point; the missing token is
+    # truncation, and it is asserted rather than rounded away.
+    assert gained == {"a": 11, "b": 3}, gained
+    assert gained["a"] != gained["b"]
+
+
 def test_p5_live_value_refunds_are_order_dependent():
-    def simulate(order):
-        original = {("a", "d"): 10, ("b", "d"): 10}
-        live = dict(original)
+    """The converse half, simulated with a self-consistent live rule.
+
+    An earlier version prorated a live numerator against a frozen pool of 20,
+    which is not a rule anyone would implement; against a consistent live rule
+    the symmetric case is order-INDEPENDENT, so the counterexample has to use
+    the asymmetric one.
+    """
+
+    def simulate(order, originals, consumed):
+        """`_refund_share` with `in_flow`/`edge.amount` for `original_*`.
+
+        A release shrinks its edge by the refunded amount rather than removing
+        it, exactly as `release()` does; the earlier version deleted the edge,
+        which made both orders coincide and the test vacuous.
+        """
+        live = dict(originals)
         refunds = {}
         for edge in order:
-            total_live = sum(live.values())
-            refunds[edge] = live[edge] / total_live * 20 if total_live else 0
-            del live[edge]
+            in_flow = sum(live.values())
+            pool = in_flow - consumed
+            share = live[edge] / in_flow * pool if in_flow else 0.0
+            refunds[edge] = share
+            live[edge] -= share
         return refunds
 
-    forward = simulate([("a", "d"), ("b", "d")])
-    reverse = simulate([("b", "d"), ("a", "d")])
-    assert forward != reverse
+    originals = {("a", "d"): 15, ("b", "d"): 5}
+    forward = simulate([("a", "d"), ("b", "d")], originals, 5)
+    reverse = simulate([("b", "d"), ("a", "d")], originals, 5)
+    assert forward != reverse, (forward, reverse)
+    assert round(forward[("b", "d")], 2) == 2.14
+    assert round(reverse[("b", "d")], 2) == 3.75
 
 
 def test_p5_confluence_holds_on_random_two_parent_graphs():
     rng = random.Random(20260824)
     for trial in range(200):
-        # root is 100, so a + b <= 100; and a scout cannot forward more than
-        # it received, so ad <= a and bd <= b. Unconstrained draws raise
-        # FlowConservationError on the first trial.
         a = rng.randint(10, 60)
         b = rng.randint(10, 100 - a)
-        params = {"a": a, "b": b, "ad": rng.randint(1, a), "bd": rng.randint(1, b)}
+        ad = rng.randint(2, a)
+        bd = rng.randint(2, b)
+        params = {
+            "a": a,
+            "b": b,
+            "ad": ad,
+            "bd": bd,
+            # Consume a real fraction of d's pooled in-flow so the refund
+            # shares are proportional rather than degenerate.
+            "consumed": rng.randint(1, ad + bd - 1),
+        }
         base = None
         for order in itertools.permutations([("a", "d"), ("b", "d")]):
-            g = _two_parent_graph(**params)  # SAME params, different order
+            graph = _two_parent_graph(**params)
             for src, dst in order:
-                g.release(src, dst)
-            snapshot = {n: g.residual(n).tokens for n in g.node_names()}
+                graph.release(src, dst)
+            snapshot = {n: graph.residual(n).tokens for n in graph.node_names()}
             if base is None:
                 base = snapshot
             assert snapshot == base, (trial, params, order, snapshot, base)
+
+
+# --------------------------------------------------------------------------
+# P6 -- the two halves of the invariant separate by locality
+# --------------------------------------------------------------------------
 
 
 def test_p6_locality_separation():
@@ -284,7 +550,7 @@ def test_p6_locality_separation():
     """
     graph = DelegationGraph(make_root(100))
     graph.add_node("w")
-    graph.allocate(DelegationGraph.ROOT, "w", tokens=40)
+    graph.allocate(ROOT, "w", tokens=40)
     graph.seal()
     monitor = graph.monitor_for("w")
     monitor.usage.add_tokens(41)
@@ -295,11 +561,38 @@ def test_p6_locality_separation():
     graph2 = DelegationGraph(make_root(100))
     for name in ("w", "child"):
         graph2.add_node(name)
-    graph2.allocate(DelegationGraph.ROOT, "w", tokens=40)
+    graph2.allocate(ROOT, "w", tokens=40)
     graph2.allocate("w", "child", tokens=35)
     graph2.seal()
     m = graph2.monitor_for("w")
     m.usage.add_tokens(30)  # 30 consumed + 35 delegated = 65 > 40
     assert m.check_constraints() == []  # the monitor sees no violation
-    with pytest.raises(ConservationViolationError):
+    with pytest.raises(FlowConservationError):
         graph2.check_node("w")  # only the graph can see it
+
+
+def test_p6_materializing_from_residual_would_collapse_the_separation():
+    """The separation is a property of the materialization choice.
+
+    `allocate()` is build-phase only and `release`/`abandon` can only shrink an
+    edge, so out-flow is a static upper bound the instant `seal()` returns. Had
+    `contract_for` used the residual, w's own monitor would flag the very spend
+    it currently misses. P6 is therefore a claim about materializing from
+    in-flow, not an unconditional impossibility -- and in-flow is the right
+    choice because a node's grant should not shrink as it delegates.
+    """
+    graph = DelegationGraph(make_root(100))
+    for name in ("w", "child"):
+        graph.add_node(name)
+    graph.allocate(ROOT, "w", tokens=40)
+    graph.allocate("w", "child", tokens=35)
+    graph.seal()
+
+    hypothetical = ResourceMonitor(ResourceConstraints(tokens=graph.residual("w").tokens))
+    assert graph.residual("w").tokens == 5
+    hypothetical.usage.add_tokens(30)
+    assert hypothetical.check_constraints() != []  # would be locally decidable
+
+    actual = graph.monitor_for("w")
+    actual.usage.add_tokens(30)
+    assert actual.check_constraints() == []  # as materialized, it is not
