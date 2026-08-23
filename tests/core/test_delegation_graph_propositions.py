@@ -7,6 +7,7 @@ test says so in minutes where a proof attempt can absorb a day.
 See docs/superpowers/plans/2026-08-23-m6-theory-propositions.md
 """
 
+import itertools
 import random
 
 import pytest
@@ -212,3 +213,62 @@ def test_p4_abandonment_bound_is_tight():
     graph.monitor_for("doomed").usage.add_tokens(1)
     with pytest.raises(ConservationViolationError):
         graph.verify()
+
+
+def _two_parent_graph(a=40, b=40, ad=10, bd=10):
+    graph = DelegationGraph(make_root(100))
+    for name in ("a", "b", "d"):
+        graph.add_node(name)
+    graph.allocate(ROOT, "a", tokens=a)
+    graph.allocate(ROOT, "b", tokens=b)
+    graph.allocate("a", "d", tokens=ad)
+    graph.allocate("b", "d", tokens=bd)
+    graph.seal()
+    return graph
+
+
+def test_p5_release_order_does_not_change_residuals():
+    orders = list(itertools.permutations([("a", "d"), ("b", "d")]))
+    results = []
+    for order in orders:
+        graph = _two_parent_graph()
+        for src, dst in order:
+            graph.release(src, dst)
+        results.append({n: graph.residual(n).tokens for n in graph.node_names()})
+    assert all(r == results[0] for r in results), results
+
+
+def test_p5_live_value_refunds_are_order_dependent():
+    def simulate(order):
+        original = {("a", "d"): 10, ("b", "d"): 10}
+        live = dict(original)
+        refunds = {}
+        for edge in order:
+            total_live = sum(live.values())
+            refunds[edge] = live[edge] / total_live * 20 if total_live else 0
+            del live[edge]
+        return refunds
+
+    forward = simulate([("a", "d"), ("b", "d")])
+    reverse = simulate([("b", "d"), ("a", "d")])
+    assert forward != reverse
+
+
+def test_p5_confluence_holds_on_random_two_parent_graphs():
+    rng = random.Random(20260824)
+    for trial in range(200):
+        # root is 100, so a + b <= 100; and a scout cannot forward more than
+        # it received, so ad <= a and bd <= b. Unconstrained draws raise
+        # FlowConservationError on the first trial.
+        a = rng.randint(10, 60)
+        b = rng.randint(10, 100 - a)
+        params = {"a": a, "b": b, "ad": rng.randint(1, a), "bd": rng.randint(1, b)}
+        base = None
+        for order in itertools.permutations([("a", "d"), ("b", "d")]):
+            g = _two_parent_graph(**params)  # SAME params, different order
+            for src, dst in order:
+                g.release(src, dst)
+            snapshot = {n: g.residual(n).tokens for n in g.node_names()}
+            if base is None:
+                base = snapshot
+            assert snapshot == base, (trial, params, order, snapshot, base)
