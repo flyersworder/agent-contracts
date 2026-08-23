@@ -38,6 +38,7 @@ from evaluation.chamber_pipeline.orchestrator import (
     _invoke_with_timeout,
     _PcDegeneracyHandler,
     _read_llm_metrics,
+    _read_llm_provenance,
     count_cells,
     get_spec,
     iter_sweep_cells,
@@ -1244,3 +1245,54 @@ class TestRunRecordNewSchema:
         d = r.to_dict()
         # The numpy array got string-ified.
         assert d["extra_json"] is not None
+
+
+class TestLlmProvenance:
+    """Every behaviour-affecting setting must be recorded with the cell.
+
+    Diagnosing the 2026-08-23 provider regression required inferring May's
+    reasoning-effort level from token arithmetic, because M4b recorded neither
+    the effort, nor the serving provider, nor the resolved model id. A sweep
+    that records its own configuration can be audited; one that does not has
+    to be reverse-engineered.
+    """
+
+    @staticmethod
+    def _response(provider: str = "Novita", model: str = "deepseek/x"):
+        return {
+            "choices": [{"message": {"content": "x"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            "provider": provider,
+            "model": model,
+        }
+
+    def test_records_model_effort_and_provider(self) -> None:
+        wrapper = _CountingLLM(target=lambda **kw: self._response())
+        wrapper(
+            model="openrouter/deepseek/deepseek-v4-flash",
+            messages=[],
+            extra_body={"reasoning": {"effort": "low"}},
+        )
+        model, effort, providers = _read_llm_provenance(wrapper)
+        assert model == "openrouter/deepseek/deepseek-v4-flash"
+        assert effort == "low"
+        assert providers == "Novita"
+
+    def test_joins_multiple_providers_seen_in_one_cell(self) -> None:
+        seen = iter(["Novita", "Parasail"])
+        wrapper = _CountingLLM(target=lambda **kw: self._response(provider=next(seen)))
+        for _ in range(2):
+            wrapper(model="m", messages=[], extra_body={"reasoning": {"effort": "low"}})
+        _model, _effort, providers = _read_llm_provenance(wrapper)
+        assert providers == "Novita,Parasail"  # sorted, deduplicated
+
+    def test_absent_effort_is_recorded_as_unset_not_guessed(self) -> None:
+        """An unset parameter is the exact failure mode being guarded against."""
+        wrapper = _CountingLLM(target=lambda **kw: self._response())
+        wrapper(model="m", messages=[])
+        _model, effort, _providers = _read_llm_provenance(wrapper)
+        assert effort == "unset"
+
+    def test_no_calls_yields_all_none(self) -> None:
+        assert _read_llm_provenance(_CountingLLM()) == (None, None, None)
+        assert _read_llm_provenance(None) == (None, None, None)

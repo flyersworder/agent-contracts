@@ -82,6 +82,13 @@ class RunRecord:
             was partly random; equal to `n_llm_calls` means it was entirely
             random. None for non-LLM variants and for cells recorded before
             this field existed (the M4b pilot).
+        model_id: The model identifier requested for this cell.
+        reasoning_effort: The reasoning effort requested, or "unset" when the
+            call relied on the provider default. Recorded because a pinned
+            model snapshot does not pin behaviour: DeepSeek raised the default
+            effort under unchanged 0423 weights on 2026-08-13.
+        providers_used: Comma-separated upstream providers that served this
+            cell, sorted. More than one means provider rotation fired.
         n_pc_degeneracies: How many times PC's singular-matrix
             fallback fired during this cell. Captured by a logging
             handler the orchestrator installs around each cell. None
@@ -132,6 +139,9 @@ class RunRecord:
     wall_time_seconds: float | None = None
     n_llm_calls: int | None = None
     n_selection_fallbacks: int | None = None
+    model_id: str | None = None
+    reasoning_effort: str | None = None
+    providers_used: str | None = None
     n_pc_degeneracies: int | None = None
 
     # --- LLM cost / token tracking ---

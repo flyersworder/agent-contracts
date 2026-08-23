@@ -280,6 +280,14 @@ class _CountingLLM:
         # per cell so a degraded run is visible in the results rather than
         # indistinguishable from a healthy one.
         self.selection_fallbacks: int = 0
+        # Provenance: what actually served this cell. Recorded because a
+        # pinned model snapshot does NOT pin behaviour -- DeepSeek raised the
+        # default reasoning effort under unchanged 0423 weights on 2026-08-13,
+        # and reconstructing May's effort level from token arithmetic was only
+        # possible by luck. Anything that can change under us gets recorded.
+        self.observed_models: set[str] = set()
+        self.observed_efforts: set[str] = set()
+        self.observed_providers: set[str] = set()
 
     # Default LiteLLM retry count for transient failures (rate limits,
     # network blips, 5xx). LiteLLM's default is 0 — meaning the first
@@ -329,6 +337,8 @@ class _CountingLLM:
             from litellm import completion as _completion
 
             self._target = _completion
+
+        self._note_request(kwargs)
 
         # Inject retry count if caller didn't specify one. FakeLLM's
         # `**_: Any` catch-all silently absorbs unknown kwargs, so this
@@ -412,6 +422,31 @@ class _CountingLLM:
         # last (still-bad) response; the caller's parser will fall back.
         return response
 
+    def _note_request(self, kwargs: dict[str, Any]) -> None:
+        """Record the model and reasoning effort this request asked for."""
+        model = kwargs.get("model")
+        if isinstance(model, str):
+            self.observed_models.add(model)
+        reasoning = (kwargs.get("extra_body") or {}).get("reasoning") or {}
+        effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
+        # "unset" is recorded explicitly rather than skipped: an unset
+        # parameter tracking a provider default is the failure being guarded
+        # against, so its absence must be visible in the results.
+        self.observed_efforts.add(effort if isinstance(effort, str) else "unset")
+
+    def _note_response(self, response: Any) -> None:
+        """Record which upstream provider actually served the request."""
+        try:
+            provider = (
+                response.get("provider")
+                if isinstance(response, dict)
+                else getattr(response, "provider", None)
+            )
+        except (AttributeError, TypeError):
+            return
+        if isinstance(provider, str) and provider:
+            self.observed_providers.add(provider)
+
     def record_selection_fallback(self) -> None:
         """Note that one selection call degraded to a random pick."""
         self.selection_fallbacks += 1
@@ -423,6 +458,8 @@ class _CountingLLM:
         Responses may be dict-shape (most LiteLLM responses) or Pydantic-shape
         (some providers); missing fields silently leave totals at 0.
         """
+        self._note_response(response)
+
         try:
             usage = (
                 response.get("usage", {})
@@ -645,6 +682,7 @@ def run_cell(
             cost_usd,
             n_selection_fallbacks,
         ) = _read_llm_metrics(counting_llm)
+        model_id, reasoning_effort, providers_used = _read_llm_provenance(counting_llm)
 
         # PC variants populate degeneracy count; llm_only doesn't run PC.
         n_pc_degen: int | None = None if spec.name == "llm_only" else handler.count
@@ -666,6 +704,9 @@ def run_cell(
             wall_time_seconds=wall,
             n_llm_calls=n_llm_calls_for_cell,
             n_selection_fallbacks=n_selection_fallbacks,
+            model_id=model_id,
+            reasoning_effort=reasoning_effort,
+            providers_used=providers_used,
             n_pc_degeneracies=n_pc_degen,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
@@ -924,6 +965,28 @@ def _invoke_with_timeout(
     if error_box:
         raise error_box[0]
     return result_box[0]
+
+
+def _read_llm_provenance(
+    counting_llm: _CountingLLM | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Extract (model_id, reasoning_effort, providers_used) from a wrapper.
+
+    Each is a sorted comma-joined string when more than one distinct value was
+    seen in the cell -- provider rotation makes that the normal case -- and
+    None when the wrapper is absent or saw no calls.
+    """
+    if counting_llm is None or not counting_llm.calls:
+        return None, None, None
+
+    def joined(values: set[str]) -> str | None:
+        return ",".join(sorted(values)) if values else None
+
+    return (
+        joined(counting_llm.observed_models),
+        joined(counting_llm.observed_efforts),
+        joined(counting_llm.observed_providers),
+    )
 
 
 def _read_llm_metrics(
