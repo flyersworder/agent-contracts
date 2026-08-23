@@ -775,3 +775,100 @@ __all__ = [
     "planner_reasoner_agents",
     "random_agent",
 ]
+
+
+def fan_in_agents(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    scout_a_budget: int,
+    scout_b_budget: int,
+    differentiate: bool = False,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """Two blind scouts fund one aggregator — ladder rungs 1 and 2.
+
+    ``differentiate=False`` is rung 1, a homogeneous ensemble whose only
+    source of divergence is sampling temperature. ``differentiate=True`` is
+    rung 2, where the scouts carry distinct role framings. Neither scout is
+    told the other exists: that blindness is what makes the pair isolate role
+    differentiation rather than communication, which is rung 4's business.
+
+    Budget flows through a :class:`DelegationGraph` whose scout and aggregator
+    nodes carry real monitors; the adapter routes each chamber call to the
+    monitor of whichever node is acting, additively with the aggregate cap.
+    """
+    from evaluation.chamber_pipeline.coordination import overlap_fraction
+    from evaluation.chamber_pipeline.llm_planner import (
+        build_reconcile_prompt,
+        build_scout_broad_prompt,
+        build_scout_targeted_prompt,
+    )
+
+    nodes = _node_names(adapter)
+    # Set on EVERY path, including the early returns below. Task 8's scorer
+    # reads this in `run_cell`; an attribute that exists only on the happy
+    # path raises AttributeError on empty-menu and zero-budget cells.
+    adapter.coordination_stats = {"overlap_frac": None, "n_experiments_distinct": 0}
+    if _intervention_budget(adapter) <= 0 or not adapter.available_experiments():
+        return _empty_adjacency(nodes)
+    llm = llm or _default_llm()
+
+    prompt_a = build_scout_broad_prompt if differentiate else build_select_prompt
+    prompt_b = build_scout_targeted_prompt if differentiate else build_select_prompt
+
+    # 2*seed and 2*seed+1, never seed and seed+1: M4b seeds are contiguous
+    # 0..29, so seed+1 would collide with the next cell's scout_a.
+    with adapter.as_node("scout_a"):
+        chosen_a, dfs_a = _llm_select_loop(
+            adapter,
+            llm,
+            model,
+            2 * seed,
+            spend=scout_a_budget,
+            starting_chosen=None,
+            prompt_builder=prompt_a,
+            temperature=_SCOUT_TEMPERATURE,
+        )
+    with adapter.as_node("scout_b"):
+        chosen_b, dfs_b = _llm_select_loop(
+            adapter,
+            llm,
+            model,
+            2 * seed + 1,
+            spend=scout_b_budget,
+            starting_chosen=None,
+            prompt_builder=prompt_b,
+            temperature=_SCOUT_TEMPERATURE,
+        )
+
+    # The aggregator's reconciliation call. REQUIRED, not decorative: PC is
+    # not an LLM call, so without it the aggregator consumes nothing, the
+    # fan-in edges carry budget nobody spends, `_consumed()` reads zero, and
+    # verify() is vacuously true. It is also the single indivisible request
+    # that puts this arm inside whitepaper §4.6 P2's incompleteness window.
+    with adapter.as_node("aggregator"):
+        llm(
+            model=model,
+            messages=build_reconcile_prompt(chosen_a, chosen_b),
+            max_tokens=_RECONCILE_MAX_TOKENS,
+        )
+
+    # Duplicates still COST budget — each query_intervention was metered — but
+    # are dropped before pooling so PC does not see an inflated n.
+    seen: set[str] = set()
+    dfs: list[pd.DataFrame] = []
+    for name, frame in zip(chosen_a + chosen_b, dfs_a + dfs_b, strict=True):
+        if name not in seen:
+            seen.add(name)
+            dfs.append(frame)
+
+    adapter.coordination_stats = {
+        "overlap_frac": overlap_fraction(chosen_a, chosen_b),
+        "n_experiments_distinct": len(seen),
+    }
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
