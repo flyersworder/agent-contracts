@@ -1039,7 +1039,7 @@ In words: **in-flow ≥ own consumption + out-flow** — Kirchhoff's current law
 with a consumption sink at each node. The tree law of §4.1 is the special case
 in which every non-root node has exactly one in-edge.
 
-The rest of this section states seven propositions. P2–P6 are each accompanied by
+The rest of this section states eight propositions. P2–P6 are each accompanied by
 an executable artifact in `tests/core/test_delegation_graph_propositions.py`,
 written *before* its proof; P1 is covered by the pre-existing telescoping
 property test in `tests/core/test_delegation_graph_properties.py`.
@@ -1067,9 +1067,11 @@ left and total system consumption on the right. ∎
 
 This is the easy half — it is Kirchhoff's law — and we claim no novelty for it;
 the paper's theoretical weight rests on P2–P6. Its corollary is what makes the law practical: **each
-node checks only its own edges, and global boundedness follows.** No global lock
-and no central accountant — the property a multi-agent system needs if its
-agents are to run concurrently without coordinating on every allocation.
+node checks only its own edges, and global boundedness follows.** No lock on the
+enforcement path and no central accountant — the property a multi-agent system
+needs if its agents are to run concurrently without coordinating on every
+consumption. P8 scopes this precisely: enforcement is lock-free, allocation is
+not, and the distinction matters.
 
 #### P2 — No tree encoding of a fan-in node is complete
 
@@ -1348,6 +1350,55 @@ framework exists to govern. Artifacts:
 `test_p7_the_overspend_is_linear_in_the_fraction_refunded`,
 `test_p7_the_gap_is_bounded_by_the_refund_not_unbounded`,
 `test_p7_in_flight_consumption_is_load_bearing`.
+
+#### P8 — The scope of "no global lock"
+
+P1's corollary is the framework's most-quoted practical claim, and until it is
+scoped it is also its most overstated. Concurrency splits into two regimes and
+the claim holds for exactly one.
+
+**Proposition 8.** After `seal()`, the local invariant is preserved under
+arbitrary interleaving of consumption at distinct nodes, with no cross-node
+synchronization. Topology mutation is not in that set: `allocate` is a
+check-then-act on the conservation predicate and requires serialization.
+
+*Proof of the first clause.* `seal()` freezes the topology, so in-flow is
+constant during the run. Each node's contract is materialized once from its
+summed in-flow and each node carries its own monitor, so the state a node reads
+and writes is disjoint from every other node's; concurrent consumption at
+distinct nodes therefore commutes. By P6 the node-local check needs nothing
+else. ∎
+
+*Proof of the second clause.* By construction. `allocate` evaluates the
+conservation predicate against the current out-flow and then appends an edge.
+Two threads may both evaluate against the pre-mutation state and both append.
+Measured: eight threads allocating 20 tokens each against `B(root) = 100`
+over-granted in 190 of 300 trials, reaching 140 — a breach of the conservation
+law at build time, before any agent runs. ∎
+
+The implementation now takes a **per-graph reentrant lock** on the mutators,
+which closes it (0 of 300 trials, maximum granted exactly 100). The lock must be
+reentrant because `abandon` releases the edges it unwinds.
+
+**This does not weaken the claim, but it does bound it.** The lock is per graph
+and confined to the build and reclamation paths; it never serializes
+consumption, which is where the concurrency that matters lives — a sweep's
+agents spend minutes inside model calls and microseconds inside `allocate`. What
+P1's corollary buys is that *enforcement* needs no coordination, not that
+*planning* is lock-free. The honest phrasing is: **no lock on the enforcement
+path, and no central accountant at any point.** Both halves are load-bearing,
+and only the first was ever in question.
+
+Two consequences worth stating for anyone building on this. Allocation is a
+planning-time act, so serializing it costs a sweep nothing; but a system that
+allocates *adaptively during execution* would put the lock on its hot path, and
+would need edge-level rather than graph-level granularity. And `release` and
+`abandon` are run-phase operations, unlike `allocate` — they are reachable after
+`seal()` — so they are inside the lock too, which is why the trilemma of P7 is a
+statement about failure detection rather than about data races. Artifacts:
+`test_p8_concurrent_consumption_at_distinct_nodes_needs_no_graph_lock`,
+`test_p8_concurrent_allocation_cannot_breach_the_root_budget`,
+`test_p8_the_graph_lock_is_reentrant`.
 
 #### Supporting properties
 

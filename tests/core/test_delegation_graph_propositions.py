@@ -17,8 +17,11 @@ while proving nothing:
 See docs/superpowers/plans/2026-08-23-m6-theory-propositions.md
 """
 
+import contextlib
 import itertools
 import random
+import sys
+import threading
 
 import pytest
 
@@ -733,3 +736,88 @@ def test_p7_in_flight_consumption_is_load_bearing():
     graph.monitor_for("doomed").usage.add_tokens(50)
     graph.monitor_for(ROOT).usage.add_tokens(refund)
     assert _total(graph) == 150
+
+
+# --------------------------------------------------------------------------
+# P8 -- what "no global lock" does and does not cover
+# --------------------------------------------------------------------------
+
+
+def test_p8_concurrent_consumption_at_distinct_nodes_needs_no_graph_lock():
+    """The corollary of P1, exercised rather than asserted.
+
+    Monitors are per node and disjoint, and `ResourceUsage` guards its own
+    counters, so agents record usage concurrently with no cross-node
+    coordination and no central accountant.
+    """
+    adds = 5000
+    names = [f"n{i}" for i in range(8)]
+    graph = DelegationGraph(make_root(100_000))
+    for name in names:
+        graph.add_node(name)
+        graph.allocate(ROOT, name, tokens=10_000)
+    graph.seal()
+
+    def consume(name):
+        monitor = graph.monitor_for(name)
+        for _ in range(adds):
+            monitor.usage.add_tokens(1)
+
+    threads = [threading.Thread(target=consume, args=(n,)) for n in names]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert [graph.monitor_for(n).usage.tokens for n in names] == [adds] * 8
+    graph.verify()
+
+
+def test_p8_concurrent_allocation_cannot_breach_the_root_budget():
+    """Topology mutation IS synchronized, and must be.
+
+    `allocate` validates conservation and then mutates. Unsynchronized, that
+    check-then-act over-granted in 190 of 300 trials, reaching 140 tokens
+    against a root budget of 100 -- a breach of the framework's central
+    guarantee at build time. Regression guard for the per-graph lock.
+    """
+    previous = sys.getswitchinterval()
+    sys.setswitchinterval(1e-9)  # force preemption inside the critical section
+    try:
+        for _ in range(50):
+            graph = DelegationGraph(make_root(100))
+            for i in range(8):
+                graph.add_node(f"n{i}")
+            barrier = threading.Barrier(8)
+
+            def allocate(i, g=graph, b=barrier):
+                b.wait()
+                # Refusals are the correct outcome for the losers of the race;
+                # the assertion below is on what was actually granted.
+                with contextlib.suppress(ConservationViolationError):
+                    g.allocate(ROOT, f"n{i}", tokens=20)  # 8 x 20 = 160 > 100
+
+            threads = [threading.Thread(target=allocate, args=(i,)) for i in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            granted = sum(graph.in_flow(f"n{i}").tokens for i in range(8))
+            assert granted <= 100, granted
+    finally:
+        sys.setswitchinterval(previous)
+
+
+def test_p8_the_graph_lock_is_reentrant():
+    """`abandon` releases the edges it unwinds, so a non-reentrant lock would
+    self-deadlock on the very path abandonment exists to serve."""
+    graph = DelegationGraph(make_root(100))
+    for name in ("a", "d"):
+        graph.add_node(name)
+    graph.allocate(ROOT, "a", tokens=60)
+    graph.allocate("a", "d", tokens=30)
+    graph.seal()
+    graph.monitor_for("d").usage.add_tokens(10)
+    assert graph.abandon("d").tokens == 20
+    graph.verify()
