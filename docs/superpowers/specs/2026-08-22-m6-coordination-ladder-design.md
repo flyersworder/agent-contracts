@@ -498,6 +498,39 @@ window. M6 takes precedence; M5 resumes October.
    calibration artifact, exactly the failure mode the `_ROLE_C95` comment
    warns about for the scouts. This is what pre-flight probe 3 measures.
 
+
+## 11. Known issue: rung 4's negotiation parser reads restatement as claim
+
+Found 2026-08-23 while fixing the selection-loop equivalent (which IS fixed --
+spent experiments now leave the menu, and parsing happens against the offered
+list). The negotiation path has the same shape and is **not** fixed.
+
+`build_negotiate_revise_prompt` renders "You proposed: <own>" and "The other
+designer proposed: <other>" above the full menu. `_parse_name_list(revised,
+menu)` then scans the **entire response text** for every menu name. A scout
+that reasons out loud -- "the other designer wants X and Y, so I will take
+Z" -- has X and Y counted as its OWN claim.
+
+Consequences, all on rung 4's headline metric:
+
+- `contested = set(source_a) & set(source_b)` inflates, so
+  `n_contested` reports conflicts the scouts never had.
+- `claim_a = list(source_a)[:scout_a_budget]` truncates in menu order, so a
+  phantom claim can displace a real one.
+
+Why it is NOT fixed the way selection was: filtering `other` out of the parse
+menu would be wrong. A scout claiming what the other proposed is a *genuine*
+contest, and that is exactly the signal rung 4 exists to measure. The fix has
+to separate the scout's ANSWER from its restatement of the prompt -- a
+delimited answer block, or parsing only lines that are bare menu names, which
+is what the prompt already asks for ("one per line, and no other
+commentary"). That is a prompt-and-parser change needing its own validation.
+
+**Measure before fixing.** The §3 overlap pre-flight probe (3 new arms x k=30
+x 8 seeds) records `n_contested` and `overlap_frac` and will show whether
+compliant responses make this rare. Do not stack a speculative parser change
+on top of the selection fix without that number.
+
 ---
 
 ## 11. Review record
