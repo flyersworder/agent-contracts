@@ -126,11 +126,18 @@ M6_SPEC = SweepSpec(
     # distinct experiments against `llm_pc`'s 59 -- a 25% coverage deficit
     # baked into the top budget point, the confound spec §3 rules out.
     #
-    # The middle fraction stays 0.50, matching PILOT_SPEC exactly. 0.51 gives
-    # the same k=30 but a different `budget_fraction`, and the analyzer groups
-    # and plots on that column -- so reused pilot rows at 0.50 and new rows at
-    # 0.51 would render as two separate Pareto points at the same budget, and
-    # the mid-budget rung-vs-rung comparison would compare nothing.
+    # A second reason not to raise this fraction: rung 4's pools are
+    # `budget + ceil((M-k)/2)` and `budget + floor((M-k)/2)`, so at k >= M-1
+    # the leftover runs out and a pool collapses to exactly its budget --
+    # every name in it gets queried and the selection loop goes inert, the
+    # same degeneracy `test_the_selection_loop_changes_which_experiments...`
+    # guards at k=20. LT k=45 leaves 14 spare; k=58 leaves 1.
+    #
+    # The middle fraction stays 0.50, matching PILOT_SPEC exactly. This is a
+    # readability choice, NOT a correctness one: the spec fraction never
+    # reaches the data. `run_sweep` discards it and `run_cell` recomputes
+    # `budget_fraction` as k/menu_size, so 0.50 and 0.51 both record
+    # 30/59 = 0.5084... and the reused-pilot rows join either way.
     budget_fractions=(0.10, 0.50, 0.76),
     agent_names=LADDER_VARIANTS,
     seeds=tuple(range(30)),

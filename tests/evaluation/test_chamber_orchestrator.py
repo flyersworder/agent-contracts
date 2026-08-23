@@ -1516,14 +1516,44 @@ class TestConservationIsNotGatedOnAggregatorSpend:
     def test_a_scout_overrun_is_recorded_as_a_failure_not_as_unmeasured(
         self,
     ) -> None:
-        import inspect
+        """Behavioral, not a source grep.
 
-        from evaluation.chamber_pipeline import orchestrator
+        An earlier version of this test asserted the string ``agg_tokens > 0``
+        was absent from ``run_cell``'s source near ``verify()``. That passes
+        with the gate fully restored under any other spelling (``if
+        agg_tokens:``), and fails when the neighbouring comment is merely
+        reworded -- wrong in both directions. This drives ``run_cell`` instead.
+        """
+        import numpy as np
 
-        src = inspect.getsource(orchestrator.run_cell)
-        certify = src[src.index("cell_graph.verify()") - 400 :]
-        certify = certify[: certify.index("except ConservationViolationError")]
-        assert "agg_tokens > 0" not in certify, "verify() must not be gated on aggregator spend"
+        from evaluation.chamber_pipeline.agents import _node_names
+        from evaluation.chamber_pipeline.coordination import build_fan_in_graph
+
+        def overrun_agent(adapter: object, **_kw: object) -> pd.DataFrame:
+            graph = build_fan_in_graph(k=6, c95=2205, a95=8557, multiple=4)
+            graph.monitor_for("scout_a").usage.add_tokens(10**7)
+            adapter.delegation_graph = graph  # type: ignore[attr-defined]
+            nodes = _node_names(adapter)
+            return pd.DataFrame(
+                np.zeros((len(nodes), len(nodes)), dtype=int), index=nodes, columns=nodes
+            )
+
+        record = run_cell(
+            spec=AgentSpec(name="overrun", run=overrun_agent, chambers=("lt",), kind="non_llm"),
+            chamber="lt",
+            configuration="standard",
+            budget_k=6,
+            seed=0,
+        )
+        assert record.status == "ok"
+        # The exact configuration the gate hid: aggregator silent, scout over.
+        assert record.aggregator_tokens == 0
+        assert record.conservation_certified is False, (
+            "a scout overrun with a silent aggregator must count as a "
+            "conservation failure, not drop out of H-C's denominator"
+        )
+        # tree_would_refuse stays aggregator-gated -- that gate is correct.
+        assert record.tree_would_refuse is None
 
     def test_a_graph_whose_scouts_overran_does_not_verify(self) -> None:
         """The condition the gate used to hide."""

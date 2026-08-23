@@ -1013,11 +1013,10 @@ def team_agents(
     source_a = revised_a or proposed_a
     source_b = revised_b or proposed_b
     # Count rounds that produced nothing usable. Unparseable negotiation is
-    # the documented empty-content mode, and it degrades to a MENU-ORDER
-    # partition: every seed then queries the identical experiments, with zero
-    # between-seed variance, while `overlap_frac` reads 0.0 and `n_contested`
-    # reads 0 -- indistinguishable from a perfect split. Unlike the selection
-    # loop, this path had no recorder at all.
+    # the documented empty-content mode, and it drops the affected scout to
+    # the seeded fallback partition while `overlap_frac` reads 0.0 and
+    # `n_contested` reads 0 -- indistinguishable from a perfect split. Unlike
+    # the selection loop, this path had no recorder at all.
     # All four parses, not two scouts. Counting only scouts whose `revised or
     # proposed` is empty misses the likelier and more damaging case: both
     # propose rounds parse but both REVISE rounds return prose, which reduces

@@ -214,18 +214,28 @@ def test_the_selection_loop_changes_which_experiments_are_queried(
     that reason -- it passed even when selection was made fully inert by
     truncating each pool to exactly its budget.
     """
+    from evaluation.chamber_pipeline.agents import _NEGOTIATE_MAX_TOKENS
     from tests.evaluation.conftest import RecordingLLM, _menu_from
 
     def queried(sel):
+        holder: list = []
+
         def responder(idx, msgs):
             names = _menu_from(msgs)
             if not names:
                 return ""
-            if len(names) > 30:  # negotiation renders the whole menu: FIXED
-                return "\n".join(names[:5])
+            # Classify by the call's own max_tokens, not by menu size. A size
+            # threshold had zero margin: the largest selection pool is
+            # `budget + ceil((M-k)/2)` = 30 against a `> 30` guard, so any
+            # pool-sizing change that reached 31 would silently reclassify
+            # selection prompts as negotiation and both tests would keep
+            # passing while testing something else.
+            if holder[0].calls[idx]["max_tokens"] == _NEGOTIATE_MAX_TOKENS:
+                return "\n".join(names[:5])  # negotiation: FIXED
             return sel(names)
 
         llm = RecordingLLM(responder)
+        holder.append(llm)
         adapter = make_ladder_adapter(llm, k=20)
         team_agents(adapter, seed=0, scout_a_budget=10, scout_b_budget=10, llm=llm)
         return _queried(adapter)
@@ -243,17 +253,22 @@ def test_matched_budget_holds_at_the_largest_ladder_budget(make_ladder_adapter):
     claims were large, with `status=ok` and conservation certified. k=6 and
     k=30 never triggered it, so a test at a smaller budget proves nothing.
     """
+    from evaluation.chamber_pipeline.agents import _NEGOTIATE_MAX_TOKENS
     from tests.evaluation.conftest import RecordingLLM, _menu_from
+
+    holder: list = []
 
     def responder(idx, msgs):
         names = _menu_from(msgs)
         if not names:
             return ""
-        if len(names) > 30:  # negotiation: claim a full budget's worth
-            return "\n".join(names[:23])
+        # max_tokens, not menu size -- see the sibling test for why.
+        if holder[0].calls[idx]["max_tokens"] == _NEGOTIATE_MAX_TOKENS:
+            return "\n".join(names[:23])  # negotiation: a full budget's worth
         return names[0]
 
     llm = RecordingLLM(responder)
+    holder.append(llm)
     adapter = make_ladder_adapter(llm, k=45)
     team_agents(adapter, seed=0, scout_a_budget=23, scout_b_budget=22, llm=llm)
     assert len(_queried(adapter)) == 45
@@ -315,3 +330,91 @@ def test_static_kwargs_cannot_be_mutated_through_the_registry():
 
     with pytest.raises(TypeError):
         get_spec("fan_in_spec").static_kwargs["differentiate"] = False
+
+
+@requires_causalchamber
+def test_the_fallback_partition_varies_with_the_seed(make_ladder_adapter):
+    """The `rest` shuffle is seeded, so the split is not the same every seed.
+
+    Before the shuffle, `rest` was sliced by parity. The menu is ordered by
+    variable family and intervention strength, so a parity slice handed
+    scout_a zero `osr_c` and zero `red` experiments -- the identical blind
+    spot in all 30 seeds, because nothing about the slice depended on the
+    seed. Deleting the shuffle leaves every other test green.
+    """
+    from evaluation.chamber_pipeline import agents as _agents
+    from evaluation.chamber_pipeline.agents import _NEGOTIATE_MAX_TOKENS
+    from tests.evaluation.conftest import RecordingLLM, _menu_from
+
+    real_loop = _agents._llm_select_loop
+
+    def pool_a_for(seed: int) -> frozenset:
+        holder: list = []
+        captured: list = []
+
+        def responder(idx, msgs):
+            names = _menu_from(msgs)
+            if not names:
+                return ""
+            # Negotiation held FIXED across seeds: claims cannot be the
+            # source of any difference this test observes.
+            if holder[0].calls[idx]["max_tokens"] == _NEGOTIATE_MAX_TOKENS:
+                return "\n".join(names[:3])
+            return names[0]
+
+        llm = RecordingLLM(responder)
+        holder.append(llm)
+        adapter = make_ladder_adapter(llm, k=20)
+
+        def spy(*a, **kw):
+            captured.append(kw.get("exclude"))
+            return real_loop(*a, **kw)
+
+        _agents._llm_select_loop = spy
+        try:
+            team_agents(adapter, seed=seed, scout_a_budget=10, scout_b_budget=10, llm=llm)
+        finally:
+            _agents._llm_select_loop = real_loop
+        all_names = set(adapter.available_experiments())
+        return frozenset(all_names - captured[0])
+
+    pools = {pool_a_for(s) for s in range(5)}
+    assert len(pools) > 1, "scout_a's pool is identical in every seed: shuffle is inert"
+
+
+@requires_causalchamber
+def test_negotiation_failures_counts_rounds_not_scouts(make_ladder_adapter):
+    """One unparseable revision is one failure, and the split still stands.
+
+    The counter previously summed over the two SCOUTS (`revised or proposed`
+    empty), which reports 0 for the likelier and more damaging case: both
+    propose rounds parse but both REVISE rounds return prose, reducing rung 4
+    to one-shot proposals with no negotiation at all.
+    """
+    from evaluation.chamber_pipeline.agents import _NEGOTIATE_MAX_TOKENS
+    from tests.evaluation.conftest import RecordingLLM, _menu_from
+
+    holder: list = []
+    negotiation_seen: list = []
+
+    def responder(idx, msgs):
+        names = _menu_from(msgs)
+        if not names:
+            return ""
+        if holder[0].calls[idx]["max_tokens"] == _NEGOTIATE_MAX_TOKENS:
+            negotiation_seen.append(idx)
+            # Rounds are propose_a, propose_b, revise_a, revise_b. Break the
+            # FOURTH only: scout_b falls back to its own proposal, so the
+            # split survives intact and the old scout-wise count reports 0.
+            if len(negotiation_seen) == 4:
+                return "I would prefer not to commit to a split at this time."
+            return "\n".join(names[:3])
+        return names[0]
+
+    llm = RecordingLLM(responder)
+    holder.append(llm)
+    adapter = make_ladder_adapter(llm, k=20)
+    team_agents(adapter, seed=0, scout_a_budget=10, scout_b_budget=10, llm=llm)
+
+    assert len(negotiation_seen) == 4
+    assert adapter.coordination_stats["n_negotiation_failures"] == 1
