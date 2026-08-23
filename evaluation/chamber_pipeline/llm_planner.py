@@ -63,14 +63,16 @@ def build_select_prompt(
     form to keep parsing stable.
 
     Args:
-        menu: All available experiment names (the chamber's `available_experiments()`).
+        menu: The experiments still SELECTABLE this step -- the chamber's
+            `available_experiments()` minus anything already spent.
         remaining_budget: Number of intervention queries the agent has left,
             including this one. Surfaced so the LLM can pace itself in
             principle (whether it actually does is the M3b empirical
             question).
         already_chosen: Experiments already spent in this run, in order.
-            Surfaced so the LLM can avoid duplicates if it cares to. None
-            and empty-list are equivalent.
+            Shown as history only -- callers are expected to have removed
+            them from `menu`, so they are not selectable. None and
+            empty-list are equivalent.
 
     Returns:
         List of `{role, content}` dicts in OpenAI / LiteLLM chat format.
@@ -84,8 +86,12 @@ def build_select_prompt(
     else:
         rendered_menu = "\n".join(menu)
 
+    # Spent experiments are history, not options: `_llm_select_loop` removes
+    # them from `menu` before calling this. The old wording ("do not repeat
+    # unless you have a reason") invited a repeat that the loop then scored as
+    # a failure, so say plainly that they are gone.
     chosen_block = (
-        "Already spent (do not repeat unless you have a reason):\n" + "\n".join(chosen) + "\n"
+        "Already spent (no longer on the menu):\n" + "\n".join(chosen) + "\n"
         if chosen
         else "Already spent: (none yet)\n"
     )

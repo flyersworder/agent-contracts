@@ -478,7 +478,17 @@ def _llm_select_loop(
         remaining = actual_spend - step
         # Compose the "already chosen" view: prior phase + this phase so far.
         all_chosen = starting_chosen + chosen
-        messages = prompt_builder(menu, remaining, all_chosen)
+        # Offer only what is still unspent. Previously the full menu was
+        # rendered every step with the spent items still in it, the prompt
+        # said "do not repeat unless you have a reason", and the loop below
+        # treated any repeat as a failure and replaced it with `rng.choice`.
+        # Duplicates were invited and then punished: measured 6-10 of 30
+        # selections falling back to random at k=30, on BOTH model snapshots,
+        # which gave every ladder rung the same ~30% random component.
+        # `actual_spend <= len(available)` guarantees this is non-empty at
+        # every step.
+        selectable = [m for m in menu if m not in all_chosen]
+        messages = prompt_builder(selectable, remaining, all_chosen)
         # See `_SELECTION_MAX_TOKENS` for why 200 was untenable once
         # providers began counting reasoning tokens against `max_tokens`.
         # Note the cap is NOT a hard bound when `reasoning.effort` is set:
@@ -495,14 +505,17 @@ def _llm_select_loop(
             max_tokens=_SELECTION_MAX_TOKENS,
             **extra,
         )
-        name = parse_selection_response(response, menu)
+        # Validate against the SAME list the model was shown. Parsing against
+        # the full menu would accept a spent name as well-formed and then
+        # discard it one line later as a duplicate -- the failure this change
+        # removes.
+        name = parse_selection_response(response, selectable)
 
-        if name is None or name in all_chosen:
-            # Fallback: random unspent. If everything is spent (LLM kept
-            # picking duplicates and the menu is exhausted), fall back to
-            # random over the full menu so we still spend the slot.
-            unspent = [m for m in menu if m not in all_chosen]
-            name = rng.choice(unspent) if unspent else rng.choice(menu)
+        if name is None:
+            # Fallback: random unspent. Reachable now only on a genuinely
+            # unusable response (empty content from a truncated reasoning
+            # budget, or a name that is not on the offered list at all).
+            name = rng.choice(selectable) if selectable else rng.choice(menu)
             # Record it. This fallback exists so a bad response degrades to
             # random rather than crashing, and that graceful degradation is
             # precisely what concealed a 100% selection-failure rate for the

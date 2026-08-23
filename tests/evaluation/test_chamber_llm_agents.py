@@ -730,3 +730,143 @@ def test_no_fallback_recorded_when_selection_parses():
     llm = CountingStub(responder=lambda idx, msgs: menu[idx])
     _llm_select_loop(adapter, llm, "m", seed=0)
     assert llm.selection_fallbacks == 0
+
+
+class TestAlreadyChosenAreNotSelectable:
+    """Duplicates were structurally invited and then punished.
+
+    The rendered menu listed all 59 experiments including every already-spent
+    one, the prompt said "do not repeat unless you have a reason", and the
+    loop treated any repeat as a failure and replaced it with `rng.choice`.
+    Measured on real cells at k=30: 6-10 of 30 selections were random, in both
+    model snapshots. Every ladder rung carried the same ~30% random component,
+    which shrinks exactly the between-rung differences the ladder measures.
+    """
+
+    class _FirstItemLLM:
+        """Always names the FIRST experiment in the rendered menu.
+
+        Under the old behaviour this picks the same name every step: one real
+        selection then n-1 duplicate fallbacks. Once spent items leave the
+        menu, the first item differs each step, so the same trivial policy
+        spends its whole budget on distinct experiments.
+        """
+
+        def __init__(self) -> None:
+            self.fallbacks = 0
+
+        def record_selection_fallback(self) -> None:
+            self.fallbacks += 1
+
+        def __call__(self, *, model, messages, **_):  # type: ignore[no-untyped-def]
+            body = messages[-1]["content"]
+            menu_part = body.split("Menu:\n", 1)[1]
+            first = menu_part.splitlines()[0].strip()
+            return {"choices": [{"message": {"content": first}}]}
+
+    @staticmethod
+    def _adapter(budget: int):  # type: ignore[no-untyped-def]
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+
+        return create_contracted_chamber_agent(chamber="lt", intervention_budget=budget)
+
+    def test_a_spent_experiment_is_absent_from_the_rendered_menu(self) -> None:
+        from evaluation.chamber_pipeline.agents import _llm_select_loop
+
+        seen_menus: list[list[str]] = []
+        llm = self._FirstItemLLM()
+        real_call = llm.__call__
+
+        def spy(*, model, messages, **kw):  # type: ignore[no-untyped-def]
+            body = messages[-1]["content"]
+            seen_menus.append(body.split("Menu:\n", 1)[1].splitlines())
+            return real_call(model=model, messages=messages, **kw)
+
+        adapter = self._adapter(5)
+        chosen, _ = _llm_select_loop(adapter, spy, "m", 0, spend=5)
+
+        # Each step's menu must omit everything picked before it.
+        for step, menu_lines in enumerate(seen_menus):
+            for prior in chosen[:step]:
+                assert prior not in menu_lines, (
+                    f"step {step}: already-spent {prior!r} still offered"
+                )
+
+    def test_a_first_item_policy_no_longer_degenerates_to_random(self) -> None:
+        from evaluation.chamber_pipeline.agents import _llm_select_loop
+
+        llm = self._FirstItemLLM()
+        adapter = self._adapter(5)
+        chosen, _ = _llm_select_loop(adapter, llm, "m", 0, spend=5)
+
+        assert len(chosen) == 5
+        assert len(set(chosen)) == 5, f"duplicates remain: {chosen}"
+        assert llm.fallbacks == 0, (
+            f"{llm.fallbacks}/5 selections fell back to rng.choice; the menu "
+            "is still offering spent experiments"
+        )
+
+    def test_a_response_that_restates_its_history_is_not_thrown_away(self) -> None:
+        """Parsing against the full menu mis-reads reasoning as a selection.
+
+        `parse_selection_response` scans the whole response text for any menu
+        name, longest first. Reasoning models routinely restate what they have
+        already run ("I already did X, so now Y"). Against the full menu the
+        spent name X wins the scan whenever it is the longer string, the
+        duplicate check then discards it, and the model's ACTUAL pick Y is
+        replaced by `rng.choice` -- a real selection thrown away and recorded
+        as a fallback.
+        """
+        from evaluation.chamber_pipeline.llm_planner import parse_selection_response
+
+        spent, wanted = "uniform_red_strong", "uniform_blue_mid"
+        assert len(spent) > len(wanted)  # the length-sort is what bites
+        text = f"I already ran {spent}, so now I pick {wanted}."
+        response = {"choices": [{"message": {"content": text}}]}
+
+        # Old behaviour: the spent name wins and the real pick is lost.
+        assert parse_selection_response(response, [wanted, spent]) == spent
+        # Filtered: only the offered names can match, so the pick survives.
+        assert parse_selection_response(response, [wanted]) == wanted
+
+    class _RestatesHistoryLLM:
+        """Picks the SHORTEST offered name, after restating everything spent.
+
+        The shortest pick guarantees that any previously-spent name mentioned
+        alongside it is longer, so `parse_selection_response`'s longest-first
+        scan prefers the spent one whenever it is still in the list it is
+        given. That is the whole failure: real reasoning text, real pick,
+        discarded as a duplicate.
+        """
+
+        def __init__(self) -> None:
+            self.fallbacks = 0
+
+        def record_selection_fallback(self) -> None:
+            self.fallbacks += 1
+
+        def __call__(self, *, model, messages, **_):  # type: ignore[no-untyped-def]
+            body = messages[-1]["content"]
+            menu = [ln.strip() for ln in body.split("Menu:\n", 1)[1].splitlines() if ln.strip()]
+            spent_block = body.split("Menu:\n", 1)[0]
+            spent = [
+                ln.strip() for ln in spent_block.splitlines() if ln.strip().startswith("uniform_")
+            ]
+            pick = min(menu, key=len)
+            preamble = f"I already ran {', '.join(spent)}. " if spent else ""
+            return {"choices": [{"message": {"content": f"{preamble}Now I pick {pick}."}}]}
+
+    def test_the_loop_keeps_a_real_pick_that_arrives_with_its_history(self) -> None:
+        from evaluation.chamber_pipeline.agents import _llm_select_loop
+
+        llm = self._RestatesHistoryLLM()
+        adapter = self._adapter(6)
+        chosen, _ = _llm_select_loop(adapter, llm, "m", 0, spend=6)
+
+        assert len(set(chosen)) == 6
+        assert llm.fallbacks == 0, (
+            f"{llm.fallbacks}/6 real selections were discarded as duplicates "
+            "because the response restated its own history"
+        )
