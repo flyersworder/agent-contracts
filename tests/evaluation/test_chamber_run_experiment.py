@@ -116,9 +116,21 @@ class TestPilotSpec:
     def test_pilot_thirty_seeds(self) -> None:
         assert len(PILOT_SPEC.seeds) == 30
 
-    def test_pilot_includes_all_variants(self) -> None:
-        """LT runs all 5 variants per plan §5.1."""
-        assert PILOT_SPEC.agent_names is None  # = all from registry
+    def test_pilot_pins_the_five_m4b_variants(self) -> None:
+        """Named explicitly, never `None`.
+
+        `None` means "every registered agent", so the preset would follow the
+        registry -- and `--pilot` would stop reproducing the published pilot
+        the moment any arm was added. It did: the M6 ladder took it from 450
+        to 720 cells before this was pinned.
+        """
+        assert PILOT_SPEC.agent_names == (
+            "random",
+            "greedy_ig_lite",
+            "llm_only",
+            "llm_pc",
+            "planner_reasoner",
+        )
 
     def test_pilot_total_cells_is_450(self) -> None:
         from evaluation.chamber_pipeline.orchestrator import count_cells

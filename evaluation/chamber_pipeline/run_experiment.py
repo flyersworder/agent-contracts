@@ -87,10 +87,34 @@ load_dotenv()
 # Pre-baked sweep specs matching plan §9 milestones. CLI flags --pilot
 # and --m5 select these; --custom (the default) lets the user override
 # every axis individually.
+# The five M4b variants, named EXPLICITLY rather than left as `None`.
+# `agent_names=None` means "every registered agent", so when the M6 ladder
+# arms joined the registry it silently redefined what `--pilot` and `--m5`
+# mean -- `--pilot` would no longer reproduce the pilot it is named after.
+# A preset that reproduces a published run must not depend on the registry
+# staying the size it was.
+_M4B_VARIANTS = (
+    "random",
+    "greedy_ig_lite",
+    "llm_only",
+    "llm_pc",
+    "planner_reasoner",
+)
+
+# The M6 coordination ladder: two M4b arms reused as rungs 0 and 3, plus the
+# three new ones. Selected with --variants; see spec §3.
+LADDER_VARIANTS = (
+    "llm_pc",  # rung 0: loop
+    "fan_in_homog",  # rung 1: ensemble
+    "fan_in_spec",  # rung 2: parallel roles
+    "planner_reasoner",  # rung 3: chain
+    "team",  # rung 4: negotiation
+)
+
 PILOT_SPEC = SweepSpec(
     chambers=("lt",),
     budget_fractions=(0.10, 0.50, 1.00),
-    agent_names=None,  # all 5 — LT runs everything per plan §5.1
+    agent_names=_M4B_VARIANTS,  # LT runs everything per plan §5.1
     seeds=tuple(range(30)),
     configuration="standard",
 )
@@ -98,7 +122,7 @@ PILOT_SPEC = SweepSpec(
 M5_SPEC = SweepSpec(
     chambers=("lt", "wt"),
     budget_fractions=(0.10, 0.25, 0.50, 0.75, 1.00),
-    agent_names=None,  # all — registry handles WT-skip for greedy_ig_lite
+    agent_names=_M4B_VARIANTS,  # registry handles WT-skip for greedy_ig_lite
     seeds=tuple(range(30)),
     configuration="standard",
 )

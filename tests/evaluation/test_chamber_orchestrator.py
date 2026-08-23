@@ -97,17 +97,29 @@ class FakeLLM:
 class TestAgentRegistry:
     """Inventory of the registered agents, plus AgentSpec.is_compatible."""
 
-    def test_registry_has_five_agents(self) -> None:
-        assert len(AGENT_REGISTRY) == 5
+    def test_registry_has_eight_agents(self) -> None:
+        """Five M4b variants plus the three M6 ladder arms."""
+        assert len(AGENT_REGISTRY) == 8
 
     def test_registry_names_are_unique(self) -> None:
         names = [s.name for s in AGENT_REGISTRY]
         assert len(names) == len(set(names)), f"Duplicate agent names: {names}"
 
-    def test_registry_matches_plan_5_1(self) -> None:
-        """Names match plan §5.1's five variants exactly."""
+    def test_registry_matches_plan_5_1_plus_the_ladder(self) -> None:
+        """Plan §5.1's five variants, plus the M6 ladder's three new arms."""
         actual = sorted(s.name for s in AGENT_REGISTRY)
-        expected = sorted(["random", "greedy_ig_lite", "llm_only", "llm_pc", "planner_reasoner"])
+        expected = sorted(
+            [
+                "random",
+                "greedy_ig_lite",
+                "llm_only",
+                "llm_pc",
+                "planner_reasoner",
+                "fan_in_homog",
+                "fan_in_spec",
+                "team",
+            ]
+        )
         assert actual == expected
 
     def test_greedy_ig_lite_is_lt_only(self) -> None:
@@ -231,10 +243,23 @@ class TestIterSweepCells:
     """Sweep iteration is pure — doesn't load chambers or invoke agents."""
 
     def test_pilot_count(self) -> None:
-        """M4 pilot: LT x 3 budgets x 5 variants x 30 seeds = 450 cells."""
+        """M4 pilot: LT x 3 budgets x 5 variants x 30 seeds = 450 cells.
+
+        `agent_names` is named explicitly. Leaving it None would make this
+        count track the registry's size, so adding an unrelated arm would
+        silently redefine "the pilot" -- which is exactly what the M6 arms did
+        before PILOT_SPEC was pinned.
+        """
         sweep = SweepSpec(
             chambers=("lt",),
             budget_fractions=(0.10, 0.50, 1.00),
+            agent_names=(
+                "random",
+                "greedy_ig_lite",
+                "llm_only",
+                "llm_pc",
+                "planner_reasoner",
+            ),
             seeds=tuple(range(30)),
         )
         assert count_cells(sweep) == 1 * 3 * 5 * 30
@@ -245,6 +270,13 @@ class TestIterSweepCells:
         sweep = SweepSpec(
             chambers=("lt", "wt"),
             budget_fractions=(0.10, 0.25, 0.50, 0.75, 1.00),
+            agent_names=(
+                "random",
+                "greedy_ig_lite",
+                "llm_only",
+                "llm_pc",
+                "planner_reasoner",
+            ),
             seeds=tuple(range(30)),
         )
         # Iterates all 1500 cells (no early skip in iteration).
@@ -1296,3 +1328,79 @@ class TestLlmProvenance:
     def test_no_calls_yields_all_none(self) -> None:
         assert _read_llm_provenance(_CountingLLM()) == (None, None, None)
         assert _read_llm_provenance(None) == (None, None, None)
+
+
+class TestLadderRegistration:
+    """The three new ladder arms and their budget split."""
+
+    def test_new_arms_registered_with_scout_budgets(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import get_spec
+
+        for name in ("fan_in_homog", "fan_in_spec", "team"):
+            spec = get_spec(name)
+            assert spec.extra_kwargs == ("scout_a_budget", "scout_b_budget")
+            assert spec.kind == "llm_multi"
+            assert spec.accepts_llm is True
+            assert spec.chambers == ("lt", "wt")
+
+    def test_scout_budgets_split_with_remainder_to_a(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import (
+            _build_agent_kwargs,
+            get_spec,
+        )
+
+        kwargs = _build_agent_kwargs(get_spec("team"), budget_k=45, seed=0, pc_alpha=0.05, llm=None)
+        assert kwargs["scout_a_budget"] == 23
+        assert kwargs["scout_b_budget"] == 22
+        assert kwargs["scout_a_budget"] + kwargs["scout_b_budget"] == 45
+
+    def test_only_the_spec_arm_differentiates(self) -> None:
+        """fan_in_homog and fan_in_spec share one function; the flag differs."""
+        from evaluation.chamber_pipeline.orchestrator import (
+            _build_agent_kwargs,
+            get_spec,
+        )
+
+        def kw(name: str) -> dict:
+            return _build_agent_kwargs(get_spec(name), budget_k=30, seed=0, pc_alpha=0.05, llm=None)
+
+        assert kw("fan_in_spec")["differentiate"] is True
+        assert "differentiate" not in kw("fan_in_homog")
+        assert "differentiate" not in kw("team")
+        assert get_spec("fan_in_homog").run is get_spec("fan_in_spec").run
+
+    def test_existing_arms_kwargs_unchanged(self) -> None:
+        """Reuse safety: rungs 0 and 3 must dispatch exactly as in M4b."""
+        from evaluation.chamber_pipeline.orchestrator import (
+            _build_agent_kwargs,
+            get_spec,
+        )
+
+        assert _build_agent_kwargs(
+            get_spec("planner_reasoner"), budget_k=30, seed=0, pc_alpha=0.05, llm=None
+        ) == {
+            "seed": 0,
+            "pc_alpha": 0.05,
+            "planner_budget": 15,
+            "reasoner_budget": 15,
+        }
+        assert _build_agent_kwargs(
+            get_spec("llm_pc"), budget_k=30, seed=0, pc_alpha=0.05, llm=None
+        ) == {"seed": 0, "pc_alpha": 0.05}
+
+
+def test_tokens_do_not_gate_tool_calls():
+    """Tokens are certified post-hoc, not enforced.
+
+    A binding token cap would truncate new-arm cells while the reused rungs 0
+    and 3 ran uncapped, breaking the matched-budget comparison in a way that
+    looks like a result. The baseline assertion is not redundant: without it
+    the test passes vacuously if the node is blocked for an unrelated reason,
+    which is exactly what a missing `tool_invocations` grant causes.
+    """
+    from evaluation.chamber_pipeline.coordination import build_fan_in_graph
+
+    monitor = build_fan_in_graph(k=6, c95=1350, a95=21163).monitor_for("scout_a")
+    assert monitor.can_use_tool("intervene") is True  # baseline
+    monitor.usage.add_tokens(10**9)
+    assert monitor.can_use_tool("intervene") is True  # tokens still do not gate

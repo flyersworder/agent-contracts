@@ -43,6 +43,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
+from agent_contracts.core.delegation import ConservationViolationError
 from agent_contracts.integrations.causalchamber import (
     ChamberId,
     ConfigId,
@@ -50,11 +51,13 @@ from agent_contracts.integrations.causalchamber import (
 )
 
 from .agents import (
+    fan_in_agents,
     greedy_ig_lite_agent,
     llm_only_agent,
     llm_pc_agent,
     planner_reasoner_agents,
     random_agent,
+    team_agents,
 )
 from .results import RunRecord, now_iso
 from .scoring import f1_edges, shd
@@ -160,6 +163,34 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         accepts_llm=True,
         kind="llm_multi",
         extra_kwargs=("planner_budget", "reasoner_budget"),
+    ),
+    # ---- M6 coordination ladder -------------------------------------------
+    # Rungs 1, 2 and 4. Rungs 0 (`llm_pc`) and 3 (`planner_reasoner`) are
+    # reused from the M4b pilot unchanged, which is why nothing above this
+    # comment may move.
+    AgentSpec(
+        name="fan_in_homog",
+        run=fan_in_agents,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_multi",
+        extra_kwargs=("scout_a_budget", "scout_b_budget"),
+    ),
+    AgentSpec(
+        name="fan_in_spec",
+        run=fan_in_agents,  # same function; `differentiate` is what differs
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_multi",
+        extra_kwargs=("scout_a_budget", "scout_b_budget"),
+    ),
+    AgentSpec(
+        name="team",
+        run=team_agents,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_multi",
+        extra_kwargs=("scout_a_budget", "scout_b_budget"),
     ),
 )
 
@@ -509,6 +540,33 @@ def _budget_fraction(budget_k: int, menu_size: int) -> float:
     return min(1.0, budget_k / menu_size)
 
 
+# 95th-percentile per-call token costs, from spec §4's table. `c95` is one
+# capped selection call; `a95` is one uncapped aggregation call, isolable
+# because `llm_only` issues exactly k+1 calls. These size the fan-in graph's
+# edges; they do not gate anything at runtime.
+#
+# NOTE (2026-08-23): these were measured under M4b's implicit reasoning
+# effort. Pinning `_SELECTION_REASONING_EFFORT="low"` roughly doubled observed
+# per-call selection cost (M4b ~509 tokens/call against ~984 today), so `c95`
+# is conservative-low. It is a sizing input for certification arithmetic, not
+# an enforced cap, so an underestimate shows up as a conservation finding
+# rather than a truncated cell -- but it should be re-measured in the
+# pre-flight calibration run before the full sweep.
+_LADDER_C95: dict[int, int] = {6: 1350, 30: 2303, 45: 2778}
+_LADDER_A95: dict[int, int] = {6: 21163, 30: 38752, 45: 39191}
+
+_LADDER_ARMS = frozenset({"fan_in_homog", "fan_in_spec", "team"})
+_LADDER_NODES = ("scout_a", "scout_b", "aggregator")
+
+
+def _ladder_calibration(budget_k: int) -> tuple[int, int]:
+    """`(c95, a95)` for a budget, falling back to the nearest tabled one."""
+    if budget_k in _LADDER_C95:
+        return _LADDER_C95[budget_k], _LADDER_A95[budget_k]
+    nearest = min(_LADDER_C95, key=lambda k: abs(k - budget_k))
+    return _LADDER_C95[nearest], _LADDER_A95[nearest]
+
+
 def _build_agent_kwargs(
     spec: AgentSpec,
     budget_k: int,
@@ -544,6 +602,15 @@ def _build_agent_kwargs(
         planner_budget = budget_k - reasoner_budget
         kwargs["planner_budget"] = planner_budget
         kwargs["reasoner_budget"] = reasoner_budget
+
+    if "scout_a_budget" in spec.extra_kwargs:
+        # Even split, remainder to scout_a -- matching the planner/reasoner
+        # convention above so the ladder's rungs stay budget-comparable.
+        kwargs["scout_b_budget"] = budget_k // 2
+        kwargs["scout_a_budget"] = budget_k - budget_k // 2
+
+    if spec.name == "fan_in_spec":
+        kwargs["differentiate"] = True
 
     return kwargs
 
@@ -616,12 +683,43 @@ def run_cell(
     # a "skipped" — agent compatibility was satisfied but adapter
     # construction itself broke (e.g., disk full, network down for
     # first-time dataset download).
+    # Built BEFORE the adapter: the ladder arms' `token_meter` closes over it,
+    # and without that closure `as_node` attributes nothing, every node's
+    # token consumption stays 0, and verify() is trivially true -- H-2 would
+    # be unfalsifiable.
+    counting_llm: _CountingLLM | None = None
+    if spec.accepts_llm:
+        counting_llm = _CountingLLM(target=llm)
+
     try:
+        extra: dict[str, Any] = {}
+        graph = None
+        if spec.name in _LADDER_ARMS:
+            from evaluation.chamber_pipeline.coordination import build_fan_in_graph
+
+            c95, a95 = _ladder_calibration(budget_k)
+            graph = build_fan_in_graph(k=budget_k, c95=c95, a95=a95)
+            meter = counting_llm
+            extra = {
+                "node_monitors": {n: graph.monitor_for(n) for n in _LADDER_NODES},
+                # No aggregate token cap: `as_node` charges node monitors, so
+                # the adapter's own `usage.tokens` stays 0 and any constraint
+                # on it would be unreachable. Token budgets live on the graph,
+                # where verify() can actually see them.
+                "token_meter": (
+                    (lambda: meter.total_input_tokens + meter.total_output_tokens)
+                    if meter is not None
+                    else None
+                ),
+            }
         adapter = create_contracted_chamber_agent(
             chamber=chamber,
             configuration=configuration,
             intervention_budget=budget_k,
+            **extra,
         )
+        if graph is not None:
+            adapter.delegation_graph = graph  # read back by the P2 scorer
         menu_size = len(adapter.available_experiments())
         budget_fraction = _budget_fraction(budget_k, menu_size)
     except Exception as exc:
@@ -652,10 +750,6 @@ def run_cell(
     # Wrap the LLM (user-supplied or lazy-imported litellm.completion)
     # in a per-cell _CountingLLM so n_llm_calls + tokens + cost can be
     # populated uniformly. Non-LLM variants get None for all four.
-    counting_llm: _CountingLLM | None = None
-    if spec.accepts_llm:
-        counting_llm = _CountingLLM(target=llm)
-
     kwargs = _build_agent_kwargs(spec, budget_k, seed, pc_alpha, counting_llm)
 
     t0 = time.perf_counter()
@@ -684,6 +778,30 @@ def run_cell(
         ) = _read_llm_metrics(counting_llm)
         model_id, reasoning_effort, providers_used = _read_llm_provenance(counting_llm)
 
+        # Coordination + P2 columns. `getattr` on both: rungs 0 and 3 set
+        # neither attribute, and a bare access raises AttributeError on every
+        # reused-arm cell.
+        coord = getattr(adapter, "coordination_stats", {}) or {}
+        cell_graph = getattr(adapter, "delegation_graph", None)
+        agg_tokens: int | None = None
+        frag: int | None = None
+        refuse: bool | None = None
+        certified: bool | None = None
+        if cell_graph is not None:
+            from evaluation.chamber_pipeline.tree_accounting import (
+                max_tree_fragment,
+                tree_would_refuse,
+            )
+
+            agg_tokens = cell_graph.monitor_for("aggregator").usage.tokens
+            frag = max_tree_fragment(cell_graph, "aggregator")
+            refuse = tree_would_refuse(cell_graph, "aggregator", agg_tokens)
+            try:
+                cell_graph.verify()
+                certified = True
+            except ConservationViolationError:
+                certified = False
+
         # PC variants populate degeneracy count; llm_only doesn't run PC.
         n_pc_degen: int | None = None if spec.name == "llm_only" else handler.count
 
@@ -707,6 +825,12 @@ def run_cell(
             model_id=model_id,
             reasoning_effort=reasoning_effort,
             providers_used=providers_used,
+            overlap_frac=coord.get("overlap_frac"),
+            n_experiments_distinct=coord.get("n_experiments_distinct"),
+            conservation_certified=certified,
+            aggregator_tokens=agg_tokens,
+            max_tree_fragment=frag,
+            tree_would_refuse=refuse,
             n_pc_degeneracies=n_pc_degen,
             tokens_in=tokens_in,
             tokens_out=tokens_out,

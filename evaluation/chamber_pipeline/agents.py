@@ -116,6 +116,14 @@ _ADJACENCY_MAX_TOKENS = 32768
 _RECONCILE_MAX_TOKENS = 8192  # aggregator merges two selection lists
 _NEGOTIATE_MAX_TOKENS = 4096  # short proposals in the team arm
 
+# Pinned for the same reason as `_SELECTION_REASONING_EFFORT`: an unset
+# parameter silently tracks a provider default, and DeepSeek raised that
+# default under unchanged weights on 2026-08-13. These two calls DO want real
+# deliberation -- reconciliation merges two selection lists, negotiation
+# reasons about a peer's claim -- so "high" is the right value, but it has to
+# be stated rather than inherited.
+_COORDINATION_REASONING_EFFORT = "high"
+
 # Rung 1's two scouts run the SAME prompt, so `seed` cannot decorrelate them:
 # `_llm_select_loop` uses it only for the fallback RNG reached on an off-menu
 # or duplicate response. On the happy path both scouts receive byte-identical
@@ -863,6 +871,7 @@ def fan_in_agents(
             model=model,
             messages=build_reconcile_prompt(chosen_a, chosen_b),
             max_tokens=_RECONCILE_MAX_TOKENS,
+            extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
         )
 
     # Duplicates still COST budget — each query_intervention was metered — but
@@ -943,6 +952,7 @@ def team_agents(
                 model=model,
                 messages=build_negotiate_propose_prompt(menu, budget, role),
                 max_tokens=_NEGOTIATE_MAX_TOKENS,
+                extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
             )
         return _parse_name_list(proposal, menu)
 
@@ -955,6 +965,7 @@ def team_agents(
                 model=model,
                 messages=build_negotiate_revise_prompt(menu, budget, own, other),
                 max_tokens=_NEGOTIATE_MAX_TOKENS,
+                extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
             )
         return _parse_name_list(revised, menu)
 
@@ -998,6 +1009,7 @@ def team_agents(
             model=model,
             messages=build_reconcile_prompt(chosen_a, chosen_b),
             max_tokens=_RECONCILE_MAX_TOKENS,
+            extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
         )
 
     seen: set[str] = set()
