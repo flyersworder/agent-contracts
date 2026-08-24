@@ -738,6 +738,65 @@ and needs its own replication check.
 - **`overlap_frac` is structurally 0.0 for rung 4** (pools disjoint by
   construction). State as a scope limit.
 
+### Harness validity gate (k=45, all five rungs) + calibration — then LAUNCH
+
+Ran a 15-cell gate at the largest budget, then 18 calibration cells at k=6/30,
+before committing to the sweep. Both clean of errors (0/33 at a generous
+timeout). What they established:
+
+| check | result |
+|---|---|
+| Truncation at k=45 | **0.7%** (2/270 calls), no `length` failures — was 43% at k=30 |
+| Timeouts | 0/15 at 7200 s; **max cell 1960 s** → sweep uses 5400 s, not M4b's 1800 |
+| PC degeneracy | 0.00 |
+| Conservation | 6/9 graph cells FAILED at k=45 → traced to `a95`, now fixed |
+| P2 | demonstrable where spend lands in-window |
+
+**`_A95_RECONCILE` → `_A95_RECONCILE_BY_K` at p75** (commit `fd7ee4c`).
+Aggregator cost grows with k, so one constant could not work:
+
+| k | p75 | spread | conserve | in P2 window |
+|---|---|---|---|---|
+| 6 | 7,646 | **48.8x** (500–24,415) | 7/9 | 2/9 |
+| 30 | 11,427 | 5.2x (4,648–24,001) | 8/9 | 5/9 |
+| 45 | 18,790 | 2.6x (9,783–25,168) | 9/9 | 6/9 |
+
+p75 not median, for a design asymmetry: `_ROLE_C95` medians get multiplied by
+`_PROVISION_MULTIPLE = 4`, but the aggregator gets `1.5 * a95` and **no
+multiple** (a margin would destroy P2), so the median was imported without its
+multiplier — and a median-sized budget overruns ~50% of executions by
+construction. Uncalibrated budgets now **raise** rather than extrapolate.
+
+**Two claims the paper must now qualify:**
+
+1. **P2's window width equals the fan-in degree.** `max_i a_i < c <= sum_i a_i`
+   gives `(f, n*f]` — 2x for two scouts. k=6's 48.8x spread cannot fit, so P2
+   is demonstrable at k=30/k=45 and effectively not at k=6. The lever is more
+   parents, not a better constant. Spec §12.
+2. **H-C conflates mechanism with forecast.** A conservation failure means
+   `verify()` correctly caught an overrun — the mechanism worked 100% of the
+   time; our cost prediction did not. Report separately or a reader concludes
+   the framework failed. Spec §6.
+
+**M6 SWEEP LAUNCHED 2026-08-24 10:51 UTC** — `--m6 --model
+openrouter/deepseek/deepseek-v4-flash-0731 --max-workers 6
+--cell-timeout-seconds 5400 --out runs/m6-ladder.parquet`, 450 cells, ~20 h
+projected (98 h serial), ~$10–15. Resume after any interruption by re-running
+the identical command; the JSONL sidecar skips completed cells.
+
+**Early science from the gate (n=3, directional only):** role differentiation
+halves scout overlap (0.79 → 0.32) and recovers distinct coverage (27.6 → 38.0
+of 45) — H-B's mechanism, visible. `team` reaches full 45/45 coverage yet the
+worst F1 (0.319 vs loop 0.463), separating topology cost from accounting:
+splitting selection between blind scouts is worse than one sequential loop
+even at equal coverage.
+
+**Still open, recorded not fixed:** scout `c95` is unverified at k=45 (per-scout
+tokens now recorded so the next calibration can check); temperature unpinned on
+`llm_pc` so the seed does not control the LLM (variance, not bias); rung-4
+negotiation restatement (gate showed contested 4/45, negfail 0 — no inflation
+visible yet).
+
 ### Test-integrity lesson (third occurrence today)
 
 Raising the caps broke **six tests** that classified call types by
