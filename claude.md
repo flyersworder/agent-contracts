@@ -692,6 +692,37 @@ Two independent reasons, either sufficient:
 The M6 plan's pilot-reuse for rungs 0 and 3 is therefore **void**; all five
 rungs must run fresh. Parallelism makes that affordable.
 
+### 2b. Library drift breaks per-cell reproducibility but NOT distributions
+
+Found 2026-08-24 by running `random` (no LLM, seeded RNG) at the current
+configuration as a within-run control. It should have reproduced M4b exactly.
+It did not — every seed differs, seed 0 giving F1 0.204 in M4b and 0.127 now.
+
+Dependency refresh (v0.5.0, Aug 21) sits between M4b (May) and now:
+`causal-learn` 0.1.4.5→0.1.4.8, `numpy` 2.3.5→2.5.2, `scipy` 1.16.3→1.18.1,
+`pandas` 3.0.1→3.0.5.
+
+**This is NOT a reason M4b is incomparable, and an earlier claim that it was
+is retracted.** PC is a threshold algorithm: it accepts or rejects each
+conditional-independence test at α=0.05, so a p-value perturbed in the 12th
+decimal flips any edge near the boundary. The flips are unbiased in direction,
+so they move an individual cell a lot and the distribution not at all:
+
+| | M4b | now | test |
+|---|---|---|---|
+| F1 (random, k=6, n=30) | 0.1832 | 0.1701 | Welch **p=0.265**, MDE 0.033 |
+| SHD (edge-level, less threshold-sensitive) | 71.4 | 71.9 | Welch **p=0.743** |
+
+So: **individual cells are not reproducible across a dependency refresh;
+population-level results are.** Two distinct claims, and conflating them
+overstates the damage. M4b remains unpoolable with new rows for the other two
+reasons above (provider-side reasoning change, selection-semantics fix) —
+both large and directional, unlike this.
+
+Worth one sentence in the paper's reproducibility statement: seeded
+determinism in a threshold-based discovery algorithm does not survive a
+numerics upgrade, so archive the resolved environment, not just the seed.
+
 ### 3. `deepseek-v4-flash-0731` is the better snapshot
 
 Same provider (Novita), late-loop call: **23.5 s / 2,175 tokens** against
