@@ -167,7 +167,7 @@ mistaken for a topology result.
 | Overlap pre-flight probe | 24 | 3 new arms × **k=30** × 8 seeds. The budget must be named: at k=6 two blind scouts draw 3 each from 59, so overlap is near zero by chance; at k=45 it is near-forced. High overlap in `fan_in_homog` is the *expected* replication of arXiv:2602.03794. Abort only if `fan_in_spec` **and** `team` also exceed `overlap_frac` > 0.8 |
 | Reuse-validity guard | 20 | `llm_pc` ×15 at k=30 + `llm_only` ×5 (smoke only). **Test the mean against M4b's SEM, not the per-cell SD.** `llm_pc` per-cell SD is 0.040, so the old 5-cell / 1.5σ rule tolerated 0.059 F1 of drift — 2–8× the effect the paper measures. n=15 gives SEM 0.010, resolving ~0.02. `llm_only`'s SD of 0.274 makes any tight test on it vacuous |
 | New-arm timeout reserve | 20 | Rung 3 lost 8/30 at k=59 and its survivors averaged 1381 s against the 1800 s limit. Rungs 1/2/4 have at least as many chained calls |
-| Tight-budget P2 demonstration | 10 | Deliberately tight T, so total consumption approaches `B(root)`. Isolated from the main sweep — see §6 |
+| ~~Tight-budget P2 demonstration~~ | ~~10~~ | **CANCELLED 2026-08-24** — demonstrated H-1's double-count, which was withdrawn with P2's unsoundness claim. Incompleteness is measured in the main sweep by `tree_would_refuse` |
 | `planner_reasoner` k=59 timeout re-runs | 8 | Completes the M4b record for the saturation report |
 | Token-matched contingency | 90 (reserve) | Held back. Triggered only if a multi-agent rung beats rung 0 — pre-registered so the "gains bought with tokens" objection is answered with evidence |
 
@@ -312,14 +312,36 @@ behavior and M4b reuse stays valid.
 
 ## 6. Hypotheses
 
+> **H-1 WITHDRAWN 2026-08-24.** This section was written 2026-08-22, one day
+> before the theory track retracted P2's *unsoundness* claim. H-1 as stated
+> below — "tree accounting certifies a bound **exceeding** `B(root)` by the
+> fan-in double-count" — IS that retracted claim. Checked against this
+> framework's own tree law, `ContractingCapability` resolves a multi-parent
+> node by splitting it and the split encoding is **sound**: it refuses the
+> over-commitment the claim relied on. Only a *drop*-policy accountant, which
+> no real implementation uses, double-counts. See `docs/whitepaper.md` §4.6 P2
+> and the module docstring of `evaluation/chamber_pipeline/tree_accounting.py`.
+>
+> **Consequence: the 10-cell tight-budget demonstration is CANCELLED.** It
+> existed only to exhibit the double-count. The surviving result --
+> incompleteness, `max_i a_i < c <= sum_i a_i` -- is measured per cell by
+> `tree_would_refuse` in the MAIN sweep, and the k=45 gate already returned
+> `True` on 6 of 9 graph cells. Nothing about it needs a tight-T run.
+>
+> What remains true, and is now quantified rather than asserted: H-2
+> (conservation) and P2 still compete for the same provisioning constant,
+> because P2's window is only `n`-wide for `n` parents (§12). That is a
+> reporting caveat, not a reason for a second run.
+
+The original text follows, superseded:
+
 H-1 and H-2 pull in opposite directions on the same constant and must not share
 a run. Tree insufficiency needs total consumption near `B(root)`; certification
 needs headroom. They are therefore separated by design:
 
 - **P2 proves insufficiency analytically** (§2).
-- **A dedicated 10-cell run at deliberately tight T demonstrates it** — total
-  consumption approaches `B(root)`, so tree accounting's double-counted bound
-  admits executions the DAG law rejects.
+- ~~A dedicated 10-cell run at deliberately tight T demonstrates it~~ —
+  CANCELLED, see above.
 - **The main sweep runs at the loose T(k) of §4** and supports H-2.
 
 | | Claim | Where | Can it be null? |
