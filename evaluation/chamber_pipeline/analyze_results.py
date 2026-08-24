@@ -675,6 +675,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         # One chamber only -- `ladder_frame` refuses a mixed frame, since the
         # same budget_k is a different budget under a different menu size.
         ladder_df = df[df["chamber"] == args.check_chamber] if "chamber" in df.columns else df
+        # Validity BEFORE accuracy, deliberately. A degradation rate that
+        # varies with budget biases the accuracy numbers, so reading the table
+        # first means reading numbers that may have to be discarded. The M4b
+        # pilot was interpreted in full before anyone checked whether the
+        # harness was working; ~43% of its k=30 selections were random.
+        print()
+        print("=== HARNESS VALIDITY ===")
+        report = harness_validity_report(ladder_df)
+        warnings = validity_warnings(report)
+        if warnings:
+            for warning in warnings:
+                print(f"  {warning}")
+            print(
+                "\n  Read these before the table below. A MODERATOR warning means "
+                "the\n  measured effect is biased, not merely noisy."
+            )
+        else:
+            print("  No degradation detected on any recorded path.")
         print()
         print(format_ladder_summary(ladder_df))
         if args.out_dir:
@@ -730,7 +748,10 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
                 # Denominator is every ATTEMPTED cell: an errored cell is the
                 # degradation, so filtering to ok-cells first would report 0.
                 "error_rate": 1.0 - (len(ok) / len(grp)) if len(grp) else float("nan"),
-                "fallback_rate": (float(fb) / float(calls)) if calls else 0.0,
+                # No denominator but non-zero fallbacks is NOT a clean rate.
+                # Surface it as 1.0 so `validity_warnings` flags it, rather
+                # than dividing by a missing `n_llm_calls` into a silent 0.0.
+                "fallback_rate": (float(fb) / float(calls)) if calls else (1.0 if fb else 0.0),
                 "pc_degeneracy_rate": (float(pc) / len(ok)) if len(ok) else 0.0,
                 "conservation_fail_rate": cons_fail,
                 "wall_mean": ok["wall_time_seconds"].mean() if len(ok) else float("nan"),

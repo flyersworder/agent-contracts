@@ -495,6 +495,8 @@ def _synthetic_ladder(n: int = 30) -> pd.DataFrame:
                         "tokens_in": 1000,
                         "tokens_out": 500,
                         "wall_time_seconds": 300.0,
+                        "n_llm_calls": k,
+                        "n_selection_fallbacks": 0,
                         "overlap_frac": 0.3,
                     }
                 )
@@ -822,3 +824,34 @@ def test_an_unrecorded_degradation_path_is_reported_as_unmeasured_not_clean() ->
     df = _validity_frame().drop(columns=["n_selection_fallbacks"])
     warnings = validity_warnings(harness_validity_report(df))
     assert any("UNMEASURED" in w and "n_selection_fallbacks" in w for w in warnings), warnings
+
+
+def test_ladder_output_puts_harness_validity_before_accuracy() -> None:
+    """Order is the point, not decoration.
+
+    A degradation rate that varies with budget biases the accuracy numbers, so
+    reading accuracy first means reading numbers you may have to discard. The
+    whole M4b pilot was interpreted before anyone checked whether the harness
+    was working. Print the warnings above the table so they cannot be skipped.
+    """
+    import io
+    from contextlib import redirect_stdout
+
+    from evaluation.chamber_pipeline.analyze_results import main
+
+    df = _synthetic_ladder(n=3)
+    df.loc[df.index[:5], "n_selection_fallbacks"] = 4  # a real degradation
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "cells.parquet"
+        df.to_parquet(path)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            main(["--input", str(path), "--ladder"])
+    out = buf.getvalue()
+
+    assert "HARNESS VALIDITY" in out, out[-800:]
+    assert "DEGRADED" in out
+    # The validity block must come FIRST.
+    assert out.index("HARNESS VALIDITY") < out.index("Rung"), (
+        "accuracy table printed above the validity warnings"
+    )
