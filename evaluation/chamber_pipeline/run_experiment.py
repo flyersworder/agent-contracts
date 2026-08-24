@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import socket
 import sys
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
@@ -323,22 +324,22 @@ def _build_sweep_from_args(args: argparse.Namespace) -> SweepSpec:
     Custom sweeps thread every CLI flag into the SweepSpec, including
     the per-cell timeout.
     """
+    # `replace` is imported at module scope, NOT inside these branches. Two of
+    # them used to do a function-local `from dataclasses import replace`, which
+    # binds the name as local for the WHOLE function -- so the `--m6` branch,
+    # which ran no import, raised UnboundLocalError and killed a 450-cell
+    # sweep at startup. Conditional local imports read like globals and are not.
+    #
+    # Apply only the timeout override; the rest of each pre-baked spec is
+    # plan-§9 fixed, and `replace` keeps the module-level spec immutable.
     if args.pilot:
-        # Apply only the timeout override (the rest of PILOT_SPEC is
-        # plan-§9 fixed); replace via dataclasses.replace so PILOT_SPEC
-        # itself stays immutable.
         if args.cell_timeout_seconds is not None:
-            from dataclasses import replace
-
             return replace(PILOT_SPEC, cell_timeout_seconds=args.cell_timeout_seconds)
         return PILOT_SPEC
     if args.m5:
         if args.cell_timeout_seconds is not None:
-            from dataclasses import replace
-
             return replace(M5_SPEC, cell_timeout_seconds=args.cell_timeout_seconds)
         return M5_SPEC
-
     if getattr(args, "m6", False):
         if args.cell_timeout_seconds is not None:
             return replace(M6_SPEC, cell_timeout_seconds=args.cell_timeout_seconds)

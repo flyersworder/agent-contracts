@@ -437,3 +437,38 @@ class TestM6Spec:
 
         args = build_arg_parser().parse_args(["--m6"])
         assert _build_sweep_from_args(args) == M6_SPEC
+
+
+@pytest.mark.parametrize("flag", ["pilot", "m5", "m6"])
+def test_a_prebaked_spec_accepts_a_cell_timeout(flag: str) -> None:
+    """Every pre-baked spec must apply `--cell-timeout-seconds`.
+
+    `--m6 --cell-timeout-seconds 5400` crashed with UnboundLocalError on the
+    real sweep: `--pilot` and `--m5` each did a function-LOCAL
+    `from dataclasses import replace` inside their own branch, which makes
+    `replace` local to the whole function, so the `--m6` branch referenced an
+    unbound name. It passed every earlier check because `--m6 --dry-run` omits
+    the timeout and takes the other return path -- the bug lived in the
+    conjunction of two flags that were only ever tested apart.
+    """
+    from evaluation.chamber_pipeline.run_experiment import (
+        _build_sweep_from_args,
+        build_arg_parser,
+    )
+
+    args = build_arg_parser().parse_args(
+        [f"--{flag}", "--out", "x.parquet", "--cell-timeout-seconds", "5400"]
+    )
+    spec = _build_sweep_from_args(args)
+    assert spec.cell_timeout_seconds == 5400.0
+
+
+@pytest.mark.parametrize("flag", ["pilot", "m5", "m6"])
+def test_a_prebaked_spec_without_a_timeout_is_untouched(flag: str) -> None:
+    from evaluation.chamber_pipeline.run_experiment import (
+        _build_sweep_from_args,
+        build_arg_parser,
+    )
+
+    args = build_arg_parser().parse_args([f"--{flag}", "--out", "x.parquet"])
+    assert _build_sweep_from_args(args).cell_timeout_seconds is None
