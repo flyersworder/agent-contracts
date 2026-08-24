@@ -15,7 +15,7 @@ Flash for the M4 sweep is a single one-line change.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -580,10 +580,19 @@ def test_every_output_cap_clears_the_measured_reasoning_load():
         _SELECTION_MAX_TOKENS,
     )
 
-    worst_observed_reasoning = 976
+    # Superseded 2026-08-24: 976 was measured on an EMPTY-history selection
+    # call, the cheapest step of the loop. A LATE-loop call (25 already chosen)
+    # measures 2,175 on flash-0731 and 11,690 on flash -- so the floor must be
+    # anchored on the late-loop figure, not the first-call one.
+    worst_observed_reasoning = 11690
     for cap in (_SELECTION_MAX_TOKENS, _RECONCILE_MAX_TOKENS, _NEGOTIATE_MAX_TOKENS):
         assert cap >= 2 * worst_observed_reasoning
-    # Reconciliation reasons over both scouts' lists; never cheaper than one pick.
+    # Reconciliation reasons over both scouts' lists. The old rationale here
+    # ("never cheaper than one pick") is FALSE at late loop -- one pick reached
+    # 11,690 against reconcile's measured 8,557 at k=30 -- but the ordering is
+    # kept as a safety property: the aggregator must never be the tightest cap,
+    # because a truncated reconcile silently pins its billed spend to the cap
+    # and that spend feeds the P2 and H-C measurements.
     assert _RECONCILE_MAX_TOKENS >= _SELECTION_MAX_TOKENS
 
 
@@ -870,3 +879,104 @@ class TestAlreadyChosenAreNotSelectable:
             f"{llm.fallbacks}/6 real selections were discarded as duplicates "
             "because the response restated its own history"
         )
+
+
+class TestSelectionCapIsSizedForLateLoopReasoning:
+    """The selection cap has now been sized against the wrong workload twice.
+
+    200 was calibrated against nothing; 2048 was calibrated against a call with
+    an EMPTY history, which is the first and cheapest step of the loop.
+    Reasoning volume scales with the prompt, and the prompt grows by one
+    spent-experiment line per step, so both held at k=6 and failed at k=30 --
+    where an instrumented cell attributed all 13 of 30 selection failures to
+    `finish_reason=length`.
+    """
+
+    # Measured 2026-08-24 on a late-loop selection call (25 already chosen,
+    # effort=low, production provider order pinned, served by Novita).
+    MEASURED_LATE_LOOP_TOKENS: ClassVar[dict[str, int]] = {
+        "deepseek-v4-flash-0731": 2175,
+        "deepseek-v4-flash": 11690,
+    }
+
+    def test_the_cap_clears_the_worst_measured_late_loop_call(self) -> None:
+        from evaluation.chamber_pipeline.agents import _SELECTION_MAX_TOKENS
+
+        worst = max(self.MEASURED_LATE_LOOP_TOKENS.values())
+        assert worst <= _SELECTION_MAX_TOKENS, (
+            f"cap {_SELECTION_MAX_TOKENS} is below the worst measured late-loop "
+            f"call ({worst}); selections will truncate to empty content and "
+            "degrade to rng.choice, and the rate will grow with k"
+        )
+
+    def test_the_cap_keeps_headroom_over_the_worst_measurement(self) -> None:
+        """Not merely above the measurement: the tail is heavier than n=2 shows,
+        and k=45 prompts are longer than the k=30 ones this was measured on."""
+        from evaluation.chamber_pipeline.agents import _SELECTION_MAX_TOKENS
+
+        worst = max(self.MEASURED_LATE_LOOP_TOKENS.values())
+        assert 2 * worst <= _SELECTION_MAX_TOKENS, (
+            f"cap {_SELECTION_MAX_TOKENS} leaves under 2x headroom over {worst}"
+        )
+
+    def test_a_truncated_selection_is_still_recorded_as_a_fallback(self) -> None:
+        """The cap is the fix; the counter is the alarm. Keep both.
+
+        Raising the cap must not remove the ability to SEE truncation if it
+        recurs at a larger k -- that visibility is what turned a silent 43%
+        random-selection rate into a diagnosable defect.
+        """
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+        from evaluation.chamber_pipeline.agents import _llm_select_loop
+
+        class _TruncatingLLM:
+            def __init__(self) -> None:
+                self.fallbacks = 0
+
+            def record_selection_fallback(self) -> None:
+                self.fallbacks += 1
+
+            def __call__(self, **_):  # type: ignore[no-untyped-def]
+                return {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]}
+
+        llm = _TruncatingLLM()
+        adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=4)
+        chosen, _ = _llm_select_loop(adapter, llm, "m", 0, spend=4)
+        assert len(chosen) == 4  # still spends the budget
+        assert llm.fallbacks == 4  # and says so, every time
+
+
+def test_call_kind_markers_are_unambiguous():
+    """Each prompt builder must map to exactly one kind.
+
+    The classifier replaced a `max_tokens` discriminator that became ambiguous
+    the moment two caps were set to the same value, and before that a menu-size
+    threshold with zero margin. This guard is what keeps the third version from
+    degrading the same way: if a prompt's wording changes so two markers match,
+    or none do, this fails instead of six tests quietly measuring the wrong
+    calls.
+    """
+    from evaluation.chamber_pipeline.llm_planner import (
+        build_negotiate_propose_prompt,
+        build_negotiate_revise_prompt,
+        build_reconcile_prompt,
+        build_select_prompt,
+    )
+    from tests.evaluation.conftest import call_kind
+
+    menu = ["uniform_a", "uniform_b", "uniform_c"]
+    expected = {
+        "select": (build_select_prompt(menu, 3, ["uniform_a"]), "select"),
+        "reconcile": (build_reconcile_prompt(["uniform_a"], ["uniform_b"]), "reconcile"),
+        "propose": (build_negotiate_propose_prompt("A", 2, menu), "negotiate_propose"),
+        "revise": (
+            build_negotiate_revise_prompt(menu, 2, ["uniform_a"], ["uniform_b"]),
+            "negotiate_revise",
+        ),
+    }
+    for label, (msgs, want) in expected.items():
+        assert call_kind(msgs) == want, f"{label} classified as {call_kind(msgs)!r}"
+    # And no kind is "unknown", which would silently empty a test's filter.
+    assert "unknown" not in {call_kind(m) for m, _ in expected.values()}

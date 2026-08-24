@@ -65,16 +65,44 @@ LLMCallable = Callable[..., Any]
 # of verbose reasoning for what is fundamentally a "pick one item from
 # this list" task. Tests can monkey-patch this if they need different
 # behavior.
-# Raised 200 -> 2048 on 2026-08-23. The old cap could not hold a single
-# selection call: measured on the real 59-item LT menu, DeepSeek v4 Flash 0423
-# spends 821 reasoning tokens at the provider default, 976 at `high`, 475 at
-# `low`, 415 at `minimal` -- every level over 200. All four pinned providers
-# returned `finish_reason=length` with EMPTY content, and the loop below then
-# fell back to `rng.choice`, silently turning LLM selection into random
-# selection. M4b (2026-05-18) was unaffected: its recorded 509-2376 output
-# tokens per call prove the calls ran to completion, because providers did not
-# then count reasoning tokens against `max_tokens`.
-_SELECTION_MAX_TOKENS = 2048
+# Raised 200 -> 2048 on 2026-08-23, then 2048 -> 32768 the same day. The old
+# cap could not hold a single selection call: measured on the real 59-item LT
+# menu, DeepSeek v4 Flash 0423 spends 821 reasoning tokens at the provider
+# default, 976 at `high`, 475 at `low`, 415 at `minimal` -- every level over
+# 200. All four pinned providers returned `finish_reason=length` with EMPTY
+# content, and the loop below then fell back to `rng.choice`, silently turning
+# LLM selection into random selection. M4b (2026-05-18) was unaffected: its
+# recorded 509-2376 output tokens per call prove the calls ran to completion,
+# because providers did not then count reasoning tokens against `max_tokens`.
+#
+# WHY 2048 WAS STILL WRONG, and the methodological error to avoid repeating:
+# those 415-976 figures were all measured on a call with an EMPTY history --
+# the FIRST and cheapest step of the loop. Reasoning volume scales with the
+# prompt, and the prompt grows by one spent-experiment line per step. Measured
+# on a late-loop call (25 already chosen, effort=low, providers pinned):
+# flash-0731 emits 2,175 tokens and flash 11,690 -- 1.1x and 5.7x the 2048 cap.
+#
+# The consequence was severe and invisible. An instrumented k=30 cell
+# (2026-08-24, 0731, pinned providers) attributed EVERY selection failure to
+# truncation: {'length': 13, 'empty': 0, 'offmenu': 0, 'ok': 17} -- 13 of 30
+# picks were `rng.choice`. Because the failure rate is a function of history
+# length, it was 0/36 at k=6 and ~43% at k=30, which made the harness a
+# MODERATOR CORRELATED WITH THE BUDGET: in M4b, `llm_pc` beat `random` by
+# +0.034 F1 at k=6 (resolved) and only +0.018 at k=30 (below MDE), so LLM
+# selection appeared to stop helping as budget grew. That was this cap, not a
+# property of the model.
+#
+# It also threatened M6 directly: the ladder varies how budget is SPLIT across
+# agents, and splitting shortens each agent's history. Two scouts at k=15 each
+# truncate less than one loop at k=30, so the fan-in rungs would have scored
+# better than the loop for reasons having nothing to do with coordination --
+# H-B could have come out positive as a pure `max_tokens` artifact.
+#
+# 32768 matches `_ADJACENCY_MAX_TOKENS`. `max_tokens` is a CEILING, not a
+# reservation -- billing follows tokens actually generated -- so sizing it
+# generously costs nothing and removes the failure mode instead of relocating
+# it to a larger k. Calibrate any future change on a LATE-loop call.
+_SELECTION_MAX_TOKENS = 32768
 
 # Pinned explicitly rather than inherited. M4b never set this and silently
 # tracked DeepSeek's default; that default then rose (M4b's ~509 output
@@ -110,8 +138,28 @@ _ADJACENCY_MAX_TOKENS = 32768
 # `completion_tokens`, so a 200-token cap is consumed entirely by hidden
 # reasoning and the response comes back with empty `content`. That is the M4b
 # root-cause bug; these are sized 4-8x expected content to avoid repeating it.
-_RECONCILE_MAX_TOKENS = 8192  # aggregator merges two selection lists
-_NEGOTIATE_MAX_TOKENS = 4096  # short proposals in the team arm
+# Raised 8192 -> 32768 on 2026-08-24, alongside the selection cap, for the
+# same reason: the old value was calibrated on k=6-ish prompts (reconcile
+# median 2,826 / p95 6,375) while `_A95_RECONCILE` already measures 8,557 at
+# k=30, so an 8192 cap truncates at the budgets the ladder actually runs.
+#
+# CAVEAT, and it is not about accuracy. `team_agents`/`fan_in_agents` DISCARD
+# the reconcile response -- the merge below is a plain Python dedup plus PC --
+# so truncation here never changed a result. What it changed is COST: a
+# truncated call still generates and bills `max_tokens` of reasoning, which
+# `as_node("aggregator")` books into the aggregator's monitor. At 8192 a
+# truncated reconcile pinned aggregator spend to exactly 8192, which sits
+# inside P2's incompleteness window (6418, 12836] -- so `tree_would_refuse`
+# could report True because the call TRUNCATED, not because reconciliation is
+# genuinely indivisible-and-large.
+#
+# Consequence: `_A95_RECONCILE` and `_C95_NEGOTIATE` in `orchestrator.py` are
+# now calibrated against truncated calls and MUST be re-derived from
+# untruncated late-loop measurements at k=45 before any sweep whose H-C or P2
+# numbers are reported. Otherwise both are calibration artifacts. This is what
+# spec §3's c95(45) pre-flight probe measures.
+_RECONCILE_MAX_TOKENS = 32768  # aggregator merges two selection lists
+_NEGOTIATE_MAX_TOKENS = 32768  # short proposals in the team arm
 
 # Pinned for the same reason as `_SELECTION_REASONING_EFFORT`: an unset
 # parameter silently tracks a provider default, and DeepSeek raised that

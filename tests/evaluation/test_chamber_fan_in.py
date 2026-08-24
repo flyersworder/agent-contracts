@@ -55,17 +55,22 @@ def test_aggregator_consumes_tokens_via_reconciliation(make_ladder_adapter, coun
     vacuously true -- H-2 would be unfalsifiable and P2 would have no
     empirical form.
     """
-    from evaluation.chamber_pipeline.agents import (
-        _RECONCILE_MAX_TOKENS,
-        _SELECTION_MAX_TOKENS,
-    )
+    from evaluation.chamber_pipeline.agents import _RECONCILE_MAX_TOKENS
 
     adapter = make_ladder_adapter(counting_llm)
     fan_in_agents(adapter, seed=0, scout_a_budget=1, scout_b_budget=1, llm=counting_llm)
 
-    reconcile = [c for c in counting_llm.calls if c["max_tokens"] == _RECONCILE_MAX_TOKENS]
+    from tests.evaluation.conftest import call_kind
+
+    reconcile = [c for c in counting_llm.calls if call_kind(c["messages"]) == "reconcile"]
     assert len(reconcile) == 1
-    assert reconcile[0]["max_tokens"] != _SELECTION_MAX_TOKENS
+    # This used to assert `!= _SELECTION_MAX_TOKENS`, standing in for "do not
+    # reuse a selection-sized cap on a reasoning call". That inequality became
+    # meaningless when both were raised to 32768 -- and the underlying concern
+    # was never the difference, it was that the cap must clear the reasoning
+    # load. Assert the substantive property instead.
+    assert reconcile[0]["max_tokens"] == _RECONCILE_MAX_TOKENS
+    assert reconcile[0]["max_tokens"] >= 2 * 11690  # worst measured late-loop call
     # Making the call is not enough: its tokens must REACH the node monitor.
     assert adapter.delegation_graph.monitor_for("aggregator").usage.tokens > 0
 
@@ -125,7 +130,7 @@ def test_differentiate_selects_the_role_prompts(make_ladder_adapter, fake_llm):
 @requires_causalchamber
 def test_homogeneous_mode_gives_both_scouts_the_same_prompt(make_ladder_adapter, fake_llm):
     """Rung 1's scouts differ only by sampling, never by instruction."""
-    from evaluation.chamber_pipeline.agents import _SELECTION_MAX_TOKENS
+    from tests.evaluation.conftest import call_kind
 
     adapter = make_ladder_adapter(fake_llm)
     fan_in_agents(
@@ -136,7 +141,12 @@ def test_homogeneous_mode_gives_both_scouts_the_same_prompt(make_ladder_adapter,
         differentiate=False,
         llm=fake_llm,
     )
-    selection = [c for c in fake_llm.calls if c["max_tokens"] == _SELECTION_MAX_TOKENS]
+    # Filter by prompt kind. Filtering on `max_tokens == _SELECTION_MAX_TOKENS`
+    # also matched the aggregator once selection and reconcile were both raised
+    # to 32768, so this compared a scout's system prompt against the
+    # aggregator's and failed for the wrong reason.
+    selection = [c for c in fake_llm.calls if call_kind(c["messages"]) == "select"]
+    assert selection
     assert len({c["messages"][0]["content"] for c in selection}) == 1
 
 

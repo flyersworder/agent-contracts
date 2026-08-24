@@ -58,6 +58,38 @@ class RecordingLLM:
         return {"choices": [{"message": {"content": self._responder(idx, messages)}}]}
 
 
+def call_kind(messages: list[dict[str, str]]) -> str:
+    """Classify an LLM call by its PROMPT, not by its max_tokens.
+
+    Tests used to discriminate on `max_tokens == _NEGOTIATE_MAX_TOKENS`. That
+    broke the moment the selection and negotiate caps were both raised to
+    32768 -- the discriminator silently became ambiguous and six tests started
+    measuring the wrong calls. An earlier version keyed on menu size (`> 30`)
+    and had exactly zero margin against the largest selection pool.
+
+    Markers verified pairwise-exclusive across all four prompt builders by
+    `test_call_kind_markers_are_unambiguous`. A bare "designer" test is NOT
+    sufficient: the reconcile prompt's system message says "You are one of two
+    designers", so it matched too and reconcile calls were counted as
+    negotiation.
+    """
+    body = " ".join(m["content"] for m in messages)
+    if "selected:" in body:
+        return "reconcile"
+    if "You are designer" in body:
+        return "negotiate_propose"
+    if "other designer proposed" in body:
+        return "negotiate_revise"
+    if "Remaining budget" in body:
+        return "select"
+    return "unknown"
+
+
+def is_negotiation(messages: list[dict[str, str]]) -> bool:
+    """Either negotiation round, but never reconciliation."""
+    return call_kind(messages).startswith("negotiate")
+
+
 def _menu_from(messages: list[dict[str, str]]) -> list[str]:
     """Recover the menu from the user message.
 

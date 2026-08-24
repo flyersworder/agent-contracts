@@ -19,11 +19,11 @@ from tests.evaluation.conftest import requires_causalchamber
 @requires_causalchamber
 def test_team_makes_exactly_four_negotiation_calls(make_ladder_adapter, counting_llm):
     """One upfront round -- propose then revise, per scout. O(1) in k."""
-    from evaluation.chamber_pipeline.agents import _NEGOTIATE_MAX_TOKENS
-
     adapter = make_ladder_adapter(counting_llm)
     team_agents(adapter, seed=0, scout_a_budget=1, scout_b_budget=1, llm=counting_llm)
-    negotiation = [c for c in counting_llm.calls if c["max_tokens"] == _NEGOTIATE_MAX_TOKENS]
+    from tests.evaluation.conftest import is_negotiation
+
+    negotiation = [c for c in counting_llm.calls if is_negotiation(c["messages"])]
     assert len(negotiation) == 4
 
 
@@ -171,13 +171,14 @@ def test_negotiation_calls_carry_a_temperature(make_ladder_adapter, counting_llm
     negotiation contributes noise instead of a split.
     """
     from evaluation.chamber_pipeline.agents import (
-        _NEGOTIATE_MAX_TOKENS,
         _SCOUT_TEMPERATURE,
     )
 
     adapter = make_ladder_adapter(counting_llm)
     team_agents(adapter, seed=0, scout_a_budget=1, scout_b_budget=1, llm=counting_llm)
-    negotiation = [c for c in counting_llm.calls if c["max_tokens"] == _NEGOTIATE_MAX_TOKENS]
+    from tests.evaluation.conftest import is_negotiation
+
+    negotiation = [c for c in counting_llm.calls if is_negotiation(c["messages"])]
     assert negotiation
     for call in negotiation:
         assert call["temperature"] == _SCOUT_TEMPERATURE
@@ -214,8 +215,7 @@ def test_the_selection_loop_changes_which_experiments_are_queried(
     that reason -- it passed even when selection was made fully inert by
     truncating each pool to exactly its budget.
     """
-    from evaluation.chamber_pipeline.agents import _NEGOTIATE_MAX_TOKENS
-    from tests.evaluation.conftest import RecordingLLM, _menu_from
+    from tests.evaluation.conftest import RecordingLLM, _menu_from, is_negotiation
 
     def queried(sel):
         holder: list = []
@@ -230,7 +230,7 @@ def test_the_selection_loop_changes_which_experiments_are_queried(
             # pool-sizing change that reached 31 would silently reclassify
             # selection prompts as negotiation and both tests would keep
             # passing while testing something else.
-            if holder[0].calls[idx]["max_tokens"] == _NEGOTIATE_MAX_TOKENS:
+            if is_negotiation(msgs):
                 return "\n".join(names[:5])  # negotiation: FIXED
             return sel(names)
 
@@ -253,8 +253,7 @@ def test_matched_budget_holds_at_the_largest_ladder_budget(make_ladder_adapter):
     claims were large, with `status=ok` and conservation certified. k=6 and
     k=30 never triggered it, so a test at a smaller budget proves nothing.
     """
-    from evaluation.chamber_pipeline.agents import _NEGOTIATE_MAX_TOKENS
-    from tests.evaluation.conftest import RecordingLLM, _menu_from
+    from tests.evaluation.conftest import RecordingLLM, _menu_from, is_negotiation
 
     holder: list = []
 
@@ -263,7 +262,7 @@ def test_matched_budget_holds_at_the_largest_ladder_budget(make_ladder_adapter):
         if not names:
             return ""
         # max_tokens, not menu size -- see the sibling test for why.
-        if holder[0].calls[idx]["max_tokens"] == _NEGOTIATE_MAX_TOKENS:
+        if is_negotiation(msgs):
             return "\n".join(names[:23])  # negotiation: a full budget's worth
         return names[0]
 
@@ -343,8 +342,7 @@ def test_the_fallback_partition_varies_with_the_seed(make_ladder_adapter):
     seed. Deleting the shuffle leaves every other test green.
     """
     from evaluation.chamber_pipeline import agents as _agents
-    from evaluation.chamber_pipeline.agents import _NEGOTIATE_MAX_TOKENS
-    from tests.evaluation.conftest import RecordingLLM, _menu_from
+    from tests.evaluation.conftest import RecordingLLM, _menu_from, is_negotiation
 
     real_loop = _agents._llm_select_loop
 
@@ -358,7 +356,7 @@ def test_the_fallback_partition_varies_with_the_seed(make_ladder_adapter):
                 return ""
             # Negotiation held FIXED across seeds: claims cannot be the
             # source of any difference this test observes.
-            if holder[0].calls[idx]["max_tokens"] == _NEGOTIATE_MAX_TOKENS:
+            if is_negotiation(msgs):
                 return "\n".join(names[:3])
             return names[0]
 
@@ -391,8 +389,7 @@ def test_negotiation_failures_counts_rounds_not_scouts(make_ladder_adapter):
     propose rounds parse but both REVISE rounds return prose, reducing rung 4
     to one-shot proposals with no negotiation at all.
     """
-    from evaluation.chamber_pipeline.agents import _NEGOTIATE_MAX_TOKENS
-    from tests.evaluation.conftest import RecordingLLM, _menu_from
+    from tests.evaluation.conftest import RecordingLLM, _menu_from, is_negotiation
 
     holder: list = []
     negotiation_seen: list = []
@@ -401,7 +398,7 @@ def test_negotiation_failures_counts_rounds_not_scouts(make_ladder_adapter):
         names = _menu_from(msgs)
         if not names:
             return ""
-        if holder[0].calls[idx]["max_tokens"] == _NEGOTIATE_MAX_TOKENS:
+        if is_negotiation(msgs):
             negotiation_seen.append(idx)
             # Rounds are propose_a, propose_b, revise_a, revise_b. Break the
             # FOURTH only: scout_b falls back to its own proposal, so the
