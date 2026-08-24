@@ -690,6 +690,129 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-(arm, budget) rates for every scaffold degradation path.
+
+    Accuracy columns say what the agents scored; these say whether the harness
+    was working while they scored it. Keeping them separate matters because a
+    degraded cell still reports `status="ok"` and a plausible F1 -- that is how
+    a 43% random-selection rate at k=30 survived a full pilot unnoticed.
+
+    Args:
+        df: Cell-level DataFrame from `load_records`.
+
+    Returns:
+        One row per (agent_name, budget_k): n_cells, error_rate,
+        fallback_rate (fallbacks per LLM call), pc_degeneracy_rate,
+        conservation_fail_rate, wall_mean, wall_p95.
+    """
+    out = []
+    for (agent, budget), grp in df.groupby(["agent_name", "budget_k"], sort=True):
+        ok = grp[grp["status"] == "ok"]
+        calls = ok["n_llm_calls"].sum() if "n_llm_calls" in ok.columns else 0
+        fb = ok["n_selection_fallbacks"].sum() if "n_selection_fallbacks" in ok.columns else 0
+        pc = ok["n_pc_degeneracies"].sum() if "n_pc_degeneracies" in ok.columns else 0
+        if "conservation_certified" in ok.columns:
+            judged = ok[ok["conservation_certified"].notna()]
+            cons_fail = (
+                float((~judged["conservation_certified"].astype(bool)).mean())
+                if len(judged)
+                else float("nan")
+            )
+        else:
+            cons_fail = float("nan")
+        out.append(
+            {
+                "agent_name": agent,
+                "budget_k": int(budget),
+                "n_cells": len(grp),
+                "n_ok": len(ok),
+                # Denominator is every ATTEMPTED cell: an errored cell is the
+                # degradation, so filtering to ok-cells first would report 0.
+                "error_rate": 1.0 - (len(ok) / len(grp)) if len(grp) else float("nan"),
+                "fallback_rate": (float(fb) / float(calls)) if calls else 0.0,
+                "pc_degeneracy_rate": (float(pc) / len(ok)) if len(ok) else 0.0,
+                "conservation_fail_rate": cons_fail,
+                "wall_mean": ok["wall_time_seconds"].mean() if len(ok) else float("nan"),
+                "wall_p95": ok["wall_time_seconds"].quantile(0.95) if len(ok) else float("nan"),
+            }
+        )
+    report = pd.DataFrame(out)
+    # Record which source columns were ABSENT. Without this a frame that never
+    # recorded a path is indistinguishable from one where the path never fired,
+    # and `validity_warnings` would call an unmeasured harness clean.
+    report.attrs["missing_columns"] = [
+        c
+        for c in ("n_selection_fallbacks", "n_pc_degeneracies", "conservation_certified")
+        if c not in df.columns
+    ]
+    return report
+
+
+# A rate this far apart across budgets counts as varying rather than jitter.
+_VARIATION_EPS = 0.02
+
+
+def validity_warnings(report: pd.DataFrame) -> list[str]:
+    """Turn a validity report into explicit warnings, worst kind first.
+
+    Two severities, and the distinction is the whole point:
+
+      * A **flat** non-zero rate degrades every cell about equally. It adds
+        noise and weakens power.
+      * A rate that **varies with budget** is a moderator correlated with the
+        independent variable. It biases the measured effect. This is what made
+        `llm_pc` beat `random` at k=6 (+0.034) and not at k=30 (+0.018): the
+        selection-truncation rate went 0% -> 43% across those budgets, so the
+        treatment was being removed in proportion to the x-axis.
+
+    Args:
+        report: Output of `harness_validity_report`.
+
+    Returns:
+        Human-readable warnings; empty if every path is clean.
+    """
+    warnings: list[str] = []
+    for column in report.attrs.get("missing_columns", []):
+        warnings.append(
+            f"UNMEASURED: {column} is absent from these records, so its rate "
+            "reads 0.00 here. That is not evidence the path is clean -- "
+            "`runs/m4-pilot.parquet` shows 0.00 for it while ~43% of its k=30 "
+            "selections were in fact random."
+        )
+    rates = (
+        ("fallback_rate", "selection fallback rate"),
+        ("error_rate", "cell error rate"),
+        ("conservation_fail_rate", "conservation failure rate"),
+        ("pc_degeneracy_rate", "PC degeneracy rate"),
+    )
+
+    # Varying-with-budget first: these bias, they do not merely blur.
+    for column, label in rates:
+        for agent, grp in report.groupby("agent_name", sort=True):
+            vals = grp[column].dropna()
+            if len(vals) < 2:
+                continue
+            if float(vals.max() - vals.min()) > _VARIATION_EPS:
+                by_k = ", ".join(
+                    f"k={int(r.budget_k)}:{getattr(r, column):.2f}"
+                    for r in grp.sort_values("budget_k").itertuples()
+                )
+                warnings.append(
+                    f"MODERATOR: {agent} {label} varies with budget ({by_k}); "
+                    "this biases the measured effect, it does not merely add noise"
+                )
+
+    for column, label in rates:
+        flagged = report[report[column].fillna(0.0) > 0.0]
+        for row in flagged.itertuples():
+            warnings.append(
+                f"DEGRADED: {row.agent_name} k={int(row.budget_k)} {label} = "
+                f"{getattr(row, column):.2f}"
+            )
+    return warnings
+
+
 def format_ladder_summary(df: pd.DataFrame, reference: str = "llm_pc") -> str:
     """Render the M6 ladder table, every delta paired with its MDE.
 
@@ -814,6 +937,7 @@ __all__ = [
     "check_m4_acceptance",
     "format_acceptance_summary",
     "format_ladder_summary",
+    "harness_validity_report",
     "ladder_frame",
     "load_records",
     "main",
@@ -821,6 +945,7 @@ __all__ = [
     "minimum_detectable_effect",
     "plot_ladder",
     "plot_pareto",
+    "validity_warnings",
 ]
 
 

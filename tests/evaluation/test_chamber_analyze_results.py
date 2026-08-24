@@ -698,3 +698,127 @@ def test_ladder_cli_runs_as_a_module() -> None:
         )
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert "MDE" in proc.stdout
+
+
+# ---------------------------------------------------------------------------
+# Harness validity report
+# ---------------------------------------------------------------------------
+
+
+def _validity_frame(
+    fallbacks_by_k=None, errors_by_k=None, n=6, budgets=(6, 30, 45)
+) -> pd.DataFrame:
+    fallbacks_by_k = fallbacks_by_k or {}
+    errors_by_k = errors_by_k or {}
+    rows = []
+    for agent in ("llm_pc", "team"):
+        for k in budgets:
+            for seed in range(n):
+                is_err = seed < errors_by_k.get((agent, k), 0)
+                rows.append(
+                    {
+                        "chamber": "lt",
+                        "agent_name": agent,
+                        "budget_k": k,
+                        "budget_fraction": k / 59.0,
+                        "seed": seed,
+                        "status": "error" if is_err else "ok",
+                        "f1": 0.4,
+                        "shd": 55.0,
+                        "tokens_in": 1000,
+                        "tokens_out": 500,
+                        "wall_time_seconds": 300.0,
+                        "n_llm_calls": k,
+                        "n_selection_fallbacks": fallbacks_by_k.get((agent, k), 0),
+                        "n_pc_degeneracies": 0,
+                        "conservation_certified": True,
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def test_validity_report_is_clean_when_nothing_degrades() -> None:
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    report = harness_validity_report(_validity_frame())
+    assert len(report) == 6  # 2 arms x 3 budgets
+    assert validity_warnings(report) == []
+
+
+def test_a_flat_nonzero_fallback_rate_is_flagged() -> None:
+    """Any degradation is a warning, even if it does not vary with k.
+
+    The RATE must be held flat, not the count. An earlier version fixed the
+    count at 3 while `n_llm_calls = k`, so the rate was 0.50/0.10/0.067 and
+    tripped the moderator branch instead -- the flat-rate branch it claimed to
+    test was never reached, and deleting that branch left it green.
+    """
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    budgets = (10, 30, 50)  # fb = 0.2*k is exact on these
+    df = _validity_frame(
+        fallbacks_by_k={("llm_pc", k): int(0.2 * k) for k in budgets}, budgets=budgets
+    )
+    report = harness_validity_report(df)
+    llm_pc = report[report.agent_name == "llm_pc"]
+    assert llm_pc.fallback_rate.max() - llm_pc.fallback_rate.min() < 1e-9  # truly flat
+    warnings = validity_warnings(report)
+    assert any("DEGRADED" in w and "fallback" in w for w in warnings), warnings
+    assert not any("MODERATOR" in w and "fallback" in w for w in warnings), warnings
+
+
+def test_a_k_varying_fallback_rate_is_flagged_as_a_moderator() -> None:
+    """The signature that cost us today: 0/36 at k=6, 43% at k=30.
+
+    A rate that changes with the budget is not merely degradation -- it is a
+    moderator correlated with the independent variable, so it biases the
+    measured effect rather than only adding noise. It must be called out
+    distinctly from a flat rate.
+    """
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    df = _validity_frame(fallbacks_by_k={("llm_pc", 6): 0, ("llm_pc", 30): 13, ("llm_pc", 45): 20})
+    warnings = validity_warnings(harness_validity_report(df))
+    assert any("varies with budget" in w for w in warnings), warnings
+    assert any("llm_pc" in w for w in warnings), warnings
+
+
+def test_a_k_varying_error_rate_is_flagged() -> None:
+    """M4b's real case: 8 of 8 errors at planner_reasoner k=59 and none
+    elsewhere, which deletes the slowest cells from one arm's mean."""
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    df = _validity_frame(errors_by_k={("team", 45): 2})
+    warnings = validity_warnings(harness_validity_report(df))
+    assert any("error rate" in w and "varies with budget" in w for w in warnings), warnings
+
+
+def test_an_unrecorded_degradation_path_is_reported_as_unmeasured_not_clean() -> None:
+    """A missing column must never read as a zero rate.
+
+    `runs/m4-pilot.parquet` predates `n_selection_fallbacks`, so a report over
+    it shows fallback_rate 0.00 -- identical to a harness that never fell back.
+    In fact ~43% of its k=30 selections were random. Silence about an
+    unmeasured path is exactly the failure this report exists to prevent, so
+    absence has to be louder than zero.
+    """
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    df = _validity_frame().drop(columns=["n_selection_fallbacks"])
+    warnings = validity_warnings(harness_validity_report(df))
+    assert any("UNMEASURED" in w and "n_selection_fallbacks" in w for w in warnings), warnings
