@@ -90,8 +90,44 @@ def _record_from_dict(d: dict[str, Any]) -> RunRecord:
 
 
 def done_cell_keys(records: Iterable[RunRecord]) -> set[CellKey]:
-    """Build the resume keyset from records — 5-tuples per cell."""
-    return {(r.chamber, r.configuration, r.agent_name, r.budget_k, r.seed) for r in records}
+    """Build the resume keyset from records — 5-tuples per cell.
+
+    **Errored cells are NOT done.** An error carries no usable result, so a
+    resume must re-attempt it. This previously keyed on every record
+    regardless of status, which meant a run that failed wholesale was frozen:
+    the M6 sweep lost 296 cells to an OpenRouter weekly-limit 403, wrote all
+    296 to the sidecar as `status="error"`, and a resume would have skipped
+    every one and consolidated a 154-cell dataset as if it were complete.
+
+    "skipped" IS done — it means registry-incompatible, and re-running would
+    skip it again.
+    """
+    return {
+        (r.chamber, r.configuration, r.agent_name, r.budget_k, r.seed)
+        for r in records
+        if r.status != "error"
+    }
+
+
+def latest_per_cell(records: Iterable[RunRecord]) -> list[RunRecord]:
+    """Collapse a sidecar to one record per cell, last write winning.
+
+    A retried cell appends a SECOND line for the same key, so consolidation
+    would otherwise carry both the stale error and the good result -- two rows
+    for one cell, inflating `n` and poisoning every per-(arm, budget) mean.
+    Order is preserved by first appearance so the Parquet stays stable.
+    """
+    out: dict[CellKey, RunRecord] = {}
+    for record in records:
+        key: CellKey = (
+            record.chamber,
+            record.configuration,
+            record.agent_name,
+            record.budget_k,
+            record.seed,
+        )
+        out[key] = record
+    return list(out.values())
 
 
 def filter_done_cells(
@@ -123,5 +159,6 @@ __all__ = [
     "append_record_jsonl",
     "done_cell_keys",
     "filter_done_cells",
+    "latest_per_cell",
     "read_records_jsonl",
 ]

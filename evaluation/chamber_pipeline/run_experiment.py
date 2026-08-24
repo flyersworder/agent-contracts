@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 from .checkpoint import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
     append_record_jsonl,
     done_cell_keys,
+    latest_per_cell,
     read_records_jsonl,
 )
 from .orchestrator import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
@@ -581,7 +582,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     # Parquet contains both the prior records and the new ones. Reading
     # back from disk is also a sanity check: if the sidecar wrote
     # successfully every cell, this should equal `prior_records + new_records`.
-    all_records = read_records_jsonl(sidecar_path)
+    # `latest_per_cell`, not the raw sidecar: a retried cell appends a second
+    # line for the same key, so consolidating raw would carry both its stale
+    # error and its good result -- two rows for one cell.
+    all_records = latest_per_cell(read_records_jsonl(sidecar_path))
 
     # Write output. Extension was validated above.
     if out.endswith(".csv"):
