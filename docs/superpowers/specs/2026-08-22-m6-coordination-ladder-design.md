@@ -325,11 +325,33 @@ needs headroom. They are therefore separated by design:
 | | Claim | Where | Can it be null? |
 |---|---|---|---|
 | **H-1** | Tree accounting certifies a bound exceeding `B(root)` by the fan-in double-count, and executions fall in that gap | tight-budget demonstration (10 cells) | No — the gap is analytic (P2); the demonstration shows executions reaching it |
-| **H-2** | DAG conservation certified on **rungs 1, 2, 4** (the only rungs with a `DelegationGraph`), including abandonment cases, against `B(root) + Σ refunds`. Rung 3 reports *tree* conservation via `ContractingCapability` separately; rung 0 has no delegation structure | main sweep | No — reported as a certification claim, per P4. **Scope stated explicitly**: reused M4b cells predate `DelegationGraph`, so `conservation_certified` is null for them |
+| **H-2** | DAG conservation certified on **rungs 1, 2, 4** (the only rungs with a `DelegationGraph`), including abandonment cases, against `B(root) + Σ refunds`. Rung 3 reports *tree* conservation via `ContractingCapability` separately; rung 0 has no delegation structure | main sweep | No — reported as a certification claim, per P4. **Scope stated explicitly**: reused M4b cells predate `DelegationGraph`, so `conservation_certified` is null for them. **Report the mechanism and the forecast separately** (added 2026-08-24) — see below |
 | **H-3** | **Equivalence bound**: no rung differs from rung 0 by more than the minimum detectable effect at that budget | main sweep | Must be stated as a bound, not a null. See the power table below — the M4b rung-0-vs-rung-3 differences (0.028 at k=6, 0.007 at k=30) sit *below* what n=30 can resolve |
 | **H-4** | If any rung beats rung 0, expect it at the tightest budget (k=6) | main sweep | Pre-registered from Tran & Kiela's finding that SAS was best "for all budgets except the lowest one". **Caveat: k=6 is a floor regime.** All five M4b variants lie within 0.035 F1 of each other there (0.183–0.218) against an MDE of ~0.034, so a null at k=6 is indistinguishable from "nothing works at 6 experiments" |
 | **H-5** | Failure rate rises with coordination machinery | main sweep | M4b: rung 3 failed 8/30 at k=59, rung 0 failed 0/30 |
 | **H-6** | Among rungs 1, 2 and 4, overlap falls as coordination increases | main sweep | Secondary. **Within-{1,2,4} only** — rung 3's overlap is 0 by construction (`starting_chosen` excludes prior picks) and rung 0's is undefined, so a full-ladder monotonicity claim is malformed. Framed as replication of arXiv:2602.03794 in the acquisition regime, not novelty. Report K\* alongside `overlap_frac` |
+
+#### H-2 measures two things; report them apart
+
+A `conservation_certified=False` cell means the node consumed more than it was
+allocated. That is a true finding about **our budget forecast**, and a
+*success* for the mechanism: `verify()` detected the overrun, every time.
+Reporting a bare compliance rate conflates:
+
+- **the mechanism** — does the framework enforce the flow-conservation
+  invariant and detect violations? Measured at 100% across every cell run so
+  far, including all overruns.
+- **the forecast** — did `_A95_RECONCILE_BY_K` predict actual cost well enough
+  that no node overran? At k=45 it did not until recalibration; at k=6 it
+  cannot, because aggregator cost spreads 48.8x (500-24,415 tokens) while the
+  provisioning basis is a median.
+
+A reader shown "H-2 compliance = 56%" will conclude the framework failed. It
+did not; our cost model did. State the mechanism result, then report
+per-budget forecast adequacy as a separate, calibration-dependent number.
+
+Note the naming skew: this document numbers hypotheses H-1..H-6 while
+`CLAUDE.md` uses H-A/H-B/H-C. H-2 here is H-C there. Reconcile before drafting.
 
 ### Statistical power
 
@@ -530,6 +552,55 @@ commentary"). That is a prompt-and-parser change needing its own validation.
 x 8 seeds) records `n_contested` and `overlap_frac` and will show whether
 compliant responses make this rare. Do not stack a speculative parser change
 on top of the selection fix without that number.
+
+
+## 12. P2's demonstrable window has width equal to the fan-in degree
+
+Found 2026-08-24 while recalibrating `a95` from the k=45 gate. This is a
+theory-to-design connection, not a bug, and it bounds what the fan-in arms can
+show.
+
+P2's incompleteness condition is `max_i a_i < c <= sum_i a_i`: the aggregator's
+single call must exceed any ONE parent's forward but not their sum. With `n`
+parents each forwarding `f`, the admissible window is `(f, n*f]` -- so its
+**width ratio is exactly `n`, the fan-in degree.** Both fan-in rungs have two
+scouts, so the window is 2x wide, and `build_fan_in_graph` deliberately gives
+the aggregator no provisioning multiple (`forward = ceil(0.75 * a95)`) because
+a margin would push every single fragment above the call and a tree encoding
+would then have coped.
+
+That creates a structural tension between the two hypotheses:
+
+- **H-C (conservation)** wants generous provisioning, so no cell overruns.
+- **P2** wants tight provisioning, so the call lands above a single forward.
+
+They can both hold only while the aggregator's observed cost spread fits
+inside the window. Measured:
+
+| budget | aggregator spend | spread | window (n=2) | both hold? |
+|---|---|---|---|---|
+| k=45 | 9,783 - 25,168 | **2.6x** | 2x | marginal |
+| k=6 | 500 - 6,064 | **12x** | 2x | **no** |
+
+At k=6 the reconcile prompt lists only 3+3 names, so cost is dominated by
+erratic reasoning length rather than prompt size -- 12x variance within a
+single arm across seeds. No single `a95` can both conserve the 6,064 cell and
+keep the 500 cell inside the window.
+
+**Consequences, all reportable rather than fixable:**
+
+1. **P2 is demonstrable at k=45 and not at k=6.** State it as a scope limit on
+   the measurement: the DAG-vs-tree distinction is empirically visible only
+   where the aggregator's cost is predictable within a factor of `n`.
+2. **Do not tune `a95` until H-C reads 100%.** With a 2x window that trades
+   directly against P2, and `_PROVISION_MULTIPLE`'s comment already forbids it.
+   Report observed rates per budget.
+3. **Higher fan-in degree widens the window.** Three scouts would give a 3x
+   window and tolerate more variance. Not a change to make for M6 -- it alters
+   the rung definitions -- but it is the principled lever if a future design
+   needs P2 demonstrable at low budgets, and it is worth one sentence in the
+   paper: the empirical demonstrability of P2 improves with fan-in degree,
+   which is a statement about the theory, not about DeepSeek.
 
 ---
 

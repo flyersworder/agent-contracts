@@ -103,6 +103,12 @@ class RunRecord:
             scout and the more damaging both-revisions-lost case.
         conservation_certified: Whether `DelegationGraph.verify()` passed at
             the end of the cell (hypothesis H-C).
+        scout_a_tokens: Tokens scout_a spent, from its node monitor. Recorded
+            from 2026-08-24: the k=45 gate found the aggregator overrunning
+            its grant on 6 of 9 graph cells, and could NOT say whether the
+            scouts overran too, because only aggregator spend was stored. An
+            unrecorded node reads as a clean node.
+        scout_b_tokens: Same for scout_b.
         aggregator_tokens: Tokens the aggregator spent on its single
             indivisible reconciliation call.
         max_tree_fragment: The largest single parent grant into the
@@ -176,6 +182,8 @@ class RunRecord:
     n_negotiation_failures: int | None = None
     conservation_certified: bool | None = None
     aggregator_tokens: int | None = None
+    scout_a_tokens: int | None = None
+    scout_b_tokens: int | None = None
     max_tree_fragment: int | None = None
     tree_would_refuse: bool | None = None
     model_id: str | None = None

@@ -1429,7 +1429,7 @@ class TestLadderSelfDescription:
         )
 
         with pytest.raises(ValueError, match="not a ladder arm"):
-            _ladder_calibration(get_spec("llm_pc"))
+            _ladder_calibration(get_spec("llm_pc"), 45)
 
     def test_roles_drive_the_budget_not_the_arm_name(self) -> None:
         from evaluation.chamber_pipeline.orchestrator import (
@@ -1437,9 +1437,9 @@ class TestLadderSelfDescription:
             get_spec,
         )
 
-        homog_a, homog_b, _, homog_oh = _ladder_calibration(get_spec("fan_in_homog"))
-        spec_a, spec_b, _, _ = _ladder_calibration(get_spec("fan_in_spec"))
-        _, _, _, team_oh = _ladder_calibration(get_spec("team"))
+        homog_a, homog_b, _, homog_oh = _ladder_calibration(get_spec("fan_in_homog"), 45)
+        spec_a, spec_b, _, _ = _ladder_calibration(get_spec("fan_in_spec"), 45)
+        _, _, _, team_oh = _ladder_calibration(get_spec("team"), 45)
 
         assert homog_a == homog_b  # both plain
         assert spec_b > spec_a  # targeted costs more than broad
@@ -1717,3 +1717,61 @@ class TestParallelSweep:
 
         sig = inspect.signature(run_sweep)
         assert sig.parameters["max_workers"].default is None
+
+
+class TestCalibrationIsBudgetDependent:
+    """`a95` is a function of k, and pretending otherwise breaks conservation.
+
+    The old docstring claimed per-call cost is "driven by the role's prompt,
+    not by `k`". Measured untruncated: aggregator spend medians 8,557 at k=30
+    and 16,980 at k=45. With one fixed constant, 6 of 9 graph cells at k=45
+    failed `verify()` -- a budgeting artifact that would have been reported as
+    0% H-C compliance for the fan-in rungs.
+    """
+
+    def test_calibration_takes_the_budget(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import _ladder_calibration, get_spec
+
+        _, _, a95_30, _ = _ladder_calibration(get_spec("fan_in_spec"), 30)
+        _, _, a95_45, _ = _ladder_calibration(get_spec("fan_in_spec"), 45)
+        assert a95_45 > a95_30, "a95 must grow with k; reconcile prompts grow with k"
+
+    def test_an_unmeasured_budget_raises_rather_than_extrapolating(self) -> None:
+        """Silently guessing is how a fixed constant became an artifact.
+
+        A wrong `a95` does not fail loudly -- it produces plausible
+        conservation numbers that are really statements about provisioning.
+        Refuse the cell instead.
+        """
+        from evaluation.chamber_pipeline.orchestrator import _ladder_calibration, get_spec
+
+        with pytest.raises(ValueError, match="not calibrated"):
+            _ladder_calibration(get_spec("fan_in_spec"), 17)
+
+    def test_the_measured_budgets_cover_the_m6_grid(self) -> None:
+        """Every budget M6 runs must have a measurement behind it."""
+        from evaluation.chamber_pipeline.orchestrator import (
+            _budget_k_for,
+            _ladder_calibration,
+            get_spec,
+        )
+        from evaluation.chamber_pipeline.run_experiment import M6_SPEC
+
+        for fraction in M6_SPEC.budget_fractions:
+            k = _budget_k_for("lt", fraction)
+            _ladder_calibration(get_spec("fan_in_spec"), k)  # must not raise
+
+    def test_capacity_at_k45_clears_the_measured_spend(self) -> None:
+        """The failure this fixes: 9 cells spent 9,783-25,168; capacity was
+        12,836."""
+        from evaluation.chamber_pipeline.coordination import build_fan_in_graph
+        from evaluation.chamber_pipeline.orchestrator import (
+            _PROVISION_MULTIPLE,
+            _ladder_calibration,
+            get_spec,
+        )
+        from evaluation.chamber_pipeline.tree_accounting import dag_capacity
+
+        c95_a, _, a95, _ = _ladder_calibration(get_spec("fan_in_spec"), 45)
+        graph = build_fan_in_graph(k=45, c95=c95_a, a95=a95, multiple=_PROVISION_MULTIPLE)
+        assert dag_capacity(graph, "aggregator") >= 25168  # worst cell measured

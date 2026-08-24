@@ -590,24 +590,104 @@ def _budget_fraction(budget_k: int, menu_size: int) -> float:
 _PROVISION_MULTIPLE = 4
 
 _ROLE_C95: dict[str, int] = {"plain": 2205, "broad": 3003, "targeted": 10379}
-_A95_RECONCILE = 8557
+# Aggregator (reconcile + any negotiation) spend per cell, in input+output
+# tokens, keyed by BUDGET. Not one constant: reconcile prompts list both
+# scouts' selections, so cost grows with k, and the gate at k=45 measured a
+# median of 16,980 against the 8,557 previously applied at every budget. With
+# the single constant, capacity was 1.5 * 8,557 = 12,836 while nine graph
+# cells spent 9,783-25,168 -- 6 of 9 failed `verify()`. That would have been
+# reported as 0% H-C compliance for the fan-in rungs and was pure
+# provisioning.
+#
+# Medians, matching `_ROLE_C95`'s stated rule, NOT tuned upward until H-C
+# reads 100%. Measured untruncated (post 32768-cap) through the production
+# provider order on deepseek-v4-flash-0731.
+#
+# Unlisted budgets RAISE rather than fall back to a nearby value. A wrong
+# `a95` does not fail loudly -- it yields plausible conservation numbers that
+# are really statements about provisioning, which is exactly how the single
+# constant survived until the k=45 gate.
+_A95_RECONCILE_BY_K: dict[int, int] = {
+    6: 7646,
+    30: 11427,
+    45: 18790,
+}
+# 75th percentile of measured aggregator spend, NOT the median -- and the
+# reason is a design asymmetry rather than a preference for the numbers.
+#
+# `_ROLE_C95` uses medians because the scouts' grant is `_PROVISION_MULTIPLE *
+# c95 * calls`, so a median basis already carries 4x headroom. The aggregator
+# gets `1.5 * a95` and NO multiple, deliberately: any margin would lift every
+# single fragment above the call and a tree encoding would cope, destroying
+# the P2 demonstration (spec §12). Carrying the median over to `a95` therefore
+# imported the statistic without its multiplier, and a budget sized at the
+# median overruns ~50% of executions by construction -- not a defensible
+# provisioning rule in a paper about resource governance.
+#
+# Measured untruncated (post 32768-cap) on deepseek-v4-flash-0731, n=9 graph
+# cells per budget, production provider order pinned. Cells conserving / cells
+# inside the P2 window, median basis vs p75 basis:
+#
+#   k=6    5/9, 1/9   ->   7/9, 2/9      spread 48.8x (500 - 24,415)
+#   k=30   8/9, 6/9   ->   8/9, 5/9      spread  5.2x (4,648 - 24,001)
+#   k=45   9/9, 6/9   ->   9/9, 6/9      spread  2.6x (9,783 - 25,168)
+#
+# Better or equal everywhere except one P2 cell at k=30.
+#
+# The k=6 spread is the headline caveat. Aggregator cost there ranges
+# 500-24,415 -- its MAXIMUM nearly equals k=45's -- because the reconcile
+# prompt lists only 3+3 names, so cost is dominated by erratic reasoning
+# length rather than prompt size. Against P2's window, only `n`-wide for `n`
+# parents (2x here), no single constant can both conserve the 24,415 cell and
+# keep the 500 cell inside the window. P2 is demonstrable at k=30 and k=45 and
+# effectively not at k=6; report that as a scope limit.
+#
+# Consequence for H-C, and it needs saying in the paper: a conservation
+# "failure" is a failure of OUR FORECAST, not of the mechanism. The aggregator
+# really did consume 24,415 against its grant and `verify()` caught it every
+# time. Reporting a bare compliance rate conflates "the framework enforces
+# conservation" (it does, 100%) with "our provisioning predicted cost" (at k=6
+# it cannot). Report the two separately.
 _C95_NEGOTIATE = 4138
 
 _LADDER_NODES = ("scout_a", "scout_b", "aggregator")
 
 
-def _ladder_calibration(spec: AgentSpec) -> tuple[int, int, int, int]:
-    """`(c95_a, c95_b, a95, fixed_overhead)` for one ladder arm.
+def _ladder_calibration(spec: AgentSpec, budget_k: int) -> tuple[int, int, int, int]:
+    """`(c95_a, c95_b, a95, fixed_overhead)` for one ladder arm at one budget.
 
-    Read off the spec rather than matched on the arm's name: per-call cost is
-    driven by the role's prompt, not by `k`, and a name-keyed lookup silently
-    returns plain-role figures for any arm it does not recognise.
+    Roles are read off the spec rather than matched on the arm's name: a
+    name-keyed lookup silently returns plain-role figures for any arm it does
+    not recognise.
+
+    `a95` is keyed by BUDGET. An earlier version of this docstring asserted
+    that per-call cost is "driven by the role's prompt, not by `k`" -- false
+    for the aggregator, whose reconcile prompt lists both scouts' selections
+    and therefore grows with k. See `_A95_RECONCILE_BY_K`.
+
+    Note `c95` is still budget-INVARIANT here, and that is not yet verified at
+    k=45: `RunRecord` records `aggregator_tokens` but no per-scout spend, so
+    the gate could not tell whether the scouts also overran. Scout token
+    fields are recorded from 2026-08-24 onward precisely so the next
+    calibration can answer it.
+
+    Raises:
+        ValueError: If the arm is not a ladder arm, or `budget_k` has no
+            measurement. Extrapolating would produce plausible-looking
+            conservation numbers that are really statements about
+            provisioning.
     """
     if spec.scout_roles is None:
         raise ValueError(f"{spec.name!r} is not a ladder arm")
+    if budget_k not in _A95_RECONCILE_BY_K:
+        raise ValueError(
+            f"aggregator spend is not calibrated at k={budget_k}; "
+            f"measured budgets are {sorted(_A95_RECONCILE_BY_K)}. Measure it "
+            "rather than extrapolating -- a wrong a95 fails silently."
+        )
     role_a, role_b = spec.scout_roles
     overhead = spec.negotiation_rounds * (_PROVISION_MULTIPLE * _C95_NEGOTIATE)
-    return _ROLE_C95[role_a], _ROLE_C95[role_b], _A95_RECONCILE, overhead
+    return _ROLE_C95[role_a], _ROLE_C95[role_b], _A95_RECONCILE_BY_K[budget_k], overhead
 
 
 def _build_agent_kwargs(
@@ -748,7 +828,7 @@ def run_cell(
         if spec.is_ladder_arm:
             from evaluation.chamber_pipeline.coordination import build_fan_in_graph
 
-            c95_a, c95_b, a95, overhead = _ladder_calibration(spec)
+            c95_a, c95_b, a95, overhead = _ladder_calibration(spec, budget_k)
             graph = build_fan_in_graph(
                 multiple=_PROVISION_MULTIPLE,
                 k=budget_k,
@@ -842,6 +922,8 @@ def run_cell(
         coord = getattr(adapter, "coordination_stats", {}) or {}
         cell_graph = getattr(adapter, "delegation_graph", None)
         agg_tokens: int | None = None
+        scout_a_tokens: int | None = None
+        scout_b_tokens: int | None = None
         frag: int | None = None
         refuse: bool | None = None
         certified: bool | None = None
@@ -852,6 +934,12 @@ def run_cell(
             )
 
             agg_tokens = cell_graph.monitor_for("aggregator").usage.tokens
+            # Per-scout spend, so the next calibration can check whether the
+            # SCOUTS overran as well. `c95` is still budget-invariant and that
+            # is unverified at k=45; without these fields the question is
+            # unanswerable after the fact.
+            scout_a_tokens = cell_graph.monitor_for("scout_a").usage.tokens
+            scout_b_tokens = cell_graph.monitor_for("scout_b").usage.tokens
             frag = max_tree_fragment(cell_graph, "aggregator")
             # Only score a cell whose aggregator actually spent. On an
             # early-return cell (zero budget, empty menu) it spends nothing,
@@ -902,6 +990,8 @@ def run_cell(
             n_negotiation_failures=coord.get("n_negotiation_failures"),
             conservation_certified=certified,
             aggregator_tokens=agg_tokens,
+            scout_a_tokens=scout_a_tokens,
+            scout_b_tokens=scout_b_tokens,
             max_tree_fragment=frag,
             tree_would_refuse=refuse,
             n_pc_degeneracies=n_pc_degen,
