@@ -794,6 +794,20 @@ def validity_warnings(report: pd.DataFrame) -> list[str]:
         Human-readable warnings; empty if every path is clean.
     """
     warnings: list[str] = []
+    # Paths that CONTAMINATE the outcome, versus paths that ARE the outcome.
+    # Only the first class can bias an accuracy comparison:
+    #   * a selection fallback replaces the LLM's choice with `rng.choice`
+    #   * a degenerate PC returns an all-zeros adjacency, zeroing F1
+    #   * an errored cell drops out of the mean (survivorship)
+    # `conservation_certified` and `tree_would_refuse` come from a post-hoc
+    # `verify()`. Token budgets are non-binding at execution -- node monitors
+    # record tokens for certification arithmetic and must not halt; only
+    # interventions are live-gated -- so a conservation failure cannot change
+    # what the agent did or what PC inferred. Calling its k-variance a bias is
+    # wrong, and it would fire permanently: k=6's 48.8x aggregator cost spread
+    # makes provisioning there unpredictable BY MEASUREMENT, which is one of
+    # the paper's findings, not a defect.
+    contaminating = {"fallback_rate", "error_rate", "pc_degeneracy_rate"}
     for column in report.attrs.get("missing_columns", []):
         warnings.append(
             f"UNMEASURED: {column} is absent from these records, so its rate "
@@ -819,10 +833,17 @@ def validity_warnings(report: pd.DataFrame) -> list[str]:
                     f"k={int(r.budget_k)}:{getattr(r, column):.2f}"
                     for r in grp.sort_values("budget_k").itertuples()
                 )
-                warnings.append(
-                    f"MODERATOR: {agent} {label} varies with budget ({by_k}); "
-                    "this biases the measured effect, it does not merely add noise"
-                )
+                if column in contaminating:
+                    warnings.append(
+                        f"MODERATOR: {agent} {label} varies with budget ({by_k}); "
+                        "this biases the measured effect, it does not merely add noise"
+                    )
+                else:
+                    warnings.append(
+                        f"FINDING: {agent} {label} varies with budget ({by_k}); "
+                        "post-hoc certification, so it does NOT bias accuracy -- "
+                        "report it as a result about provisioning"
+                    )
 
     for column, label in rates:
         flagged = report[report[column].fillna(0.0) > 0.0]

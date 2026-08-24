@@ -855,3 +855,45 @@ def test_ladder_output_puts_harness_validity_before_accuracy() -> None:
     assert out.index("HARNESS VALIDITY") < out.index("Rung"), (
         "accuracy table printed above the validity warnings"
     )
+
+
+def test_conservation_variance_is_not_an_accuracy_moderator() -> None:
+    """A k-varying conservation rate is a FINDING, not a confound.
+
+    `conservation_certified` comes from a post-hoc `verify()`. Token budgets
+    are non-binding at execution -- node monitors record tokens for
+    certification arithmetic and must not halt; only interventions are
+    live-gated -- so a conservation failure cannot change what the agent did
+    or what PC inferred. Warning that it "biases the measured effect" is
+    wrong, and it would fire forever: we predicted k-varying conservation from
+    the 48.8x cost spread at k=6.
+    """
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    df = _validity_frame(n=10)
+    mask = (df.agent_name == "llm_pc") & (df.budget_k == 45)
+    df["conservation_certified"] = True
+    df.loc[mask, "conservation_certified"] = False
+    warnings = validity_warnings(harness_validity_report(df))
+    moderators = [w for w in warnings if "MODERATOR" in w]
+    assert not any("conservation" in w for w in moderators), moderators
+    # Still reported, just not as a bias.
+    assert any("conservation" in w and "FINDING" in w for w in warnings), warnings
+
+
+def test_pc_degeneracy_variance_is_an_accuracy_moderator() -> None:
+    """Degenerate PC returns an all-zeros adjacency, so it zeroes F1
+    directly. A rate that varies with k biases the comparison."""
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    df = _validity_frame(n=10)
+    df["n_pc_degeneracies"] = 0
+    df.loc[(df.agent_name == "llm_pc") & (df.budget_k == 6), "n_pc_degeneracies"] = 1
+    warnings = validity_warnings(harness_validity_report(df))
+    assert any("MODERATOR" in w and "degeneracy" in w for w in warnings), warnings
