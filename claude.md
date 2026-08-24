@@ -640,6 +640,114 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
 - **Checkpoint sidecar**: every pilot run writes one JSON line per cell to `<out>.jsonl` before the Parquet consolidates at sweep end. Resume-on-restart is automatic — re-running the same `--out` command after a kill skips already-done cells. The two May 15 and 16-17 overnight stalls lost ~217 cells each because this didn't exist; M4b May 18 pilot benefited from it (10 timeouts that would have wedged the older orchestrator instead just logged as errors and the sweep continued).
 - **VPS provisioned**: `173.212.217.40` (Ubuntu 24.04, 4 vCPU, 8 GiB RAM, 145 GB disk). Repo cloned at `/root/agent-contracts`, uv synced with `--all-extras`, `.env` transferred (0600 perms). Ready to launch any pilot via `ssh root@173.212.217.40 'cd /root/agent-contracts && export PATH="$HOME/.local/bin:$PATH" && tmux new -d -s pilot "uv run python -m evaluation.chamber_pipeline.run_experiment --pilot --cell-timeout-seconds 1800 --out runs/m4-pilot.parquet > runs/m4-pilot.log 2>&1"'`. Pull results back via `rsync -av root@173.212.217.40:/root/agent-contracts/runs/ ./runs-vps/`.
 
+## Session 2026-08-24: the harness was moderating the result
+
+Four findings, in descending order of consequence. All measured, not inferred.
+
+### 1. `_SELECTION_MAX_TOKENS` made the harness a moderator of the IV
+
+An instrumented k=30 cell (0731, providers pinned) attributed **every**
+selection failure to truncation: `{'length': 13, 'empty': 0, 'offmenu': 0,
+'ok': 17}`. 13 of 30 picks were `rng.choice`, because the 2048 cap was consumed
+by reasoning before any content was emitted.
+
+The cap has now been mis-sized **twice** (200, then 2048), both times
+calibrated on the loop's **first** call, where reasoning is 415-976 tokens.
+Reasoning scales with the prompt, and the prompt grows one spent-experiment
+line per step. Late-loop (25 chosen): flash-0731 **2,175**, flash **11,690**.
+
+Because the failure rate tracks history length, it was **0/36 at k=6 and ~43%
+at k=30** — correlated with the experiment's independent variable. In M4b,
+`llm_pc` beat `random` by **+0.034 F1 at k=6 (resolved)** and only **+0.018 at
+k=30 (below MDE)**. "LLM selection stops helping as budget grows" was this cap.
+
+**M6 exposure was worse.** The ladder's IV is how budget is *split across
+agents*, and splitting shortens each agent's history: two scouts at k=15
+truncate less than one loop at k=30. The fan-in rungs would have beaten the
+loop for reasons unrelated to coordination — **H-B could have come out positive
+as a pure `max_tokens` artifact.**
+
+Fixed in `6ae85e5`: selection, reconcile, and negotiate all raised to 32768
+(`max_tokens` is a ceiling, not a reservation — generosity is free).
+
+**Consequence for calibration:** `_A95_RECONCILE` (8557) and `_C95_NEGOTIATE`
+(4138) were measured against *truncated* calls. A truncated reconcile pinned
+aggregator spend to exactly 8192 — inside P2's window (6418, 12836] — so
+`tree_would_refuse` could read True *because the call truncated*. Both
+constants MUST be re-derived from untruncated late-loop measurements at k=45
+before any sweep reporting H-C or P2.
+
+### 2. M4b rows can no longer be reused
+
+Two independent reasons, either sufficient:
+
+- **Provider-side change.** DeepSeek raised default reasoning under unchanged
+  0423 weights (2026-08-13). `llm_pc` k=30 went from 244 s / 1,089 output
+  tokens per call to ~1,300 s / ~3,600. Decomposed exactly: **4.35x more
+  tokens x 1.55x lower throughput = 6.72x**, matching observed. (Throughput
+  really did drop, 134 -> 87 tok/s, consistent with the old snapshot getting
+  less compute — but it is the smaller factor.)
+- **Selection semantics changed** (`7f284be`, `6ae85e5`).
+
+The M6 plan's pilot-reuse for rungs 0 and 3 is therefore **void**; all five
+rungs must run fresh. Parallelism makes that affordable.
+
+### 3. `deepseek-v4-flash-0731` is the better snapshot
+
+Same provider (Novita), late-loop call: **23.5 s / 2,175 tokens** against
+flash's **105.0 s / 8,828**, for ~25% more cost per call. At cell level (n=3,
+k=30) it reproduced M4b accuracy closely — F1 0.387 vs 0.379, SHD 57.3 vs 57.1
+— with far tighter spread (wall 500/547/579 s vs flash 991/1642). Selectable
+via the new `--model` flag; recorded per cell in `model_id`.
+
+`~deepseek/deepseek-v4-flash-latest` is **not routable** (404); the `~` marks a
+non-routable variant. `deepseek-v4-pro` truncates at 2048 with empty content
+and costs 3x.
+
+### 4. The seed does not control the LLM
+
+`llm_pc_agent` calls `_llm_select_loop(...)` with **no temperature**, so the
+provider default applies. Same seed, same config, two runs: **F1 0.330 and
+0.482**. The seed governs only the fallback RNG and PC. Every cell is an
+independent draw. Not yet changed — pinning temperature touches every LLM arm
+and needs its own replication check.
+
+### Infrastructure shipped
+
+- **`--max-workers N`** (`116ac05`): process-parallel sweep, M4c's deferred
+  item. Cells run at ~1.3% CPU (pure network wait). Measured **2.49x on 3
+  workers** (83% efficiency); ~700 MB per worker caps the 8 GB VPS at ~8.
+  Processes not threads: `_PcDegeneracyHandler` attaches to a *global* logger
+  per cell, so concurrent cells in one process would cross-contaminate
+  `n_pc_degeneracy`; and `_invoke_with_timeout` leaks a daemon thread per
+  timeout.
+- **`--model`** (`5f081ba`): applied after `static_kwargs` so an explicit flag
+  outranks a spec default; guarded on `accepts_llm`.
+
+### Known-open (recorded, deliberately not fixed blind)
+
+- **Rung 4 negotiation parser** reads restatement as claim: the revise prompt
+  shows the peer's proposals above the full menu and `_parse_name_list` scans
+  the whole response, so a scout restating the peer inflates `n_contested` —
+  rung 4's headline metric. Cannot be fixed by filtering (a genuine contest is
+  the signal); needs answer/restatement separation. See spec §11.
+- **The aggregator's reconcile output is discarded.** `team_agents` /
+  `fan_in_agents` call it and drop the response; the merge is a Python dedup
+  plus PC. Defensible for the P2/conservation demonstration (the token flow is
+  real) but the paper must not claim the aggregator improves the result.
+- **`overlap_frac` is structurally 0.0 for rung 4** (pools disjoint by
+  construction). State as a scope limit.
+
+### Test-integrity lesson (third occurrence today)
+
+Raising the caps broke **six tests** that classified call types by
+`max_tokens`, which became ambiguous the moment two caps shared a value — the
+same fragility as the `len(names) > 30` menu-size threshold with zero margin
+that was replaced earlier the same day. Replaced with a prompt-marker
+classifier in `conftest.call_kind`, guarded by
+`test_call_kind_markers_are_unambiguous`. A bare `"designer"` marker is
+insufficient: the reconcile system prompt says "one of two designers".
+
 ## References
 
 - **Whitepaper**: `docs/whitepaper.md`
