@@ -730,6 +730,18 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
         calls = ok["n_llm_calls"].sum() if "n_llm_calls" in ok.columns else 0
         fb = ok["n_selection_fallbacks"].sum() if "n_selection_fallbacks" in ok.columns else 0
         pc = ok["n_pc_degeneracies"].sum() if "n_pc_degeneracies" in ok.columns else 0
+        if "n_collinear_dropped" in ok.columns and len(ok):
+            dropped = ok["n_collinear_dropped"].fillna(0)
+            # FRACTION OF CELLS that dropped anything, not columns-per-cell.
+            # `_VARIATION_EPS` and the DEGRADED threshold both assume a rate
+            # in [0, 1]; a per-cell count (~3.1 on WT, where three redundant
+            # barometers are dropped every time) makes a 0.37 wobble look
+            # like a 0.02 moderator and false-alarms on every budget.
+            coll_rate = float((dropped > 0).mean())
+            coll_mean = float(dropped.mean())
+        else:
+            coll_rate = 0.0
+            coll_mean = 0.0
         if "conservation_certified" in ok.columns:
             judged = ok[ok["conservation_certified"].notna()]
             cons_fail = (
@@ -753,6 +765,13 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
                 # than dividing by a missing `n_llm_calls` into a silent 0.0.
                 "fallback_rate": (float(fb) / float(calls)) if calls else (1.0 if fb else 0.0),
                 "pc_degeneracy_rate": (float(pc) / len(ok)) if len(ok) else 0.0,
+                # Reported separately from pc_degeneracy_rate because a
+                # collinear drop is a LOCAL loss (the dropped node makes no
+                # claim, the rest of the graph is still inferred) rather than
+                # a total one. Two numbers, deliberately: the rate drives the
+                # warnings, the mean says how much of the graph went silent.
+                "collinear_drop_rate": coll_rate,
+                "collinear_cols_mean": coll_mean,
                 "conservation_fail_rate": cons_fail,
                 "wall_mean": ok["wall_time_seconds"].mean() if len(ok) else float("nan"),
                 "wall_p95": ok["wall_time_seconds"].quantile(0.95) if len(ok) else float("nan"),
@@ -764,7 +783,12 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
     # and `validity_warnings` would call an unmeasured harness clean.
     report.attrs["missing_columns"] = [
         c
-        for c in ("n_selection_fallbacks", "n_pc_degeneracies", "conservation_certified")
+        for c in (
+            "n_selection_fallbacks",
+            "n_pc_degeneracies",
+            "n_collinear_dropped",
+            "conservation_certified",
+        )
         if c not in df.columns
     ]
     return report
@@ -807,7 +831,18 @@ def validity_warnings(report: pd.DataFrame) -> list[str]:
     # wrong, and it would fire permanently: k=6's 48.8x aggregator cost spread
     # makes provisioning there unpredictable BY MEASUREMENT, which is one of
     # the paper's findings, not a defect.
-    contaminating = {"fallback_rate", "error_rate", "pc_degeneracy_rate"}
+    # `collinear_drop_rate` is contaminating too, and less obviously so than
+    # the others: dropping a numerically duplicate column forfeits every edge
+    # incident to it, and how many columns are duplicate depends on WHICH
+    # experiments were bought -- so the rate can move with the budget axis.
+    # On WT this is load-bearing: four barometers read the same quantity in
+    # the `standard` configuration, and 13 of 42 true edges point into them.
+    contaminating = {
+        "fallback_rate",
+        "error_rate",
+        "pc_degeneracy_rate",
+        "collinear_drop_rate",
+    }
     for column in report.attrs.get("missing_columns", []):
         warnings.append(
             f"UNMEASURED: {column} is absent from these records, so its rate "
@@ -820,6 +855,7 @@ def validity_warnings(report: pd.DataFrame) -> list[str]:
         ("error_rate", "cell error rate"),
         ("conservation_fail_rate", "conservation failure rate"),
         ("pc_degeneracy_rate", "PC degeneracy rate"),
+        ("collinear_drop_rate", "collinear column-drop rate"),
     )
 
     # Varying-with-budget first: these bias, they do not merely blur.

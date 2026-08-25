@@ -8,6 +8,8 @@ in isolation against synthesized linear-Gaussian data.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -154,6 +156,66 @@ class TestRunPc:
         with pytest.raises(ValueError, match="columns must match"):
             run_pc(data, ["y", "w", "z"])  # wrong order
 
+    def test_near_duplicate_columns_are_dropped_not_fatal(self) -> None:
+        """A near-duplicate variable must degrade locally, not globally.
+
+        The WT chamber has four barometers that read the same physical
+        quantity in the `standard` configuration (pairwise r > 0.9998),
+        which makes Fisher-Z's sub-correlation inversion singular. Before
+        this filter, that aborted the whole PC run and returned all-zeros
+        for ALL 32 nodes -- F1=0 for the cell -- even though the other 28
+        variables carried perfectly good signal.
+
+        Dropping the redundant column and padding it back with zeros is the
+        same policy `run_pc` already applies to zero-variance columns:
+        "no independent signal, no claim". The loss is then bounded to
+        edges incident to the dropped node.
+        """
+        rng = np.random.default_rng(0)
+        n = 400
+        a = rng.normal(size=n)
+        b = 2.0 * a + rng.normal(scale=0.5, size=n)
+        # `dup` is `a` plus noise 1e-7 of its scale: numerically collinear.
+        dup = a + rng.normal(scale=1e-7, size=n)
+        data = pd.DataFrame({"a": a, "b": b, "dup": dup})
+
+        adj = run_pc(data, ["a", "b", "dup"], alpha=0.05, seed=0)
+
+        assert list(adj.index) == ["a", "b", "dup"], "must pad back to full node set"
+        # The duplicate is dropped -> no claim about it in either direction.
+        assert adj.loc["dup"].sum() == 0
+        assert adj["dup"].sum() == 0
+        # ...but the surviving a-b relationship is still recovered. This is
+        # the whole point: a local drop, not a global all-zeros abort.
+        assert adj.loc["a", "b"] + adj.loc["b", "a"] > 0
+
+    def test_collinear_drop_is_logged_for_sweep_visibility(self, caplog) -> None:
+        """The drop must be countable, or it is a silent moderator.
+
+        A degradation path that varies with the experiment's independent
+        variable and leaves no trace is how a harness ends up measuring
+        itself. `_PcCollinearHandler` scrapes this warning per cell, so the
+        phrase is load-bearing.
+        """
+        rng = np.random.default_rng(1)
+        a = rng.normal(size=300)
+        data = pd.DataFrame(
+            {"a": a, "b": rng.normal(size=300), "dup": a + rng.normal(scale=1e-7, size=300)}
+        )
+        with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+            run_pc(data, ["a", "b", "dup"], alpha=0.05, seed=0)
+        assert any("collinear" in r.getMessage().lower() for r in caplog.records)
+
+    def test_collinearity_filter_can_be_disabled(self) -> None:
+        """None disables the filter, so the old behaviour stays reachable."""
+        rng = np.random.default_rng(2)
+        a = rng.normal(size=300)
+        data = pd.DataFrame(
+            {"a": a, "b": rng.normal(size=300), "dup": a + rng.normal(scale=1e-9, size=300)}
+        )
+        adj = run_pc(data, ["a", "b", "dup"], alpha=0.05, seed=0, collinearity_threshold=None)
+        assert adj.shape == (3, 3)
+
     def test_singular_matrix_returns_zero_adjacency(self) -> None:
         """Highly-collinear data (rank-deficient correlation) -> all-zeros.
 
@@ -220,20 +282,49 @@ class TestSingularFallbackLogging:
     """Verify the singular-matrix fallback emits a warning for M5 sweep visibility."""
 
     def test_warns_on_singular_matrix(self, caplog) -> None:
-        """Degenerate input → all-zeros output AND a warning logged."""
+        """Degenerate input → all-zeros output AND a warning logged.
+
+        Uses a THREE-way linear dependence (`w = x + y + z`) rather than a
+        pairwise duplicate. This matters: the collinearity filter added on
+        2026-08-25 compares columns pairwise, so it cannot see a variable
+        that is a sum of several others -- here every pairwise |r| is only
+        about 0.58, far below the 0.999 cutoff, while the correlation matrix
+        is exactly rank-deficient.
+
+        So this test pins the property that the pairwise filter is a
+        mitigation and not a replacement: the singular fallback must remain
+        reachable for the higher-order collinearity the filter is blind to.
+        """
         import logging
 
         rng = np.random.default_rng(0)
         x = rng.standard_normal(200)
-        y = 2.0 * x  # perfectly collinear → singular sub-correlation
+        y = rng.standard_normal(200)
         z = rng.standard_normal(200)
-        data = pd.DataFrame({"x": x, "y": y, "z": z})
+        a = rng.standard_normal(200)
+        # Overlapping sums: rank-deficient as a set, but every PAIRWISE |r|
+        # is around 0.5-0.7, nowhere near the 0.999 cutoff. The filter runs
+        # and drops nothing; PC still hits a singular sub-matrix.
+        data = pd.DataFrame(
+            {
+                "x": x,
+                "y": y,
+                "z": z,
+                "a": a,
+                "p": x + y,
+                "q": y + z,
+                "r": z + a,
+                "s": x + y + z + a,
+            }
+        )
+        cols = ["x", "y", "z", "a", "p", "q", "r", "s"]
 
         with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
-            adj = run_pc(data, ["x", "y", "z"])
+            adj = run_pc(data, cols)
 
         # Output is well-typed (the all-zeros fallback).
-        assert adj.shape == (3, 3)
+        assert adj.shape == (8, 8)
+        assert adj.to_numpy().sum() == 0
         # AND a warning was emitted about the fallback. The exact phrasing
         # is implementation detail; we just check the keyword "fell back"
         # which is in the log message.

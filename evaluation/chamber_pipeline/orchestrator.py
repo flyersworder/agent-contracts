@@ -253,6 +253,35 @@ class _PcDegeneracyHandler(logging.Handler):
             self.count += 1
 
 
+class _PcCollinearHandler(logging.Handler):
+    """Counts how many columns PC dropped as numerically duplicate.
+
+    Separate from `_PcDegeneracyHandler` on purpose: a collinear drop is a
+    LOCAL loss (the dropped node makes no claim, the rest of the graph is
+    still inferred), while a degeneracy fallback is a TOTAL loss (all-zeros
+    for every node). Averaging them into one number would hide which of the
+    two a sweep actually hit.
+
+    Counted per cell so the rate is visible in the harness-validity report.
+    A degradation path whose rate can vary with the experiment's independent
+    variable and that leaves no trace is how a harness ends up measuring
+    itself rather than the thing under study.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.count = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Inference logs "PC dropped N collinear column(s) at |r|>=...".
+        # Match on "collinear" and recover N from the args so the count is
+        # columns-dropped, not warnings-emitted.
+        message = record.getMessage().lower()
+        if "collinear" in message and "dropped" in message:
+            first = record.args[0] if isinstance(record.args, tuple) and record.args else 1
+            self.count += int(first) if isinstance(first, int) else 1
+
+
 # ---------------------------------------------------------------------------
 # LLM-call counting wrapper
 # ---------------------------------------------------------------------------
@@ -926,7 +955,9 @@ def run_cell(
     # so we count PC-degeneracy fallbacks per cell.
     inference_logger = logging.getLogger("evaluation.chamber_pipeline.inference")
     handler = _PcDegeneracyHandler()
+    collinear_handler = _PcCollinearHandler()
     inference_logger.addHandler(handler)
+    inference_logger.addHandler(collinear_handler)
     # Don't let the handler-level filter override the logger level.
     prev_level = inference_logger.level
     if prev_level > logging.WARNING:
@@ -1010,6 +1041,7 @@ def run_cell(
 
         # PC variants populate degeneracy count; llm_only doesn't run PC.
         n_pc_degen: int | None = None if spec.name == "llm_only" else handler.count
+        n_collinear: int | None = None if spec.name == "llm_only" else collinear_handler.count
 
         return RunRecord(
             chamber=chamber,
@@ -1042,6 +1074,7 @@ def run_cell(
             max_tree_fragment=frag,
             tree_would_refuse=refuse,
             n_pc_degeneracies=n_pc_degen,
+            n_collinear_dropped=n_collinear,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=cost_usd,
@@ -1080,6 +1113,7 @@ def run_cell(
         )
     finally:
         inference_logger.removeHandler(handler)
+        inference_logger.removeHandler(collinear_handler)
         inference_logger.setLevel(prev_level)
 
 

@@ -126,6 +126,12 @@ class RunRecord:
             effort under unchanged 0423 weights on 2026-08-13.
         providers_used: Comma-separated upstream providers that served this
             cell, sorted. More than one means provider rotation fired.
+        n_collinear_dropped: How many columns PC dropped as numerically
+            duplicate of an earlier column (see
+            `inference.DEFAULT_COLLINEARITY_THRESHOLD`). A LOCAL loss --
+            the dropped node makes no claim while the rest of the graph is
+            still inferred -- unlike `n_pc_degeneracies`, which is total.
+            None for variants that never run PC.
         n_pc_degeneracies: How many times PC's singular-matrix
             fallback fired during this cell. Captured by a logging
             handler the orchestrator installs around each cell. None
@@ -190,6 +196,7 @@ class RunRecord:
     reasoning_effort: str | None = None
     providers_used: str | None = None
     n_pc_degeneracies: int | None = None
+    n_collinear_dropped: int | None = None
 
     # --- LLM cost / token tracking ---
     # Populated by the orchestrator's _CountingLLM wrapper for cells whose

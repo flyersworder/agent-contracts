@@ -36,6 +36,7 @@ from evaluation.chamber_pipeline.orchestrator import (
     _build_agent_kwargs,
     _CountingLLM,
     _invoke_with_timeout,
+    _PcCollinearHandler,
     _PcDegeneracyHandler,
     _read_llm_metrics,
     _read_llm_provenance,
@@ -1801,3 +1802,50 @@ class TestCalibrationIsBudgetDependent:
         c95_a, _, a95, _ = _ladder_calibration(get_spec("fan_in_spec"), 45)
         graph = build_fan_in_graph(k=45, c95=c95_a, a95=a95, multiple=_PROVISION_MULTIPLE)
         assert dag_capacity(graph, "aggregator") >= 25168  # worst cell measured
+
+
+pytest.importorskip("causallearn")
+
+
+class TestCollinearDropCounting:
+    """The collinear-drop count must reach the RunRecord.
+
+    An uncounted degradation path is the failure mode this project has hit
+    three times: truncation that varied with k, a provider that returned
+    empty content, and a `wt_walks_v1` curve that pointed downhill. Each
+    looked like a finding because nothing recorded the harness giving way.
+    """
+
+    def test_run_cell_records_collinear_drops(self) -> None:
+        from evaluation.chamber_pipeline.inference import run_pc
+
+        # TWO duplicates, not one. With a single duplicate the assertion
+        # cannot tell "columns dropped" from "warnings emitted" -- both are
+        # 1 -- and a handler that counted warnings would pass. Verified by
+        # mutation: `self.count += 1` fails this test and passed the
+        # one-duplicate version.
+        rng = np.random.default_rng(0)
+        base = rng.normal(size=400)
+        data = pd.DataFrame(
+            {
+                "a": base,
+                "b": 2.0 * base + rng.normal(scale=0.5, size=400),
+                "dup1": base + rng.normal(scale=1e-7, size=400),
+                "dup2": base + rng.normal(scale=1e-7, size=400),
+            }
+        )
+        inference_logger = logging.getLogger("evaluation.chamber_pipeline.inference")
+        handler = _PcCollinearHandler()
+        inference_logger.addHandler(handler)
+        prev = inference_logger.level
+        inference_logger.setLevel(logging.WARNING)
+        try:
+            run_pc(data, ["a", "b", "dup1", "dup2"], alpha=0.05, seed=0)
+        finally:
+            inference_logger.removeHandler(handler)
+            inference_logger.setLevel(prev)
+
+        assert handler.count == 2, (
+            "two columns ('dup1','dup2') are numerical duplicates emitted in "
+            "ONE warning; the handler must count COLUMNS dropped, not warnings"
+        )

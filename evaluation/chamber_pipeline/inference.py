@@ -162,6 +162,69 @@ def cpdag_to_directed_adjacency(pc_graph: np.ndarray, node_names: list[str]) -> 
 # it's seconds. Set max_rows=None to disable.
 DEFAULT_MAX_ROWS = 300
 
+# Pearson |r| above which two columns are treated as the same variable.
+#
+# Motivated by the WT chamber's four barometers -- pressure_upwind,
+# pressure_downwind, pressure_ambient and pressure_intake -- which in the
+# `standard` configuration all read essentially ambient atmospheric
+# pressure. Measured over the full wt_validate_v1 menu, all six pairs sit
+# above r=0.9998 and NONE of the six is a true edge. Four variables spanning
+# roughly one dimension leaves the correlation matrix rank-deficient by
+# three (cond(R) ~ 1e7), and Fisher-Z's sub-matrix inversion then raises --
+# aborting the entire PC run and returning all-zeros for all 32 nodes.
+#
+# Dropping the redundant columns and padding them back with zeros is the
+# same policy this module already applies to zero-variance columns, for the
+# same reason: a variable numerically indistinguishable from another
+# carries no independent signal, so "no claim" is the honest output. The
+# difference it makes is scope -- the loss becomes the edges incident to
+# the dropped nodes instead of the whole graph.
+#
+# 0.999 rather than something closer to 1.0 because float64 Fisher-Z fails
+# well before exact collinearity; the WT clique sits at 0.9998-0.99998.
+DEFAULT_COLLINEARITY_THRESHOLD = 0.999
+
+
+def select_noncollinear_columns(
+    data: pd.DataFrame, columns: list[str], threshold: float
+) -> tuple[list[str], list[str]]:
+    """Greedily keep columns that are not near-duplicates of a kept column.
+
+    Walks `columns` in order and keeps each one whose absolute Pearson
+    correlation with every already-kept column is below `threshold`. Order
+    matters and is therefore taken from the caller's node ordering, never
+    from a set or dict iteration, so the choice of which member of a
+    duplicate group survives is reproducible across runs and platforms.
+
+    Args:
+        data: Frame containing at least `columns`; already subsampled and
+            already filtered for zero variance by the caller.
+        columns: Candidate column names, in the order that decides which
+            member of a near-duplicate group is kept.
+        threshold: Absolute-correlation cutoff. See
+            `DEFAULT_COLLINEARITY_THRESHOLD`.
+
+    Returns:
+        `(kept, dropped)`, together a partition of `columns`.
+    """
+    kept: list[str] = []
+    dropped: list[str] = []
+    for name in columns:
+        col = data[name].to_numpy(dtype=float)
+        redundant = False
+        for keeper in kept:
+            other = data[keeper].to_numpy(dtype=float)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                r = np.corrcoef(col, other)[0, 1]
+            # NaN means one side had no variance, which the caller already
+            # excluded; treat it as "not redundant" rather than silently
+            # dropping a column for an unrelated reason.
+            if np.isfinite(r) and abs(r) >= threshold:
+                redundant = True
+                break
+        (dropped if redundant else kept).append(name)
+    return kept, dropped
+
 
 def run_pc(
     pooled_data: pd.DataFrame,
@@ -171,6 +234,7 @@ def run_pc(
     show_progress: bool = False,
     max_rows: int | None = DEFAULT_MAX_ROWS,
     seed: int = 0,
+    collinearity_threshold: float | None = DEFAULT_COLLINEARITY_THRESHOLD,
     **pc_kwargs: Any,
 ) -> pd.DataFrame:
     """Run PC on pooled chamber data, return directed-adjacency DataFrame.
@@ -194,6 +258,11 @@ def run_pc(
             level. Pass None to use all rows (slow at 38 nodes).
         seed: RNG seed for the subsampling. Has no effect when
             `max_rows is None` or `len(pooled_data) <= max_rows`.
+        collinearity_threshold: Absolute-correlation cutoff above which a
+            column is treated as a duplicate of an earlier one and dropped
+            (padded back with zeros). Pass None to disable and restore the
+            pre-2026-08-25 behaviour, where a numerically duplicate pair
+            aborted the whole run. See `DEFAULT_COLLINEARITY_THRESHOLD`.
         **pc_kwargs: Forwarded to `causallearn.search.ConstraintBased.PC.pc`.
 
     Returns:
@@ -238,6 +307,28 @@ def run_pc(
             index=node_names,
             columns=node_names,
         )
+
+    if collinearity_threshold is not None and len(valid_cols) > 1:
+        valid_cols, collinear_dropped = select_noncollinear_columns(
+            pooled_data, valid_cols, collinearity_threshold
+        )
+        if collinear_dropped:
+            # Logged, not merely returned, because the orchestrator scrapes
+            # this per cell (`_PcCollinearHandler`). A degradation path whose
+            # rate can vary with the experiment's independent variable and
+            # that leaves no trace is how a harness ends up measuring itself.
+            logger.warning(
+                "PC dropped %d collinear column(s) at |r|>=%.4g: %s",
+                len(collinear_dropped),
+                collinearity_threshold,
+                ", ".join(collinear_dropped),
+            )
+        if not valid_cols:
+            return pd.DataFrame(
+                np.zeros((len(node_names), len(node_names)), dtype=int),
+                index=node_names,
+                columns=node_names,
+            )
 
     valid_data = pooled_data[valid_cols]
     data_array = valid_data.to_numpy(dtype=float)

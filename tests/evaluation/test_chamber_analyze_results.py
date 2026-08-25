@@ -733,6 +733,10 @@ def _validity_frame(
                         "n_llm_calls": k,
                         "n_selection_fallbacks": fallbacks_by_k.get((agent, k), 0),
                         "n_pc_degeneracies": 0,
+                        # Present-and-zero, not absent. A frame missing this
+                        # column is UNMEASURED, not clean -- which is the
+                        # distinction `missing_columns` exists to make.
+                        "n_collinear_dropped": 0,
                         "conservation_certified": True,
                     }
                 )
@@ -897,3 +901,33 @@ def test_pc_degeneracy_variance_is_an_accuracy_moderator() -> None:
     df.loc[(df.agent_name == "llm_pc") & (df.budget_k == 6), "n_pc_degeneracies"] = 1
     warnings = validity_warnings(harness_validity_report(df))
     assert any("MODERATOR" in w and "degeneracy" in w for w in warnings), warnings
+
+
+def test_collinear_drop_rate_is_a_fraction_not_a_count() -> None:
+    """`collinear_drop_rate` must live in [0, 1].
+
+    Every consumer -- `_VARIATION_EPS` (0.02) and the DEGRADED threshold --
+    assumes a rate. WT drops three redundant barometers in essentially every
+    cell, so a columns-per-cell encoding sits near 3.1 and its ordinary
+    sampling wobble (3.27 vs 2.90) reads as a 0.37 "variation with budget",
+    false-alarming as a MODERATOR on a path that is in fact perfectly flat.
+
+    The magnitude is not lost -- it moves to `collinear_cols_mean`.
+    """
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    df = _validity_frame()
+    # Three columns dropped in every cell: constant, and far above 1.0 if
+    # anyone re-encodes this as a count.
+    df["n_collinear_dropped"] = 3
+
+    report = harness_validity_report(df)
+    assert (report.collinear_drop_rate <= 1.0).all()
+    assert (report.collinear_drop_rate == 1.0).all()
+    assert (report.collinear_cols_mean == 3.0).all()
+
+    moderators = [w for w in validity_warnings(report) if w.startswith("MODERATOR")]
+    assert not moderators, f"flat path must not be a moderator; got {moderators}"

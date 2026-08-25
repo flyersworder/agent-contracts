@@ -66,14 +66,34 @@ ChamberId = Literal["lt", "wt"]
 ConfigId = Literal["standard", "pressure-control"]
 
 
-# Per-chamber dataset selection. LT and WT use different dataset names because
-# their interventional designs differ:
+# Per-chamber dataset selection. LT and WT use different dataset names
+# because their interventional designs differ:
 #   - LT: 59-experiment uniform menu (lt_interventions_standard_v1)
-#   - WT: 28-experiment random-walk menu (wt_walks_v1)
+#   - WT: 28-experiment menu (wt_validate_v1)
 # See §3.2 of docs/causal_chamber_validation_plan.md for menu sizes.
+#
+# WT was `wt_walks_v1` until 2026-08-25. That release is a random-walk
+# TIME SERIES: median lag-1 autocorrelation 0.9999, so its 320,000 rows per
+# experiment carry roughly 19 independent observations. Feeding it to PC's
+# Fisher-Z test -- which assumes i.i.d. samples -- inverted the budget
+# response. Measured over the same 28-experiment menu, 12 seeds per point:
+#
+#   k/M               0.11   0.25   0.50   0.75   1.00
+#   wt_walks_v1       0.181  0.178  0.157  0.144  0.155   F1 DECLINES
+#   wt_validate_v1    0.070  0.120  0.163  0.164  0.257   F1 rises
+#
+# Under wt_walks_v1, SHD worsened 55 -> 67 and predicted edges grew 25 -> 38
+# as more data arrived: spurious density from a violated test assumption,
+# not a property of the wind tunnel. `wt_validate_v1` covers the same menu
+# with lag-1 autocorrelation 0.14 and reproduces LT's qualitative shape,
+# which is what makes the two chambers comparable at all.
+#
+# This is a scientific choice and must be stated in the paper, not buried
+# here: we use the near-i.i.d. WT release because PC's independence test is
+# invalid on the random-walk release.
 DATASET_FOR_CHAMBER: dict[str, str] = {
     "lt": "lt_interventions_standard_v1",
-    "wt": "wt_walks_v1",
+    "wt": "wt_validate_v1",
 }
 
 
