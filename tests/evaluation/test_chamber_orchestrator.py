@@ -1478,13 +1478,26 @@ class TestLadderSelfDescription:
         assert team_oh > 0  # two rounds, at the same provisioning multiple
 
     def test_every_declared_role_has_a_calibration_figure(self) -> None:
+        """Per role AND per chamber the arm claims to support.
+
+        `_ROLE_C95` was keyed by role alone with every figure measured on LT,
+        so an arm declaring `chambers=("lt", "wt")` silently used LT's numbers
+        on WT. Measured on the WT gate, `targeted` costs 2,868 there against
+        LT's 10,379 -- a 3.6x over-provision that would have turned H-C into a
+        statement about provisioning. The registry declares the chambers; the
+        calibration table must cover what it declares.
+        """
         from evaluation.chamber_pipeline.orchestrator import _ROLE_C95, AGENT_REGISTRY
 
+        missing = []
         for spec in AGENT_REGISTRY:
             if spec.scout_roles is None:
                 continue
-            for role in spec.scout_roles:
-                assert role in _ROLE_C95, f"{spec.name} declares unknown role {role!r}"
+            for chamber in spec.chambers:
+                for role in spec.scout_roles:
+                    if (chamber, role) not in _ROLE_C95:
+                        missing.append(f"{spec.name}: ({chamber}, {role})")
+        assert not missing, f"uncalibrated (chamber, role) pairs: {missing}"
 
 
 class TestProvisioningIsWired:

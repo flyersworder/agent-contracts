@@ -687,7 +687,30 @@ def _budget_fraction(budget_k: int, menu_size: int) -> float:
 # hypothesis vacuous.
 _PROVISION_MULTIPLE = 4
 
-_ROLE_C95: dict[str, int] = {"plain": 2205, "broad": 3003, "targeted": 10379}
+# PER-CALL scout cost, keyed by (CHAMBER, ROLE).
+#
+# Was keyed by role alone, with every figure measured on LT. The WT gate
+# (2026-08-25, 27 graph cells) shows the roles do not transfer: `targeted`
+# costs 10,379 on LT and 2,868 on WT, a 3.6x gap, because the prompt carries
+# the menu and WT's is 28 experiments against LT's 59. Carrying LT's number
+# over would have over-provisioned that scout 3.6x and inflated H-C compliance
+# into a statement about provisioning rather than about the framework.
+#
+# Medians, per the rule stated for the LT figures: the grant is
+# `_PROVISION_MULTIPLE * c95 * calls`, so a median basis already carries 4x
+# headroom.
+#
+# Budget-invariance -- flagged as unverified when these were LT-only -- is now
+# CHECKED on WT: per-call cost varies 1.29x (targeted), 1.31x (plain) and
+# 1.71x (broad) across k in {7,14,21}, comfortably inside the 4x multiple.
+_ROLE_C95: dict[tuple[str, str], int] = {
+    ("lt", "plain"): 2205,
+    ("lt", "broad"): 3003,
+    ("lt", "targeted"): 10379,
+    ("wt", "plain"): 2112,
+    ("wt", "broad"): 2050,
+    ("wt", "targeted"): 2868,
+}
 # Aggregator (reconcile + any negotiation) spend per cell, in input+output
 # tokens, keyed by BUDGET. Not one constant: reconcile prompts list both
 # scouts' selections, so cost grows with k, and the gate at k=45 measured a
@@ -715,11 +738,14 @@ _A95_RECONCILE_BY_K: dict[tuple[str, int], int] = {
     ("lt", 6): 7646,
     ("lt", 30): 11427,
     ("lt", 45): 18790,
-    # WT: PROVISIONAL, carried over from LT's nearest budgets. NOT
-    # measurements -- see `_PROVISIONAL_CALIBRATION` directly below.
-    ("wt", 7): 7646,
-    ("wt", 14): 11427,
-    ("wt", 21): 18790,
+    # WT, measured on the 2026-08-25 gate (9 graph cells per budget, p75).
+    # Note the shape differs from LT's: LT rises monotonically with k while
+    # WT peaks at its LOWEST budget. What the two share is that the lowest
+    # budget is the least predictable -- spread 26x on WT k=7, 48.8x on LT
+    # k=6 -- so P2's window is not demonstrable there in either chamber.
+    ("wt", 7): 8593,
+    ("wt", 14): 4764,
+    ("wt", 21): 5491,
 }
 
 # (chamber, k) pairs whose calibration is a placeholder rather than a
@@ -735,18 +761,27 @@ _A95_RECONCILE_BY_K: dict[tuple[str, int], int] = {
 #
 # REMOVE each entry as its measurement lands. An entry left here after
 # measurement silently voids conservation for the whole sweep.
-_PROVISIONAL_CALIBRATION: frozenset[tuple[str, int]] = frozenset(
-    {("wt", 7), ("wt", 14), ("wt", 21)}
-)
+_PROVISIONAL_CALIBRATION: frozenset[tuple[str, int]] = frozenset()
+
+# Chambers where `_C95_NEGOTIATE` has been measured. It enters only through
+# `spec.negotiation_rounds`, so it affects the `team` arm and nothing else --
+# which is why it is tracked separately rather than voiding a whole chamber.
+# WT's negotiate cost was never isolated by the gate, so WT `team` cells run
+# on LT's figure and have their conservation voided; the fan-in arms, whose
+# c95 and a95 ARE measured on WT, report conservation normally.
+_NEGOTIATE_CALIBRATED_CHAMBERS: frozenset[str] = frozenset({"lt"})
 
 
-def is_provisional_calibration(chamber: str, budget_k: int) -> bool:
-    """True if this (chamber, budget) runs on placeholder calibration.
+def is_provisional_calibration(chamber: str, budget_k: int, *, negotiates: bool = False) -> bool:
+    """True if this cell runs on any placeholder calibration figure.
 
-    Consulted by `run_cell` to void `conservation_certified`. See
-    `_PROVISIONAL_CALIBRATION`.
+    Consulted by `run_cell` to void `conservation_certified`. Two sources:
+    an unmeasured (chamber, budget) pair, and -- for negotiating arms only --
+    a chamber whose `_C95_NEGOTIATE` was never isolated.
     """
-    return (chamber, budget_k) in _PROVISIONAL_CALIBRATION
+    if (chamber, budget_k) in _PROVISIONAL_CALIBRATION:
+        return True
+    return negotiates and chamber not in _NEGOTIATE_CALIBRATED_CHAMBERS
 
 
 # 75th percentile of measured aggregator spend, NOT the median -- and the
@@ -829,9 +864,16 @@ def _ladder_calibration(
         )
     role_a, role_b = spec.scout_roles
     overhead = spec.negotiation_rounds * (_PROVISION_MULTIPLE * _C95_NEGOTIATE)
+    for role in (role_a, role_b):
+        if (chamber, role) not in _ROLE_C95:
+            raise ValueError(
+                f"scout role {role!r} is not calibrated for chamber={chamber!r}; "
+                f"measured roles are "
+                f"{sorted(r for c, r in _ROLE_C95 if c == chamber)}"
+            )
     return (
-        _ROLE_C95[role_a],
-        _ROLE_C95[role_b],
+        _ROLE_C95[(chamber, role_a)],
+        _ROLE_C95[(chamber, role_b)],
         _A95_RECONCILE_BY_K[(chamber, budget_k)],
         overhead,
     )
@@ -1120,7 +1162,9 @@ def run_cell(
             # usage would drop out of H-C's denominator instead of counting
             # as the failure it is -- biasing the reported compliance rate
             # upward. Only `tree_would_refuse` is aggregator-specific.
-            if is_provisional_calibration(chamber, budget_k):
+            if is_provisional_calibration(
+                chamber, budget_k, negotiates=spec.negotiation_rounds > 0
+            ):
                 # Placeholder budgets produce a verify() result that describes
                 # the placeholder, not the framework. Reporting it would put
                 # provisioning noise into H-C, which is precisely the error
