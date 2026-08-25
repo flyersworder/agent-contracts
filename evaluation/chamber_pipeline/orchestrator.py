@@ -453,12 +453,34 @@ class _CountingLLM:
     # stops sending bytes mid-response. Discovered via root-cause
     # systematic debugging during M4b smoke: a stuck call kept the
     # python process at 0% CPU for 12+ minutes inside `_ssl__SSLSocket_read`.
-    # 30s is generous for normal completions (~1-15s with retries) and
-    # short enough that a stuck call surfaces a TimeoutError that
-    # `num_retries` can backoff-retry against. num_retries handles
-    # *exceptions*; without timeout, hangs never raise → retries
-    # never trigger → process appears wedged. Both are required.
-    DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
+    # Was 30.0 until 2026-08-25, with a comment calling that "generous for
+    # normal completions (~1-15s)". True in May; invalidated twice since, by
+    # the 32768 token caps and by August's provider-side reasoning increase.
+    # By the WT gate the MEDIAN cell averaged 30.3s per call -- the timeout sat
+    # at the middle of the latency distribution, with 21 of 42 cells above it
+    # (LT M6: 26.4% above, surviving only because Novita ran a few seconds
+    # faster).
+    #
+    # That is a MODERATOR, not noise. `num_retries` rescues most over-runs, so
+    # failures appear only where latency is highest -- `team` and
+    # `fan_in_spec` at the top budget -- making the error rate a function of
+    # both the topology IV and the budget axis. The WT gate lost 3 of 45 cells
+    # that way, all at k=21, all in the two heaviest arms.
+    #
+    # 300s is ~3.5x the measured p99 and ~2.7x the slowest legitimate call
+    # observed (109.8s on SiliconFlow), while still surfacing the 12-minute
+    # `_ssl__SSLSocket_read` hang this constant was introduced for, and still
+    # far below `--cell-timeout-seconds`. num_retries handles *exceptions*;
+    # without a timeout, hangs never raise → retries never trigger → the
+    # process appears wedged. Both are required.
+    # p99 of measured mean-seconds-per-call, WT gate 2026-08-25 (42 ok cells,
+    # Parasail/SiliconFlow, deepseek-v4-flash-0731): 78.9s, max 86.1s. A direct
+    # probe the same day saw a single SiliconFlow call at 109.8s. Recorded as a
+    # constant, not prose, so `DEFAULT_REQUEST_TIMEOUT_SECONDS` can be checked
+    # against it (`test_timeout_clears_measured_p99_with_margin`).
+    MEASURED_CALL_P99_SECONDS = 86.0
+
+    DEFAULT_REQUEST_TIMEOUT_SECONDS = 300.0
 
     def __call__(self, **kwargs: Any) -> Any:
         if self._target is None:

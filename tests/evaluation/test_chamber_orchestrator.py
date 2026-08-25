@@ -925,7 +925,11 @@ class TestCountingLLM:
         wrapper = _CountingLLM(target=target)
         wrapper(model="m", messages=[])
         assert captured[0].get("timeout") == _CountingLLM.DEFAULT_REQUEST_TIMEOUT_SECONDS
-        assert captured[0]["timeout"] == 30.0
+        # Deliberately NOT asserting a literal here. This test is about the
+        # kwarg being injected at all; a second assertion pinning the value
+        # made a latency-calibration change fail a pass-through test, which
+        # says nothing about whether the value is right.
+        # `TestRequestTimeoutIsCalibrated` owns the value, against measured p99.
 
     def test_caller_can_override_request_timeout(self) -> None:
         """Caller-supplied timeout wins (e.g., longer for k=59 cells)."""
@@ -1903,3 +1907,41 @@ class TestChamberKeyedCalibration:
         for chamber, k in _PROVISIONAL_CALIBRATION:
             assert is_provisional_calibration(chamber, k) is True
         assert is_provisional_calibration("lt", 30) is False
+
+
+class TestRequestTimeoutIsCalibrated:
+    """The per-request timeout must clear measured call latency with margin.
+
+    `DEFAULT_REQUEST_TIMEOUT_SECONDS` was 30.0 with a comment calling it
+    "generous for normal completions (~1-15s)". That was true in May 2026 and
+    was invalidated twice over: by raising the token caps to 32768, and by the
+    provider-side reasoning increase in August. Measured on the WT gate, the
+    MEDIAN cell had a mean per-call time of 30.3s -- the timeout sat at the
+    middle of the distribution, and 21 of 42 cells were above it.
+
+    Why that is a moderator and not just noise: `num_retries=3` rescues most
+    over-runs, so failures surface only where latency is highest -- the
+    heaviest arms at the largest budget. The error rate then correlates with
+    both the topology IV and the budget axis, which is survivorship bias
+    pointed straight at the arms under comparison.
+
+    Pinning the ratio rather than the number so the relationship stays
+    checkable when either figure moves.
+    """
+
+    def test_timeout_clears_measured_p99_with_margin(self) -> None:
+        assert _CountingLLM.DEFAULT_REQUEST_TIMEOUT_SECONDS >= (
+            3 * _CountingLLM.MEASURED_CALL_P99_SECONDS
+        ), (
+            "the request timeout must sit well clear of observed call latency; "
+            "at parity it burns retries on healthy calls and fails the tail"
+        )
+
+    def test_timeout_stays_below_the_cell_timeout_safety_net(self) -> None:
+        """It must still be a per-request bound, not a second cell timeout.
+
+        The constant exists to surface a STUCK call -- the original symptom was
+        12+ minutes at 0% CPU inside `_ssl__SSLSocket_read`. If it grows past
+        the cell timeout it stops catching that.
+        """
+        assert _CountingLLM.DEFAULT_REQUEST_TIMEOUT_SECONDS < 1800
