@@ -937,7 +937,21 @@ def run_cell(
     Returns:
         A RunRecord with status "ok" / "skipped" / "error".
     """
+    # TWO clocks on purpose. `started_at`/`finished_at` are wall-clock;
+    # `wall_time_seconds` below comes from `time.perf_counter()`, which on
+    # macOS is `mach_absolute_time` and DOES NOT ADVANCE WHILE THE SYSTEM IS
+    # ASLEEP. Their difference is therefore suspend time, and on a laptop
+    # running a multi-hour sweep on battery that is not a rounding error: the
+    # 2026-08-25 WT gate spent 1.01h of active worker time inside a 6.66h
+    # wall-clock span, with 100.4% of the 70,029s gap matched to `pmset -g
+    # log` sleep windows.
+    #
+    # Keep both. `wall_time_seconds` is the honest cost figure (sweep
+    # estimates must use it); the wall-clock pair is what makes an
+    # invisible suspend visible -- see `suspend_seconds` in
+    # `harness_validity_report`. Run sweeps under `caffeinate -is`.
     started_at = now_iso()
+    _t_cell_start = time.perf_counter()
 
     # Pre-flight: is this agent compatible with this chamber?
     if not spec.is_compatible(chamber):
@@ -1040,6 +1054,7 @@ def run_cell(
     kwargs = _build_agent_kwargs(spec, budget_k, seed, pc_alpha, counting_llm, model=model)
 
     t0 = time.perf_counter()
+    _setup_seconds = t0 - _t_cell_start
     try:
         predicted = _invoke_with_timeout(spec.run, adapter, kwargs, cell_timeout_seconds)
         wall = time.perf_counter() - t0
@@ -1056,6 +1071,7 @@ def run_cell(
         n_edges_truth = int(truth.values.sum() - truth.values.trace())
 
         finished_at = now_iso()
+        _score_seconds = time.perf_counter() - t0 - wall
         (
             n_llm_calls_for_cell,
             tokens_in,
@@ -1156,6 +1172,10 @@ def run_cell(
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=cost_usd,
+            extra={
+                "setup_seconds": round(_setup_seconds, 2),
+                "score_seconds": round(_score_seconds, 2),
+            },
         )
     except NotImplementedError as exc:
         # Defensive: the registry already filtered this, but the agent

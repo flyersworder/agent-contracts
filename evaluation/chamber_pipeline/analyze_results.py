@@ -708,6 +708,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
+def _suspend_seconds(ok: pd.DataFrame) -> float:
+    """Total wall-clock time these cells spanned but did not spend computing.
+
+    Returns 0.0 when the timestamp columns are absent or unparseable rather
+    than raising: this is a diagnostic, and a frame that predates the columns
+    should still produce a validity report.
+    """
+    needed = {"started_at", "finished_at", "wall_time_seconds"}
+    if not needed.issubset(ok.columns) or not len(ok):
+        return 0.0
+    try:
+        start = pd.to_datetime(ok["started_at"], errors="coerce")
+        end = pd.to_datetime(ok["finished_at"], errors="coerce")
+    except (TypeError, ValueError):
+        return 0.0
+    span = (end - start).dt.total_seconds()
+    gap = span - ok["wall_time_seconds"]
+    # Negative gaps are clock jitter on sub-second cells, not negative sleep.
+    return float(gap[gap > 0].sum())
+
+
 def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
     """Per-(arm, budget) rates for every scaffold degradation path.
 
@@ -773,6 +794,15 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
                 "collinear_drop_rate": coll_rate,
                 "collinear_cols_mean": coll_mean,
                 "conservation_fail_rate": cons_fail,
+                # Wall-CLOCK span minus active compute. `wall_time_seconds`
+                # is `time.perf_counter()`, which on macOS does not advance
+                # while the system is asleep, so this difference is suspend
+                # time. Reported because it is otherwise invisible: the
+                # 2026-08-25 WT gate ran 1.01h of work inside a 6.66h span.
+                # It is NOT a contaminating path -- sleeping between LLM calls
+                # cannot change what the agent chose -- it is an operations
+                # number. Run sweeps under `caffeinate -is`.
+                "suspend_seconds": _suspend_seconds(ok),
                 "wall_mean": ok["wall_time_seconds"].mean() if len(ok) else float("nan"),
                 "wall_p95": ok["wall_time_seconds"].quantile(0.95) if len(ok) else float("nan"),
             }

@@ -931,3 +931,35 @@ def test_collinear_drop_rate_is_a_fraction_not_a_count() -> None:
 
     moderators = [w for w in validity_warnings(report) if w.startswith("MODERATOR")]
     assert not moderators, f"flat path must not be a moderator; got {moderators}"
+
+
+def test_suspend_between_the_two_clocks_is_surfaced() -> None:
+    """A machine that sleeps mid-sweep must not look like slow cells.
+
+    `wall_time_seconds` comes from `time.perf_counter()`, which on macOS does
+    not advance while the system is asleep; `started_at`/`finished_at` are
+    wall-clock and do. On 2026-08-25 the WT gate ran 1.01h of active worker
+    time inside a 6.66h span -- 5.6h of idle sleep on battery -- and the gap
+    was initially misread as a 5x error in the cost model.
+
+    Surfacing it costs nothing (both columns already exist) and turns an
+    invisible multi-day stretch into a reported number.
+    """
+    from evaluation.chamber_pipeline.analyze_results import harness_validity_report
+
+    df = _validity_frame()
+    # One cell that "took" 100s of compute but spanned 700s of wall clock.
+    df.loc[df.index[0], "started_at"] = "2026-08-25T10:00:00"
+    df.loc[df.index[0], "finished_at"] = "2026-08-25T10:11:40"
+    df.loc[df.index[0], "wall_time_seconds"] = 100.0
+
+    report = harness_validity_report(df)
+    assert "suspend_seconds" in report.columns
+    row = report[
+        (report.agent_name == df.iloc[0]["agent_name"])
+        & (report.budget_k == df.iloc[0]["budget_k"])
+    ].iloc[0]
+    assert row.suspend_seconds >= 500, (
+        "a 700s span around 100s of compute is ~600s of suspend; reporting 0 "
+        "would hide exactly the condition that stretched a 10h sweep to days"
+    )
