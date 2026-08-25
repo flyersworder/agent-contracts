@@ -838,8 +838,68 @@ classifier in `conftest.call_kind`, guarded by
 `test_call_kind_markers_are_unambiguous`. A bare `"designer"` marker is
 insufficient: the reconcile system prompt says "one of two designers".
 
+## Session 2026-08-25: the provider and the WT dataset were both moderators
+
+Full detail, with measurements: **`docs/chamber-harness-validity-register.md`**
+(the running register of every harness defect that changed a result). Summary:
+
+1. **Provider order was costing 4.7x and mixing precisions.** One OpenRouter
+   model id is served by many endpoints at different prices: identical
+   `deepseek-v4-flash-0731` is $0.280/M out on Parasail/SiliconFlow/Baidu and
+   $1.320/M on Novita/AtlasCloud/DeepSeek/Cloudflare. M6 ran 422/450 cells on
+   Novita for **$54.53**; on Parasail it is **~$11.60**. Re-probed: Parasail
+   17-34s vs Novita 21s, so there is no throughput reason to pay it. Order is
+   now `(Parasail, SiliconFlow, Baidu, Novita)`, commit `6fe16e5`.
+   - `Together` excluded despite the low price: it spends the whole 32768 cap
+     on reasoning and returns EMPTY content, which degrades to `rng.choice`.
+   - The comment claiming Novita and AtlasCloud were "both fp8" was wrong --
+     **AtlasCloud is fp4** and served 27 of the 450 M6 cells. Measured, not
+     distorting (residualised on arm x budget: -0.004 vs +0.000, p=0.61).
+     Now a `PROVIDER_PRECISION` table plus a mutation-verified test; the old
+     test asserted `order == DEFAULT_PROVIDER_ORDER`, true by construction.
+
+2. **WT switched `wt_walks_v1` -> `wt_validate_v1`** (commit `05a811c`). The
+   walks release is a random-walk time series, median lag-1 autocorrelation
+   **0.9999**, so 320,000 rows carry ~19 independent observations. Fisher-Z
+   assumes i.i.d., and on that input the budget response INVERTS. Same menu,
+   30 seeds/point: walks slope **-0.0007 (p=0.06)**, validate **+0.0042
+   (p=1.4e-13)**, LT reference **+0.0041**. Dynamic range 0.022 -> 0.107.
+   **An earlier write-up called the flat walks curve an external-validity
+   finding ("the wind tunnel is insensitive to selection"). That is retracted
+   -- the pipeline was insensitive, not the chamber.**
+
+3. **PC now drops collinear columns locally instead of aborting globally.**
+   WT's four barometers all read ambient pressure in `standard` (all six pairs
+   r>0.9998, none a true edge); `cond(R)` ~ 1e7 made Fisher-Z raise and return
+   all-zeros for **all 32 nodes**, F1=0. 15/60 runs; now 0/150. Cost: the four
+   are pure sinks and 13 of 42 true edges point into them, so dropping three
+   forfeits those -- a real recall ceiling, stated as a WT scope limit.
+   Counted as `n_collinear_dropped` and flagged contaminating, because which
+   columns are duplicate depends on which experiments were bought (on WT the
+   rate moves 0.90 -> 1.00 with k).
+
+**Free results already extracted from the existing 450+180 cells** (no new
+compute; see the register and the analysis in-session):
+- **Cost-accuracy Pareto**: `planner_reasoner` is the ONLY Pareto-optimal arm
+  at k=30 AND k=45 -- cheapest and most accurate. Every fan-in topology is
+  strictly dominated. **This retires the M4b "delegation has measurable cost"
+  narrative.**
+- **Redundancy decomposition**: `fan_in_homog`'s residual against the loop's
+  own accuracy-vs-distinct-experiments curve is +0.006 at both k=30 and k=45 --
+  its entire -0.079 deficit is duplicated work, not worse selection. `team`
+  reaches identical 30/30 coverage and is still -0.047 (p=0.0001), so its cost
+  is genuine coordination, not redundancy.
+- **Budget matching verified by identity**: solving `distinct = |A|+|B|-shared`
+  against `overlap_frac` gives implied scout budgets of exactly 3/15/22 with
+  zero non-integer cells across all fan-in cells.
+- **Noise floor**: at k=M selection freedom is zero, so spread there is pure PC
+  noise -- 0.069 (LT) / 0.065 (WT). Quote effects against it.
+- **Seed pairing carries no information** (cross-arm r = -0.03), confirming the
+  unpinned-temperature note; unpaired MDEs are valid.
+
 ## References
 
+- **Harness validity register**: `docs/chamber-harness-validity-register.md`
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`
 - **Causal Chamber Plan**: `docs/causal_chamber_validation_plan.md` (full M4/M5/M6 spec for AAMAS 2027 / ECAI 2027)
