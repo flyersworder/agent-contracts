@@ -4,7 +4,7 @@ Every defect found in the causal-chamber pipeline that **changed a scientific
 result or would have**, with the measurement that established it and the check
 that now prevents recurrence.
 
-This file exists because the same defect class has now appeared five times and
+This file exists because the same defect class has now appeared six times and
 was, each time, initially mistaken for a finding. It is the reference for the
 paper's threats-to-validity and reproducibility sections. Add to it rather
 than rediscovering.
@@ -29,7 +29,8 @@ never as clean.
 | 2 | `_A95_RECONCILE` single constant | conservation failures | aggregator cost grows with k; one constant cannot fit | `_A95_RECONCILE_BY_K` at p75; raises on uncalibrated k |
 | 3 | Provider serves fp4 while pinned as fp8 | — (silent) | AtlasCloud is fp4; 27 of 450 M6 cells | `PROVIDER_PRECISION` + precision-homogeneity test |
 | 4 | Together returns empty after 32768 reasoning tokens | a valid but odd selection | truncation degraded to `rng.choice`, provider-level | excluded from `DEFAULT_PROVIDER_ORDER` |
-| 5 | `wt_walks_v1` fed to an i.i.d. test | "the wind tunnel is insensitive to selection" | random-walk autocorrelation 0.9999; ~19 effective samples | `wt_validate_v1`; `n_collinear_dropped` counted |
+| 5 | `wt_walks_v1` fed to an i.i.d. test | "the wind tunnel is insensitive to selection" | random-walk autocorrelation 0.9999; ~19 effective samples from 320,000 rows | `wt_validate_v1`, documented at the constant |
+| 6 | Collinear columns abort the whole PC run | a cell with genuinely no signal | four barometers read one quantity; all-zeros for all 32 nodes, F1=0 | local drop + pad; `n_collinear_dropped` counted |
 
 ---
 
@@ -83,8 +84,11 @@ Identical prompt, identical model id, `max_tokens=32768`:
 
 Three consequences:
 
-- **Cost.** 422 of 450 M6 cells ran on Novita: **$54.53**, against ~$11.60 for
-  the same sweep on Parasail. Price is not a proxy for speed.
+- **Cost.** 422 of 450 M6 cells ran on Novita, and the sweep billed **$54.53**
+  in total ($49.68 of it Novita's). The endpoint price model reproduces that —
+  7.4M in + 39.5M out at Novita's $0.44/$1.32 predicts $55.40 — and the same
+  token counts at Parasail's $0.14/$0.28 predict **$12.10**. Price is not a
+  proxy for speed.
 - **Precision.** The code *comment* asserted Novita and AtlasCloud were "both
   fp8". AtlasCloud is fp4. Impact measured: raw F1 on fp4-touched cells differs
   at p<1e-4, but that is entirely arm×budget composition — residualised on
@@ -110,8 +114,8 @@ carry roughly **19 independent observations**. LT's
 `lt_interventions_standard_v1` is 0.007 — effectively i.i.d.
 
 Fisher-Z assumes i.i.d. samples. Fed the walks release, the budget response
-**inverts**: F1 falls as experiments are added, SHD worsens 55 → 67, and
-predicted edges grow 25 → 38 — spurious density, not a property of the wind
+**inverts**: F1 falls as experiments are added, SHD worsens 54.6 → 68.8, and
+predicted edges grow 23.5 → 38.8 — spurious density, not a property of the wind
 tunnel. Same menu, 30 seeds per point:
 
 | k/M | 0.11 | 0.25 | 0.50 | 0.75 | 1.00 | slope |
@@ -128,6 +132,11 @@ LT's. Dynamic range 0.022 → 0.107.
 curve was written up as an external-validity finding — "the wind tunnel's
 discovery problem is insensitive to selection". It is not; the pipeline was.
 
+## 6. Collinear columns aborted the whole run (2026-08-25)
+
+Found while fixing #5, but a **separate defect with a separate cause**: #5 is
+about which dataset, #6 about how PC handles redundant sensors in any of them.
+
 ### The collinear barometers
 
 WT's four pressure sensors — `pressure_upwind`, `pressure_downwind`,
@@ -140,10 +149,11 @@ returning all-zeros for all 32 nodes, F1=0 for the cell. **15 of 60 runs.**
 `run_pc` now drops near-duplicate columns and pads them back with zeros, the
 same policy already applied to zero-variance columns. Degeneracies: 0 of 150.
 
-**The cost, stated plainly:** the four barometers are pure sinks and 13 of 42
-true edges point into them. Dropping three of the four forfeits those edges.
-That is strictly better than forfeiting all 42, but it is a real recall
-ceiling and belongs in the WT results as a scope limit.
+**The cost, stated plainly:** the four barometers are pure sinks, and 13 of 42
+true edges point into them. `pressure_upwind` survives the filter (in-degree
+4), so the three dropped sinks forfeit **9 of 42 true edges** — a recall
+ceiling of 0.786 on WT. Strictly better than forfeiting all 42, but real, and
+it belongs in the WT results as a scope limit.
 
 **It is counted**, because which columns are duplicate depends on which
 experiments were bought and can move with the budget axis. On WT it does —
@@ -152,6 +162,16 @@ experiments were bought and can move with the budget axis. On WT it does —
 ---
 
 ## Standing scope limits (not defects)
+
+- **Noise floor** — at k=M there is no selection freedom, so the spread there
+  is pure PC noise, and every effect should be quoted against it. LT (k=59):
+  sd 0.038, max−mean 0.069. WT `wt_validate_v1` (k=28): sd **0.076**,
+  max−mean **0.134**, roughly twice LT's. The 0.065 figure measured on
+  `wt_walks_v1` is stale — do not reuse it.
+- **WT resolves less than LT at the same n.** WT's dynamic range is 0.107
+  against MDE 0.031–0.055 at n=30; LT's is 0.238 against ~0.030. Scaled
+  proportionally, only the largest ladder contrast would resolve on WT at
+  n=30. Plan WT seeds accordingly or report equivalence bounds.
 
 - **`overlap_frac` is structurally 0.0 for rung 4** — pools are disjoint by
   construction.
@@ -174,8 +194,8 @@ experiments were bought and can move with the budget axis. On WT it does —
 ## How to add an entry
 
 1. Measure the effect on the result — do not assert it. Residualise on
-   arm×budget before claiming a difference is real; three of the five entries
-   above looked significant raw and were composition.
+   arm×budget before claiming a difference is real — the fp4 contamination
+   looked significant at p<1e-4 raw and was pure arm×budget composition.
 2. Add the counter at source and surface it in `harness_validity_report`.
 3. Write the test against the *behaviour*, then mutate the implementation and
    confirm the test fails. Two tests in this repo passed against a deliberately

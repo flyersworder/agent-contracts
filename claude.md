@@ -847,7 +847,8 @@ Full detail, with measurements: **`docs/chamber-harness-validity-register.md`**
    model id is served by many endpoints at different prices: identical
    `deepseek-v4-flash-0731` is $0.280/M out on Parasail/SiliconFlow/Baidu and
    $1.320/M on Novita/AtlasCloud/DeepSeek/Cloudflare. M6 ran 422/450 cells on
-   Novita for **$54.53**; on Parasail it is **~$11.60**. Re-probed: Parasail
+   Novita, billing **$54.53** total ($49.68 of it Novita's); the same token
+   counts at Parasail's prices predict **$12.10**. Re-probed: Parasail
    17-34s vs Novita 21s, so there is no throughput reason to pay it. Order is
    now `(Parasail, SiliconFlow, Baidu, Novita)`, commit `6fe16e5`.
    - `Together` excluded despite the low price: it spends the whole 32768 cap
@@ -872,8 +873,9 @@ Full detail, with measurements: **`docs/chamber-harness-validity-register.md`**
    WT's four barometers all read ambient pressure in `standard` (all six pairs
    r>0.9998, none a true edge); `cond(R)` ~ 1e7 made Fisher-Z raise and return
    all-zeros for **all 32 nodes**, F1=0. 15/60 runs; now 0/150. Cost: the four
-   are pure sinks and 13 of 42 true edges point into them, so dropping three
-   forfeits those -- a real recall ceiling, stated as a WT scope limit.
+   are pure sinks and 13 of 42 true edges point into them; `pressure_upwind`
+   survives, so the three dropped sinks forfeit **9 of 42** -- a recall ceiling
+   of 0.786, stated as a WT scope limit.
    Counted as `n_collinear_dropped` and flagged contaminating, because which
    columns are duplicate depends on which experiments were bought (on WT the
    rate moves 0.90 -> 1.00 with k).
@@ -887,13 +889,16 @@ compute; see the register and the analysis in-session):
 - **Redundancy decomposition**: `fan_in_homog`'s residual against the loop's
   own accuracy-vs-distinct-experiments curve is +0.006 at both k=30 and k=45 --
   its entire -0.079 deficit is duplicated work, not worse selection. `team`
-  reaches identical 30/30 coverage and is still -0.047 (p=0.0001), so its cost
-  is genuine coordination, not redundancy.
+  reaches identical 30/30 coverage and is still -0.047 (paired p=0.0005,
+  Holm-adjusted 0.0016 across the 6 within-budget contrasts; unpaired Welch
+  gives 0.0001 -- quote the Holm figure), so its cost is genuine coordination,
+  not redundancy.
 - **Budget matching verified by identity**: solving `distinct = |A|+|B|-shared`
   against `overlap_frac` gives implied scout budgets of exactly 3/15/22 with
   zero non-integer cells across all fan-in cells.
 - **Noise floor**: at k=M selection freedom is zero, so spread there is pure PC
-  noise -- 0.069 (LT) / 0.065 (WT). Quote effects against it.
+  noise. LT k=59: sd 0.038, max-mean 0.069. WT `wt_validate_v1` k=28: sd 0.076,
+  max-mean 0.134. The 0.065 measured on `wt_walks_v1` is STALE.
 - **Seed pairing carries no information** (cross-arm r = -0.03), confirming the
   unpinned-temperature note; unpaired MDEs are valid.
 
