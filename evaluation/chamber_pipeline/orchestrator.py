@@ -42,7 +42,7 @@ import traceback
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any
+from typing import Any, ClassVar
 
 from agent_contracts.core.delegation import ConservationViolationError
 from agent_contracts.integrations.causalchamber import (
@@ -350,25 +350,72 @@ class _CountingLLM:
     # cell-error rate on sustained LLM bursts.
     DEFAULT_NUM_RETRIES = 3
 
+    # Inference-precision class per OpenRouter endpoint, read from
+    # `GET /models/{id}/endpoints` on 2026-08-25. This is a table and not a
+    # comment on purpose. The previous version of this block *asserted in
+    # prose* that Novita and AtlasCloud were "both fp8". AtlasCloud is fp4,
+    # and 27 of the 450 M6 ladder cells were served by it before anyone
+    # checked — the precision class the comment existed to hold constant was
+    # already broken. A comment cannot be verified; this mapping is, by
+    # `test_default_provider_order_is_precision_homogeneous`.
+    #
+    # (The M6 contamination was measured and is not distorting: raw F1 on
+    # fp4-touched cells differs at p<1e-4, but that is entirely arm x budget
+    # composition. Residualised on arm x budget it is -0.004 vs +0.000,
+    # Welch p=0.61. Reported as a limitation, not a correction.)
+    PROVIDER_PRECISION: ClassVar[dict[str, str]] = {
+        # fp8 — eligible for DEFAULT_PROVIDER_ORDER
+        "Parasail": "fp8",
+        "SiliconFlow": "fp8",
+        "Baidu": "fp8",
+        "StreamLake": "fp8",
+        "Novita": "fp8",
+        # fp4 — INELIGIBLE, different numerics
+        "AtlasCloud": "fp4",
+        "Reka": "fp4",
+        # unquantised/undeclared — INELIGIBLE, precision class unknown
+        "Together": "unknown",
+        "DeepSeek": "unknown",
+        "Cloudflare": "unknown",
+        "Fireworks": "unknown",
+        "Alibaba": "unknown",
+        "Venice": "unknown",
+        "Phala": "unknown",
+        "Wafer": "unknown",
+    }
+
     # OpenRouter's `provider.order` preference for `deepseek-v4-flash`.
-    # Provider performance is genuinely dynamic across days: yesterday
-    # (2026-05-14) Parasail was the fastest (~0.5-1.3s/call) and AtlasCloud
-    # was throttling badly. Today (2026-05-15) Parasail dropped to ~9 t/s
-    # while Novita and AtlasCloud both serve at ~70-80 t/s. At
-    # `_ADJACENCY_MAX_TOKENS=32768` with ~95% reasoning load on DeepSeek
-    # v4 Flash, a 9 t/s provider takes ~55 min per cell vs ~6 min on a
-    # 70 t/s provider — every cell on Parasail would time out at 1800s.
-    # Order is therefore Novita + AtlasCloud first (consistently fast today,
-    # both fp8), Parasail + SiliconFlow as fallbacks. Rotation in `__call__`
-    # advances on `finish_reason: 'error'` and the cell-timeout safety net
-    # bounds any genuinely-slow provider at `cell_timeout_seconds`.
-    # DeepInfra (fp4) remains excluded to keep the inference-precision
-    # class constant for AAMAS reproducibility.
+    #
+    # Ordered by PRICE among verified-fp8 endpoints, not by throughput.
+    # OpenRouter serves one model id from many endpoints at *different
+    # prices*: on 2026-08-25 the identical `deepseek-v4-flash-0731` cost
+    # $0.280/M output on Parasail, SiliconFlow and Baidu, and $1.320/M on
+    # Novita, AtlasCloud, DeepSeek and Cloudflare — 4.7x for the same
+    # weights. The M6 ladder ran 422/450 cells on Novita and cost $54.53;
+    # the same sweep on Parasail would have cost ~$11.60.
+    #
+    # The May 2026 ordering put Novita first for throughput, which was
+    # correct then (Parasail had degraded to ~9 t/s). Re-probed 2026-08-25
+    # on a realistic late-loop selection prompt: Parasail 17-34s and always
+    # valid, Novita 21s — no throughput reason left to pay 4.7x.
+    #
+    # `Together` is excluded despite the $0.280 price: it spent the entire
+    # 32768-token cap on reasoning and returned EMPTY content
+    # (finish_reason='length'), which this harness degrades to `rng.choice`.
+    # That is the `_SELECTION_MAX_TOKENS` failure one level down — the
+    # provider, not just the model, sets truncation risk.
+    #
+    # `StreamLake` is fp8 at $0.147/M (cheapest) but unprobed; add it only
+    # after a throughput/validity check like the one above.
+    #
+    # Rotation in `__call__` advances on `finish_reason: 'error'`, and the
+    # cell-timeout safety net bounds any genuinely-slow provider at
+    # `cell_timeout_seconds`.
     DEFAULT_PROVIDER_ORDER: tuple[str, ...] = (
-        "Novita",
-        "AtlasCloud",
         "Parasail",
         "SiliconFlow",
+        "Baidu",
+        "Novita",
     )
 
     # Per-request socket-level timeout (seconds). Without this, a single

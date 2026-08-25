@@ -868,6 +868,32 @@ class TestCountingLLM:
         assert extra["provider"]["order"] == list(_CountingLLM.DEFAULT_PROVIDER_ORDER)
         assert extra["provider"]["allow_fallbacks"] is True
 
+    def test_default_provider_order_is_precision_homogeneous(self) -> None:
+        """Every pinned provider must serve the SAME inference precision.
+
+        This is the check that `test_injects_default_provider_order` cannot
+        make: that test asserts `order == DEFAULT_PROVIDER_ORDER`, which is
+        true by construction whatever the constant contains. The fp8 claim
+        lived only in a comment, and drifted -- AtlasCloud sat second in the
+        order while serving fp4, and 27 of the 450 M6 ladder cells were
+        served by it.
+
+        Mixing precision classes silently changes the numerics mid-sweep,
+        which is the one thing the provider pin exists to prevent.
+        """
+        precision = _CountingLLM.PROVIDER_PRECISION
+        classes = set()
+        for provider in _CountingLLM.DEFAULT_PROVIDER_ORDER:
+            assert provider in precision, (
+                f"{provider} is pinned but has no recorded precision class; "
+                "add it to PROVIDER_PRECISION from GET /models/{id}/endpoints"
+            )
+            classes.add(precision[provider])
+        assert classes == {"fp8"}, (
+            f"DEFAULT_PROVIDER_ORDER mixes precision classes: {classes}. "
+            "Only fp8 endpoints may be pinned."
+        )
+
     def test_caller_can_override_provider(self) -> None:
         """Caller-supplied extra_body.provider wins (e.g., for ablation)."""
         captured: list[dict[str, Any]] = []
