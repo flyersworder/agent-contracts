@@ -683,11 +683,50 @@ _ROLE_C95: dict[str, int] = {"plain": 2205, "broad": 3003, "targeted": 10379}
 # `a95` does not fail loudly -- it yields plausible conservation numbers that
 # are really statements about provisioning, which is exactly how the single
 # constant survived until the k=45 gate.
-_A95_RECONCILE_BY_K: dict[int, int] = {
-    6: 7646,
-    30: 11427,
-    45: 18790,
+# KEYED BY (CHAMBER, BUDGET). Every figure below was measured on LT, whose
+# menu is 59 experiments; WT's is 28, so its reconcile prompt -- which lists
+# both scouts' selections against the menu -- is a different length and a
+# different cost. A dict keyed by `k` alone silently lends LT's numbers to any
+# other chamber, which is the same silent-plausible-number failure that let a
+# single `_A95_RECONCILE` survive until the k=45 gate.
+_A95_RECONCILE_BY_K: dict[tuple[str, int], int] = {
+    ("lt", 6): 7646,
+    ("lt", 30): 11427,
+    ("lt", 45): 18790,
+    # WT: PROVISIONAL, carried over from LT's nearest budgets. NOT
+    # measurements -- see `_PROVISIONAL_CALIBRATION` directly below.
+    ("wt", 7): 7646,
+    ("wt", 14): 11427,
+    ("wt", 21): 18790,
 }
+
+# (chamber, k) pairs whose calibration is a placeholder rather than a
+# measurement. They exist for exactly one reason: a calibration gate on a new
+# chamber has to RUN before anything can be measured, and `_ladder_calibration`
+# refuses unmeasured budgets by design.
+#
+# The safety property that makes this acceptable: `run_cell` forces
+# `conservation_certified` to None for any cell run under a provisional entry,
+# so a gate cannot contribute H-C numbers. Token accounting is unaffected --
+# node monitors record spend regardless of the granted budget, which is what
+# the gate is there to measure.
+#
+# REMOVE each entry as its measurement lands. An entry left here after
+# measurement silently voids conservation for the whole sweep.
+_PROVISIONAL_CALIBRATION: frozenset[tuple[str, int]] = frozenset(
+    {("wt", 7), ("wt", 14), ("wt", 21)}
+)
+
+
+def is_provisional_calibration(chamber: str, budget_k: int) -> bool:
+    """True if this (chamber, budget) runs on placeholder calibration.
+
+    Consulted by `run_cell` to void `conservation_certified`. See
+    `_PROVISIONAL_CALIBRATION`.
+    """
+    return (chamber, budget_k) in _PROVISIONAL_CALIBRATION
+
+
 # 75th percentile of measured aggregator spend, NOT the median -- and the
 # reason is a design asymmetry rather than a preference for the numbers.
 #
@@ -729,7 +768,9 @@ _C95_NEGOTIATE = 4138
 _LADDER_NODES = ("scout_a", "scout_b", "aggregator")
 
 
-def _ladder_calibration(spec: AgentSpec, budget_k: int) -> tuple[int, int, int, int]:
+def _ladder_calibration(
+    spec: AgentSpec, budget_k: int, chamber: str = "lt"
+) -> tuple[int, int, int, int]:
     """`(c95_a, c95_b, a95, fixed_overhead)` for one ladder arm at one budget.
 
     Roles are read off the spec rather than matched on the arm's name: a
@@ -755,15 +796,23 @@ def _ladder_calibration(spec: AgentSpec, budget_k: int) -> tuple[int, int, int, 
     """
     if spec.scout_roles is None:
         raise ValueError(f"{spec.name!r} is not a ladder arm")
-    if budget_k not in _A95_RECONCILE_BY_K:
+    if (chamber, budget_k) not in _A95_RECONCILE_BY_K:
+        known = sorted(k for c, k in _A95_RECONCILE_BY_K if c == chamber)
         raise ValueError(
-            f"aggregator spend is not calibrated at k={budget_k}; "
-            f"measured budgets are {sorted(_A95_RECONCILE_BY_K)}. Measure it "
-            "rather than extrapolating -- a wrong a95 fails silently."
+            f"aggregator spend is not calibrated for chamber={chamber!r} at "
+            f"k={budget_k}; calibrated budgets for that chamber are {known}. "
+            "Measure it rather than extrapolating -- a wrong a95 fails "
+            "silently, yielding conservation numbers that are really "
+            "statements about provisioning."
         )
     role_a, role_b = spec.scout_roles
     overhead = spec.negotiation_rounds * (_PROVISION_MULTIPLE * _C95_NEGOTIATE)
-    return _ROLE_C95[role_a], _ROLE_C95[role_b], _A95_RECONCILE_BY_K[budget_k], overhead
+    return (
+        _ROLE_C95[role_a],
+        _ROLE_C95[role_b],
+        _A95_RECONCILE_BY_K[(chamber, budget_k)],
+        overhead,
+    )
 
 
 def _build_agent_kwargs(
@@ -904,7 +953,7 @@ def run_cell(
         if spec.is_ladder_arm:
             from evaluation.chamber_pipeline.coordination import build_fan_in_graph
 
-            c95_a, c95_b, a95, overhead = _ladder_calibration(spec, budget_k)
+            c95_a, c95_b, a95, overhead = _ladder_calibration(spec, budget_k, chamber=chamber)
             graph = build_fan_in_graph(
                 multiple=_PROVISION_MULTIPLE,
                 k=budget_k,
@@ -1033,11 +1082,18 @@ def run_cell(
             # usage would drop out of H-C's denominator instead of counting
             # as the failure it is -- biasing the reported compliance rate
             # upward. Only `tree_would_refuse` is aggregator-specific.
-            try:
-                cell_graph.verify()
-                certified = True
-            except ConservationViolationError:
-                certified = False
+            if is_provisional_calibration(chamber, budget_k):
+                # Placeholder budgets produce a verify() result that describes
+                # the placeholder, not the framework. Reporting it would put
+                # provisioning noise into H-C, which is precisely the error
+                # the single `_A95_RECONCILE` made at k=45.
+                certified = None
+            else:
+                try:
+                    cell_graph.verify()
+                    certified = True
+                except ConservationViolationError:
+                    certified = False
 
         # PC variants populate degeneracy count; llm_only doesn't run PC.
         n_pc_degen: int | None = None if spec.name == "llm_only" else handler.count

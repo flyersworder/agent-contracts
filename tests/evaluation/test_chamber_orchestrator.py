@@ -1849,3 +1849,57 @@ class TestCollinearDropCounting:
             "two columns ('dup1','dup2') are numerical duplicates emitted in "
             "ONE warning; the handler must count COLUMNS dropped, not warnings"
         )
+
+
+class TestChamberKeyedCalibration:
+    """Calibration constants are per-chamber, and unmeasured ones are inert.
+
+    Every `_ROLE_C95` / `_A95_RECONCILE_BY_K` / `_C95_NEGOTIATE` figure was
+    measured on LT, whose menu is 59 experiments. WT's is 28, so its prompts
+    -- and therefore its token costs -- are different quantities. A dict keyed
+    by `k` alone silently applies LT's numbers to WT.
+    """
+
+    def test_lt_calibration_still_resolves(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import (
+            AGENT_REGISTRY,
+            _ladder_calibration,
+        )
+
+        spec = next(s for s in AGENT_REGISTRY if s.name == "fan_in_homog")
+        c95_a, c95_b, a95, _ = _ladder_calibration(spec, 30, chamber="lt")
+        assert (c95_a, c95_b, a95) == (2205, 2205, 11427)
+
+    def test_lt_budget_does_not_leak_into_another_chamber(self) -> None:
+        """k=30 is calibrated on LT and NOT on WT; asking for WT must raise.
+
+        Before chamber keying this returned LT's 11,427 for a WT cell without
+        complaint -- the same silent-plausible-number failure that let a single
+        `_A95_RECONCILE` survive until the k=45 gate.
+        """
+        from evaluation.chamber_pipeline.orchestrator import (
+            AGENT_REGISTRY,
+            _ladder_calibration,
+        )
+
+        spec = next(s for s in AGENT_REGISTRY if s.name == "fan_in_homog")
+        with pytest.raises(ValueError, match="not calibrated"):
+            _ladder_calibration(spec, 30, chamber="wt")
+
+    def test_provisional_entries_are_declared_not_silent(self) -> None:
+        """A provisional entry must be flagged so conservation can be voided.
+
+        Provisional numbers exist only so a calibration gate can RUN on a new
+        chamber; they are not measurements. `is_provisional_calibration` is
+        what `run_cell` consults to force `conservation_certified` to None, so
+        a gate cannot contribute plausible H-C figures that are really
+        statements about provisioning.
+        """
+        from evaluation.chamber_pipeline.orchestrator import (
+            _PROVISIONAL_CALIBRATION,
+            is_provisional_calibration,
+        )
+
+        for chamber, k in _PROVISIONAL_CALIBRATION:
+            assert is_provisional_calibration(chamber, k) is True
+        assert is_provisional_calibration("lt", 30) is False
