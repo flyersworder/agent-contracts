@@ -989,6 +989,36 @@ cells (2.9%) from OpenInference/Relace/DigitalOcean — unpinned, unknown
 quantization. Impact nil (residualised +0.0095 vs −0.0003, p=0.55) but the
 guarantee was void; now False. See register §8.
 
+## LT LOOP CURVE LAUNCHED (2026-08-26 17:29 UTC)
+
+`runs/m6-lt-loop-curve.parquet` — **420 cells**, LT, `llm_pc` + `random`,
+k ∈ {6, 12, 20, 30, 40, 50, 59} (fractions 0.10/0.20/0.34/0.50/0.68/0.85/1.00),
+30 seeds, `deepseek-v4-flash-0731`, 6 workers, 5400 s cell timeout. Projected
+**~12 h, ~$14**. Resume by re-running the identical command; the JSONL sidecar
+skips completed cells.
+
+**Both arms run fresh in one sweep, on one machine.** That is not a
+convenience — per §2b a local random curve against a VPS loop is a cross-BLAS
+comparison. `runs/curve-lt-random.parquet` is Accelerate and cannot serve as
+this curve's baseline.
+
+The grid was chosen on merit rather than inherited from the legacy random
+curve, which is possible precisely because both arms are fresh. The M6 ladder
+shows the LT loop already saturated at k=30 (0.420) vs k=45 (0.417), and the
+preflight hints the loop sits *below* random at k=15 — so the structure worth
+resolving is the crossover below k=30, not the plateau above it. Four of the
+seven points sit at k ≤ 30.
+
+**Preflight (12 cells, k ∈ {15, 59}, 3 seeds) was clean on every check**:
+0 selection fallbacks at k=59 (the M6-era failure mode), 0 errors, providers
+confined to the pinned fp8 set, max cell wall **2593 s** against the 5400 s
+timeout. It also produced the calibration the projection uses: cost and wall
+scale as ~`k^1.19`, anchored at $0.027 / 499 s (k=15) and $0.135 / 2560 s
+(k=59).
+
+**The preflight's real return was catching the BLAS confound before the sweep
+rather than after it** — see §2b.
+
 ## References
 
 - **Harness validity register**: `docs/chamber-harness-validity-register.md`
