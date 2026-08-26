@@ -902,6 +902,55 @@ compute; see the register and the analysis in-session):
 - **Seed pairing carries no information** (cross-arm r = -0.03), confirming the
   unpinned-temperature note; unpaired MDEs are valid.
 
+## M6 WT LADDER COMPLETE (2026-08-26): the topology result replicates
+
+`runs/m6-wt-ladder.parquet` — **750/750 cells, 750 ok, 0 errors, 0 PC
+degeneracies**, 21.3h wall on the VPS, **$11.64**, 127.7h active compute
+across 6 workers. Grid: 5 rungs x k in {7,14,21} (k/M = 0.25/0.50/0.75 on
+WT's 28-experiment menu) x 50 seeds. n=50 rather than 30 because WT compresses
+effect sizes ~2.2x versus LT.
+
+**Headline: no multi-agent topology beats the single sequential loop on
+EITHER chamber, at any budget where selection has signal.**
+
+| rung | LT k=30 | WT k=14 | WT k=21 |
+|---|---|---|---|
+| ensemble `fan_in_homog` | −0.079 **R** | −0.048 **R** (p=0.0008) | −0.052 **R** (p=0.0004) |
+| roles `fan_in_spec` | −0.051 **R** | −0.044 **R** (p=0.0025) | −0.049 **R** (p=0.0004) |
+| chain `planner_reasoner` | +0.011 ns | +0.022 ns | −0.024 ns |
+| team | −0.047 **R** | −0.021 ns | −0.045 **R** (p=0.0024) |
+
+Two chambers, different graphs (38 nodes/57 edges vs 32/42), different menus
+(59 vs 28), different sample regimes (1,000 vs ~840 rows/experiment) — same
+ordering. **This is the external-validity answer to "everything rests on LT's
+single graph".** The chain is the only multi-agent rung that never resolves as
+worse, consistent across both chambers.
+
+**Loop vs random**: WT +0.019 (k=14), **+0.037 (k=21)**. Unlike LT, WT does
+NOT converge at its top budget — because k/M=0.75 there is only 21 experiments
+absolute, against LT's 45. So **LT's convergence is about absolute menu
+coverage, not budget fraction**; a useful disambiguation for §5.
+
+**k=7 is uninformative, not a reversal.** All five arms underperform random
+(loop −0.045); the band 0.145–0.179 sits just above WT's PC noise floor of
+0.134. Report as "below some budget the LLM's selection is worse than chance
+on WT". An interim reading of it as "splitting helps at low budget" is
+withdrawn.
+
+**Conservation**: WT 64.3% (193/300 fan-in cells) against LT's 95.9%,
+degrading 91% → 61% → 41% across budgets. `verify()` caught every overrun, so
+this is provisioning, not mechanism — the WT c95/a95 figures were calibrated
+from only 27 gate cells. **Report the two separately.** WT `team` carries no
+conservation result at all (`_C95_NEGOTIATE` unmeasured for WT → forced None).
+
+**Harness**: fallbacks 37/11,550 = 0.32%; 0 degeneracies; suspend **231s**
+(the macOS gate recorded 70,029s — see register §9).
+
+**Fixed after the sweep**: `allow_fallbacks` was True, so OpenRouter served 22
+cells (2.9%) from OpenInference/Relace/DigitalOcean — unpinned, unknown
+quantization. Impact nil (residualised +0.0095 vs −0.0003, p=0.55) but the
+guarantee was void; now False. See register §8.
+
 ## References
 
 - **Harness validity register**: `docs/chamber-harness-validity-register.md`

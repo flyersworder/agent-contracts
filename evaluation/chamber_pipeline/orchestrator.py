@@ -517,10 +517,31 @@ class _CountingLLM:
             self._accumulate_usage(response)
             return response
 
-        # Provider rotation loop. OpenRouter's `allow_fallbacks: True`
-        # cycles through `provider.order` when the upstream provider
-        # returns an HTTP error — but **NOT** when the provider returns
-        # 200 with `finish_reason: 'error'` in the response body
+        # Provider rotation loop.
+        #
+        # `allow_fallbacks` is FALSE, so OpenRouter may use only the
+        # providers we list. It was True until 2026-08-26, and the 750-cell
+        # WT sweep showed what that costs: 22 cells (2.9%) were served by
+        # OpenInference, Relace or DigitalOcean -- none pinned, none in
+        # `PROVIDER_PRECISION`, quantization unknown. Impact on that sweep
+        # was nil (residualised on arm x budget, +0.0095 vs -0.0003, Welch
+        # p=0.55), but the guarantee was the point: with fallbacks on,
+        # `PROVIDER_PRECISION` and its homogeneity test certify what we
+        # REQUEST, not what ran. That is the fp4/AtlasCloud lesson one layer
+        # down -- there a pinned provider had drifted precision, here routing
+        # left the pinned set entirely.
+        #
+        # The trade is availability for reproducibility: if all four pinned
+        # fp8 endpoints fail, the call now fails instead of silently
+        # succeeding elsewhere. That is the correct direction for a paper
+        # that reports the serving stack, and the rotation below plus
+        # `num_retries` still give four providers x four attempts of
+        # redundancy inside the pinned set.
+        #
+        # Rotation exists because OpenRouter's own fallback (when it was
+        # enabled) cycled `provider.order` on an HTTP error — but **NOT**
+        # when a provider returns 200 with `finish_reason: 'error'` in the
+        # response body
         # (a body-encoded soft failure). We saw this in the M4b
         # re-smoke (2026-05-14): Parasail returned ~40 body-encoded
         # errors over a 1-hr window, never triggering OpenRouter
@@ -543,7 +564,7 @@ class _CountingLLM:
                 **existing_extra,
                 "provider": {
                     "order": provider_order,
-                    "allow_fallbacks": True,
+                    "allow_fallbacks": False,
                 },
             }
 

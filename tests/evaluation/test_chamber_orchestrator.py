@@ -867,7 +867,14 @@ class TestCountingLLM:
         extra = captured[0].get("extra_body", {})
         assert "provider" in extra
         assert extra["provider"]["order"] == list(_CountingLLM.DEFAULT_PROVIDER_ORDER)
-        assert extra["provider"]["allow_fallbacks"] is True
+        assert extra["provider"]["allow_fallbacks"] is False, (
+            "OpenRouter must not route past DEFAULT_PROVIDER_ORDER. With "
+            "allow_fallbacks=True the 750-cell WT sweep was served in part by "
+            "OpenInference, Relace and DigitalOcean -- 22 cells, none of them "
+            "pinned, none of them in PROVIDER_PRECISION. The precision table "
+            "and its homogeneity test then guarantee only what we REQUEST, "
+            "which is not what the paper claims."
+        )
 
     def test_default_provider_order_is_precision_homogeneous(self) -> None:
         """Every pinned provider must serve the SAME inference precision.

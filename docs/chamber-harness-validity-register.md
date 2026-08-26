@@ -4,7 +4,7 @@ Every defect found in the causal-chamber pipeline that **changed a scientific
 result or would have**, with the measurement that established it and the check
 that now prevents recurrence.
 
-This file exists because the same defect class has now appeared six times and
+This file exists because the same defect class has now appeared eight times and
 was, each time, initially mistaken for a finding. It is the reference for the
 paper's threats-to-validity and reproducibility sections. Add to it rather
 than rediscovering.
@@ -31,6 +31,8 @@ never as clean.
 | 4 | Together returns empty after 32768 reasoning tokens | a valid but odd selection | truncation degraded to `rng.choice`, provider-level | excluded from `DEFAULT_PROVIDER_ORDER` |
 | 5 | `wt_walks_v1` fed to an i.i.d. test | "the wind tunnel is insensitive to selection" | random-walk autocorrelation 0.9999; ~19 effective samples from 320,000 rows | `wt_validate_v1`, documented at the constant |
 | 6 | Collinear columns abort the whole PC run | a cell with genuinely no signal | four barometers read one quantity; all-zeros for all 32 nodes, F1=0 | local drop + pad; `n_collinear_dropped` counted |
+| 7 | 30s request timeout | 3 cells "failed" at k=21 | the timeout sat at the MEDIAN call latency; retries hid it until the tail | raised to 300s, ratio pinned against measured p99 |
+| 8 | `allow_fallbacks: True` | a precision-homogeneous sweep | OpenRouter routed past the pinned list; 22 WT cells on unpinned, unknown-quant endpoints | `allow_fallbacks: False`, asserted by test |
 
 ---
 
@@ -159,6 +161,90 @@ it belongs in the WT results as a scope limit.
 experiments were bought and can move with the budget axis. On WT it does —
 0.90 → 1.00 of cells — and `validity_warnings` flags it as contaminating.
 
+
+## 7. The request timeout sat at the median call latency (2026-08-25)
+
+`DEFAULT_REQUEST_TIMEOUT_SECONDS` was 30.0, with a comment calling it
+"generous for normal completions (~1-15s)". True in May 2026; invalidated by
+the 32768 token caps and by August's provider-side reasoning increase.
+Measured mean seconds per LLM call on the WT gate: **p50 30.3**, p90 53.7,
+p99 78.9, max 86.1. The timeout sat at the middle of the distribution, with
+21 of 42 cells above it.
+
+**Why it was a moderator, not noise:** `num_retries=3` rescues most
+over-runs, so a failure surfaces only where latency is highest -- the heaviest
+arms at the largest budget. The gate lost 3 of 45 cells, ALL at k=21, all in
+`team` and `fan_in_spec`. The error rate was therefore a function of both the
+topology IV and the budget axis: survivorship bias aimed squarely at the arms
+under comparison, the same shape as M4b's 8 `planner_reasoner` timeouts.
+
+Raised to 300s (~3.5x measured p99). The measurement is now a constant,
+`MEASURED_CALL_P99_SECONDS`, with a test pinning the ratio. Retrying the three
+failed cells under the new value: all three passed.
+
+**Note the near-miss.** LT's M6 ladder reported 0 errors in 450 cells. That
+was not health -- 26.4% of its cells also averaged above 30s per call, and it
+survived only because Novita ran a few seconds faster than Parasail.
+
+## 8. `allow_fallbacks: True` defeated the precision pin (2026-08-26)
+
+`PROVIDER_PRECISION` and `test_default_provider_order_is_precision_homogeneous`
+certify that every PINNED provider is fp8. They cannot certify what actually
+served a call: with `allow_fallbacks: True`, OpenRouter routes past
+`provider.order` when the listed providers fail.
+
+The 750-cell WT ladder was served in part by **OpenInference (14 cells),
+Relace (9) and DigitalOcean (4)** -- 22 cells, 2.9%, none pinned, none in the
+precision table, quantization unknown.
+
+Impact on that sweep was nil and is reported rather than corrected:
+residualised on arm x budget, off-pin cells sit at **+0.0095** against
+**-0.0003**, Welch **p=0.55**. The defect is in the guarantee, not the data.
+
+Now `allow_fallbacks: False`. The trade is availability for reproducibility:
+if all four pinned fp8 endpoints fail the call fails, rather than silently
+succeeding on an unknown stack. Rotation plus `num_retries` still give four
+providers x four attempts inside the pinned set.
+
+**This is the fp4/AtlasCloud lesson one layer down.** There, a pinned provider
+had drifted precision. Here, routing left the pinned set entirely. Both make
+the same shape of claim unverifiable, and in both cases the test asserted
+something true about our REQUEST rather than about what ran.
+
+## 9. Machine suspend masqueraded as a 5x cost error (2026-08-25)
+
+Not a pipeline defect, but it consumed an investigation and produced a wrong
+public claim, so it belongs here.
+
+The WT gate ran **1.01h of active worker time inside a 6.66h wall-clock
+span**. Per cell, `finished_at - started_at` was up to 5.5x
+`wall_time_seconds`, and the gap scaled with budget -- the shape of a real
+per-cell overhead. Three hypotheses were eliminated by direct measurement
+(adapter construction 0.0s, imports 3.2s, scoring ~0s) before the cause
+surfaced.
+
+`wall_time_seconds` comes from `time.perf_counter()`, which on macOS is
+`mach_absolute_time` and **does not advance while the system is asleep**;
+`started_at`/`finished_at` are wall-clock and do. The laptop was idle-sleeping
+on battery. Against `pmset -g log`, sleep windows account for **100.4%** of
+the 70,029s gap (residual -288s over 48 cells). The machine slept 13.74h that
+day.
+
+**An interim claim that the cost model was wrong by 5x is retracted.**
+`wall_time_seconds` was correct throughout and remains the figure sweep
+estimates must use.
+
+**The diagnostic tell, recorded because it should have been read sooner:**
+two CONCURRENT cells lost an *identical* interval -- 1475s in one batch, 853s
+in another. Per-cell work cannot be identical across processes; a shared
+external interval can. That points at the clock, not at the code.
+
+`suspend_seconds` is now reported by `harness_validity_report`, computed from
+two columns that were always recorded. Deliberately NOT in `contaminating`:
+sleeping between LLM calls cannot change what an agent selected. Run sweeps
+under `caffeinate -is`, or better, on the Linux VPS -- the 750-cell WT ladder
+there recorded **231s** of suspend against the gate's 70,029s.
+
 ---
 
 ## Standing scope limits (not defects)
@@ -168,10 +254,25 @@ experiments were bought and can move with the budget axis. On WT it does —
   sd 0.038, max−mean 0.069. WT `wt_validate_v1` (k=28): sd **0.076**,
   max−mean **0.134**, roughly twice LT's. The 0.065 figure measured on
   `wt_walks_v1` is stale — do not reuse it.
-- **WT resolves less than LT at the same n.** WT's dynamic range is 0.107
-  against MDE 0.031–0.055 at n=30; LT's is 0.238 against ~0.030. Scaled
-  proportionally, only the largest ladder contrast would resolve on WT at
-  n=30. Plan WT seeds accordingly or report equivalence bounds.
+- **WT resolves less than LT at the same n**, which is why the ladder ran at
+  n=50 there: WT's dynamic range is 0.107 against MDE 0.031–0.055 at n=30,
+  where LT's is 0.238 against ~0.030. At n=50 the achieved MDEs were
+  0.031–0.043 and every fan-in contrast resolved.
+- **WT's k=7 band is uninformative, not a reversal.** Every arm underperforms
+  random there (loop −0.045, team −0.011, all five negative) and the band
+  (0.145–0.179) sits just above WT's PC noise floor of 0.134. Report it as
+  "below some budget the LLM's selection is worse than chance on WT", not as a
+  ladder result. An interim reading of it as "splitting helps at low budget"
+  was withdrawn once k=14 and k=21 completed.
+- **Conservation compliance is chamber- and budget-dependent.** LT 95.9%; WT
+  64.3% overall (193/300 fan-in cells), degrading 91% → 61% → 41% across
+  k=7/14/21. `verify()` caught every overrun, so this is a statement about
+  provisioning — the WT c95/a95 figures, calibrated from 27 gate cells,
+  under-predict cost as budget grows — and NOT about the mechanism. Report the
+  two separately or a reader concludes the framework failed.
+- **WT `team` carries no conservation result.** `_C95_NEGOTIATE` was never
+  isolated for WT, so those 150 cells run on LT's figure with
+  `conservation_certified` forced to None. They contribute accuracy only.
 
 - **`overlap_frac` is structurally 0.0 for rung 4** — pools are disjoint by
   construction.
