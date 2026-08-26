@@ -60,6 +60,7 @@ from .agents import (
     random_agent,
     team_agents,
 )
+from .inference import pc_call_defaults
 from .results import RunRecord, now_iso
 from .scoring import f1_edges, shd
 
@@ -955,6 +956,10 @@ def _build_agent_kwargs(
     return kwargs
 
 
+# Resolved once at import: `run_pc`'s bound defaults never change at runtime.
+_PC_CALL_DEFAULTS = pc_call_defaults()
+
+
 def run_cell(
     spec: AgentSpec,
     chamber: ChamberId,
@@ -1016,9 +1021,24 @@ def run_cell(
     started_at = now_iso()
     _t_cell_start = time.perf_counter()
 
+    # Stamped onto EVERY record this function returns, including skips and
+    # errors: a re-run needs the failed cell's configuration as much as the
+    # ok cell's. `DEFAULT_MAX_ROWS` / `DEFAULT_COLLINEARITY_THRESHOLD` are
+    # read from the module rather than hardcoded here, and
+    # `test_pc_defaults_match_the_recorded_constants` pins them to `run_pc`'s
+    # actual signature defaults -- Python binds default arguments at def
+    # time, so a module constant reassigned later would leave `run_pc`
+    # unchanged while this stamp reported the new value.
+    _pc_provenance: dict[str, Any] = {
+        "pc_alpha": pc_alpha,
+        "pc_max_rows": _PC_CALL_DEFAULTS["max_rows"],
+        "pc_collinearity_threshold": _PC_CALL_DEFAULTS["collinearity_threshold"],
+    }
+
     # Pre-flight: is this agent compatible with this chamber?
     if not spec.is_compatible(chamber):
         return RunRecord(
+            **_pc_provenance,
             chamber=chamber,
             configuration=configuration,
             agent_name=spec.name,
@@ -1086,6 +1106,7 @@ def run_cell(
         budget_fraction = _budget_fraction(budget_k, menu_size)
     except Exception as exc:
         return RunRecord(
+            **_pc_provenance,
             chamber=chamber,
             configuration=configuration,
             agent_name=spec.name,
@@ -1203,6 +1224,7 @@ def run_cell(
         n_collinear: int | None = None if spec.name == "llm_only" else collinear_handler.count
 
         return RunRecord(
+            **_pc_provenance,
             chamber=chamber,
             configuration=configuration,
             agent_name=spec.name,
@@ -1248,6 +1270,7 @@ def run_cell(
         # menu-parse guard). Treat as a skip rather than an error so
         # the M5 figure doesn't show this as a failure.
         return RunRecord(
+            **_pc_provenance,
             chamber=chamber,
             configuration=configuration,
             agent_name=spec.name,
@@ -1261,6 +1284,7 @@ def run_cell(
         )
     except Exception as exc:
         return RunRecord(
+            **_pc_provenance,
             chamber=chamber,
             configuration=configuration,
             agent_name=spec.name,

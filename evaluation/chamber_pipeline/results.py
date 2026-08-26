@@ -198,6 +198,17 @@ class RunRecord:
     n_pc_degeneracies: int | None = None
     n_collinear_dropped: int | None = None
 
+    # --- PC provenance: the three parameters that silently determine the
+    #     graph. Recorded per cell because `runs/m6-controls.parquet`
+    #     disagreed with a later `random` run on identical seed, code and
+    #     dependency versions, and the disagreement was undiagnosable --
+    #     none of these travelled with the row. A cell that cannot state
+    #     the configuration that produced it cannot be pooled with another
+    #     cell, which is the only thing a sweep is for. ---
+    pc_alpha: float | None = None
+    pc_max_rows: int | None = None
+    pc_collinearity_threshold: float | None = None
+
     # --- LLM cost / token tracking ---
     # Populated by the orchestrator's _CountingLLM wrapper for cells whose
     # agent accepts an LLM. Stay None for non-LLM variants and for cells

@@ -45,6 +45,7 @@ CPDAG → directed-adjacency convention:
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 
@@ -224,6 +225,21 @@ def select_noncollinear_columns(
                 break
         (dropped if redundant else kept).append(name)
     return kept, dropped
+
+
+def pc_call_defaults() -> dict[str, Any]:
+    """The values `run_pc` will actually use when called without them.
+
+    Read off the BOUND signature, not the module constants. Python
+    evaluates default arguments at def time, so reassigning
+    `DEFAULT_MAX_ROWS` after import moves the constant while leaving
+    `run_pc` untouched -- provenance stamped from the constant would then
+    describe a configuration that never ran. Every agent calls `run_pc`
+    without `max_rows` or `collinearity_threshold`, so these defaults are
+    what produced the graph.
+    """
+    params = inspect.signature(run_pc).parameters
+    return {name: p.default for name, p in params.items() if p.default is not p.empty}
 
 
 def run_pc(

@@ -27,6 +27,10 @@ import pandas as pd
 import pytest
 
 from agent_contracts.integrations import CAUSAL_CHAMBER_AVAILABLE
+from evaluation.chamber_pipeline.inference import (
+    DEFAULT_COLLINEARITY_THRESHOLD,
+    DEFAULT_MAX_ROWS,
+)
 from evaluation.chamber_pipeline.orchestrator import (
     AGENT_REGISTRY,
     MENU_SIZES,
@@ -1965,3 +1969,70 @@ class TestRequestTimeoutIsCalibrated:
         the cell timeout it stops catching that.
         """
         assert _CountingLLM.DEFAULT_REQUEST_TIMEOUT_SECONDS < 1800
+
+
+# ---------------------------------------------------------------------------
+# PC provenance -- the three parameters that silently determine the graph
+# ---------------------------------------------------------------------------
+
+
+def test_pc_provenance_survives_a_runtime_constant_reassignment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stamp must follow `run_pc`, not the module constant.
+
+    Python binds default arguments at def time, so reassigning
+    `DEFAULT_MAX_ROWS` after import moves the constant while `run_pc` keeps
+    using the old value. A stamp read from the constant would then report a
+    configuration that never ran -- which is strictly worse than no stamp,
+    because it looks like provenance. Editing the constant in the source
+    file cannot catch this: that changes both together, so the assertion
+    would hold by construction.
+    """
+    from evaluation.chamber_pipeline import inference
+
+    monkeypatch.setattr(inference, "DEFAULT_MAX_ROWS", 9999)
+    defaults = inference.pc_call_defaults()
+    assert defaults["max_rows"] != 9999
+    assert defaults["max_rows"] == DEFAULT_MAX_ROWS
+
+
+@requires_causalchamber
+class TestRunCellRecordsPcProvenance:
+    """Every cell must state the PC configuration that produced it.
+
+    `runs/m6-controls.parquet` disagrees with a later `random` run on the
+    same seed, the same committed code and the same dependency versions
+    (41 predicted edges vs 22 -- a structurally different graph, not a
+    threshold flip). It stayed undiagnosable because none of alpha, the row
+    cap or the collinearity threshold travelled with the row.
+    """
+
+    def test_ok_record_carries_the_alpha_actually_used(self) -> None:
+        record = run_cell(
+            spec=get_spec("random"),
+            chamber="lt",
+            configuration="standard",
+            budget_k=2,
+            seed=0,
+            pc_alpha=0.01,
+        )
+        assert record.status == "ok"
+        # The value passed, NOT run_cell's 0.05 default -- a stamp that
+        # hardcoded the default would be worse than no stamp at all.
+        assert record.pc_alpha == 0.01
+        assert record.pc_max_rows == DEFAULT_MAX_ROWS
+        assert record.pc_collinearity_threshold == DEFAULT_COLLINEARITY_THRESHOLD
+
+    def test_skipped_record_carries_it_too(self) -> None:
+        """A re-run needs the skipped cell's configuration as much as an ok one."""
+        record = run_cell(
+            spec=get_spec("greedy_ig_lite"),  # LT-only, so WT skips
+            chamber="wt",
+            configuration="standard",
+            budget_k=2,
+            seed=0,
+            pc_alpha=0.01,
+        )
+        assert record.status == "skipped"
+        assert record.pc_alpha == 0.01
