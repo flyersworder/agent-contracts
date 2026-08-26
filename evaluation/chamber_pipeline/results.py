@@ -208,6 +208,11 @@ class RunRecord:
     pc_alpha: float | None = None
     pc_max_rows: int | None = None
     pc_collinearity_threshold: float | None = None
+    # The linear-algebra backend is part of the configuration: identical
+    # code, seeds, data and package versions produce different graphs under
+    # Accelerate vs OpenBLAS. See `inference.runtime_fingerprint`.
+    blas_backend: str | None = None
+    platform_tag: str | None = None
 
     # --- LLM cost / token tracking ---
     # Populated by the orchestrator's _CountingLLM wrapper for cells whose

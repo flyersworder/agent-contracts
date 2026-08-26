@@ -227,6 +227,36 @@ def select_noncollinear_columns(
     return kept, dropped
 
 
+def runtime_fingerprint() -> dict[str, str]:
+    """Platform facts that change PC's output on byte-identical inputs.
+
+    Verified 2026-08-26, not inferred: macOS/Accelerate and Linux/OpenBLAS
+    disagree on `np.corrcoef` of the same matrix, and on `inv(C)[0,1]` from
+    the ~10th hex digit (relative ~1e-10). PC turns that into structural
+    noise -- it is a sequence of accept/reject tests at alpha, each
+    conditioned on the last, so one flipped borderline test forks the
+    conditioning-set search rather than perturbing a number. Seeded `random`
+    LT k=15 seed 0 gives F1 0.381 on Accelerate and 0.286 on OpenBLAS.
+
+    Cells from different backends therefore MUST NOT be pooled, and the only
+    way to notice is for each row to say which one produced it.
+    """
+    import platform as _platform
+
+    import numpy as np
+
+    blas = "unknown"
+    try:
+        deps = np.show_config("dicts").get("Build Dependencies", {})
+        blas = str(deps.get("blas", {}).get("name", "unknown"))
+    except Exception:  # pragma: no cover - numpy build without the dicts API
+        pass
+    return {
+        "blas": blas,
+        "platform": f"{_platform.system()}-{_platform.machine()}",
+    }
+
+
 def pc_call_defaults() -> dict[str, Any]:
     """The values `run_pc` will actually use when called without them.
 

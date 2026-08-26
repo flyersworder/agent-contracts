@@ -60,7 +60,7 @@ from .agents import (
     random_agent,
     team_agents,
 )
-from .inference import pc_call_defaults
+from .inference import pc_call_defaults, runtime_fingerprint
 from .results import RunRecord, now_iso
 from .scoring import f1_edges, shd
 
@@ -958,6 +958,7 @@ def _build_agent_kwargs(
 
 # Resolved once at import: `run_pc`'s bound defaults never change at runtime.
 _PC_CALL_DEFAULTS = pc_call_defaults()
+_RUNTIME = runtime_fingerprint()
 
 
 def run_cell(
@@ -1033,6 +1034,8 @@ def run_cell(
         "pc_alpha": pc_alpha,
         "pc_max_rows": _PC_CALL_DEFAULTS["max_rows"],
         "pc_collinearity_threshold": _PC_CALL_DEFAULTS["collinearity_threshold"],
+        "blas_backend": _RUNTIME["blas"],
+        "platform_tag": _RUNTIME["platform"],
     }
 
     # Pre-flight: is this agent compatible with this chamber?

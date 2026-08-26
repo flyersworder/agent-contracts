@@ -1997,6 +1997,43 @@ def test_pc_provenance_survives_a_runtime_constant_reassignment(
     assert defaults["max_rows"] == DEFAULT_MAX_ROWS
 
 
+def test_runtime_fingerprint_is_read_from_numpy_not_hardcoded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The BLAS name must come from the installed numpy at call time.
+
+    A hardcoded string would be provenance-shaped and wrong on exactly the
+    machine where it matters. macOS/Accelerate and Linux/OpenBLAS produce
+    different graphs from byte-identical inputs, so this field is what stops
+    two sweeps from being pooled across that boundary.
+    """
+    import numpy as np
+
+    from evaluation.chamber_pipeline.inference import runtime_fingerprint
+
+    monkeypatch.setattr(
+        np,
+        "show_config",
+        lambda *a, **k: {"Build Dependencies": {"blas": {"name": "sentinel-blas"}}},
+    )
+    assert runtime_fingerprint()["blas"] == "sentinel-blas"
+
+
+def test_runtime_fingerprint_degrades_to_unknown_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A numpy build without the dicts API must not abort a 20-hour sweep."""
+    import numpy as np
+
+    from evaluation.chamber_pipeline.inference import runtime_fingerprint
+
+    def _boom(*a: object, **k: object) -> dict[str, object]:
+        raise TypeError("show_config('dicts') unsupported")
+
+    monkeypatch.setattr(np, "show_config", _boom)
+    assert runtime_fingerprint()["blas"] == "unknown"
+
+
 @requires_causalchamber
 class TestRunCellRecordsPcProvenance:
     """Every cell must state the PC configuration that produced it.

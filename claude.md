@@ -692,46 +692,59 @@ Two independent reasons, either sufficient:
 The M6 plan's pilot-reuse for rungs 0 and 3 is therefore **void**; all five
 rungs must run fresh. Parallelism makes that affordable.
 
-### 2b. RETRACTED (2026-08-26): library drift did NOT break reproducibility
+### 2b. The BLAS backend is part of the configuration (2026-08-26)
 
-The section that stood here claimed a dependency refresh (v0.5.0, Aug 21:
-`causal-learn` 0.1.4.5→0.1.4.8, `numpy` 2.3.5→2.5.2, `scipy` 1.16.3→1.18.1,
-`pandas` 3.0.1→3.0.5) had made seeded `random` cells irreproducible per-cell
-while leaving distributions intact, and drew a paper-facing lesson about
-archiving the resolved environment. **All of that rested on a single file,
-`runs/m6-controls.parquet`, and it is wrong.**
+Supersedes two earlier explanations of the same observation, both wrong:
+"library drift breaks per-cell reproducibility" (`c77c610`) and, later the
+same day, "an unrecoverable uncommitted working tree" (`bd46b0d`). The actual
+cause is measured:
 
-HEAD reproduces M4b **exactly, seed for seed**: `random` LT k=6 gives
-0.2041 / 0.2759 / 0.2025 for seeds 0/1/2, identical to `runs/m4-pilot.parquet`
-and to `runs/curve-lt-random.parquet`. Only `m6-controls` differs, and not
-subtly — seed 0 predicts 22 edges against 41, a structurally different graph
-rather than the boundary flips the retracted explanation posited. The docs
-commit that recorded the finding (`c77c610`) was written 14 minutes after
-that run started.
+**macOS/Accelerate and Linux/OpenBLAS produce different causal graphs from
+byte-identical inputs.** Verified directly, not by elimination: on the same
+LT matrix, `np.corrcoef` differs between the machines, and `inv(C)[0,1]`
+agrees to ~10 hex digits then diverges (`-0x1.a8471c316a312p+13` vs
+`-0x1.a8471c315c71bp+13`, relative ~1e-10). Dataset md5s match; `numpy`
+2.5.2, `scipy` 1.18.1, `causal-learn` 0.1.4.8 and `pandas` 3.0.5 are
+identical on both.
 
-Excluded as causes by direct measurement (2026-08-26): committed code;
-dependency versions (VPS and local are identical on all four packages); arm
-mix (`random` is bit-identical run alone and alongside `greedy_ig_lite`);
-the parallel path (`--max-workers 3` is seed-faithful); and `pc_alpha`
-(neither 0.01 nor 0.10 reproduces it). What remains is an uncommitted
-working tree on 2026-08-24 — unrecoverable, because the run recorded none
-of its own parameters.
+PC converts that into *structural* noise. It is a sequence of accept/reject
+tests at alpha, each conditioned on the previous ones, so a perturbation that
+flips one borderline test forks the conditioning-set search rather than
+nudging a number. Seeded `random`, LT, no LLM:
 
-**Do not use `runs/m6-controls.parquet`.** Its `random` rows are the
-contaminated ones; `runs/curve-lt-random.parquet` (LT, k ∈ {6,15,30,45,50,55,59},
-n=30) is valid and matches HEAD.
+| k | seed | Accelerate (macOS) | OpenBLAS (VPS) |
+|---|---|---|---|
+| 15 | 0 | 0.3810 | 0.2857 |
+| 15 | 1 | 0.2889 | 0.2759 |
+| 59 | 0 | 0.3736 | 0.3864 |
+| 59 | 2 | 0.3871 | 0.4615 |
 
-**Durable fix, commit `2e54aa1`**: every `RunRecord` now carries `pc_alpha`,
-`pc_max_rows` and `pc_collinearity_threshold` — PC's three silent
-determinants. The stamp is read from `run_pc`'s *bound signature defaults*,
-not the module constants, because Python binds default arguments at def time:
-a constant reassigned after import would move the stamp without moving
-`run_pc`, reporting a configuration that never ran. The first version of that
-test compared constant to constant and survived mutation; see register §10.
+**Which file came from which machine:**
 
-The real lesson is the opposite of the retracted one, and closer to home: a
-sweep that does not record its own parameters cannot be pooled with any
-other sweep, and cannot be debugged a day later.
+- **macOS / Accelerate**: `m4-pilot.parquet`, `curve-lt-random.parquet`,
+  `curve-wt-random.parquet`, `curve-wt-validate.parquet`.
+- **Linux / OpenBLAS (VPS)**: `m6-ladder.parquet`, `m6-wt-ladder.parquet`,
+  `m6-controls.parquet`.
+
+Two consequences, one reassuring and one not:
+
+1. **Both M6 ladders are OpenBLAS**, so the cross-chamber topology
+   replication (LT vs WT, §"M6 WT LADDER COMPLETE") is platform-consistent
+   and stands as reported.
+2. **Every loop-vs-random contrast recorded so far is cross-platform** — the
+   ladders are VPS, the random curves are local. The WT figures (+0.019 at
+   k=14, +0.037 at k=21) are therefore *not* yet a clean contrast and must be
+   recomputed against a VPS random baseline before use. Cheap: `random` runs
+   without an LLM.
+
+**Durable fix, `2e54aa1` + follow-up**: every `RunRecord` now carries
+`pc_alpha`, `pc_max_rows`, `pc_collinearity_threshold`, `blas_backend` and
+`platform_tag`. Never pool rows whose `blas_backend` differs.
+
+For the paper's reproducibility statement: in a constraint-based discovery
+algorithm, the seed does not determine the graph. Archive the resolved
+environment *including the linear-algebra backend*, and run every arm of a
+comparison on one machine.
 
 ### 3. `deepseek-v4-flash-0731` is the better snapshot
 

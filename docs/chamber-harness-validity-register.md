@@ -247,52 +247,63 @@ there recorded **231s** of suspend against the gate's 70,029s.
 
 ---
 
-## 10. A sweep that recorded none of its own parameters (2026-08-26)
+## 10. The BLAS backend silently determined the graph (2026-08-26)
 
 `runs/m6-controls.parquet` and `runs/curve-lt-random.parquet` disagree on
 `random` LT k=6 -- a **seeded, LLM-free** arm that must be deterministic.
-Seed 0: F1 0.1266 with 22 predicted edges against 0.2041 with 41. That is a
-structurally different graph, not the boundary flip a numerics change
-produces.
+Seed 0: F1 0.1266 with 22 predicted edges against 0.2041 with 41. A
+structurally different graph, not a boundary flip.
 
-HEAD reproduces `curve-lt-random` and `m4-pilot` **exactly, seed for seed**.
-So `m6-controls` is the outlier, and the "library drift breaks per-cell
-reproducibility" finding that was drawn from it (commit `c77c610`, written 14
-minutes after that run began) is **retracted**.
+**Cause, measured directly:** the two files were produced on different
+machines, and macOS/Accelerate and Linux/OpenBLAS do not agree bit-for-bit.
+On the same LT matrix, `np.corrcoef` differs, and `inv(C)[0,1]` agrees to
+~10 hex digits then diverges at relative ~1e-10. Dataset md5s match and all
+four numeric packages are at identical versions on both machines.
 
-Excluded as causes by direct measurement:
+PC amplifies this. It is a sequence of accept/reject tests at alpha, each
+conditioned on the previous ones, so flipping one borderline test forks the
+conditioning-set search. Numerical noise becomes structural noise.
 
-| candidate | test | result |
-|---|---|---|
-| committed code | re-run at HEAD | reproduces M4b exactly |
-| dependency versions | compare VPS vs local | identical on all four packages |
-| arm mix | `random` alone vs with `greedy_ig_lite` | bit-identical |
-| parallel path | `--max-workers 3` vs serial | bit-identical |
-| `pc_alpha` | re-run at 0.01 and 0.10 | neither reproduces it |
+**Two earlier explanations of this same observation were wrong** and are
+retracted: "library drift breaks per-cell reproducibility" (`c77c610`,
+written 14 minutes after the anomalous run began) and "an unrecoverable
+uncommitted working tree" (`bd46b0d`, same day). Both were reached by
+elimination. The mechanism was found by *measuring the linear algebra
+directly* -- the discipline the register exists to enforce.
 
-What remains is an uncommitted working tree, and it is unrecoverable --
-**because the run recorded none of its own parameters.** PC has three silent
-determinants and the schema carried none of them: `pc_alpha`,
-`DEFAULT_MAX_ROWS` (300, the subsample fed to Fisher-Z) and
-`DEFAULT_COLLINEARITY_THRESHOLD` (0.999).
+Excluded by direct measurement before that: committed code (HEAD reproduces
+M4b exactly, per-seed, on macOS), dependency versions, arm mix (`random` is
+bit-identical alone and alongside `greedy_ig_lite`), the parallel path
+(`--max-workers 3` is seed-faithful), and `pc_alpha` (neither 0.01 nor 0.10
+reproduces it). All five held; the sixth candidate was the machine.
 
-Fixed in `2e54aa1`: all three are stamped onto every `RunRecord`, including
-skips and errors -- a re-run needs a failed cell's configuration as much as
-an ok cell's.
+**Consequence for reported results:** both M6 ladders ran on the VPS, so the
+cross-chamber replication is platform-consistent and stands. But every
+loop-vs-random contrast so far pairs a VPS ladder against a local random
+curve, including WT's +0.019 / +0.037. Those must be recomputed against a
+VPS random baseline.
 
-**The test for it was trivially true on the first attempt, and mutation
-caught that.** `run_cell` stamps constants; `run_pc` binds its defaults at
-def time. Editing the constant in the source file changes both together, so
+**Fixed** by recording the configuration instead of assuming it. PC had
+three silent determinants and the schema carried none: `pc_alpha`,
+`DEFAULT_MAX_ROWS` (300) and `DEFAULT_COLLINEARITY_THRESHOLD` (0.999); the
+backend was a fourth. All now stamped on every `RunRecord` -- including
+skips and errors, since a re-run needs a failed cell's configuration too --
+plus `blas_backend` and `platform_tag`. **Never pool rows whose
+`blas_backend` differs.**
+
+**The first test written for the fix was trivially true, and mutation caught
+it.** `run_cell` stamps constants; `run_pc` binds its defaults at def time.
+Editing the constant in the source changes both together, so
 `assert record.pc_max_rows == DEFAULT_MAX_ROWS` held by construction. The
 real hazard is a *runtime* reassignment, which moves the constant and leaves
 `run_pc` alone. The stamp now reads `run_pc`'s bound signature via
 `pc_call_defaults()`, and the test monkeypatches the constant and asserts the
 stamp does **not** follow.
 
-That makes this the fourth entry whose test certified our REQUEST rather than
-what ran (§3-4 provider order, §7 the hardcoded 30.0, §8 `allow_fallbacks`).
-The pattern is now explicit enough to state as a rule: **assert against
-recorded execution, never against the constant that configured it.**
+That is the fourth entry whose test certified our REQUEST rather than what
+ran (§3-4 provider order, §7 the hardcoded 30.0, §8 `allow_fallbacks`). The
+rule, stated outright: **assert against recorded execution, never against
+the constant that configured it.**
 
 ## Standing scope limits (not defects)
 
