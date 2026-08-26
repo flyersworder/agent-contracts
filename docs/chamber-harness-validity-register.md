@@ -247,6 +247,53 @@ there recorded **231s** of suspend against the gate's 70,029s.
 
 ---
 
+## 10. A sweep that recorded none of its own parameters (2026-08-26)
+
+`runs/m6-controls.parquet` and `runs/curve-lt-random.parquet` disagree on
+`random` LT k=6 -- a **seeded, LLM-free** arm that must be deterministic.
+Seed 0: F1 0.1266 with 22 predicted edges against 0.2041 with 41. That is a
+structurally different graph, not the boundary flip a numerics change
+produces.
+
+HEAD reproduces `curve-lt-random` and `m4-pilot` **exactly, seed for seed**.
+So `m6-controls` is the outlier, and the "library drift breaks per-cell
+reproducibility" finding that was drawn from it (commit `c77c610`, written 14
+minutes after that run began) is **retracted**.
+
+Excluded as causes by direct measurement:
+
+| candidate | test | result |
+|---|---|---|
+| committed code | re-run at HEAD | reproduces M4b exactly |
+| dependency versions | compare VPS vs local | identical on all four packages |
+| arm mix | `random` alone vs with `greedy_ig_lite` | bit-identical |
+| parallel path | `--max-workers 3` vs serial | bit-identical |
+| `pc_alpha` | re-run at 0.01 and 0.10 | neither reproduces it |
+
+What remains is an uncommitted working tree, and it is unrecoverable --
+**because the run recorded none of its own parameters.** PC has three silent
+determinants and the schema carried none of them: `pc_alpha`,
+`DEFAULT_MAX_ROWS` (300, the subsample fed to Fisher-Z) and
+`DEFAULT_COLLINEARITY_THRESHOLD` (0.999).
+
+Fixed in `2e54aa1`: all three are stamped onto every `RunRecord`, including
+skips and errors -- a re-run needs a failed cell's configuration as much as
+an ok cell's.
+
+**The test for it was trivially true on the first attempt, and mutation
+caught that.** `run_cell` stamps constants; `run_pc` binds its defaults at
+def time. Editing the constant in the source file changes both together, so
+`assert record.pc_max_rows == DEFAULT_MAX_ROWS` held by construction. The
+real hazard is a *runtime* reassignment, which moves the constant and leaves
+`run_pc` alone. The stamp now reads `run_pc`'s bound signature via
+`pc_call_defaults()`, and the test monkeypatches the constant and asserts the
+stamp does **not** follow.
+
+That makes this the fourth entry whose test certified our REQUEST rather than
+what ran (§3-4 provider order, §7 the hardcoded 30.0, §8 `allow_fallbacks`).
+The pattern is now explicit enough to state as a rule: **assert against
+recorded execution, never against the constant that configured it.**
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there

@@ -692,36 +692,46 @@ Two independent reasons, either sufficient:
 The M6 plan's pilot-reuse for rungs 0 and 3 is therefore **void**; all five
 rungs must run fresh. Parallelism makes that affordable.
 
-### 2b. Library drift breaks per-cell reproducibility but NOT distributions
+### 2b. RETRACTED (2026-08-26): library drift did NOT break reproducibility
 
-Found 2026-08-24 by running `random` (no LLM, seeded RNG) at the current
-configuration as a within-run control. It should have reproduced M4b exactly.
-It did not — every seed differs, seed 0 giving F1 0.204 in M4b and 0.127 now.
-
-Dependency refresh (v0.5.0, Aug 21) sits between M4b (May) and now:
+The section that stood here claimed a dependency refresh (v0.5.0, Aug 21:
 `causal-learn` 0.1.4.5→0.1.4.8, `numpy` 2.3.5→2.5.2, `scipy` 1.16.3→1.18.1,
-`pandas` 3.0.1→3.0.5.
+`pandas` 3.0.1→3.0.5) had made seeded `random` cells irreproducible per-cell
+while leaving distributions intact, and drew a paper-facing lesson about
+archiving the resolved environment. **All of that rested on a single file,
+`runs/m6-controls.parquet`, and it is wrong.**
 
-**This is NOT a reason M4b is incomparable, and an earlier claim that it was
-is retracted.** PC is a threshold algorithm: it accepts or rejects each
-conditional-independence test at α=0.05, so a p-value perturbed in the 12th
-decimal flips any edge near the boundary. The flips are unbiased in direction,
-so they move an individual cell a lot and the distribution not at all:
+HEAD reproduces M4b **exactly, seed for seed**: `random` LT k=6 gives
+0.2041 / 0.2759 / 0.2025 for seeds 0/1/2, identical to `runs/m4-pilot.parquet`
+and to `runs/curve-lt-random.parquet`. Only `m6-controls` differs, and not
+subtly — seed 0 predicts 22 edges against 41, a structurally different graph
+rather than the boundary flips the retracted explanation posited. The docs
+commit that recorded the finding (`c77c610`) was written 14 minutes after
+that run started.
 
-| | M4b | now | test |
-|---|---|---|---|
-| F1 (random, k=6, n=30) | 0.1832 | 0.1701 | Welch **p=0.265**, MDE 0.033 |
-| SHD (edge-level, less threshold-sensitive) | 71.4 | 71.9 | Welch **p=0.743** |
+Excluded as causes by direct measurement (2026-08-26): committed code;
+dependency versions (VPS and local are identical on all four packages); arm
+mix (`random` is bit-identical run alone and alongside `greedy_ig_lite`);
+the parallel path (`--max-workers 3` is seed-faithful); and `pc_alpha`
+(neither 0.01 nor 0.10 reproduces it). What remains is an uncommitted
+working tree on 2026-08-24 — unrecoverable, because the run recorded none
+of its own parameters.
 
-So: **individual cells are not reproducible across a dependency refresh;
-population-level results are.** Two distinct claims, and conflating them
-overstates the damage. M4b remains unpoolable with new rows for the other two
-reasons above (provider-side reasoning change, selection-semantics fix) —
-both large and directional, unlike this.
+**Do not use `runs/m6-controls.parquet`.** Its `random` rows are the
+contaminated ones; `runs/curve-lt-random.parquet` (LT, k ∈ {6,15,30,45,50,55,59},
+n=30) is valid and matches HEAD.
 
-Worth one sentence in the paper's reproducibility statement: seeded
-determinism in a threshold-based discovery algorithm does not survive a
-numerics upgrade, so archive the resolved environment, not just the seed.
+**Durable fix, commit `2e54aa1`**: every `RunRecord` now carries `pc_alpha`,
+`pc_max_rows` and `pc_collinearity_threshold` — PC's three silent
+determinants. The stamp is read from `run_pc`'s *bound signature defaults*,
+not the module constants, because Python binds default arguments at def time:
+a constant reassigned after import would move the stamp without moving
+`run_pc`, reporting a configuration that never ran. The first version of that
+test compared constant to constant and survived mutation; see register §10.
+
+The real lesson is the opposite of the retracted one, and closer to home: a
+sweep that does not record its own parameters cannot be pooled with any
+other sweep, and cannot be debugged a day later.
 
 ### 3. `deepseek-v4-flash-0731` is the better snapshot
 
