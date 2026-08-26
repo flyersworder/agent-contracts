@@ -949,16 +949,31 @@ ordering. **This is the external-validity answer to "everything rests on LT's
 single graph".** The chain is the only multi-agent rung that never resolves as
 worse, consistent across both chambers.
 
-**Loop vs random**: WT +0.019 (k=14), **+0.037 (k=21)**. Unlike LT, WT does
-NOT converge at its top budget — because k/M=0.75 there is only 21 experiments
-absolute, against LT's 45. So **LT's convergence is about absolute menu
-coverage, not budget fraction**; a useful disambiguation for §5.
+**Loop vs random** (recomputed 2026-08-26 on a matched platform; the figures
+that stood here, +0.019 and +0.037, paired the VPS ladder against a *local*
+random curve at n=30 and are superseded -- see §2b). Both arms VPS/OpenBLAS,
+n=50, `runs/wt-random-vps.parquet`:
 
-**k=7 is uninformative, not a reversal.** All five arms underperform random
-(loop −0.045); the band 0.145–0.179 sits just above WT's PC noise floor of
-0.134. Report as "below some budget the LLM's selection is worse than chance
-on WT". An interim reading of it as "splitting helps at low budget" is
-withdrawn.
+| k | loop | random | delta | MDE | Welch p | verdict |
+|---|---|---|---|---|---|---|
+| 7 | 0.1451 | 0.1813 | **−0.036** | 0.031 | 0.0015 | **RESOLVED** |
+| 14 | 0.2388 | 0.2081 | +0.031 | 0.038 | 0.028 | below MDE |
+| 21 | 0.2854 | 0.2339 | **+0.052** | 0.040 | 0.0004 | **RESOLVED** |
+
+The matched contrast is **larger** at k=21 than the cross-platform one it
+replaces. Unlike LT, WT does NOT converge at its top budget -- because
+k/M=0.75 there is only 21 experiments absolute, against LT's 45. So **LT's
+convergence is about absolute menu coverage, not budget fraction**; a useful
+disambiguation for §5.
+
+**k=7 is a resolved negative, not an uninformative band.** The earlier
+reading -- "all five arms underperform random, report as below some budget
+the LLM's selection is worse than chance" -- understated it: against a
+matched-platform baseline the loop is worse than random by 0.036 at
+**p=0.0015**, comfortably past the MDE. The claim is now positive and
+directional: *on WT, below k≈10 the LLM's selection is measurably worse than
+chance.* An earlier interim reading of k=7 as "splitting helps at low budget"
+remains withdrawn.
 
 **Conservation**: WT 64.3% (193/300 fan-in cells) against LT's 95.9%,
 degrading 91% → 61% → 41% across budgets. `verify()` caught every overrun, so
