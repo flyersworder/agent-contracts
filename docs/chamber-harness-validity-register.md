@@ -305,6 +305,46 @@ ran (§3-4 provider order, §7 the hardcoded 30.0, §8 `allow_fallbacks`). The
 rule, stated outright: **assert against recorded execution, never against
 the constant that configured it.**
 
+## 11. Collinear-column drops are not WT-only, and they track the IV (2026-08-27)
+
+§6 recorded collinearity as a WT problem -- four barometers reading ambient
+pressure. The 420-cell LT loop curve shows LT has it too, and worse in the
+respect that matters: **the drop rate varies with the budget AND differs
+between the two arms being compared.**
+
+| arm | k=6 | k=12 | k=20 | k=30 | k=40 | k=50 | k=59 |
+|---|---|---|---|---|---|---|---|
+| `llm_pc` | 43% | **70%** | 37% | 0% | 0% | 0% | 0% |
+| `random` | 27% | 23% | 13% | 13% | 7% | 3% | 0% |
+
+(percent of cells with at least one column dropped; 71/420 cells, 76 columns)
+
+The mechanism is not a defect: with few experiments bought, fewer distinct
+interventions are present, so more column pairs are indistinguishable in the
+pooled data. It vanishes as k grows. But the LLM's selections are *more*
+collinear than random draws at low budget, which is a behavioural difference
+between the arms sitting on top of a budget-dependent harness effect -- the
+§1 shape exactly.
+
+**Measured, so it can be reported rather than feared.** Within arm and
+within k, cells with a dropped column score lower: `llm_pc` k=6, 0.2244
+(n=17) vs 0.1898 (n=13), **p=0.02**; other cells same sign, not significant.
+So drops do cost F1.
+
+Two consequences, both checked:
+
+1. **It does not manufacture the k=12 anomaly.** Restricting k=12 to cells
+   with no drops moves the loop-vs-random delta from +0.0138 to **+0.0037** --
+   smaller, not larger. The below-MDE dip at k=12 survives; it is not a
+   collinearity artifact.
+2. **It biases the headline conservatively.** The loop takes drops more often
+   than random at low budget, so its resolved +0.047 at k=6 is if anything
+   understated (+0.050 restricted to clean cells).
+
+Report as a scope limit with these numbers attached. Do NOT report the LT
+curve's low-budget points without it: a reader who knows only §6 will assume
+LT was unaffected.
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there

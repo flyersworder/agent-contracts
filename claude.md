@@ -989,35 +989,68 @@ cells (2.9%) from OpenInference/Relace/DigitalOcean — unpinned, unknown
 quantization. Impact nil (residualised +0.0095 vs −0.0003, p=0.55) but the
 guarantee was void; now False. See register §8.
 
-## LT LOOP CURVE LAUNCHED (2026-08-26 17:29 UTC)
+## LT LOOP CURVE COMPLETE (2026-08-27): the gap closes because random catches up
 
-`runs/m6-lt-loop-curve.parquet` — **420 cells**, LT, `llm_pc` + `random`,
-k ∈ {6, 12, 20, 30, 40, 50, 59} (fractions 0.10/0.20/0.34/0.50/0.68/0.85/1.00),
-30 seeds, `deepseek-v4-flash-0731`, 6 workers, 5400 s cell timeout. Projected
-**~12 h, ~$14**. Resume by re-running the identical command; the JSONL sidecar
-skips completed cells.
+`runs/m6-lt-loop-curve.parquet` — **420/420 cells, 420 ok, 0 errors, 0 PC
+degeneracies**, 13.1 h wall on the VPS, **$7.26**, 76.9 h active compute
+across 6 workers. Grid: `llm_pc` + `random` × k ∈ {6,12,20,30,40,50,59} × 30
+seeds. Both arms fresh, one machine, one provider set, one model.
 
-**Both arms run fresh in one sweep, on one machine.** That is not a
-convenience — per §2b a local random curve against a VPS loop is a cross-BLAS
-comparison. `runs/curve-lt-random.parquet` is Accelerate and cannot serve as
-this curve's baseline.
+| k | k/M | loop | random | delta | MDE | Welch p | Holm | verdict |
+|---|---|---|---|---|---|---|---|---|
+| 6 | 0.10 | 0.2094 | 0.1627 | **+0.047** | 0.035 | 0.0004 | 0.0026 | **RESOLVED** |
+| 12 | 0.20 | 0.2604 | 0.2466 | +0.014 | 0.034 | 0.26 | 0.78 | below MDE |
+| 20 | 0.34 | 0.3553 | 0.3137 | **+0.042** | 0.033 | 0.0008 | 0.0038 | **RESOLVED** |
+| 30 | 0.51 | 0.4156 | 0.3604 | **+0.055** | 0.035 | 0.00004 | 0.0003 | **RESOLVED** |
+| 40 | 0.68 | 0.4208 | 0.3849 | **+0.036** | 0.031 | 0.0022 | 0.0089 | **RESOLVED** |
+| 50 | 0.85 | 0.4106 | 0.4104 | +0.000 | 0.035 | 0.98 | 0.98 | below MDE |
+| 59 | 1.00 | 0.4225 | 0.4146 | +0.008 | 0.030 | 0.46 | 0.93 | below MDE |
 
-The grid was chosen on merit rather than inherited from the legacy random
-curve, which is possible precisely because both arms are fresh. The M6 ladder
-shows the LT loop already saturated at k=30 (0.420) vs k=45 (0.417), and the
-preflight hints the loop sits *below* random at k=15 — so the structure worth
-resolving is the crossover below k=30, not the plateau above it. Four of the
-seven points sit at k ≤ 30.
+All four resolved points survive Holm correction across the seven contrasts.
 
-**Preflight (12 cells, k ∈ {15, 59}, 3 seeds) was clean on every check**:
-0 selection fallbacks at k=59 (the M6-era failure mode), 0 errors, providers
-confined to the pinned fp8 set, max cell wall **2593 s** against the 5400 s
-timeout. It also produced the calibration the projection uses: cost and wall
-scale as ~`k^1.19`, anchored at $0.027 / 499 s (k=15) and $0.135 / 2560 s
-(k=59).
+**The mechanism of convergence, which we previously had wrong.** The loop's
+own F1 saturates at ≈0.42 by k=30 and never improves (0.4156 → 0.4208 →
+0.4106 → 0.4225). Random climbs the whole way (0.3604 → 0.3849 → 0.4104 →
+0.4146). So the advantage does not vanish because the loop degrades — **it
+vanishes because random catches up.** Above k/M ≈ 0.85 there is almost no
+selection left to perform: both arms buy nearly the same set.
 
-**The preflight's real return was catching the BLAS confound before the sweep
-rather than after it** — see §2b.
+**Retracted: "LT's convergence is about absolute menu coverage, not budget
+fraction."** That was inferred from the ladder's loop F1 plateauing between
+k=30 and k=45, which is the *loop saturating*, not the *gap closing*. The
+fresh curve separates the two and shows LT still holds a resolved +0.036 at
+k=40. WT was never run above k/M=0.75 on either scaling, so this data does
+not discriminate absolute coverage from budget fraction. **Open scope limit,
+not a finding.**
+
+**The low-budget reversal is WT-specific.** WT k=7 gives −0.036 (loop worse
+than chance, p=0.0015); LT k=6 gives +0.047 (loop better, p=0.0004). Opposite
+under *both* matched-k and matched-k/M readings, so it is a property of that
+chamber — plausibly its 28-experiment menu — and not of small budgets as
+such. Do not state "below some budget the LLM's selection is worse than
+chance" without naming the chamber.
+
+**k=12 is an observed non-monotonicity, reported not smoothed.** +0.014,
+below MDE, sitting between two resolved positives, driven by random gaining
+more than the loop over 6→12 (+0.084 vs +0.051). Checked against the
+collinearity moderator (register §11) and it survives: restricted to cells
+with no dropped columns the delta gets *smaller*, +0.0037. One of seven
+points landing below MDE by chance is unremarkable; it is recorded as
+observed.
+
+**Harness**: fallbacks 9/6510 = **0.138%** and flat in k (0.00/0.00/0.17/
+0.00/0.25/0.13/0.17%) — no §1 moderator. 0 degeneracies. Every cell
+`scipy-openblas` / `Linux-x86_64`, `pc_alpha` 0.05, `max_rows` 300,
+`collinearity_threshold` 0.999. Providers confined to the pinned fp8 set
+(Parasail/SiliconFlow/Baidu), **no off-pin routing** — `allow_fallbacks:
+False` holding. One live caveat: collinear-column drops are budget- and
+arm-dependent on LT, biasing the low-budget contrast *conservatively*; see
+register §11.
+
+**Preflight (12 cells, k ∈ {15,59})** was clean on all four stated checks and
+caught the BLAS confound that would otherwise have contaminated this curve
+(§2b). Cost/wall scale as ≈`k^1.19`; the $14 projection overshot the $7.26
+actual roughly 2×, so future LT estimates should use this curve's per-k costs.
 
 ## References
 
