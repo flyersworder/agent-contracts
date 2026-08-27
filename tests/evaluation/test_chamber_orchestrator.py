@@ -855,6 +855,27 @@ class TestCountingLLM:
         wrapper(model="m", messages=[], num_retries=0)
         assert captured[0]["num_retries"] == 0
 
+    def test_a_pro_model_request_carries_the_pro_provider_order(self) -> None:
+        """The resolver must reach the REQUEST, not just exist.
+
+        `test_injects_default_provider_order` drives `model="m"`, which falls
+        back to the default, so it passes whether or not per-model routing is
+        wired in at all. This drives the real tag and asserts what actually
+        goes on the wire -- the difference between a constant we declared and
+        a request we sent.
+        """
+        captured: list[dict[str, Any]] = []
+
+        def target(**kwargs: Any) -> dict:
+            captured.append(dict(kwargs))
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        wrapper = _CountingLLM(target=target)
+        wrapper(model="openrouter/deepseek/deepseek-v4-pro", messages=[])
+        order = captured[0]["extra_body"]["provider"]["order"]
+        assert order == ["Baidu", "StreamLake", "SiliconFlow", "Novita"]
+        assert order != list(_CountingLLM.DEFAULT_PROVIDER_ORDER)
+
     def test_injects_default_provider_order(self) -> None:
         """OpenRouter provider routing: pinned to a fp8-only order so
         OpenRouter doesn't fall back to fp4 (DeepInfra) for AAMAS
@@ -882,7 +903,7 @@ class TestCountingLLM:
             "which is not what the paper claims."
         )
 
-    def test_default_provider_order_is_precision_homogeneous(self) -> None:
+    def test_every_declared_provider_order_is_precision_homogeneous(self) -> None:
         """Every pinned provider must serve the SAME inference precision.
 
         This is the check that `test_injects_default_provider_order` cannot
@@ -892,21 +913,48 @@ class TestCountingLLM:
         order while serving fp4, and 27 of the 450 M6 ladder cells were
         served by it.
 
-        Mixing precision classes silently changes the numerics mid-sweep,
-        which is the one thing the provider pin exists to prevent.
+        Walks EVERY declared order, not just the default: per-model orders
+        exist precisely because the endpoint ranking differs by model, so a
+        new one is exactly where an unchecked precision class would enter.
         """
         precision = _CountingLLM.PROVIDER_PRECISION
-        classes = set()
-        for provider in _CountingLLM.DEFAULT_PROVIDER_ORDER:
-            assert provider in precision, (
-                f"{provider} is pinned but has no recorded precision class; "
-                "add it to PROVIDER_PRECISION from GET /models/{id}/endpoints"
+        orders = {"<default>": _CountingLLM.DEFAULT_PROVIDER_ORDER}
+        orders.update(_CountingLLM.PROVIDER_ORDER_BY_MODEL)
+        for label, order in orders.items():
+            classes = set()
+            for provider in order:
+                assert provider in precision, (
+                    f"{provider} is pinned for {label} but has no recorded "
+                    "precision class; add it to PROVIDER_PRECISION from "
+                    "GET /models/{id}/endpoints"
+                )
+                classes.add(precision[provider])
+            assert len(classes) == 1, (
+                f"order for {label} mixes precision classes: { {p: precision[p] for p in order} }"
             )
-            classes.add(precision[provider])
-        assert classes == {"fp8"}, (
-            f"DEFAULT_PROVIDER_ORDER mixes precision classes: {classes}. "
-            "Only fp8 endpoints may be pinned."
-        )
+
+    def test_a_dated_snapshot_does_not_inherit_its_family_pin(self) -> None:
+        """`deepseek-v4-pro-0813` is not served by Baidu at all, and
+        StreamLake serves `deepseek-v4-pro` at fp8 while its `-0813` endpoint
+        reports `unknown`. Quantization belongs to the (provider, model) pair,
+        so a substring match would hand a snapshot a pin naming an endpoint
+        that does not serve it -- and a precision claim never checked for it.
+        """
+        family = _CountingLLM._provider_order_for("openrouter/deepseek/deepseek-v4-pro")
+        snapshot = _CountingLLM._provider_order_for("openrouter/deepseek/deepseek-v4-pro-0813")
+        assert family == ("Baidu", "StreamLake", "SiliconFlow", "Novita")
+        assert snapshot == _CountingLLM.DEFAULT_PROVIDER_ORDER
+        assert snapshot != family
+
+    def test_provider_order_is_cheapest_first_for_the_model_it_names(self) -> None:
+        """Measured 2026-08-27 from GET /models/{id}/endpoints: Parasail is
+        the CHEAPEST fp8 endpoint for flash-0731 and the MOST EXPENSIVE one
+        for v4-pro. A single global order cannot be right for both, and using
+        the flash order on pro overpays 2.2x.
+        """
+        pro = _CountingLLM._provider_order_for("openrouter/deepseek/deepseek-v4-pro")
+        assert pro[0] == "Baidu", "Baidu is the cheapest fp8 endpoint for v4-pro"
+        assert "Parasail" not in pro, "Parasail is the most expensive fp8 for v4-pro"
 
     def test_caller_can_override_provider(self) -> None:
         """Caller-supplied extra_body.provider wins (e.g., for ablation)."""

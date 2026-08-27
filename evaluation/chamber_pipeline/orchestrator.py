@@ -475,12 +475,46 @@ class _CountingLLM:
     # Rotation in `__call__` advances on `finish_reason: 'error'`, and the
     # cell-timeout safety net bounds any genuinely-slow provider at
     # `cell_timeout_seconds`.
+    # Per-model provider orders. The price and precision RANKING of endpoints
+    # is model-specific, so one global order cannot be right for two models.
+    # Measured 2026-08-27 from GET /models/{id}/endpoints:
+    #
+    #   deepseek-v4-pro   Baidu $1.58/M ... Parasail $3.48/M  (18 endpoints)
+    #   flash-0731        Parasail $0.28/M ... Novita $1.32/M  (8 endpoints)
+    #
+    # Parasail is the CHEAPEST fp8 endpoint for flash and the MOST EXPENSIVE
+    # one for pro. Running the flash order on pro would overpay 2.2x -- the
+    # register §3-4 defect on a different model. Every provider listed here is
+    # fp8 and present in `PROVIDER_PRECISION`; the homogeneity test walks all
+    # declared orders, not just the default.
+    PROVIDER_ORDER_BY_MODEL: ClassVar[dict[str, tuple[str, ...]]] = {
+        "deepseek-v4-pro": ("Baidu", "StreamLake", "SiliconFlow", "Novita"),
+    }
+
     DEFAULT_PROVIDER_ORDER: tuple[str, ...] = (
         "Parasail",
         "SiliconFlow",
         "Baidu",
         "Novita",
     )
+
+    @classmethod
+    def _provider_order_for(cls, model: str) -> tuple[str, ...]:
+        """The pinned endpoint order for `model`, matched on the EXACT tag.
+
+        Exact rather than substring, because a dated snapshot is a different
+        product with a different endpoint set: `deepseek-v4-pro-0813` is not
+        served by Baidu at all, and StreamLake serves `deepseek-v4-pro` at fp8
+        while its `-0813` endpoint reports `unknown`. Quantization is a
+        property of the (provider, model) pair, not of the provider. A
+        substring match would hand an unlisted snapshot a pin naming an
+        endpoint that does not serve it, and a precision claim that was never
+        checked for it.
+
+        Unknown models fall back to `DEFAULT_PROVIDER_ORDER`.
+        """
+        tag = model.rsplit("/", 1)[-1]
+        return cls.PROVIDER_ORDER_BY_MODEL.get(tag, cls.DEFAULT_PROVIDER_ORDER)
 
     # Per-request socket-level timeout (seconds). Without this, a single
     # litellm.completion call can BLOCK FOREVER on the underlying SSL
@@ -591,7 +625,7 @@ class _CountingLLM:
         # response — the agent's downstream parsers (parse_selection_response
         # / parse_adjacency_response) already handle empty content via
         # fallback paths.
-        provider_order = list(self.DEFAULT_PROVIDER_ORDER)
+        provider_order = list(self._provider_order_for(kwargs.get("model", "")))
         max_attempts = len(provider_order)
         response: Any = None
         for attempt in range(max_attempts):
