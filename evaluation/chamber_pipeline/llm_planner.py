@@ -49,6 +49,68 @@ _MAX_MENU_LINES = 200
 # ---------------------------------------------------------------------------
 
 
+UNCONTRACTED_STOP_TOKEN = "DONE"
+
+
+def build_uncontracted_select_prompt(
+    menu: list[str],
+    remaining_budget: int,
+    already_chosen: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Selection prompt for the UNGOVERNED arm: no budget, agent stops itself.
+
+    Same shape as `build_select_prompt` so it drops into `_llm_select_loop`
+    unchanged, and deliberately identical in every other respect -- menu
+    rendering, history block, one-name-per-line answer format. The ONLY
+    differences are that no budget is stated and that stopping is offered.
+    Changing anything else would confound "removing the contract" with
+    "changing the prompt".
+
+    `remaining_budget` is accepted and IGNORED. It carries the safety cap,
+    which is the menu size -- a physical limit on how many distinct
+    experiments exist, not a governance bound. Showing it would reintroduce
+    exactly the budget signal this arm exists to remove.
+    """
+    del remaining_budget  # see docstring: showing it would restore the cap
+
+    chosen = already_chosen or []
+    if len(menu) > _MAX_MENU_LINES:
+        rendered_menu = "\n".join(menu[:_MAX_MENU_LINES])
+        rendered_menu += f"\n... ({len(menu) - _MAX_MENU_LINES} more, omitted for brevity)"
+    else:
+        rendered_menu = "\n".join(menu)
+
+    chosen_block = (
+        "Already run (no longer on the menu):\n" + "\n".join(chosen) + "\n"
+        if chosen
+        else "Already run: (none yet)\n"
+    )
+
+    system = (
+        "You are designing causal-discovery experiments on a physical "
+        "chamber. You will be shown a menu of available pre-recorded "
+        "interventional experiments. Your task is to pick ONE experiment "
+        "to query next, using only the experiment names. The names encode "
+        "what each experiment perturbs and how strongly. There is no budget: "
+        "run as many or as few experiments as you judge necessary to recover "
+        "the causal graph, and stop when further experiments would not help."
+    )
+
+    user = (
+        f"{chosen_block}\n"
+        f"Menu:\n{rendered_menu}\n\n"
+        "Respond with the exact name of ONE experiment from the menu, on "
+        f"its own line, with no other commentary -- or exactly "
+        f"{UNCONTRACTED_STOP_TOKEN} on its own line if you have run enough "
+        "experiments and want to stop."
+    )
+
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
 def build_select_prompt(
     menu: list[str],
     remaining_budget: int,

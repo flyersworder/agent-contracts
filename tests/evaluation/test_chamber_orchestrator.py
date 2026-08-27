@@ -102,9 +102,9 @@ class FakeLLM:
 class TestAgentRegistry:
     """Inventory of the registered agents, plus AgentSpec.is_compatible."""
 
-    def test_registry_has_nine_agents(self) -> None:
-        """Five M4b variants, the three M6 ladder arms, and one ablation."""
-        assert len(AGENT_REGISTRY) == 9
+    def test_registry_has_ten_agents(self) -> None:
+        """Five M4b variants, three ladder arms, one ablation, one control."""
+        assert len(AGENT_REGISTRY) == 10
 
     def test_registry_names_are_unique(self) -> None:
         names = [s.name for s in AGENT_REGISTRY]
@@ -120,6 +120,7 @@ class TestAgentRegistry:
                 "llm_only",
                 "llm_pc",
                 "planner_reasoner",
+                "uncontracted",
                 "fan_in_homog",
                 "fan_in_spec",
                 "fan_in_agg",

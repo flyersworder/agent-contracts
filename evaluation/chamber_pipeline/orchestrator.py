@@ -59,6 +59,7 @@ from .agents import (
     planner_reasoner_agents,
     random_agent,
     team_agents,
+    uncontracted_agent,
 )
 from .inference import pc_call_defaults, runtime_fingerprint
 from .results import RunRecord, now_iso
@@ -117,6 +118,12 @@ class AgentSpec:
     # real overruns -- it simply is not a ladder arm.
     scout_roles: tuple[str, str] | None = None
     negotiation_rounds: int = 0
+    # True for the UNCONTRACTED control: the adapter is built with the menu
+    # size as its intervention cap instead of `k`. That is a physical limit
+    # (only so many distinct experiments exist), not a governance bound --
+    # building it with `k` would make "uncontracted" contracted after all,
+    # and the arm would silently measure nothing.
+    ignores_budget: bool = False
     # `MappingProxyType` so a caller cannot mutate the registry through
     # `get_spec(...).static_kwargs[k] = v`, which persisted globally.
     static_kwargs: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
@@ -180,6 +187,19 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         accepts_llm=True,
         kind="llm_multi",
         extra_kwargs=("planner_budget", "reasoner_budget"),
+    ),
+    # ---- UNCONTRACTED control -------------------------------------------
+    # The framework's own comparison, absent from the chamber pillar until
+    # now: every other arm here is contracted, so nothing measured what
+    # governance costs. Matches the definition used by the research and
+    # code-review pipelines -- no budget enforcement at all.
+    AgentSpec(
+        name="uncontracted",
+        run=uncontracted_agent,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_single",
+        ignores_budget=True,
     ),
     # ---- M6 coordination ladder -------------------------------------------
     # Rungs 1, 2 and 4. Rungs 0 (`llm_pc`) and 3 (`planner_reasoner`) are
@@ -1111,12 +1131,29 @@ def run_cell(
                     else None
                 ),
             }
+        # The UNCONTRACTED arm gets the menu size, not `k`. See
+        # `AgentSpec.ignores_budget`: a cap of `k` here would quietly
+        # re-impose the very constraint the arm exists to remove, and the
+        # cell would look like a valid uncontracted run.
+        cap = MENU_SIZES[chamber] if spec.ignores_budget else budget_k
         adapter = create_contracted_chamber_agent(
             chamber=chamber,
             configuration=configuration,
-            intervention_budget=budget_k,
+            intervention_budget=cap,
             **extra,
         )
+        if spec.ignores_budget:
+            # `MENU_SIZES` is a hardcoded table and its agreement with the
+            # live menu has been unverified since M4c. Here it MATTERS: too
+            # small and the "uncontracted" arm runs under a binding cap,
+            # producing a plausible-looking result that measures the
+            # opposite of what it claims. Fail loudly instead.
+            live = len(adapter.available_experiments())
+            if cap < live:
+                raise ValueError(
+                    f"MENU_SIZES[{chamber!r}]={cap} is below the live menu "
+                    f"({live}); the uncontracted arm would run capped."
+                )
         if graph is not None:
             adapter.delegation_graph = graph  # read back by the P2 scorer
         menu_size = len(adapter.available_experiments())

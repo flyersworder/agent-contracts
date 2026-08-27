@@ -67,6 +67,7 @@ VARIANT_COLORS: dict[str, str] = {
     "fan_in_homog": "#9467bd",  # purple — ensemble
     "fan_in_spec": "#8c564b",  # brown — parallel roles
     "team": "#e377c2",  # pink — negotiation
+    "uncontracted": "#7f7f7f",  # gray — the ungoverned control
     "fan_in_agg": "#17becf",  # cyan — rung-1 ablation, not a rung
 }
 
@@ -79,6 +80,7 @@ VARIANT_LABELS: dict[str, str] = {
     "fan_in_homog": "Ensemble (fan-in)",
     "fan_in_spec": "Parallel roles (fan-in)",
     "team": "Team (negotiation)",
+    "uncontracted": "Uncontracted (self-terminating)",
     "fan_in_agg": "Ensemble (aggregator honored)",
 }
 
@@ -93,6 +95,7 @@ VARIANT_MARKERS: dict[str, str] = {
     "fan_in_homog": "P",
     "fan_in_spec": "X",
     "team": "*",
+    "uncontracted": "X",
     "fan_in_agg": "P",
 }
 
@@ -105,6 +108,7 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "fan_in_homog": (0, (5, 1)),
     "fan_in_spec": (0, (1, 1)),
     "team": (0, (3, 5, 1, 5)),
+    "uncontracted": (0, (7, 2)),
     "fan_in_agg": (0, (3, 1, 1, 1)),
 }
 
@@ -115,6 +119,8 @@ VARIANT_ORDER: tuple[str, ...] = (
     "llm_only",
     "llm_pc",
     "planner_reasoner",
+    # The ungoverned control. Not a rung and not an M4b variant.
+    "uncontracted",
     # M6 ladder, in rung order. Every figure and summary table iterates this
     # tuple, so an arm missing here is silently dropped from the output --
     # no error, no warning, just an absent curve.

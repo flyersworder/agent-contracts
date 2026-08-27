@@ -439,6 +439,30 @@ def _default_llm() -> LLMCallable:
 PromptBuilder = Callable[[list[str], int, list[str] | None], list[dict[str, str]]]
 
 
+def _says_stop(response: Any, stop_token: str) -> bool:
+    """True iff the agent's LAST non-empty line is the stop token alone.
+
+    Deliberately strict, and the strictness is the point: a false stop is
+    unrecoverable. The run simply ends with less data than the agent wanted
+    and no error is raised, so the cell silently scores a shorter experiment
+    than the one we meant to run.
+
+    A word-boundary search over the whole response is too loose -- it fires
+    on "not done yet", which is an agent asking to CONTINUE. Matching the
+    final line against the token alone (bare trailing punctuation allowed)
+    matches what the prompt asks for and rejects prose.
+    """
+    from evaluation.chamber_pipeline.llm_planner import _response_text
+
+    text = _response_text(response)
+    if not text:
+        return False
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+    if not lines:
+        return False
+    return lines[-1].strip(" .!*`'\"").upper() == stop_token.upper()
+
+
 def _llm_select_loop(
     adapter: ContractedChamberAgent,
     llm: LLMCallable,
@@ -450,6 +474,7 @@ def _llm_select_loop(
     prompt_builder: PromptBuilder = build_select_prompt,
     temperature: float | None = None,
     exclude: set[str] | None = None,
+    stop_token: str | None = None,
 ) -> tuple[list[str], list[pd.DataFrame]]:
     """Step `spend` times: prompt LLM for one experiment, query, repeat.
 
@@ -558,6 +583,15 @@ def _llm_select_loop(
         # discard it one line later as a duplicate -- the failure this change
         # removes.
         name = parse_selection_response(response, selectable)
+
+        # Checked AFTER the parse (a named experiment wins over a stop
+        # token) but BEFORE the fallback below. `DONE` is not a menu name,
+        # so the parse returns None for it, and the fallback would convert
+        # the agent's decision to stop into a random PURCHASE -- turning a
+        # self-terminating agent into one that always spends the safety cap,
+        # silently.
+        if name is None and stop_token is not None and _says_stop(response, stop_token):
+            break
 
         if name is None:
             # Fallback: random unspent. Reachable now only on a genuinely
@@ -705,6 +739,68 @@ def llm_pc_agent(
 
     pooled = pool_experiment_data(dfs, nodes)
     return run_pc(pooled, nodes, alpha=pc_alpha, seed=seed)
+
+
+def uncontracted_agent(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """`llm_pc` with the contract removed: the agent decides when to stop.
+
+    The UNCONTRACTED half of the framework's central comparison, and the one
+    thing the chamber pillar was missing -- every other arm in the registry
+    is contracted, so nothing measured what governance costs or buys.
+
+    Identical to `llm_pc_agent` in mechanism (same iterative loop, same
+    fallback handling, same PC afterwards). Two differences, both essential
+    and neither cosmetic:
+
+    1. No budget is stated in the prompt, and the agent may answer
+       `DONE` instead of naming an experiment.
+    2. The adapter is built with `intervention_budget = len(menu)` rather
+       than `k`. That cap is a PHYSICAL limit -- there are only so many
+       distinct experiments on the menu -- not a governance bound. It exists
+       so a non-terminating agent cannot loop forever.
+
+    Because the cap can still bind, the arm records whether it did. An agent
+    that runs the whole menu because it never said `DONE` is a different
+    finding from one that chose to run the whole menu, and the two are
+    indistinguishable from the experiment count alone.
+    """
+    from evaluation.chamber_pipeline.llm_planner import (
+        UNCONTRACTED_STOP_TOKEN,
+        build_uncontracted_select_prompt,
+    )
+
+    nodes = _node_names(adapter)
+    menu = list(adapter.available_experiments())
+    if _intervention_budget(adapter) <= 0 or not menu:
+        adapter.coordination_stats = {"n_experiments_distinct": 0}
+        return _empty_adjacency(nodes)
+
+    llm = llm or _default_llm()
+    chosen, dfs = _llm_select_loop(
+        adapter,
+        llm,
+        model,
+        seed,
+        prompt_builder=build_uncontracted_select_prompt,
+        stop_token=UNCONTRACTED_STOP_TOKEN,
+    )
+
+    adapter.coordination_stats = {
+        "n_experiments_distinct": len(chosen),
+        # The safety cap bound iff the agent never volunteered a stop.
+        "agg_hit_safety_stop": int(len(chosen) >= len(menu)),
+    }
+
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
 
 
 def planner_reasoner_agents(
