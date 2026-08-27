@@ -785,10 +785,11 @@ and needs its own replication check.
   the whole response, so a scout restating the peer inflates `n_contested` —
   rung 4's headline metric. Cannot be fixed by filtering (a genuine contest is
   the signal); needs answer/restatement separation. See spec §11.
-- **The aggregator's reconcile output is discarded.** `team_agents` /
-  `fan_in_agents` call it and drop the response; the merge is a Python dedup
-  plus PC. Defensible for the P2/conservation demonstration (the token flow is
-  real) but the paper must not claim the aggregator improves the result.
+- **The aggregator's reconcile output is discarded — RESOLVED as a threat
+  (2026-08-27).** Measured by the `fan_in_agg` ablation rather than argued;
+  see the section below. The paper still must not claim the aggregator
+  *improves* the result, but the negative fan-in finding is not an artifact
+  of a null aggregator.
 - **`overlap_frac` is structurally 0.0 for rung 4** (pools disjoint by
   construction). State as a scope limit.
 
@@ -1051,6 +1052,96 @@ register §11.
 caught the BLAS confound that would otherwise have contaminated this curve
 (§2b). Cost/wall scale as ≈`k^1.19`; the $14 projection overshot the $7.26
 actual roughly 2×, so future LT estimates should use this curve's per-k costs.
+
+## AGGREGATOR ABLATION + UNCONTRACTED CONTROL (2026-08-27)
+
+Two experiments closing the two largest gaps in the chamber pillar's story.
+Both VPS / `scipy-openblas`, `deepseek-v4-flash-0731`, pinned fp8 providers,
+0 errors. Combined cost **$2.83**.
+
+### 1. The aggregator is inert BY MEASUREMENT (`runs/agg-ablation.parquet`)
+
+60 cells, LT k=30 (the budget where the fan-in negative lives), n=30 per arm,
+both arms run fresh in one sweep.
+
+| | F1 | sd |
+|---|---|---|
+| aggregator **honored** (`fan_in_agg`) | 0.3290 | 0.0395 |
+| aggregator **discarded** (`fan_in_homog`) | 0.3259 | 0.0446 |
+
+delta **+0.0031**, MDE 0.0305, Welch **p=0.78** — equivalence, well inside
+the bound. The diagnostics matter more than the delta: across **30/30 cells**
+the aggregator **dropped nothing, hallucinated nothing, never returned an
+empty answer** (`agg_dropped`, `agg_hallucinated`, `agg_fallback` all 0;
+`agg_named` mean 20.4 against 20.4 distinct experiments pooled).
+
+**Given authority over the pooled set, the aggregator reproduces the union
+verbatim.** So the Python dedup is a *faithful* implementation of what the
+LLM aggregator does when asked, not a strawman — and the ladder's negative
+fan-in result is not an artifact of discarding it.
+
+The architectural reason, which the measurement confirms: by the time the
+aggregator runs the scouts have **already bought** their experiments. Its
+only levers are reordering (which reaches PC solely via `run_pc`'s row
+subsample) and dropping (strictly less data). It cannot un-buy and holds no
+information the scouts lack. That is a property of fan-in-*after-purchase*,
+and it is the honest scope of the negative result: a fan-in where the
+aggregator allocates budget *before* purchase is a different topology that
+this ladder does not test.
+
+Free consistency check: fresh `fan_in_homog` at k=30 scores 0.3259, against
+0.337 predicted from the M6 ladder's −0.079 offset and the fresh loop curve's
+0.4156. The arm reproduces across the Novita → pinned-fp8 provider change.
+
+### 2. Contracts are a floor on effort, not only a ceiling on spend
+
+`runs/uncontracted.parquet` — 60 cells, both chambers, n=30 each. The
+UNCONTRACTED arm is `llm_pc` with the contract removed: no budget in the
+prompt, the agent may answer `DONE`, and the adapter is capped at the menu
+size (a physical limit, not a governance bound). **The cap never bound —
+0/60 cells hit it, so every stop was voluntary.**
+
+| chamber | bought | range | F1 | cost CV |
+|---|---|---|---|---|
+| LT (menu 59) | 28.9 (sd 4.9) | **6–33, 5.5×** | 0.4224 | 21% |
+| WT (menu 28) | 12.8 (sd 3.6) | **7–19, 2.7×** | 0.2272 | 34% |
+
+| comparison | delta | MDE | p | verdict |
+|---|---|---|---|---|
+| LT uncontracted vs contracted k=30 | +0.007 | 0.035 | 0.59 | below MDE |
+| LT uncontracted vs contracted k=59 | −0.000 | 0.033 | 0.99 | below MDE |
+| WT uncontracted vs contracted k=14 | −0.012 | 0.048 | 0.49 | below MDE |
+| **WT uncontracted vs contracted k=21** | **−0.058** | 0.045 | **0.0007** | **RESOLVED** |
+
+Three findings, in ascending order of interest:
+
+1. **At matched spend the contract costs nothing in accuracy.** Every
+   matched-budget contrast is below MDE. Governance is not paid for in
+   quality here.
+2. **Spend variance is outcome variance.** The stopping point predicts the
+   result: r = **+0.51** on LT (p=0.004) and **+0.50** on WT (p=0.005). LT
+   uncontracted F1 ranges 0.292–0.533. So an ungoverned agent is not merely
+   unpredictable in cost — you cannot tell in advance which *graph quality*
+   you will get. Contracted arms buy exactly k, sd = 0, by construction.
+3. **On WT the agent stops in the wrong place, and the contract fixes it.**
+   It quits at 12.8 of 28 available experiments; a contract mandating k=21
+   beats it by **+0.058 at p=0.0007**. **The contract is a floor on effort,
+   not only a ceiling on spend** — `k` is a commitment to do the work, not
+   merely a cap on it. On LT the same agent stops at 28.9, right at the knee
+   where the loop curve saturates, and loses nothing. Whether self-regulation
+   suffices is therefore **chamber-dependent and not predictable in advance**,
+   which is the governance argument in one sentence.
+
+This independently reproduces the framework's Nov-2025 positioning —
+"governance, not optimization" — on a pillar built five months later with a
+different task, model and metric.
+
+**Scope limit, stated not glossed:** removing the budget necessarily changes
+the prompt (no budget line, plus a `DONE` option), so the contrast is
+contract-plus-prompt, not contract alone. `build_uncontracted_select_prompt`
+holds menu rendering, history block and answer format identical to
+`build_select_prompt` to keep that difference as small as it can be, but it
+cannot be zero.
 
 ## References
 

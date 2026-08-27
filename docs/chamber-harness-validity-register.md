@@ -374,9 +374,17 @@ LT was unaffected.
 
 - **`overlap_frac` is structurally 0.0 for rung 4** — pools are disjoint by
   construction.
-- **The aggregator's reconcile output is discarded.** The merge is a Python
-  dedup plus PC. The token flow is real, so the P2/conservation demonstration
-  holds, but **the paper must not claim the aggregator improves the result.**
+- **The aggregator's reconcile output is discarded — and that is now measured,
+  not assumed** (2026-08-27, `runs/agg-ablation.parquet`). The `fan_in_agg`
+  ablation gives the aggregator authority over the pooled set: F1 0.3290
+  honored vs 0.3259 discarded, delta +0.0031 against an MDE of 0.0305,
+  Welch p=0.78. The diagnostics are the finding rather than the delta —
+  across 30/30 cells the aggregator **dropped nothing, hallucinated nothing
+  and never returned an empty answer**. Given the power to change the pooled
+  set it reproduces the union verbatim, so the Python dedup is a *faithful*
+  implementation of what the LLM aggregator actually does. The negative
+  fan-in result is therefore not an artifact of a null aggregator.
+  The paper still must not claim the aggregator *improves* the result.
 - **Rung 4's negotiation parser reads restatement as claim**, inflating
   `n_contested`. Cannot be fixed by filtering — a genuine contest is the
   signal. See spec §11.
