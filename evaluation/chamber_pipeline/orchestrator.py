@@ -204,6 +204,20 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         scout_roles=("broad", "targeted"),
         static_kwargs=MappingProxyType({"differentiate": True}),
     ),
+    # Ablation of rung 1, not a rung of the ladder. Identical wiring to
+    # `fan_in_homog` except the aggregator's response SELECTS the pooled set
+    # instead of being discarded. Exists to answer the review "your negative
+    # fan-in result is an artifact of a null aggregator" with a measurement.
+    AgentSpec(
+        name="fan_in_agg",
+        run=fan_in_agents,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_multi",
+        extra_kwargs=("scout_a_budget", "scout_b_budget"),
+        scout_roles=("plain", "plain"),
+        static_kwargs=MappingProxyType({"honor_aggregator": True}),
+    ),
     AgentSpec(
         name="team",
         run=team_agents,
@@ -1265,6 +1279,10 @@ def run_cell(
             extra={
                 "setup_seconds": round(_setup_seconds, 2),
                 "score_seconds": round(_score_seconds, 2),
+                # Aggregator-ablation diagnostics (`fan_in_agg` only). Absent
+                # for every other arm, which is why they live in `extra`
+                # rather than becoming columns that are null 8 times in 9.
+                **{k: v for k, v in coord.items() if k.startswith("agg_")},
             },
         )
     except NotImplementedError as exc:

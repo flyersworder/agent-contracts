@@ -67,6 +67,7 @@ VARIANT_COLORS: dict[str, str] = {
     "fan_in_homog": "#9467bd",  # purple — ensemble
     "fan_in_spec": "#8c564b",  # brown — parallel roles
     "team": "#e377c2",  # pink — negotiation
+    "fan_in_agg": "#17becf",  # cyan — rung-1 ablation, not a rung
 }
 
 VARIANT_LABELS: dict[str, str] = {
@@ -78,6 +79,7 @@ VARIANT_LABELS: dict[str, str] = {
     "fan_in_homog": "Ensemble (fan-in)",
     "fan_in_spec": "Parallel roles (fan-in)",
     "team": "Team (negotiation)",
+    "fan_in_agg": "Ensemble (aggregator honored)",
 }
 
 # Marker + linestyle per variant so curves stay distinguishable when the
@@ -91,6 +93,7 @@ VARIANT_MARKERS: dict[str, str] = {
     "fan_in_homog": "P",
     "fan_in_spec": "X",
     "team": "*",
+    "fan_in_agg": "P",
 }
 
 VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
@@ -102,6 +105,7 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "fan_in_homog": (0, (5, 1)),
     "fan_in_spec": (0, (1, 1)),
     "team": (0, (3, 5, 1, 5)),
+    "fan_in_agg": (0, (3, 1, 1, 1)),
 }
 
 # Variant rendering order in legend (matches plan §5.3 description top-to-bottom).
@@ -116,6 +120,9 @@ VARIANT_ORDER: tuple[str, ...] = (
     # no error, no warning, just an absent curve.
     "fan_in_homog",
     "fan_in_spec",
+    # Ablation of rung 1, ordered beside it. Deliberately NOT in
+    # `LADDER_ORDER`: it is not a rung, and the ladder table must not list it.
+    "fan_in_agg",
     "team",
 )
 

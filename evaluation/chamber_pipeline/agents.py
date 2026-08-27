@@ -875,6 +875,7 @@ def fan_in_agents(
     scout_a_budget: int,
     scout_b_budget: int,
     differentiate: bool = False,
+    honor_aggregator: bool = False,
     llm: LLMCallable | None = None,
 ) -> pd.DataFrame:
     """Two blind scouts fund one aggregator — ladder rungs 1 and 2.
@@ -939,7 +940,7 @@ def fan_in_agents(
     # verify() is vacuously true. It is also the single indivisible request
     # that puts this arm inside whitepaper §4.6 P2's incompleteness window.
     with adapter.as_node("aggregator"):
-        llm(
+        agg_response = llm(
             model=model,
             messages=build_reconcile_prompt(chosen_a, chosen_b),
             max_tokens=_RECONCILE_MAX_TOKENS,
@@ -955,9 +956,42 @@ def fan_in_agents(
             seen.add(name)
             dfs.append(frame)
 
+    # `honor_aggregator` is the ablation that answers the obvious review of
+    # this arm: "your aggregator's output is discarded, so a negative result
+    # about fan-in is an artifact of a null aggregator."
+    #
+    # By the time the aggregator runs the scouts have ALREADY BOUGHT their
+    # experiments, so its only levers are reordering (which reaches PC solely
+    # through `run_pc`'s row subsample) and dropping (strictly less data).
+    # It cannot un-buy, and it holds no information the scouts lack. That is
+    # a property of the architecture, not of this implementation -- but the
+    # claim has to be measured rather than argued, which is what this does.
+    #
+    # Hallucinated names are intersected away: `_parse_name_list` matches
+    # against the menu, not against what was purchased, so an aggregator may
+    # name an experiment nobody ran. Pooling that would fabricate data.
+    agg_diag: dict[str, int] = {}
+    if honor_aggregator:
+        bought = dict(zip(chosen_a + chosen_b, dfs_a + dfs_b, strict=True))
+        named = _parse_name_list(agg_response, list(adapter.available_experiments()))
+        kept = [n for n in named if n in bought]
+        agg_diag = {
+            "agg_named": len(named),
+            "agg_hallucinated": len(named) - len(kept),
+            "agg_dropped": len(seen) - len(kept),
+        }
+        # An empty or fully-hallucinated response must not silently pool
+        # nothing -- that would score the parser, not the topology.
+        if kept:
+            dfs = [bought[n] for n in kept]
+            seen = set(kept)
+        else:
+            agg_diag["agg_fallback"] = 1
+
     adapter.coordination_stats = {
         "overlap_frac": overlap_fraction(chosen_a, chosen_b),
         "n_experiments_distinct": len(seen),
+        **agg_diag,
     }
     if not dfs:
         return _empty_adjacency(nodes)

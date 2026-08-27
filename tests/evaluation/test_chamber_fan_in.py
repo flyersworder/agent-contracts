@@ -167,3 +167,150 @@ def test_scout_budgets_are_respected_per_node(make_ladder_adapter, fake_llm):
         used = graph.monitor_for(scout).usage.get_tool_usage("intervene")
         assert used <= graph.in_flow(scout).per_tool["intervene"]
     assert graph.monitor_for("aggregator").usage.get_tool_usage("intervene") == 0
+
+
+# ---------------------------------------------------------------------------
+# `honor_aggregator` -- the ablation answering "your aggregator is a no-op"
+# ---------------------------------------------------------------------------
+
+
+@requires_causalchamber
+def test_honoring_the_aggregator_restricts_the_pooled_set(make_ladder_adapter):
+    """With honor_aggregator, the aggregator's answer selects what PC sees.
+
+    Default behaviour discards that answer and pools the dedup'd union, so a
+    negative result for fan-in could be dismissed as an artifact of a null
+    aggregator. This is the arm that makes the claim measurable instead of
+    arguable.
+    """
+    from tests.evaluation.conftest import RecordingLLM, call_kind
+
+    picked: list[str] = []
+
+    def responder(idx: int, msgs: list[dict[str, str]]) -> str:
+        from tests.evaluation.conftest import _menu_from
+
+        menu = _menu_from(msgs)
+        if call_kind(msgs) == "reconcile":
+            # Name exactly ONE of the scouts' picks: a strict subset, so
+            # "honored" and "discarded" cannot agree by accident.
+            return picked[0]
+        choice = menu[idx % len(menu)] if menu else ""
+        picked.append(choice)
+        return choice
+
+    llm = RecordingLLM(responder)
+    adapter = make_ladder_adapter(llm)
+    fan_in_agents(
+        adapter,
+        seed=0,
+        scout_a_budget=2,
+        scout_b_budget=2,
+        honor_aggregator=True,
+        llm=llm,
+    )
+    stats = adapter.coordination_stats
+    assert stats["n_experiments_distinct"] == 1, stats
+    assert stats["agg_named"] == 1
+    assert stats["agg_hallucinated"] == 0
+    assert stats["agg_dropped"] >= 1
+    assert "agg_fallback" not in stats
+
+
+@requires_causalchamber
+def test_default_discards_the_aggregator_and_pools_the_union(make_ladder_adapter):
+    """The control for the test above: same LLM, honor_aggregator off."""
+    from tests.evaluation.conftest import RecordingLLM, _menu_from, call_kind
+
+    picked: list[str] = []
+
+    def responder(idx: int, msgs: list[dict[str, str]]) -> str:
+        menu = _menu_from(msgs)
+        if call_kind(msgs) == "reconcile":
+            return picked[0]
+        choice = menu[idx % len(menu)] if menu else ""
+        picked.append(choice)
+        return choice
+
+    llm = RecordingLLM(responder)
+    adapter = make_ladder_adapter(llm)
+    fan_in_agents(adapter, seed=0, scout_a_budget=2, scout_b_budget=2, llm=llm)
+    stats = adapter.coordination_stats
+    assert stats["n_experiments_distinct"] > 1, stats
+    assert not any(k.startswith("agg_") for k in stats)
+
+
+@requires_causalchamber
+def test_a_hallucinating_aggregator_cannot_fabricate_data(make_ladder_adapter):
+    """`_parse_name_list` matches the MENU, not what was purchased.
+
+    The reconcile prompt carries only the two scouts' lists -- no menu -- so
+    an aggregator can only name an unpurchased experiment by inventing it
+    from its own knowledge of the chamber. Rare, but pooling it would
+    fabricate data the budget never bought, so the arm intersects against
+    actual purchases and falls back rather than pooling an empty set.
+    """
+    from tests.evaluation.conftest import RecordingLLM, _menu_from, call_kind
+
+    full_menu: list[str] = []
+    picked: list[str] = []
+
+    def responder(idx: int, msgs: list[dict[str, str]]) -> str:
+        menu = _menu_from(msgs)
+        if call_kind(msgs) == "reconcile":
+            # A real menu name the scouts never bought.
+            unbought = [m for m in full_menu if m not in picked]
+            return unbought[-1] if unbought else ""
+        if menu and not full_menu:
+            full_menu.extend(menu)
+        choice = menu[idx % len(menu)] if menu else ""
+        picked.append(choice)
+        return choice
+
+    llm = RecordingLLM(responder)
+    adapter = make_ladder_adapter(llm)
+    fan_in_agents(
+        adapter,
+        seed=0,
+        scout_a_budget=2,
+        scout_b_budget=2,
+        honor_aggregator=True,
+        llm=llm,
+    )
+    stats = adapter.coordination_stats
+    assert stats["agg_named"] == 1, stats
+    assert stats["agg_hallucinated"] == 1, stats
+    assert stats.get("agg_fallback") == 1, stats
+    # Fell back to the union rather than pooling an empty set.
+    assert stats["n_experiments_distinct"] > 1
+
+
+@requires_causalchamber
+def test_an_empty_aggregator_response_falls_back_to_the_union(make_ladder_adapter):
+    """Truncation and empty content are live failure modes on this stack.
+
+    Scoring the parser instead of the topology is the error to avoid: an
+    empty reconcile must not pool nothing and report F1 on no data.
+    """
+    from tests.evaluation.conftest import RecordingLLM, _menu_from, call_kind
+
+    def responder(idx: int, msgs: list[dict[str, str]]) -> str:
+        if call_kind(msgs) == "reconcile":
+            return ""
+        menu = _menu_from(msgs)
+        return menu[idx % len(menu)] if menu else ""
+
+    llm = RecordingLLM(responder)
+    adapter = make_ladder_adapter(llm)
+    fan_in_agents(
+        adapter,
+        seed=0,
+        scout_a_budget=2,
+        scout_b_budget=2,
+        honor_aggregator=True,
+        llm=llm,
+    )
+    stats = adapter.coordination_stats
+    assert stats["agg_named"] == 0
+    assert stats.get("agg_fallback") == 1
+    assert stats["n_experiments_distinct"] > 1

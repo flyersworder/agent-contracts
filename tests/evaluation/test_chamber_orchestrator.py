@@ -102,16 +102,16 @@ class FakeLLM:
 class TestAgentRegistry:
     """Inventory of the registered agents, plus AgentSpec.is_compatible."""
 
-    def test_registry_has_eight_agents(self) -> None:
-        """Five M4b variants plus the three M6 ladder arms."""
-        assert len(AGENT_REGISTRY) == 8
+    def test_registry_has_nine_agents(self) -> None:
+        """Five M4b variants, the three M6 ladder arms, and one ablation."""
+        assert len(AGENT_REGISTRY) == 9
 
     def test_registry_names_are_unique(self) -> None:
         names = [s.name for s in AGENT_REGISTRY]
         assert len(names) == len(set(names)), f"Duplicate agent names: {names}"
 
     def test_registry_matches_plan_5_1_plus_the_ladder(self) -> None:
-        """Plan §5.1's five variants, plus the M6 ladder's three new arms."""
+        """Plan §5.1's five variants, the ladder's three arms, one ablation."""
         actual = sorted(s.name for s in AGENT_REGISTRY)
         expected = sorted(
             [
@@ -122,6 +122,7 @@ class TestAgentRegistry:
                 "planner_reasoner",
                 "fan_in_homog",
                 "fan_in_spec",
+                "fan_in_agg",
                 "team",
             ]
         )
@@ -1461,7 +1462,11 @@ class TestLadderSelfDescription:
         from evaluation.chamber_pipeline.orchestrator import AGENT_REGISTRY
 
         ladder = {s.name for s in AGENT_REGISTRY if s.is_ladder_arm}
-        assert ladder == {"fan_in_homog", "fan_in_spec", "team"}
+        # `fan_in_agg` is an ABLATION of rung 1, not a fifth rung. It declares
+        # scout roles because it needs rung 1's identical budget calibration --
+        # the ablation is only interpretable against a matched-budget control.
+        # Anything reporting "the ladder" must exclude it by name.
+        assert ladder == {"fan_in_homog", "fan_in_spec", "fan_in_agg", "team"}
 
     def test_calibration_refuses_a_non_ladder_arm(self) -> None:
         """A silent plain-role fallthrough is what this replaces."""
