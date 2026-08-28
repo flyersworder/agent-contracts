@@ -1143,6 +1143,64 @@ holds menu rendering, history block and answer format identical to
 `build_select_prompt` to keep that difference as small as it can be, but it
 cannot be zero.
 
+## v4-PRO ROBUSTNESS CHECK (2026-08-28): the ordering survives; scale does not help
+
+`runs/pro-lt.parquet` + `runs/pro-wt.parquet` — **160/160 cells, 0 errors**,
+7.0 h wall on the VPS, **$14.55**. `deepseek-v4-pro`, LT k=30 n=30 and
+WT k=21 n=50, contrast restricted to the decisive one (loop `llm_pc` vs
+ensemble `fan_in_homog`). n=50 on WT because WT compresses effects ~2.2x —
+at n=30 the MDE (0.051) exceeds the flash effect (0.052), so that run would
+have been guaranteed inconclusive before it started.
+
+### 1. The topology ordering is model-robust
+
+Ensemble minus loop, provider- and platform-matched **within each model**:
+
+| config | n | loop | ensemble | delta | MDE | p | verdict |
+|---|---|---|---|---|---|---|---|
+| LT k=30 flash | 30 | 0.4156 | 0.3259 | **−0.090** | 0.032 | <1e-6 | **RESOLVED** |
+| LT k=30 **pro** | 30 | 0.3520 | 0.2765 | **−0.075** | 0.031 | <1e-6 | **RESOLVED** |
+| WT k=21 flash | 50 | 0.2854 | 0.2336 | **−0.052** | 0.039 | 0.0004 | **RESOLVED** |
+| WT k=21 **pro** | 50 | 0.2656 | 0.2453 | −0.020 | 0.036 | 0.11 | below MDE |
+
+On LT the effect reproduces at nearly the same magnitude under a model
+costing 3.9x more per cell. On WT it keeps its sign but attenuates below the
+MDE. **The single sequential loop is not an artifact of one model snapshot**,
+which was the largest open threat to the ladder's headline.
+
+Report the WT pro cell as an attenuation, not a contradiction: the sign is
+unchanged and the flash effect there was itself the smallest in the study.
+
+### 2. The larger model is WORSE at this task, and it is resolved
+
+Same arm, budget, seeds, platform and provider class; only the model differs:
+
+| contrast | pro | flash | delta | MDE | p | verdict |
+|---|---|---|---|---|---|---|
+| LT k=30 loop | 0.3520 | 0.4156 | **−0.064** | 0.030 | <1e-5 | **RESOLVED** |
+| LT k=30 ensemble | 0.2765 | 0.3259 | **−0.049** | 0.033 | 0.0001 | **RESOLVED** |
+| WT k=21 loop | 0.2656 | 0.2854 | −0.020 | 0.039 | 0.16 | below MDE |
+| WT k=21 ensemble | 0.2453 | 0.2336 | +0.012 | 0.036 | 0.36 | below MDE |
+
+At **3.9x the cost per cell** ($0.123 vs $0.032), v4-pro selects measurably
+worse experiments on LT — on both arms — and is indistinguishable on WT.
+Model scale does not buy accuracy at experiment selection here.
+
+**The comparison worth putting in the paper:** on LT, changing the
+coordination topology costs **−0.075 to −0.090** F1, while changing to a
+4x more expensive model costs **−0.064**. *Topology is at least as large a
+lever as model choice, and it is the cheaper one.* That is the strongest
+single sentence the coordination pillar can make.
+
+No mechanism is claimed for why pro is worse. Do not speculate in the paper —
+the harness, prompts, budget, seeds and platform are identical, and that is
+all the design licenses.
+
+**Harness**: 0 errors; fallbacks 3/900 (LT) and 1/1050 (WT), and **all of
+them fall on the loop**, so the bias runs against the finding rather than
+for it. Providers 97-99% Baidu, remainder StreamLake — the pinned fp8
+per-model order, no strays. Single BLAS, single platform, single model tag.
+
 ## References
 
 - **Harness validity register**: `docs/chamber-harness-validity-register.md`

@@ -345,6 +345,43 @@ Report as a scope limit with these numbers attached. Do NOT report the LT
 curve's low-budget points without it: a reader who knows only §6 will assume
 LT was unaffected.
 
+## 12. The provider order is per-MODEL (2026-08-27)
+
+`DEFAULT_PROVIDER_ORDER` was one constant applied to every model, but the
+price and precision RANKING of endpoints is model-specific. Measured from
+`GET /models/{id}/endpoints`:
+
+| provider | flash-0731 | v4-pro |
+|---|---|---|
+| Parasail | **$0.28/M (cheapest fp8)** | **$3.48/M (most expensive fp8)** |
+| Baidu | $0.28/M | **$1.58/M (cheapest fp8)** |
+
+Caught in preflight, before spending: running the flash-calibrated order on
+v4-pro would have overpaid **2.2x**, silently, during the one experiment
+whose entire purpose is to vary the model. This is §3-4 recurring on a
+different axis — there the order was stale, here it was *model-inappropriate*.
+
+Fixed by `PROVIDER_ORDER_BY_MODEL`, matched on the **exact model tag**.
+Substring matching is wrong because a dated snapshot is a different product:
+Baidu does not serve `deepseek-v4-pro-0813` at all, and StreamLake serves
+`deepseek-v4-pro` at fp8 while its `-0813` endpoint reports `unknown`.
+**Quantization is a property of the (provider, model) pair, not of the
+provider** — so `PROVIDER_PRECISION`, which is keyed by provider alone,
+is an approximation that holds only for the models whose endpoints were
+actually inspected. Unlisted models fall back to the default.
+
+**A real test gap surfaced here.** `test_injects_default_provider_order`
+drives `model="m"`, which falls back to the default — so it passed whether or
+not per-model routing was wired in *at all*. Mutation caught it: removing the
+resolver from the request path broke nothing. There is now a test asserting a
+pro-model request carries the pro order **on the wire**. Fifth instance of
+"the test certified our REQUEST, not what ran" (§3-4, §7, §8, §10).
+
+Also stale and now corrected: the note that `deepseek-v4-pro` "truncates at
+2048 with empty content" dated from the era of the 2048 cap. At 32768 it
+returns clean content — 4/4 preflight cells and 160/160 sweep cells with
+near-zero fallbacks.
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
