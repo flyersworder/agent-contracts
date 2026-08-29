@@ -53,10 +53,12 @@ from agent_contracts.integrations.causalchamber import (
 
 from . import inference as inference_module
 from .agents import (
+    critique_agents,
     fan_in_agents,
     greedy_ig_lite_agent,
     llm_only_agent,
     llm_pc_agent,
+    one_shot_agent,
     planner_reasoner_agents,
     random_agent,
     team_agents,
@@ -206,6 +208,29 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
     # Rungs 1, 2 and 4. Rungs 0 (`llm_pc`) and 3 (`planner_reasoner`) are
     # reused from the M4b pilot unchanged, which is why nothing above this
     # comment may move.
+    # Rung -1: the no-history control. One call for the whole budget, so the
+    # running record the loop accumulates is absent rather than divided. Every
+    # multi-agent rung SPLITS that record; without this arm the ladder prices
+    # the cost of dividing a resource whose value was never established.
+    AgentSpec(
+        name="one_shot",
+        run=one_shot_agent,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_single",
+    ),
+    # Executor-evaluator. The only multi-agent shape here where the second
+    # agent takes NO share of the budget -- it advises, the proposer decides.
+    # Three LLM calls regardless of k, so also the cheapest multi-agent arm by
+    # a wide margin. `scout_roles` stays None: it is not a two-scout arm and
+    # must not be handed the fan-in calibration.
+    AgentSpec(
+        name="critique",
+        run=critique_agents,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_multi",
+    ),
     AgentSpec(
         name="fan_in_homog",
         run=fan_in_agents,

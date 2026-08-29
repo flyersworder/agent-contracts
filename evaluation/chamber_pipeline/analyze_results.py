@@ -69,6 +69,8 @@ VARIANT_COLORS: dict[str, str] = {
     "team": "#e377c2",  # pink — negotiation
     "uncontracted": "#7f7f7f",  # gray — the ungoverned control
     "fan_in_agg": "#17becf",  # cyan — rung-1 ablation, not a rung
+    "one_shot": "#bcbd22",  # olive — the no-history control
+    "critique": "#393b79",  # indigo — executor-evaluator
 }
 
 VARIANT_LABELS: dict[str, str] = {
@@ -82,6 +84,8 @@ VARIANT_LABELS: dict[str, str] = {
     "team": "Team (negotiation)",
     "uncontracted": "Uncontracted (self-terminating)",
     "fan_in_agg": "Ensemble (aggregator honored)",
+    "one_shot": "One-shot (no history)",
+    "critique": "Critique (executor-evaluator)",
 }
 
 # Marker + linestyle per variant so curves stay distinguishable when the
@@ -97,6 +101,8 @@ VARIANT_MARKERS: dict[str, str] = {
     "team": "*",
     "uncontracted": "X",
     "fan_in_agg": "P",
+    "one_shot": "*",
+    "critique": "h",
 }
 
 VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
@@ -110,6 +116,8 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "team": (0, (3, 5, 1, 5)),
     "uncontracted": (0, (7, 2)),
     "fan_in_agg": (0, (3, 1, 1, 1)),
+    "one_shot": "dashdot",
+    "critique": "dotted",
 }
 
 # Variant rendering order in legend (matches plan §5.3 description top-to-bottom).
@@ -130,6 +138,8 @@ VARIANT_ORDER: tuple[str, ...] = (
     # `LADDER_ORDER`: it is not a rung, and the ladder table must not list it.
     "fan_in_agg",
     "team",
+    "one_shot",
+    "critique",
 )
 
 
@@ -341,7 +351,13 @@ def aggregate_pareto(df: pd.DataFrame, *, allow_mixed_provenance: bool = False) 
 # it were less coordinated than the ensembles, which is the one axis the
 # ladder exists to order.
 LADDER_ORDER: tuple[str, ...] = (
+    # Ordered by how much of the loop's running record each arm retains:
+    # none, complete, complete-plus-a-reviewer, split-by-agreement, split
+    # blind. `one_shot` sits BELOW the reference because it removes the
+    # record rather than dividing it.
+    "one_shot",
     "llm_pc",
+    "critique",
     "fan_in_homog",
     "fan_in_spec",
     "planner_reasoner",

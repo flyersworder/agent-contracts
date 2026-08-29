@@ -32,6 +32,7 @@ their oriented direction.
 
 from __future__ import annotations
 
+import contextlib
 import random as _random
 import re
 from collections.abc import Callable
@@ -1166,6 +1167,201 @@ def _capped_claim(names: list[str], budget: int, stream: str, seed: int) -> list
     return [n for n in names if n in keep]
 
 
+def _maybe_node(adapter: ContractedChamberAgent, name: str) -> Any:
+    """`adapter.as_node(name)` when a delegation graph exists, else a no-op.
+
+    Node routing requires a sealed `DelegationGraph`, which `run_cell` builds
+    only for arms with measured per-role token costs -- `_ladder_calibration`
+    raises rather than extrapolate one. An arm whose accuracy we want before
+    its cost is calibrated would otherwise be unrunnable, so the routing
+    degrades instead of blocking: the adapter's aggregate monitor still gates
+    the intervention budget, and only the per-node token accounting is lost.
+    Such a cell is simply not conservation-certified, which `run_cell` already
+    records as None rather than as a pass.
+    """
+    if getattr(adapter, "delegation_graph", None) is None:
+        return contextlib.nullcontext()
+    return adapter.as_node(name)
+
+
+def _resolve_batch_selection(
+    named: list[str], menu: list[str], budget: int, seed: int, stream: str
+) -> tuple[list[str], int, int]:
+    """Turn a free-form batch answer into exactly `budget` distinct names.
+
+    A batch answer is unconstrained in a way a one-at-a-time answer is not:
+    the model may name more than the budget, fewer, or names it was not
+    offered. All three have to resolve to exactly `budget` picks or the arm is
+    not budget-comparable with the loop and the ladder stops being a
+    controlled comparison.
+
+    Over-long is cut with `_capped_claim`, i.e. a seeded shuffle rather than a
+    menu-order slice -- the menu is grouped by variable family, so a slice
+    keeps the head families in every seed. Short is topped up from the
+    remaining menu on the same seeded shuffle. Both are counted, because a
+    silent top-up would let a model that answered with one name score as a
+    full-budget arm.
+
+    Returns `(chosen, n_over, n_short)`.
+    """
+    offered = [n for n in named if n in set(menu)]
+    n_over = max(0, len(offered) - budget)
+    chosen = _capped_claim(offered, budget, stream, seed)
+    n_short = max(0, budget - len(chosen))
+    if n_short:
+        rest = [m for m in menu if m not in set(chosen)]
+        _random.Random(f"batch-topup-{stream}:{seed}").shuffle(rest)
+        chosen = chosen + rest[:n_short]
+    return [m for m in menu if m in set(chosen)], n_over, n_short
+
+
+def one_shot_agent(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """Pick the whole budget in ONE call, then infer. The no-history control.
+
+    Rung 0 spends `k` calls, each conditioned on everything picked so far.
+    This spends one. Every multi-agent rung on the ladder SPLITS that running
+    record between agents without anything establishing what an unsplit record
+    is worth -- so without this arm the ladder measures the cost of dividing a
+    resource whose value was never priced.
+    """
+    from evaluation.chamber_pipeline.llm_planner import build_batch_select_prompt
+
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = list(adapter.available_experiments())
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+
+    llm = llm or _default_llm()
+    budget = min(budget, len(menu))
+    response = llm(
+        model=model,
+        messages=build_batch_select_prompt(menu, budget),
+        max_tokens=_SELECTION_MAX_TOKENS,
+        extra_body={"reasoning": {"effort": _SELECTION_REASONING_EFFORT}},
+    )
+    chosen, n_over, n_short = _resolve_batch_selection(
+        _parse_name_list(response, menu), menu, budget, seed, "one_shot"
+    )
+    dfs = [adapter.query_intervention(name) for name in chosen]
+    adapter.coordination_stats = {
+        "n_experiments_distinct": len(set(chosen)),
+        "n_batch_over_budget": n_over,
+        "n_batch_topped_up": n_short,
+    }
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+def critique_agents(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """Executor-evaluator: propose a set, have it reviewed, revise, then infer.
+
+    The pattern reviewers name most often, and the only shape on the ladder
+    where a second agent does not take a share of the budget. Every other
+    multi-agent rung DIVIDES the work; this one leaves the proposer holding
+    the whole budget and adds an opinion about it.
+
+    Three calls regardless of `k`, so it is also the cheapest multi-agent arm
+    by a wide margin -- worth reporting on the cost axis whatever it does to
+    accuracy.
+
+    With no feedback available, the critic judges the SET from names alone:
+    what is over-covered, what is untouched, which swaps would help. It
+    advises and does not decide -- the proposer emits the final list, which is
+    what separates this from the team arm's negotiation, where both sides
+    hold budget.
+    """
+    from evaluation.chamber_pipeline.llm_planner import (
+        _response_text,
+        build_batch_select_prompt,
+        build_critique_prompt,
+        build_revise_after_critique_prompt,
+    )
+
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = list(adapter.available_experiments())
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+
+    llm = llm or _default_llm()
+    budget = min(budget, len(menu))
+    extra: dict[str, Any] = {"extra_body": {"reasoning": {"effort": _SELECTION_REASONING_EFFORT}}}
+
+    with _maybe_node(adapter, "proposer"):
+        first = llm(
+            model=model,
+            messages=build_batch_select_prompt(menu, budget),
+            max_tokens=_SELECTION_MAX_TOKENS,
+            **extra,
+        )
+    proposed, over_1, short_1 = _resolve_batch_selection(
+        _parse_name_list(first, menu), menu, budget, seed, "propose"
+    )
+
+    with _maybe_node(adapter, "critic"):
+        review = llm(
+            model=model,
+            messages=build_critique_prompt(menu, budget, proposed),
+            max_tokens=_RECONCILE_MAX_TOKENS,
+            extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+        )
+    critique_text = _response_text(review) or ""
+
+    with _maybe_node(adapter, "proposer"):
+        final = llm(
+            model=model,
+            messages=build_revise_after_critique_prompt(menu, budget, proposed, critique_text),
+            max_tokens=_SELECTION_MAX_TOKENS,
+            **extra,
+        )
+    # Tested BEFORE resolution, not after. `_resolve_batch_selection` tops a
+    # short answer up to the full budget, so `revised` is never empty and a
+    # post-hoc `revised or proposed` fallback can never fire -- an unreadable
+    # revise would silently become a random basket, scoring the arm on a
+    # top-up rather than on its proposal. A review nobody could read leaves
+    # the plan standing.
+    named_revised = _parse_name_list(final, menu)
+    if named_revised:
+        revised, over_2, short_2 = _resolve_batch_selection(
+            named_revised, menu, budget, seed, "revise"
+        )
+        chosen, revise_unusable = revised, 0
+    else:
+        chosen, over_2, short_2, revise_unusable = proposed, 0, 0, 1
+
+    dfs = [adapter.query_intervention(name) for name in chosen]
+    adapter.coordination_stats = {
+        "n_experiments_distinct": len(set(chosen)),
+        # How much the review actually moved the set. 0 means the critic was
+        # decorative, which is a result and must not be mistaken for one.
+        "n_critique_changed": len(set(chosen) ^ set(proposed)) // 2,
+        "n_critique_empty": int(not critique_text.strip()),
+        # The revise answer named nothing on the menu, so the proposal stands.
+        "n_revise_unusable": revise_unusable,
+        "n_batch_over_budget": over_1 + over_2,
+        "n_batch_topped_up": short_1 + short_2,
+    }
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
 def team_agents(
     adapter: ContractedChamberAgent,
     model: str = "openrouter/deepseek/deepseek-v4-flash",
@@ -1405,10 +1601,12 @@ def team_agents(
 # re-exports -- a public surface that disagreed with the registry the sweep
 # actually runs.
 __all__ = [
+    "critique_agents",
     "fan_in_agents",
     "greedy_ig_lite_agent",
     "llm_only_agent",
     "llm_pc_agent",
+    "one_shot_agent",
     "planner_reasoner_agents",
     "random_agent",
     "team_agents",

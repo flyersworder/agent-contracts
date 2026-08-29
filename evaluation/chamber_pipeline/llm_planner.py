@@ -377,6 +377,96 @@ _NEGOTIATE_SYSTEM_MESSAGE = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Batch selection and executor-evaluator critique
+# ---------------------------------------------------------------------------
+
+_BATCH_SYSTEM_MESSAGE = (
+    "You are designing causal-discovery experiments on a physical chamber. "
+    "You will be shown a menu of available pre-recorded interventional "
+    "experiments. Your task is to choose a SET of experiments to run, using "
+    "only the experiment names. The names encode what each experiment "
+    "perturbs and how strongly."
+)
+
+_CRITIC_SYSTEM_MESSAGE = (
+    "You are reviewing another designer's proposed set of causal-discovery "
+    "experiments on a physical chamber. You cannot run anything and you "
+    "cannot see any results -- judge the SET itself, from the experiment "
+    "names alone. Say what the set over-covers, what it leaves untouched, and "
+    "which specific swaps would improve it. Be concrete and brief."
+)
+
+
+def build_batch_select_prompt(menu: list[str], budget: int) -> list[dict[str, str]]:
+    """Ask for all `budget` experiments in ONE call.
+
+    The no-history control for the loop. Rung 0 spends `budget` calls, each
+    conditioned on everything picked so far; this spends one. The difference
+    between them is the value of the running record, which no other rung
+    isolates -- every multi-agent arm splits that record without ever
+    establishing what an unsplit one is worth.
+    """
+    user = (
+        f"You may run {budget} experiment(s) in total.\n\n"
+        f"Menu:\n{_render_menu(menu)}\n\n"
+        f"List exactly {budget} experiment name(s) you choose, one per line, "
+        "and no other commentary."
+    )
+    return [
+        {"role": "system", "content": _BATCH_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_critique_prompt(
+    menu: list[str], budget: int, proposed: list[str]
+) -> list[dict[str, str]]:
+    """Ask a second agent to review the proposed set.
+
+    Deliberately asks for a CRITIQUE, not a replacement list. An evaluator
+    that simply re-picks is a second proposer, and the arm would measure
+    resampling rather than review -- the same trap that makes rung 1's two
+    scouts a single opinion drawn twice.
+    """
+    user = (
+        f"A designer proposed these {len(proposed)} experiment(s) out of a "
+        f"budget of {budget}:\n" + "\n".join(proposed) + "\n\n"
+        f"Menu:\n{_render_menu(menu)}\n\n"
+        "Critique this set. Which perturbation targets are duplicated or "
+        "over-weighted? Which are missing entirely? Name specific swaps."
+    )
+    return [
+        {"role": "system", "content": _CRITIC_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_revise_after_critique_prompt(
+    menu: list[str], budget: int, proposed: list[str], critique: str
+) -> list[dict[str, str]]:
+    """Return the proposer's final set, having read the critique.
+
+    The proposer keeps authorship: the critic advises and does not decide.
+    That is what makes this executor-evaluator rather than a two-round
+    negotiation, where both sides hold budget.
+    """
+    user = (
+        f"You proposed these {len(proposed)} experiment(s):\n"
+        + "\n".join(proposed)
+        + "\n\nA reviewer responded:\n"
+        + critique.strip()
+        + f"\n\nMenu:\n{_render_menu(menu)}\n\n"
+        f"Give your FINAL list of exactly {budget} experiment name(s), one "
+        "per line, and no other commentary. You may keep or change any of "
+        "your original choices."
+    )
+    return [
+        {"role": "system", "content": _BATCH_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
 def build_negotiate_propose_prompt(
     menu: list[str],
     budget: int,
