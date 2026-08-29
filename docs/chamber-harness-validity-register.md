@@ -560,6 +560,66 @@ with `m6-ladder` (OpenBLAS) and running `--ladder` silently averages two
 backends across a 0.055 gap. The rule lives in prose in three documents and
 nowhere in code.
 
+## 16. The claim cap never fires, so its bias never happened (2026-08-29)
+
+Entry 15 flagged two team-arm defects and rated the second as possibly
+contaminating a published number. **Measured, it does not.** Recorded because
+the reasoning that got it wrong is more reusable than the fix.
+
+The argument for contamination was half right. The pool arithmetic is real and
+reproduces to three decimals: a full claim leaves no top-up, so it is
+`claim/(claim + half the leftover)` of what a scout can see —
+
+| LT budget | predicted | measured `claim_pool_share` | cells |
+|---|---|---|---|
+| k=6 | ~0.10 | **0.103** | 3/3 |
+| k=45 | 23/30 = 0.767 | **0.767** | 6/6 |
+
+So at the top budget the claim really does decide 77% of the scout's pool, and
+a menu-order cut of it would have been a family-shaped hole repeated in every
+seed. **But `n_claim_truncated` is 0 in all 9 cells at both budgets.** The cap
+never runs, because `build_negotiate_propose_prompt` says *"List the {budget}
+experiment name(s) you intend to claim, one per line, and no other
+commentary"* — and the model complies exactly, returning 23 names for a 23
+budget. A real bias channel that nothing ever pushes through.
+
+The estimate that a 240-cell re-run was needed rested on a CODE COMMENT
+("measured 10 + 4 against a 20 budget when `claim_a` reached 55 names"), which
+describes an earlier state of the pipeline. A comment is a claim about the
+past; it is not a measurement of the present. **Cost of checking: 9 cells,
+$0.42, ~2h. Cost of not checking: 240 cells and a week of wall time.**
+
+**Consequences:**
+
+- Both entry-15 team fixes are **behaviour-neutral on LT**: the cap has nothing
+  to cut, and LT's menu has no substring pairs. So there is no version boundary
+  (entry 13) — the new code reproduces the published LT `team` rows, and the
+  −0.047 loop-vs-team gap stands as measured.
+- **WT is the one place the fixes change behaviour.** Three of 28 names are
+  droppable and the old guard always dropped the SHORTER member
+  (`validate_load_in`, `validate_load_out`, `validate_osr_in`), replacing it
+  with a random top-up. That is a bounded perturbation of at most one name per
+  cell, biased against three specific experiments — a scope limit to state,
+  not a correctness failure. Re-running WT `team` (150 cells) is a cleanliness
+  option, not a requirement.
+- **k=30 is un-measured**, bracketed by k=6 and k=45. The mechanism (a prompt
+  that hard-codes the count) does not vary with budget, so the interpolation is
+  safe, but say "measured at k=6 and k=45" rather than "at every budget".
+
+**Also confirmed on this run:** provider rotation fired **0 extra attempts**
+across 300 calls (`n_llm_attempts == n_llm_calls == 50`/cell), independently
+reconfirming that entry 15's fallback-denominator defect was real but inert.
+The LiteLLM errors in the log were litellm's own `num_retries`, not our
+rotation. A team cell at k=45 is exactly 50 calls: 4 negotiation + 45
+selection + 1 reconcile.
+
+**Operational, and self-inflicted:** the preflight took 4h45m of wall clock for
+96 minutes of compute because the machine slept — defect 9 exactly, whose own
+recorded fix is "run sweeps under `caffeinate -is`" and which I did not apply
+when launching. `wall_time_seconds` (`perf_counter`) stayed honest while
+`etime` inflated 6x, which is how the stall was diagnosed rather than guessed.
+**Launch every local sweep under `caffeinate -is`.**
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
