@@ -382,6 +382,95 @@ Also stale and now corrected: the note that `deepseek-v4-pro` "truncates at
 returns clean content — 4/4 preflight cells and 160/160 sweep cells with
 near-zero fallbacks.
 
+## 13. The pipeline version is part of the configuration, like the BLAS backend (2026-08-29)
+
+Entry 10 established that two machines produce different graphs from identical
+inputs. This is the same lesson one level up: **two runs on the same machine,
+same backend, same seed, same arm produce different graphs if the pipeline
+changed between them** — and our files straddle exactly such a change.
+
+`random` is deterministic given its seed, which makes it a probe. Comparing
+overlapping `(budget_k, seed)` cells:
+
+| pair | overlap | identical | mean abs ΔF1 |
+|---|---|---|---|
+| `curve-lt-random` vs `m6-lt-loop-curve` | 120 | **0** (0%) | **0.055** |
+| `m6-controls` vs `m6-lt-loop-curve` | 60 | 48 (80%) | 0.005 |
+| `m6-controls` vs `curve-lt-random` | 90 | 0 (0%) | 0.053 |
+
+Two things follow. First, the middle row **positively verifies** that
+`m6-controls` is OpenBLAS — its platform had only been attributed from a run
+log, never stamped. Second, the 20% that differ are not noise. Cross-tabulating
+the changed cells against `n_collinear_dropped` on the newer run:
+
+| `n_collinear_dropped` | unchanged | changed |
+|---|---|---|
+| 0 | 48 | 0 |
+| 1 | 0 | **12** |
+
+**Perfect separation** — every changed cell dropped a collinear column, every
+unchanged cell dropped none. The difference is entirely defect 6's fix (2026-08-25),
+not drift. It also confirms defect 11: collinear drops are **not** WT-only, they
+fire on 20% of LT cells at k ∈ {6, 30}.
+
+**The version boundary, by file.** The presence of the `n_collinear_dropped`
+column is the marker:
+
+- **Pre-fix**: `m4-pilot`, **`m6-ladder`** (the LT ladder), `m6-controls`,
+  `curve-lt-random`, `curve-wt-random`.
+- **Post-fix**: `curve-wt-validate`, `wt-gate`, `m6-wt-ladder`,
+  `m6-lt-loop-curve`, `wt-random-vps`, `agg-ablation`, `uncontracted`,
+  `pro-lt`, `pro-wt`.
+
+**Audited consequence: no published contrast crosses the boundary.** Every
+headline comparison is within one file or within one side of it — the LT
+ladder's five arms all ran pre-fix together; `agg-ablation` and the `pro-*`
+files each carry their own control; the uncontracted contrast draws its
+contracted baselines from `m6-lt-loop-curve` and `m6-wt-ladder`, both post-fix.
+The rule going forward is the same as for BLAS: **never pool rows across the
+boundary**, and prefer datasets that carry their own control.
+
+Note also that ΔF1 = 0.055 across backends is **larger than most effects the
+paper reports** (team − loop = −0.047). Cross-platform pooling would not have
+added noise; it would have manufactured or erased findings.
+
+## 14. `run_pc`'s subsample seed is pinned for two arms and not the others (2026-08-29)
+
+`random_agent` and `greedy_ig_lite_agent` call `run_pc(pooled, nodes,
+alpha=pc_alpha)`; the seven LLM-bearing agents call it with `seed=seed`. So the
+300-row subsample is drawn with `random_state=0` in **every** cell of the two
+non-LLM arms, and varies per cell in every other arm. The two arms in the
+loop-vs-random headline are therefore not sampled the same way.
+
+**How much that matters, measured rather than argued.** Holding the experiment
+selection completely fixed and varying only the PC seed (LT, 8 seeds):
+
+| k | selection seed | mean F1 | sd | range |
+|---|---|---|---|---|
+| 12 | 0 / 1 / 2 | 0.305 / 0.289 / 0.249 | 0.033 / 0.050 / 0.038 | ~0.10–0.15 wide |
+| 30 | 0 / 1 / 2 | 0.380 / 0.440 / 0.378 | 0.038 / 0.038 / 0.039 | ~0.10 wide |
+
+**The subsample alone moves F1 by sd ≈ 0.04 — the size of the effects we
+report.** It is noise, not bias, and n=30 reduces the standard error to ≈0.007;
+but it is why single-cell comparisons are meaningless here.
+
+Reproducing `random_agent`'s selection exactly and scoring both conditions over
+30 seeds:
+
+| k | pinned (seed=0) | varying | delta | paired p |
+|---|---|---|---|---|
+| 12 | 0.2646 (sd 0.056) | 0.2470 (sd 0.060) | +0.018 | 0.15 |
+| 30 | 0.3595 (sd 0.056) | 0.3656 (sd 0.043) | −0.006 | 0.59 |
+
+**No detectable bias**, both below MDE, and the pinned arm's sd is not smaller.
+The k=12 sign favours `random`, so pinning makes the "loop beats random at low
+k" claim *conservative* rather than inflated.
+
+Left as-is deliberately: changing it now would make the recorded `random` rows
+irreproducible from the code (defect 13's own lesson), for a correction measured
+at below MDE. Fix it at the next data freeze, re-running the LLM-free `random`
+cells, which cost nothing.
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
@@ -434,6 +523,58 @@ near-zero fallbacks.
   edge near α=0.05. Flips are unbiased in direction: individual cells move a
   lot (seed 0: F1 0.204 → 0.127), the distribution does not (Welch p=0.265 on
   F1, p=0.743 on SHD). Archive the resolved environment, not just the seed.
+
+## Audited clean (2026-08-29)
+
+A register of defects is survivorship-biased: it lists what went wrong and is
+silent on what was checked and held. These were checked in the same pass that
+produced entries 13 and 14, and each is a threat a reviewer can reasonably
+raise.
+
+- **The identifiability ceiling is not binding.** PC returns a CPDAG and we
+  report undirected edges in both directions, so a reader will ask how much F1
+  that convention forfeits. Computed by taking each ground-truth DAG to its
+  CPDAG (`dag2cpdag`) and scoring it through our own converter and scorer: **LT
+  has zero undirected edges in its CPDAG — it is fully identifiable, ceiling F1
+  = 1.000, SHD = 0.** WT has exactly one, ceiling F1 = 0.988. The observed
+  saturation at F1 ≈ 0.42 is therefore **not** a Markov-equivalence artifact.
+  It is a property of PC on pooled interventional data, which is the fixed,
+  uniform inference step every arm shares.
+- **Budget matching is exact, and now verified from the data rather than from
+  the code.** `build_fan_in_graph` splits as `ceil(k/2) + k//2`, which sums to
+  `k` for odd budgets too (k=45 → 23+22, not 22+22). Solving
+  `distinct = |A| + |B| − shared` against the recorded `overlap_frac` on all
+  270 fan-in cells gives **max residual 0.00e+00 and zero non-integer shared
+  counts**, so both scouts spent their full allocation in every cell.
+- **No exclusion bias.** All 450 LT-ladder and 750 WT-ladder cells have
+  `status == "ok"`; no cell was dropped from any mean.
+- **Fallback contamination cannot explain any gap.** Mean `rng.choice`
+  fallbacks per cell peak at 0.33 (`team`, k=45) — 0.7% of selections. It does
+  rise with k in `team`, the entry-1 pattern, but two orders of magnitude too
+  small to move a 0.047 effect.
+- **The pooled-interventional design does not penalise exploration.** Dropping
+  the `intervention` column makes the pooled mixture an unobserved common
+  cause, so diversity could in principle *hurt* accuracy and thereby punish the
+  fan-in arms for exploring. Measured within every arm × budget cell, F1
+  correlates **positively** with `n_experiments_distinct` (r = +0.11 to +0.32),
+  never negatively. The mechanism is not operating.
+- **Menu truncation never fires.** `_MAX_MENU_LINES = 200` against a 59-entry
+  LT menu — unlike the `> 30` threshold with zero margin that this repo shipped
+  once before.
+- **No duplicate cell keys, and ground truth is constant** (57 LT / 42 WT
+  edges) across every headline file; one `model_id` per file.
+
+**Open instrumentation gap, recorded not fixed:** `run_pc` drops zero-variance
+columns silently — there is no logger call, so unlike PC degeneracy and
+collinear drops it has **no counter**. That path fires *more at low budget*
+(a variable no bought experiment perturbs is constant, gets dropped, and is
+padded back with zeros — guaranteed false negatives), so its rate tracks the
+independent variable, which is the entry-1 shape. It is not a confound between
+arms — activating more variables is exactly what good selection does, so this
+is the causal pathway rather than a bias — but with no counter we cannot
+decompose the budget curve into "PC saw more nodes" versus "PC inferred better
+edges". Adding `n_zero_variance_dropped` is purely additive and changes no
+computation.
 
 ## How to add an entry
 

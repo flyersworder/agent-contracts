@@ -4,7 +4,7 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the twelve
+**Companions.** `docs/chamber-harness-validity-register.md` records the fourteen
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
@@ -26,7 +26,20 @@ across two chambers and two models.
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
-and the `curve-*` files, which are macOS / Accelerate.
+and the `curve-*` files, which are macOS / Accelerate. `m6-controls`'s
+backend was attributed from a run log until 2026-08-29, when it was
+positively verified against a platform-stamped file (register §13).
+
+**Never pool across the collinear-fix boundary either** (register §13). The
+fix of 2026-08-25 changes 20% of LT `random` cells — with *perfect* separation
+against `n_collinear_dropped`, so it is a version difference, not noise. The
+marker is whether a file carries that column. Pre-fix: `m4-pilot`,
+**`m6-ladder`**, `m6-controls`, `curve-lt-random`, `curve-wt-random`.
+Post-fix: everything else above. **Audited 2026-08-29: no published contrast
+crosses the boundary** — the LT ladder's five arms ran pre-fix together,
+`agg-ablation` and `pro-*` each carry their own control, and the uncontracted
+contrast draws both baselines from post-fix files. For scale: the
+cross-backend gap is ΔF1 = 0.055, larger than most effects reported below.
 
 Chambers: light tunnel (LT) 38 nodes / 57 edges / 59-experiment menu; wind
 tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
