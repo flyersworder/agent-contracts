@@ -4,7 +4,7 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the sixteen
+**Companions.** `docs/chamber-harness-validity-register.md` records the seventeen
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
@@ -23,6 +23,9 @@ across two chambers and two models.
 | `runs/uncontracted.parquet` | 60 | $1.09 | the ungoverned control, both chambers |
 | `runs/pro-lt.parquet` | 60 | $7.39 | v4-pro robustness, LT |
 | `runs/pro-wt.parquet` | 100 | $7.16 | v4-pro robustness, WT |
+| `runs/team-preflight.parquet` + `-lowk` | 9 | $0.42 | claim-cap incidence, LT k=45 and k=6 |
+| `runs/wt-team-probe.parquet` | 3 | $0.04 | substring-conflict incidence, WT k=21 |
+| `runs/m6-wt-team-rerun.parquet` | 150 | ~$2.3 | **IN FLIGHT** — WT `team` re-run under the fixed parser |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -46,6 +49,35 @@ tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
+
+## STATUS 2026-08-29: WT `team` is being re-run; every other number is final
+
+A parser defect that fires **only on WT and only on rung 4** is being retired
+by re-running that arm. Nothing else in this document is affected.
+
+- **What was wrong.** `_parse_name_list` carried a substring guard on top of a
+  word-boundary regex that already prevented the problem it was written for,
+  so every time it fired it deleted a genuine claim. Three WT names can be
+  deleted this way (`validate_load_in`, `validate_load_out`, `validate_osr_in`
+  — the short, unqualified member of each family), each replaced by a random
+  top-up. **LT's menu has no such pairs, so LT is untouched.**
+- **How often.** Measured, not assumed: a 3-cell WT probe at k=21 gave
+  `n_substring_conflicts` = 0, 0, **2**. Non-zero, so the recorded WT `team`
+  rows are perturbed; at n=3 the rate itself is barely constrained.
+- **What is being re-run.** 150 cells: WT x `team` x k in {7,14,21} x 50
+  seeds, on the VPS (`scipy-openblas`, matching `m6-wt-ladder`). The other
+  four WT rungs are untouched by the fix, so the ladder stays within-version.
+- **What could move.** `team`'s three WT deltas (+0.034 R at k=7, −0.021 ns at
+  k=14, −0.045 R at k=21) and its `n_contested`, which is computed from the
+  same parsed lists. **Until it lands, treat the WT `team` row of the ladder
+  table below as provisional.** The LT ladder, both loop curves, the
+  aggregator ablation, the uncontracted control and the v4-pro check are all
+  final.
+- **A companion defect, measured and dismissed.** The claim cap that truncated
+  over-long claims in menu order never fires: `n_claim_truncated` = 0 in all
+  12 cells across both chambers, because the propose prompt asks for exactly
+  `budget` names and the model complies. See register entry 16 — this is why
+  the LT `team` arm needed no re-run.
 
 ## M6 WT LADDER COMPLETE (2026-08-26): the topology result replicates
 

@@ -595,13 +595,35 @@ $0.42, ~2h. Cost of not checking: 240 cells and a week of wall time.**
   to cut, and LT's menu has no substring pairs. So there is no version boundary
   (entry 13) — the new code reproduces the published LT `team` rows, and the
   −0.047 loop-vs-team gap stands as measured.
-- **WT is the one place the fixes change behaviour.** Three of 28 names are
-  droppable and the old guard always dropped the SHORTER member
-  (`validate_load_in`, `validate_load_out`, `validate_osr_in`), replacing it
-  with a random top-up. That is a bounded perturbation of at most one name per
-  cell, biased against three specific experiments — a scope limit to state,
-  not a correctness failure. Re-running WT `team` (150 cells) is a cleanliness
-  option, not a requirement.
+- **WT is the one place the fixes change behaviour, and there it FIRES.**
+  Measured with a dedicated counter (`n_substring_conflicts`) on a 3-cell WT
+  probe at k=21: **0, 0, 2** — one cell in three, two shadowed names in that
+  cell. So this is not a scope limit, it is a real perturbation of recorded
+  data, and the WT `team` re-run became a requirement rather than a
+  cleanliness option. (n=3, so the *rate* is barely constrained; what is
+  established is that it is non-zero.)
+
+  Exactly three WT names can ever be dropped, and only when a longer sibling
+  is claimed in the same response:
+
+  | droppable | shadowed by |
+  |---|---|
+  | `validate_load_in` | `validate_load_in_mic`, `validate_load_in_current_out` |
+  | `validate_load_out` | `validate_load_out_pressure_intake`, `validate_load_out_current_in`, `validate_load_out_mic` |
+  | `validate_osr_in` | `validate_osr_intake` |
+
+  They are the short, unqualified member of each family, so the old guard
+  biased systematically against the plain load-in / load-out / osr-in
+  interventions, replacing each with a random top-up. It also propagates to
+  `n_contested`, computed from the same parsed lists — the affected probe cell
+  reported 5 contested against 3 for the other two. LT has zero such pairs,
+  which is why the defect is structurally impossible there.
+
+  **Re-run launched 2026-08-29 16:55 UTC** on the VPS (`scipy-openblas`,
+  matching `m6-wt-ladder`): 150 cells, WT x `team` x k in {7,14,21} x 50 seeds,
+  6 workers, `runs/m6-wt-team-rerun.parquet`. The other four WT rungs are
+  untouched by both fixes, so replacing only `team` keeps the ladder
+  within-version.
 - **k=30 is un-measured**, bracketed by k=6 and k=45. The mechanism (a prompt
   that hard-codes the count) does not vary with budget, so the interpolation is
   safe, but say "measured at k=6 and k=45" rather than "at every budget".
@@ -619,6 +641,64 @@ recorded fix is "run sweeps under `caffeinate -is`" and which I did not apply
 when launching. `wall_time_seconds` (`perf_counter`) stayed honest while
 `etime` inflated 6x, which is how the stall was diagnosed rather than guessed.
 **Launch every local sweep under `caffeinate -is`.**
+
+## 17. A second review found eight defects in one day's fixes (2026-08-29)
+
+Entry 15 was a review of the branch; this is a review of the *repairs*, scoped
+to `3c67b32..HEAD` (~1.5k lines, all written the same day). **Eight findings,
+four confirmed by execution, and the suite was green at 545 passed
+throughout** — none were test-visible.
+
+Two made a guard decorative, which is worse than not having written it:
+
+- **`--allow-mixed-provenance` was a dead flag.** `load_records` threaded it;
+  `aggregate_pareto` and `ladder_frame` called the guard bare, and `main`
+  calls `aggregate_pareto` on every invocation. The escape hatch the CLI
+  documents could not be reached at all.
+- **`SweepConfigurationError` was swallowed on the agent-invocation path.**
+  The adapter-construction `try` re-raised it; the second `try`, around
+  `_invoke_with_timeout`, did not — and `_provider_order_for`'s unpinned-model
+  raise fires inside `_CountingLLM.__call__`, i.e. in the second block. So
+  `--model <unlisted-id>` produced N identical error records that every resume
+  re-attempts: the exact loop the class docstring claims to prevent, defeated
+  in the same commit that introduced the class.
+
+Then four mediums and two lows. The ones worth remembering:
+
+- **`n_claim_truncated`'s scout-B term was measured against a list the cap
+  never saw** — `uncapped_b` excluded a menu-order slice of `source_a` while
+  the cap ran on the shuffled `claim_a`. Same size, different membership.
+  Reproduced at seed 1: reported 2 truncated where 1 had been. A counter lying
+  by being measured against the wrong list, inside the commit series about
+  counters that lie.
+- **The broken-pool handler did not do what its comment claimed.** Once the
+  pool dies every remaining future raises the same `BrokenProcessPool`, so a
+  sweep that OOMed at cell 250 "completed" with 200 fabricated error rows and
+  exit 0 — a success-shaped ending for a fraction of a run. It now aborts,
+  naming how many cells actually ran; per-cell faults the pool survives still
+  become one error record each.
+- **`_pc_provenance_snapshot` hardcoded `pc_alpha=0.05`** while `run_cell`
+  stamps `sweep.pc_alpha`. Since `pc_alpha` is a provenance column and the new
+  guard runs *before* non-ok rows are dropped, one dead worker on a non-default
+  alpha would have made the entire Parquet un-analysable — by the guard added
+  two commits earlier.
+- **The partial-counter check false-alarmed on every frame with a non-LLM
+  arm**: `n_selection_fallbacks` is legitimately null for `random` and
+  `greedy_ig`, which nonetheless run PC.
+
+**The pattern across all three rounds, and the thing to carry forward.** Three
+of these eight are the same defect class fixed elsewhere hours earlier: a
+guard that treats **absent / partial / present** as two states instead of
+three. It appeared as `dropna().unique()` in the provenance check, as
+`fillna(0)` in the counter check, as an all-null column passing both guards,
+and as the wrong base list for scout B. Writing the guard is not the hard
+part; enumerating the states is.
+
+**Second lesson, procedural:** `/code-review high 3c67b32` was read as "review
+that commit", not "review since that commit". The first pass therefore covered
+one commit and missed the four that contained the sweep-runner control flow —
+the highest-risk surface. Use the range form, `3c67b32..HEAD`, and check the
+scope line in the reply before trusting a clean result.
 
 ## Standing scope limits (not defects)
 
