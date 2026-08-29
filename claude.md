@@ -936,8 +936,13 @@ document you open deliberately.
 As of 2026-08-28: **2,050 cells, $90.80, zero errored cells**, two chambers,
 two models. Headlines, with the detail and the caveats in the results doc:
 
-- **No multi-agent topology beats a single sequential loop** where selection
-  has signal, replicated on both chambers and under a 3.9x pricier model.
+- **Where the comparison resolves, no fan-in topology beats a single
+  sequential loop**, and at middle budgets the loop wins by 0.044-0.079 F1 on
+  both chambers and under a 3.9x pricier model. Scoped 2026-08-29: of 24
+  topology-vs-loop contrasts, 10 resolve, 9 favouring the loop. The
+  exceptions travel with the claim — `team` beats the loop at WT k=7
+  (+0.034, resolved), nothing resolves at LT k=45, and the chain resolves in
+  neither direction anywhere.
 - **The gap to random closes because random catches up**, not because the
   loop degrades — the loop saturates at F1 ≈ 0.42 by k=30.
 - **The contract is a floor on effort, not only a ceiling on spend.**

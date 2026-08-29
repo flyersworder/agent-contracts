@@ -738,6 +738,11 @@ def _validity_frame(
                         # distinction `missing_columns` exists to make.
                         "n_collinear_dropped": 0,
                         "n_zero_variance_dropped": 0,
+                        # Present, so the frame can be CONFIRMED
+                        # single-configuration. Absent, it would be
+                        # UNVERIFIABLE -- which is a real warning, not noise.
+                        "blas_backend": "scipy-openblas",
+                        "platform_tag": "Linux-x86_64",
                         "conservation_certified": True,
                     }
                 )
@@ -981,7 +986,7 @@ def test_absent_zero_variance_column_is_reported_but_not_as_contamination() -> N
 
     frame = _validity_frame().drop(columns=["n_zero_variance_dropped"])
     warns = validity_warnings(harness_validity_report(frame))
-    assert len(warns) == 1
+    assert len(warns) == 1, warns
     assert warns[0].startswith("NOT RECORDED: n_zero_variance_dropped")
     assert "UNMEASURED" not in warns[0]
 
@@ -1001,3 +1006,99 @@ def test_validity_warnings_on_an_empty_selection_is_empty_not_a_crash() -> None:
     report = harness_validity_report(empty)
     assert report.empty
     assert validity_warnings(report) == []
+
+
+class TestProvenanceHomogeneity:
+    """Rows from two configurations must not become one mean.
+
+    The rule "never pool rows whose `blas_backend` differs" lived in prose in
+    three documents and in no code, while every RunRecord carried the field
+    and no analyzer read it. Register entry 10 measures the cost of breaking
+    it at |dF1| = 0.055 -- larger than most effects this pillar reports.
+    """
+
+    @staticmethod
+    def _frame(n: int = 4, **overrides) -> pd.DataFrame:
+        base = {
+            "chamber": "lt",
+            "agent_name": "llm_pc",
+            "budget_k": 30,
+            "budget_fraction": 0.5,
+            "seed": 0,
+            "status": "ok",
+            "shd": 50,
+            "f1": 0.4,
+            "wall_time_seconds": 10.0,
+            "started_at": "2026-08-29T10:00:00",
+            "finished_at": "2026-08-29T10:00:10",
+            "blas_backend": "scipy-openblas",
+            "platform_tag": "Linux-x86_64",
+        }
+        rows = []
+        for i in range(n):
+            row = dict(base, seed=i)
+            row.update({k: v[i] for k, v in overrides.items()})
+            rows.append(row)
+        return pd.DataFrame(rows)
+
+    def test_a_homogeneous_frame_passes(self) -> None:
+        from evaluation.chamber_pipeline.analyze_results import provenance_problems
+
+        assert provenance_problems(self._frame()) == []
+
+    def test_two_backends_are_refused_by_the_aggregators(self) -> None:
+        from evaluation.chamber_pipeline.analyze_results import (
+            MixedProvenanceError,
+            aggregate_pareto,
+            ladder_frame,
+        )
+
+        mixed = self._frame(
+            blas_backend=["scipy-openblas", "scipy-openblas", "accelerate", "accelerate"]
+        )
+        for fn in (aggregate_pareto, ladder_frame):
+            with pytest.raises(MixedProvenanceError, match="blas_backend"):
+                fn(mixed)
+
+    def test_a_partly_stamped_frame_is_refused(self) -> None:
+        """The mix anyone is actually likely to make: a legacy Parquet
+        concatenated with a current one. Judging on `dropna().unique()` alone
+        calls this homogeneous -- one distinct backend plus a block of nulls --
+        so the guard would miss `m4-pilot` + `m6-lt-loop-curve`, the exact
+        pooling the register warns about."""
+        from evaluation.chamber_pipeline.analyze_results import (
+            MixedProvenanceError,
+            provenance_problems,
+            require_homogeneous_provenance,
+        )
+
+        partial = self._frame(
+            blas_backend=["scipy-openblas", "scipy-openblas", None, None],
+            platform_tag=["Linux-x86_64", "Linux-x86_64", None, None],
+        )
+        problems = provenance_problems(partial)
+        assert any("UNSTAMPED on 2" in p for p in problems)
+        with pytest.raises(MixedProvenanceError):
+            require_homogeneous_provenance(partial)
+
+    def test_a_fully_unstamped_frame_is_allowed_but_flagged_unverifiable(self) -> None:
+        """Absent is weaker than mixed: a pre-2026-08-26 sweep is analysable
+        on its own, it just cannot be CONFIRMED single-configuration."""
+        from evaluation.chamber_pipeline.analyze_results import (
+            harness_validity_report,
+            provenance_problems,
+            validity_warnings,
+        )
+
+        legacy = self._frame().drop(columns=["blas_backend", "platform_tag"])
+        assert provenance_problems(legacy) == []
+        warns = validity_warnings(harness_validity_report(legacy))
+        assert any(w.startswith("UNVERIFIABLE: blas_backend") for w in warns)
+
+    def test_the_escape_hatch_exists_for_measuring_the_difference(self) -> None:
+        from evaluation.chamber_pipeline.analyze_results import require_homogeneous_provenance
+
+        mixed = self._frame(
+            blas_backend=["scipy-openblas", "scipy-openblas", "accelerate", "accelerate"]
+        )
+        require_homogeneous_provenance(mixed, allow_mixed=True)  # must not raise

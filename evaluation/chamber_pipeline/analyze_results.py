@@ -138,7 +138,103 @@ VARIANT_ORDER: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 
-def load_records(path: str | Path) -> pd.DataFrame:
+# Columns that must not vary WITHIN a frame being pooled into a mean.
+#
+# `blas_backend` is the one that has already changed a result: register entry
+# 10 measured macOS/Accelerate against Linux/OpenBLAS on the same seeded
+# `random` cells and found 0 of 120 identical, mean |dF1| = 0.055 -- LARGER
+# than most effects this pillar reports (team - loop = -0.047). PC is a
+# sequence of accept/reject tests at alpha, so a ~1e-10 difference in
+# `inv(C)` forks the conditioning-set search rather than nudging a number.
+#
+# The PC parameters are here for the same reason at a coarser scale: an alpha
+# or a row cap that differs between rows is two experiments in one frame.
+_PROVENANCE_COLUMNS: tuple[str, ...] = (
+    "blas_backend",
+    "platform_tag",
+    "pc_alpha",
+    "pc_max_rows",
+    "pc_collinearity_threshold",
+)
+
+
+class MixedProvenanceError(ValueError):
+    """Rows produced under different PC or platform configurations were pooled.
+
+    Until 2026-08-29 the rule "never pool rows whose `blas_backend` differs"
+    lived in prose in three documents and nowhere in code, while every
+    `RunRecord` dutifully carried the field and no analyzer read it. The
+    failure mode is silent by construction: concatenating
+    `runs/m4-pilot.parquet` (Accelerate) with `runs/m6-ladder.parquet`
+    (OpenBLAS) and calling `--ladder` produces a rung mean averaged across two
+    backends, with no error and no warning.
+    """
+
+
+def provenance_problems(df: pd.DataFrame) -> list[str]:
+    """Provenance columns that carry more than one value in this frame.
+
+    A column ABSENT from the frame entirely is not a problem -- pre-2026-08-26
+    sweeps predate the stamp, and "unverifiable" is a weaker statement than
+    "mixed". `harness_validity_report` reports that case separately.
+
+    A column PARTLY populated IS a problem, and this is the case that matters
+    most in practice. Concatenating `runs/m4-pilot.parquet` (unstamped,
+    Accelerate) with `runs/m6-lt-loop-curve.parquet` (stamped, OpenBLAS) --
+    the exact pooling the register warns about -- leaves one distinct non-null
+    backend and a block of nulls. Judging on `dropna().unique()` alone calls
+    that homogeneous, which is how a guard against mixing legacy and current
+    data misses the only mix anyone is likely to make. Verified by execution
+    against those two files.
+    """
+    problems: list[str] = []
+    for column in _PROVENANCE_COLUMNS:
+        if column not in df.columns:
+            continue
+        present = df[column].notna()
+        values = df.loc[present, column].unique()
+        if len(values) > 1:
+            rendered = ", ".join(repr(v) for v in sorted(values, key=str))
+            problems.append(f"{column}: {rendered}")
+        elif len(values) == 1 and not present.all():
+            problems.append(
+                f"{column}: {values[0]!r} on {int(present.sum())} rows and "
+                f"UNSTAMPED on {int((~present).sum())} -- the unstamped rows "
+                "predate the field and may come from any configuration"
+            )
+    return problems
+
+
+def require_homogeneous_provenance(df: pd.DataFrame, *, allow_mixed: bool = False) -> None:
+    """Raise unless every row shares one PC/platform configuration.
+
+    Args:
+        df: Cell-level frame.
+        allow_mixed: Escape hatch for a caller that genuinely wants the
+            comparison -- measuring the backend effect itself, for instance.
+            Never set it to silence the error on an analysis you intend to
+            publish.
+
+    Raises:
+        MixedProvenanceError: If any provenance column carries two values.
+    """
+    if allow_mixed:
+        return
+    problems = provenance_problems(df)
+    if problems:
+        raise MixedProvenanceError(
+            "these rows were produced under more than one configuration, and "
+            "pooling them averages two experiments into one number: "
+            + "; ".join(problems)
+            + ". Register entry 10 measures the backend effect at |dF1| = "
+            "0.055, larger than most effects reported from this pillar. "
+            "Analyse the groups separately, or pass allow_mixed=True "
+            "(--allow-mixed-provenance) if measuring the difference IS the "
+            "point."
+        )
+
+
+def load_records(path: str | Path, *, allow_mixed_provenance: bool = False) -> pd.DataFrame:
     """Load a Parquet or CSV produced by `run_experiment.py`.
 
     Auto-detects format from the file extension. Validates the schema
@@ -173,11 +269,17 @@ def load_records(path: str | Path) -> pd.DataFrame:
             f"Input file missing required columns: {sorted(missing)}. "
             f"Was this Parquet produced by `run_experiment.py`?"
         )
+    require_homogeneous_provenance(df, allow_mixed=allow_mixed_provenance)
     return df
 
 
 def aggregate_pareto(df: pd.DataFrame) -> pd.DataFrame:
     """Aggregate cell-level records into per-(chamber, agent, budget) Pareto points.
+
+    Refuses a frame whose rows come from more than one PC/platform
+    configuration. Checked HERE and not only at load time because this is
+    where rows actually become a mean: a caller that concatenated two
+    Parquets in a notebook never went through `load_records`.
 
     Drops non-"ok" cells (skipped/error) before aggregating — those
     don't contribute to the Pareto curve. Computes mean and standard
@@ -192,6 +294,7 @@ def aggregate_pareto(df: pd.DataFrame) -> pd.DataFrame:
         combination. Columns: chamber, agent_name, budget_k, budget_fraction,
         n_seeds, shd_mean, shd_sem, f1_mean, f1_sem.
     """
+    require_homogeneous_provenance(df)
     ok_only = df[df["status"] == "ok"].copy()
     if ok_only.empty:
         return pd.DataFrame(
@@ -247,6 +350,9 @@ _MDE_Z = 2.8
 def ladder_frame(df: pd.DataFrame) -> pd.DataFrame:
     """One row per (ladder rung, budget) for the M6 coordination table.
 
+    Refuses a frame spanning more than one PC/platform configuration; see
+    `require_homogeneous_provenance`.
+
     `failure_rate` is computed BEFORE dropping non-"ok" cells. Filtering
     first makes every rate exactly 0.0, which would erase the M4b finding
     that `planner_reasoner` timed out on 8 of 30 cells at its top budget --
@@ -269,6 +375,7 @@ def ladder_frame(df: pd.DataFrame) -> pd.DataFrame:
             sizes, so the same `budget_k` is a different budget in each and
             averaging them describes neither.
     """
+    require_homogeneous_provenance(df)
     if "chamber" in df.columns and df["chamber"].nunique(dropna=True) > 1:
         found = sorted(df["chamber"].dropna().unique())
         raise ValueError(f"ladder_frame needs a single chamber; got {found}. Filter first.")
@@ -650,6 +757,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Print the M6 coordination-ladder table (with MDE) and, with --out-dir, its panels.",
     )
     parser.add_argument(
+        "--allow-mixed-provenance",
+        action="store_true",
+        help=(
+            "Analyse rows spanning more than one BLAS backend / platform / PC "
+            "configuration. Off by default because pooling them averages two "
+            "experiments into one number -- the backend effect alone is "
+            "|dF1| = 0.055, larger than most effects this pillar reports. Use "
+            "only when measuring that difference IS the point."
+        ),
+    )
+    parser.add_argument(
         "--check-chamber",
         type=str,
         default="lt",
@@ -660,7 +778,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    df = load_records(args.input)
+    df = load_records(args.input, allow_mixed_provenance=args.allow_mixed_provenance)
     print(f"Loaded {len(df)} records from {args.input}")
     n_ok = (df["status"] == "ok").sum()
     n_skipped = (df["status"] == "skipped").sum()
@@ -856,6 +974,7 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
             "n_pc_degeneracies",
             "n_collinear_dropped",
             "n_zero_variance_dropped",
+            "blas_backend",
             "conservation_certified",
         )
         if c not in df.columns
@@ -921,6 +1040,18 @@ def validity_warnings(report: pd.DataFrame) -> list[str]:
         "collinear_drop_rate",
     }
     for column in report.attrs.get("missing_columns", []):
+        if column in ("blas_backend", "platform_tag"):
+            # Absent, not mixed. A pre-2026-08-26 sweep predates the stamp, so
+            # single-configuration cannot be CHECKED -- which is a weaker
+            # statement than "these rows disagree", and a different one from
+            # the contaminating-path notices below.
+            warnings.append(
+                f"UNVERIFIABLE: {column} is absent from these records, so "
+                "single-configuration cannot be confirmed. Attribute the "
+                "platform from the run log and do not pool with stamped rows "
+                "unless the attribution is certain (register entries 10, 13)."
+            )
+            continue
         if column == "n_zero_variance_dropped":
             # Deliberately NOT phrased as contamination. This path cannot bias
             # an arm-vs-arm comparison; what its absence costs is the ability

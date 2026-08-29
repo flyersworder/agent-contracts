@@ -55,21 +55,61 @@ across 6 workers. Grid: 5 rungs x k in {7,14,21} (k/M = 0.25/0.50/0.75 on
 WT's 28-experiment menu) x 50 seeds. n=50 rather than 30 because WT compresses
 effect sizes ~2.2x versus LT.
 
-**Headline: no multi-agent topology beats the single sequential loop on
-EITHER chamber, at any budget where selection has signal.**
+**Headline, scoped to what resolves (revised 2026-08-29): of the 24
+topology-vs-loop contrasts — 4 multi-agent rungs x 3 budgets x 2 chambers —
+**10 resolve at n=30/50, and 9 of those 10 favour the sequential loop.** The
+tenth runs the other way. No fan-in topology ever resolves as *better* than
+the loop on either chamber.
 
-| rung | LT k=30 | WT k=14 | WT k=21 |
-|---|---|---|---|
-| ensemble `fan_in_homog` | −0.079 **R** | −0.048 **R** (p=0.0008) | −0.052 **R** (p=0.0004) |
-| roles `fan_in_spec` | −0.051 **R** | −0.044 **R** (p=0.0025) | −0.049 **R** (p=0.0004) |
-| chain `planner_reasoner` | +0.011 ns | +0.022 ns | −0.024 ns |
-| team | −0.047 **R** | −0.021 ns | −0.045 **R** (p=0.0024) |
+An earlier version of this line read "no multi-agent topology beats the single
+sequential loop on EITHER chamber, at any budget where selection has signal",
+and the table below it showed only the three budgets where the loop wins.
+That is the claim the full grid does not support, for two reasons that must
+travel with it.
 
-Two chambers, different graphs (38 nodes/57 edges vs 32/42), different menus
-(59 vs 28), different sample regimes (1,000 vs ~840 rows/experiment) — same
-ordering. **This is the external-validity answer to "everything rests on LT's
-single graph".** The chain is the only multi-agent rung that never resolves as
-worse, consistent across both chambers.
+**Exception 1 — at the lowest WT budget the ordering inverts, because the
+baseline is broken there.** `team` beats the loop by **+0.034, resolved** at
+WT k=7, and all four topologies are nominally above it (fan-in +0.029, roles
++0.016, chain +0.031, all below MDE). The reason is visible one table down:
+**at WT k=7 the loop is itself significantly WORSE than random** — 0.145 vs
+0.181, delta −0.036 against MDE 0.031, Welch p=0.0015. LLM selection actively
+hurts at that budget, so the reference arm is below chance-level selection and
+"beating the loop" there is not evidence for a topology. Report k=7 as a
+regime where the comparison's denominator fails, not as a counterexample to
+the topology result — and note the loop only overtakes random from k=14
+(+0.031, p=0.028) and k=21 (+0.052, p=0.0004).
+
+**Exception 2 — at LT's top budget nothing resolves at all.** All four deltas
+at k=45 fall inside the MDE (−0.009, +0.014, +0.023, −0.003). That is an
+equivalence bound, not a null: the design cannot separate the rungs there.
+Note WT's top budget (k=21, the same k/M ≈ 0.75) *does* resolve three, so this
+is specific to LT rather than a general property of high budgets.
+
+**The chain is never resolved in either direction, anywhere.** All six of its
+contrasts are below MDE (−0.038 to +0.031). "Delegation has measurable cost"
+is not supported by this grid, and neither is its converse.
+
+Every contrast, so the claim can be checked rather than taken:
+
+| rung | LT k=6 | LT k=30 | LT k=45 | WT k=7 | WT k=14 | WT k=21 |
+|---|---|---|---|---|---|---|
+| ensemble `fan_in_homog` | −0.013 ns | −0.079 **R** | −0.009 ns | +0.029 ns | −0.048 **R** | −0.052 **R** |
+| roles `fan_in_spec` | −0.046 **R** | −0.051 **R** | +0.014 ns | +0.016 ns | −0.044 **R** | −0.049 **R** |
+| chain `planner_reasoner` | −0.038 ns | +0.011 ns | +0.023 ns | +0.031 ns | +0.022 ns | −0.024 ns |
+| team (negotiation) | +0.006 ns | −0.047 **R** | −0.003 ns | **+0.034 R** | −0.021 ns | −0.045 **R** |
+
+**R** = resolved against that cell's MDE; ns = below it. Negative favours the
+loop. Reproduce with `analyze_results --input <ladder>.parquet --ladder`.
+
+**The defensible sentence** is therefore: *where the comparison resolves, the
+sequential loop is matched or beaten by no fan-in topology, and beats them by
+0.044-0.079 F1 at middle budgets on both chambers; the one resolved exception
+is negotiation at the smallest WT budget.* The replication across two
+chambers, different graphs (38 nodes/57 edges vs 32/42), different menus (59
+vs 28) and different sample regimes (1,000 vs ~840 rows/experiment) is real
+and is **the external-validity answer to "everything rests on LT's single
+graph"** — it is the middle-budget result that replicates, not a claim about
+every budget.
 
 **Loop vs random** (recomputed 2026-08-26 on a matched platform; the figures
 that stood here, +0.019 and +0.037, paired the VPS ladder against a *local*
@@ -354,12 +394,16 @@ nothing measured what governance costs.
 
 ### Still open, ranked
 
-1. **The negative is carried by middle budgets.** Nothing resolves at LT
-   k=45, and WT k=7 resolves the *other* way (team beats loop, +0.034
-   RESOLVED). Both are defensible — k=45 has no selection left to perform,
-   and at WT k=7 the loop loses to random so it is a degenerate baseline —
-   but the ladder table is in the paper too, and as currently worded the
-   table contradicts the sentence. **Answerable in prose; must be answered.**
+1. ~~**The negative is carried by middle budgets.**~~ **CLOSED
+   2026-08-29.** The headline above now states the scope it can support: of
+   24 topology-vs-loop contrasts, 10 resolve and 9 favour the loop, with all
+   24 tabulated so the sentence can be checked against the table rather than
+   contradicted by it. Both exceptions travel with the claim — LT k=45
+   resolves nothing (an equivalence bound, and note WT's equivalent k/M does
+   resolve three, so it is specific to LT), and WT k=7 inverts because the
+   loop is itself below random there (−0.036, p=0.0015), which makes it a
+   broken denominator rather than a counterexample. The chain resolves in
+   neither direction in any of its six contrasts.
 2. **Conservation conflates mechanism with forecast.** LT 92.2% (249/270),
    WT 64.3% (193/300). A failure means `verify()` correctly CAUGHT an
    overrun: the mechanism worked every time, the cost prediction did not.
