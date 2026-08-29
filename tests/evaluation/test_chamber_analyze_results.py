@@ -1198,3 +1198,65 @@ def test_a_non_llm_arm_does_not_trip_the_partial_counter_check() -> None:
     frame["n_selection_fallbacks"] = [0 if i % 2 == 0 else None for i in range(len(frame))]
     warns = validity_warnings(harness_validity_report(frame))
     assert not any(w.startswith("PARTIALLY RECORDED") for w in warns)
+
+
+class TestCostFrontier:
+    """Accuracy against coordination cost, in calls rather than dollars."""
+
+    @staticmethod
+    def _frame(rows) -> pd.DataFrame:
+        base = {
+            "chamber": "lt",
+            "budget_fraction": 0.5,
+            "status": "ok",
+            "shd": 50,
+            "wall_time_seconds": 1.0,
+            "started_at": "x",
+            "finished_at": "y",
+            "blas_backend": "scipy-openblas",
+            "platform_tag": "Linux-x86_64",
+        }
+        return pd.DataFrame(
+            [
+                dict(base, agent_name=a, budget_k=30, seed=i, f1=f, n_llm_calls=c, cost_usd=u)
+                for a, f, c, u in rows
+                for i in range(3)
+            ]
+        )
+
+    def test_an_arm_beaten_on_both_axes_is_dominated(self) -> None:
+        from evaluation.chamber_pipeline.analyze_results import cost_frontier
+
+        out = cost_frontier(
+            self._frame([("cheap_good", 0.5, 3, 0.01), ("dear_bad", 0.4, 30, 0.10)])
+        )
+        by = dict(zip(out.agent_name, out.dominated, strict=True))
+        assert by["dear_bad"] is True
+        assert by["cheap_good"] is False
+
+    def test_the_most_accurate_arm_is_optimal_however_dear(self) -> None:
+        """Pareto, not value-for-money: nothing beats it on BOTH axes."""
+        from evaluation.chamber_pipeline.analyze_results import cost_frontier
+
+        out = cost_frontier(
+            self._frame([("cheap_bad", 0.3, 3, 0.01), ("dear_best", 0.6, 50, 0.20)])
+        )
+        by = dict(zip(out.agent_name, out.dominated, strict=True))
+        assert by["dear_best"] is False
+        assert by["cheap_bad"] is False, "cheapest is also on the frontier"
+
+    def test_a_tie_on_both_axes_dominates_neither(self) -> None:
+        """`<=` and `>=` alone would call two identical arms dominated."""
+        from evaluation.chamber_pipeline.analyze_results import cost_frontier
+
+        out = cost_frontier(self._frame([("a", 0.4, 10, 0.05), ("b", 0.4, 10, 0.05)]))
+        assert not out.dominated.any()
+
+    def test_the_table_stays_aligned_for_a_long_label(self) -> None:
+        from evaluation.chamber_pipeline.analyze_results import format_cost_frontier
+
+        text = format_cost_frontier(
+            self._frame([("fan_in_spec", 0.4, 31, 0.1), ("llm_pc", 0.42, 30, 0.1)])
+        )
+        rows = [ln for ln in text.splitlines() if "0.4" in ln]
+        assert len({ln.index("0.4") for ln in rows}) == 1, "F1 column must line up"

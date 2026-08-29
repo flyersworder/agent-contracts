@@ -385,6 +385,89 @@ _LLM_COUNTER_COLUMNS: tuple[str, ...] = ("n_selection_fallbacks",)
 _COUNTER_COLUMNS: tuple[str, ...] = _PC_COUNTER_COLUMNS + _LLM_COUNTER_COLUMNS
 
 
+def cost_frontier(df: pd.DataFrame, *, allow_mixed_provenance: bool = False) -> pd.DataFrame:
+    """Per (chamber, budget, arm): accuracy against coordination cost.
+
+    Cost is measured in **LLM calls**, not dollars. Dollars are a property of
+    the provider's price sheet that week -- register entry 3 measured the same
+    model billing 4.7x more on one endpoint than another -- while call count
+    is a property of the topology, which is the thing under study. A frontier
+    denominated in dollars would move when nobody changed the experiment.
+
+    Interventions are held EQUAL across arms by construction, so what varies
+    here is coordination overhead alone. In a real laboratory the experiment
+    would dominate and these differences would compress toward nothing; the
+    axis is meaningful because our experiments are pre-recorded and free.
+
+    `dominated` marks an arm that some other arm at the same (chamber, budget)
+    beats on BOTH axes -- fewer calls and higher F1. That is a stronger
+    statement than losing on accuracy: it means no cost argument rescues it.
+
+    Returns:
+        One row per (chamber, budget_k, agent_name) with `f1_mean`,
+        `calls_mean`, `usd_mean`, `n_ok` and `dominated`.
+    """
+    require_homogeneous_provenance(df, allow_mixed=allow_mixed_provenance)
+    ok = df[df["status"] == "ok"]
+    grouped = (
+        ok.groupby(["chamber", "budget_k", "agent_name"])
+        .agg(
+            f1_mean=("f1", "mean"),
+            calls_mean=("n_llm_calls", "mean"),
+            usd_mean=("cost_usd", "mean"),
+            n_ok=("f1", "size"),
+        )
+        .reset_index()
+    )
+
+    dominated: list[bool] = []
+    for row in grouped.itertuples():
+        peers = grouped[(grouped["chamber"] == row.chamber) & (grouped["budget_k"] == row.budget_k)]
+        # Strictly better on one axis and no worse on the other. `<=` on the
+        # cost side and `>=` on accuracy would call ties dominated, which
+        # would flag an arm that merely matches another as inferior to it.
+        beaten = (
+            (peers["calls_mean"] <= row.calls_mean)
+            & (peers["f1_mean"] >= row.f1_mean)
+            & ((peers["calls_mean"] < row.calls_mean) | (peers["f1_mean"] > row.f1_mean))
+        )
+        dominated.append(bool(beaten.any()))
+    grouped["dominated"] = dominated
+    return grouped
+
+
+def format_cost_frontier(df: pd.DataFrame, *, allow_mixed_provenance: bool = False) -> str:
+    """Render `cost_frontier` as a table, cheapest arm first within a budget."""
+    frame = cost_frontier(df, allow_mixed_provenance=allow_mixed_provenance)
+    if frame.empty:
+        return "No cells to place on the cost frontier."
+
+    lines: list[str] = []
+    for (chamber, budget), grp in frame.groupby(["chamber", "budget_k"], sort=True):
+        lines.append(f"\n{chamber.upper()} k={int(budget)}  (cheapest first)")
+        # Width taken from the longest label rather than a literal, so a new
+        # arm cannot silently overflow the column and misalign the table.
+        width = max(len(VARIANT_LABELS.get(a, a)) for a in frame["agent_name"]) + 2
+        lines.append(f"  {'arm':<{width}}{'F1':>8}{'calls':>8}{'USD':>10}{'n':>5}  frontier")
+        lines.append("  " + "-" * (width + 41))
+        for row in grp.sort_values("calls_mean").itertuples():
+            mark = "dominated" if row.dominated else "* optimal"
+            calls = "n/a" if pd.isna(row.calls_mean) else f"{row.calls_mean:.0f}"
+            usd = "n/a" if pd.isna(row.usd_mean) else f"{row.usd_mean:.4f}"
+            lines.append(
+                f"  {VARIANT_LABELS.get(row.agent_name, row.agent_name):<{width}}"
+                f"{row.f1_mean:>8.3f}{calls:>8}{usd:>10}{int(row.n_ok):>5}  {mark}"
+            )
+    lines.append(
+        "\nCost is LLM CALLS, not dollars: call count is a property of the "
+        "topology,\nwhile price is a property of the provider that week (the "
+        "same model has\nbilled 4.7x more on one endpoint than another). "
+        "Interventions are equal\nacross arms by construction, so this is "
+        "coordination overhead alone."
+    )
+    return "\n".join(lines)
+
+
 def ladder_frame(df: pd.DataFrame, *, allow_mixed_provenance: bool = False) -> pd.DataFrame:
     """One row per (ladder rung, budget) for the M6 coordination table.
 
@@ -795,6 +878,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Print the M6 coordination-ladder table (with MDE) and, with --out-dir, its panels.",
     )
     parser.add_argument(
+        "--cost-frontier",
+        action="store_true",
+        help=(
+            "Print accuracy against coordination cost in LLM CALLS, marking "
+            "arms that another arm beats on both axes at the same budget."
+        ),
+    )
+    parser.add_argument(
         "--allow-mixed-provenance",
         action="store_true",
         help=(
@@ -868,6 +959,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("  No degradation detected on any recorded path.")
         print()
         print(format_ladder_summary(ladder_df, allow_mixed_provenance=_allow_mixed))
+
+    if args.cost_frontier:
+        print(format_cost_frontier(df, allow_mixed_provenance=_allow_mixed))
         if args.out_dir:
             for written in plot_ladder(
                 ladder_df, Path(args.out_dir), allow_mixed_provenance=_allow_mixed

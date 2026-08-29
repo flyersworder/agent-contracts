@@ -2455,3 +2455,47 @@ def test_a_failed_query_does_not_enter_the_roster() -> None:
     with pytest.raises(KeyError):
         adapter.query_intervention("no_such_experiment")
     assert adapter.purchased == [real]
+
+
+@pytest.mark.parametrize("arm", ["random", "llm_pc", "one_shot"])
+def test_every_arm_reports_distinct_experiment_count(arm: str) -> None:
+    """The reference arm must not be missing from its own comparison.
+
+    Only the multi-agent agents set `coordination_stats`, so `llm_pc` reported
+    None and silently dropped out of any analysis grouped on this column --
+    including the coverage curve that the fan-in redundancy decomposition is
+    measured against.
+    """
+    llm = None
+    if arm != "random":
+
+        def llm(**kw):  # type: ignore[misc]
+            menu = [
+                line
+                for line in kw["messages"][-1]["content"]
+                .split("Menu:\n")[-1]
+                .split("\n\n")[0]
+                .split("\n")
+                if line
+            ]
+            resp = type("R", (), {})()
+            resp.choices = [
+                type(
+                    "C",
+                    (),
+                    {
+                        "message": type(
+                            "M",
+                            (),
+                            {"content": menu[0] if arm != "one_shot" else "\n".join(menu[:4])},
+                        )()
+                    },
+                )()
+            ]
+            resp.usage = type("U", (), {"prompt_tokens": 1, "completion_tokens": 1})()
+            return resp
+
+    record = run_cell(get_spec(arm), "lt", "standard", budget_k=4, seed=0, llm=llm)
+    assert record.status == "ok", record.error_message
+    assert record.n_experiments_distinct is not None
+    assert record.n_experiments_distinct == len(set((record.chosen_experiments or "").split(",")))

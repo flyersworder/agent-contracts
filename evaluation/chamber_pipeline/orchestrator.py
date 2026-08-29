@@ -430,16 +430,41 @@ def _response_has_finish_reason_error(response: Any) -> bool:
         return False
 
 
-# Endpoints probed for the deepseek-v4-flash family: Parasail/SiliconFlow/Baidu
-# serve it at $0.280/M output against Novita's $1.320/M for identical weights,
-# and Parasail's latency (17-34s) gives no reason to pay the difference.
-# `Together` is excluded despite the low price -- it spends the whole token cap
-# on reasoning and returns empty content, which degrades to `rng.choice`.
+# Re-probed 2026-08-29 and REORDERED; the previous order had gone stale in a
+# way that cost money on every call. It read (Parasail, SiliconFlow, Baidu,
+# Novita), from a probe when all three of the first were $0.280/M. Since then
+# SiliconFlow has moved to $0.660/M -- so the SECOND choice in the rotation had
+# become the dearest of the four -- while Baidu sits at $0.090/M, the cheapest
+# of thirty endpoints, in third place.
+#
+# Measured on a realistic late-loop prompt, price and throughput agree for once:
+#
+#   Baidu      $0.090/M fp8   4.2s   164 tok/s
+#   CoreWeave  $0.280/M fp8  13.3s   136 tok/s
+#   DeepInfra  $0.180/M fp8  19.1s    89 tok/s
+#   Parasail   $0.280/M fp8  16.3s    58 tok/s
+#
+# All four fp8, so the rotation cannot silently change precision -- the defect
+# that put 27 M6 cells on an fp4 endpoint. `Together` stays excluded despite a
+# low price: it spends the whole token cap on reasoning and returns empty
+# content, which degrades to `rng.choice`. `BaseTen` is excluded because it
+# rate-limited on the probe itself.
 _FLASH_PROVIDER_ORDER: tuple[str, ...] = (
-    "Parasail",
-    "SiliconFlow",
     "Baidu",
+    "CoreWeave",
+    "DeepInfra",
+    "Parasail",
+)
+
+# GLM's endpoints are uniformly fp8 -- Relace, Z.AI, Novita, DeepInfra and
+# GMICloud all quote $0.250/M out at fp8 -- so unlike the deepseek family
+# there is no precision decision to get wrong here. Ordered by vendor-first
+# then the endpoints we already exercise for other models.
+_GLM_PROVIDER_ORDER: tuple[str, ...] = (
+    "Z.AI",
+    "DeepInfra",
     "Novita",
+    "GMICloud",
 )
 
 
@@ -529,6 +554,11 @@ class _CountingLLM:
         "Parasail": "fp8",
         "SiliconFlow": "fp8",
         "Baidu": "fp8",
+        "CoreWeave": "fp8",
+        "DeepInfra": "fp8",
+        # GLM's endpoints, all fp8 at one price.
+        "Z.AI": "fp8",
+        "GMICloud": "fp8",
         "StreamLake": "fp8",
         "Novita": "fp8",
         # fp4 — INELIGIBLE, different numerics
@@ -591,6 +621,10 @@ class _CountingLLM:
         "deepseek-v4-flash-0731": _FLASH_PROVIDER_ORDER,
         "deepseek-v4-flash": _FLASH_PROVIDER_ORDER,
         "deepseek-v4-pro": ("Baidu", "StreamLake", "SiliconFlow", "Novita"),
+        # A genuinely different vendor and architecture, for the mixed-model
+        # arm: rung 1's two scouts currently differ only by sampling
+        # temperature, which is one opinion drawn twice rather than two.
+        "glm-5.3-flash": _GLM_PROVIDER_ORDER,
     }
 
     DEFAULT_PROVIDER_ORDER: tuple[str, ...] = _FLASH_PROVIDER_ORDER
@@ -1472,7 +1506,15 @@ def run_cell(
             reasoning_effort=reasoning_effort,
             providers_used=providers_used,
             overlap_frac=coord.get("overlap_frac"),
-            n_experiments_distinct=coord.get("n_experiments_distinct"),
+            # Falls back to the adapter's own roster, so EVERY arm reports it.
+            # Only the multi-agent agents set `coordination_stats`, so the
+            # reference arm -- the loop -- reported None and dropped out of any
+            # analysis that grouped on this column: the baseline missing from
+            # its own comparison. Derived, not duplicated: the roster is the
+            # single source and this is its distinct count.
+            n_experiments_distinct=coord.get(
+                "n_experiments_distinct", len(set(adapter.purchased)) or None
+            ),
             n_contested=coord.get("n_contested"),
             n_negotiation_failures=coord.get("n_negotiation_failures"),
             n_claim_truncated=coord.get("n_claim_truncated"),
