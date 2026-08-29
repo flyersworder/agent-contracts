@@ -193,6 +193,13 @@ def provenance_problems(df: pd.DataFrame) -> list[str]:
             continue
         present = df[column].notna()
         values = df.loc[present, column].unique()
+        if len(values) == 0:
+            # Column exists but is entirely null -- a Parquet consolidated from
+            # a fully-legacy sidecar. Neither mixed nor confirmed; the
+            # `UNVERIFIABLE` notice covers it, and treating it as homogeneous
+            # here would report "single configuration" where nothing was
+            # checked.
+            continue
         if len(values) > 1:
             rendered = ", ".join(repr(v) for v in sorted(values, key=str))
             problems.append(f"{column}: {rendered}")
@@ -273,7 +280,7 @@ def load_records(path: str | Path, *, allow_mixed_provenance: bool = False) -> p
     return df
 
 
-def aggregate_pareto(df: pd.DataFrame) -> pd.DataFrame:
+def aggregate_pareto(df: pd.DataFrame, *, allow_mixed_provenance: bool = False) -> pd.DataFrame:
     """Aggregate cell-level records into per-(chamber, agent, budget) Pareto points.
 
     Refuses a frame whose rows come from more than one PC/platform
@@ -294,7 +301,7 @@ def aggregate_pareto(df: pd.DataFrame) -> pd.DataFrame:
         combination. Columns: chamber, agent_name, budget_k, budget_fraction,
         n_seeds, shd_mean, shd_sem, f1_mean, f1_sem.
     """
-    require_homogeneous_provenance(df)
+    require_homogeneous_provenance(df, allow_mixed=allow_mixed_provenance)
     ok_only = df[df["status"] == "ok"].copy()
     if ok_only.empty:
         return pd.DataFrame(
@@ -347,15 +354,22 @@ LADDER_ORDER: tuple[str, ...] = (
 _MDE_Z = 2.8
 
 # Degradation counters whose absence on SOME rows silently becomes a zero.
-_COUNTER_COLUMNS: tuple[str, ...] = (
-    "n_selection_fallbacks",
+#
+# Split by which subsystem populates them, because "legitimately null" differs:
+# a PC counter is null when inference never ran, an LLM counter when the arm
+# has no `_CountingLLM` at all. `random` and `greedy_ig` run PC and make no LLM
+# calls, so testing an LLM counter against `pc_ran` flagged every ladder frame
+# with a random baseline.
+_PC_COUNTER_COLUMNS: tuple[str, ...] = (
     "n_pc_degeneracies",
     "n_collinear_dropped",
     "n_zero_variance_dropped",
 )
+_LLM_COUNTER_COLUMNS: tuple[str, ...] = ("n_selection_fallbacks",)
+_COUNTER_COLUMNS: tuple[str, ...] = _PC_COUNTER_COLUMNS + _LLM_COUNTER_COLUMNS
 
 
-def ladder_frame(df: pd.DataFrame) -> pd.DataFrame:
+def ladder_frame(df: pd.DataFrame, *, allow_mixed_provenance: bool = False) -> pd.DataFrame:
     """One row per (ladder rung, budget) for the M6 coordination table.
 
     Refuses a frame spanning more than one PC/platform configuration; see
@@ -383,7 +397,7 @@ def ladder_frame(df: pd.DataFrame) -> pd.DataFrame:
             sizes, so the same `budget_k` is a different budget in each and
             averaging them describes neither.
     """
-    require_homogeneous_provenance(df)
+    require_homogeneous_provenance(df, allow_mixed=allow_mixed_provenance)
     if "chamber" in df.columns and df["chamber"].nunique(dropna=True) > 1:
         found = sorted(df["chamber"].dropna().unique())
         raise ValueError(f"ladder_frame needs a single chamber; got {found}. Filter first.")
@@ -787,13 +801,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
     df = load_records(args.input, allow_mixed_provenance=args.allow_mixed_provenance)
+    # The flag has to reach the AGGREGATORS too: they hold the same guard,
+    # and `main` calls `aggregate_pareto` on every invocation, so a flag
+    # honoured only at load time is a flag that does nothing.
+    _allow_mixed = args.allow_mixed_provenance
     print(f"Loaded {len(df)} records from {args.input}")
     n_ok = (df["status"] == "ok").sum()
     n_skipped = (df["status"] == "skipped").sum()
     n_error = (df["status"] == "error").sum()
     print(f"  ok: {n_ok}, skipped: {n_skipped}, error: {n_error}")
 
-    agg = aggregate_pareto(df)
+    agg = aggregate_pareto(df, allow_mixed_provenance=_allow_mixed)
     if agg.empty:
         print("No 'ok' cells to analyze; bailing.")
         return 1
@@ -833,9 +851,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             print("  No degradation detected on any recorded path.")
         print()
-        print(format_ladder_summary(ladder_df))
+        print(format_ladder_summary(ladder_df, allow_mixed_provenance=_allow_mixed))
         if args.out_dir:
-            for written in plot_ladder(ladder_df, Path(args.out_dir)):
+            for written in plot_ladder(
+                ladder_df, Path(args.out_dir), allow_mixed_provenance=_allow_mixed
+            ):
                 print(f"Wrote {written}")
 
     if args.check_m4_acceptance:
@@ -990,15 +1010,22 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
     # since that field is now itself None exactly then, a row with a non-null
     # degeneracy count and a null sibling can only be a legacy row.
     partial: list[str] = []
-    if "n_pc_degeneracies" in df.columns:
-        pc_ran = df["n_pc_degeneracies"].notna()
-        for column in _COUNTER_COLUMNS:
-            if column not in df.columns:
+    for reference, columns, label in (
+        ("n_pc_degeneracies", _PC_COUNTER_COLUMNS, "PC-cells"),
+        ("n_llm_calls", _LLM_COUNTER_COLUMNS, "LLM-cells"),
+    ):
+        if reference not in df.columns:
+            continue
+        ran = df[reference].notna()
+        for column in columns:
+            if column not in df.columns or column == reference:
                 continue
-            gaps = int((pc_ran & df[column].isna()).sum())
+            gaps = int((ran & df[column].isna()).sum())
             if gaps:
-                partial.append(f"{column} ({gaps} of {int(pc_ran.sum())} PC-cells unrecorded)")
+                partial.append(f"{column} ({gaps} of {int(ran.sum())} {label} unrecorded)")
     report.attrs["partial_columns"] = partial
+    # All-null counts as absent: the column carries no information, and the
+    # provenance guard now skips it for the same reason.
     report.attrs["missing_columns"] = [
         c
         for c in (
@@ -1007,9 +1034,10 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
             "n_collinear_dropped",
             "n_zero_variance_dropped",
             "blas_backend",
+            "platform_tag",
             "conservation_certified",
         )
-        if c not in df.columns
+        if c not in df.columns or df[c].isna().all()
     ]
     return report
 
@@ -1153,7 +1181,9 @@ def validity_warnings(report: pd.DataFrame) -> list[str]:
     return warnings
 
 
-def format_ladder_summary(df: pd.DataFrame, reference: str = "llm_pc") -> str:
+def format_ladder_summary(
+    df: pd.DataFrame, reference: str = "llm_pc", *, allow_mixed_provenance: bool = False
+) -> str:
     """Render the M6 ladder table, every delta paired with its MDE.
 
     Spec §6 reports an equivalence bound rather than a null. A bare
@@ -1170,7 +1200,7 @@ def format_ladder_summary(df: pd.DataFrame, reference: str = "llm_pc") -> str:
     Returns:
         A printable multi-line table.
     """
-    frame = ladder_frame(df)
+    frame = ladder_frame(df, allow_mixed_provenance=allow_mixed_provenance)
     if frame.empty:
         return "No ladder cells to summarize."
 
@@ -1218,7 +1248,9 @@ def format_ladder_summary(df: pd.DataFrame, reference: str = "llm_pc") -> str:
     return "\n".join(lines)
 
 
-def plot_ladder(df: pd.DataFrame, out_dir: str | Path) -> list[Path]:
+def plot_ladder(
+    df: pd.DataFrame, out_dir: str | Path, *, allow_mixed_provenance: bool = False
+) -> list[Path]:
     """Three ladder panels: accuracy, cost, and failure rate.
 
     Rungs on the x-axis in `LADDER_ORDER`, one line per budget. Rung index
@@ -1235,7 +1267,7 @@ def plot_ladder(df: pd.DataFrame, out_dir: str | Path) -> list[Path]:
     """
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
-    frame = ladder_frame(df)
+    frame = ladder_frame(df, allow_mixed_provenance=allow_mixed_provenance)
 
     panels = (
         ("ladder_f1.png", "f1_mean", "F1 (higher is better)"),

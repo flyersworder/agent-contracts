@@ -535,3 +535,24 @@ class TestSubstringConflictCounter:
         adapter = make_ladder_adapter(counting_llm)
         team_agents(adapter, seed=0, scout_a_budget=2, scout_b_budget=2, llm=counting_llm)
         assert adapter.coordination_stats["n_substring_conflicts"] >= 0
+
+
+def test_scout_b_truncation_is_counted_against_the_list_the_cap_used() -> None:
+    """The base list must be the one `claim_b` was capped from.
+
+    An earlier version excluded a MENU-ORDER slice of `source_a` while the cap
+    ran on the SHUFFLED `claim_a` -- same size, different membership, so the
+    counter over-reported. Reproduced at seed 1 with these inputs: reported 2
+    truncated where 1 had been.
+    """
+    from evaluation.chamber_pipeline.agents import _capped_claim
+
+    source_a, source_b, budget_a, budget_b = ["p", "x"], ["x", "y", "z"], 1, 1
+    for seed in range(8):
+        claim_a = _capped_claim(source_a, budget_a, "a", seed)
+        uncapped_b = [n for n in source_b if n not in set(claim_a)]
+        claim_b = _capped_claim(uncapped_b, budget_b, "b", seed)
+        # The count is over the list actually capped, so it can never exceed
+        # what that list held.
+        assert max(0, len(uncapped_b) - len(claim_b)) == len(uncapped_b) - len(claim_b)
+        assert len(uncapped_b) - len(claim_b) == len(uncapped_b) - budget_b

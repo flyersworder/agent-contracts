@@ -2314,14 +2314,21 @@ class TestParallelWorkerFailure:
 
         return _Pool
 
-    def test_broken_pool_becomes_error_records_and_the_sweep_finishes(self, monkeypatch) -> None:
+    def test_a_surviving_pool_turns_one_cell_fault_into_one_error_record(self, monkeypatch) -> None:
+        """A fault the pool SURVIVES costs one cell, not the sweep.
+
+        A result that fails to pickle is the canonical case: the worker is
+        fine, this cell is not. Distinguished from `BrokenProcessPool`, which
+        kills every remaining future and is handled by aborting instead --
+        treating that as a per-cell fault turned a sweep that died at cell 250
+        into an instant completion with 200 fabricated error rows and exit 0.
+        """
         import concurrent.futures as cf
-        from concurrent.futures.process import BrokenProcessPool
 
         from evaluation.chamber_pipeline.orchestrator import SweepSpec, run_sweep
 
         monkeypatch.setattr(
-            cf, "ProcessPoolExecutor", self._fake_pool_raising(BrokenProcessPool("worker died"))
+            cf, "ProcessPoolExecutor", self._fake_pool_raising(TypeError("cannot pickle"))
         )
         monkeypatch.setattr(cf, "as_completed", lambda futs: list(futs))
 
@@ -2332,10 +2339,8 @@ class TestParallelWorkerFailure:
 
         assert len(records) == 2, "every cell is accounted for, none silently dropped"
         assert all(r.status == "error" for r in records)
-        assert all(r.error_type == "BrokenProcessPool" for r in records)
+        assert all(r.error_type == "TypeError" for r in records)
         assert all("worker process died" in (r.error_message or "") for r in records)
-        # Provenance must survive, or this is the one row whose backend is
-        # unknown -- and register entry 10 forbids pooling across backends.
         assert all(r.blas_backend for r in records)
 
     def test_a_configuration_error_still_aborts_the_parallel_sweep(self, monkeypatch) -> None:
@@ -2370,3 +2375,44 @@ def test_counters_are_none_when_pc_never_ran_for_a_non_llm_only_arm(arm: str) ->
     assert record.n_pc_degeneracies is None
     assert record.n_collinear_dropped is None
     assert record.n_zero_variance_dropped is None
+
+
+def test_an_unpinned_model_raises_rather_than_recording_an_error_row() -> None:
+    """`_provider_order_for` fires inside `_CountingLLM.__call__`, so it lands
+    in the AGENT-INVOCATION try, not the adapter-construction one. Guarding
+    only the first left `--model <unlisted>` producing N identical error rows
+    that every resume re-attempts -- the loop the class exists to prevent.
+    """
+    with pytest.raises(SweepConfigurationError, match="unknown-model"):
+        run_cell(
+            get_spec("llm_pc"),
+            "lt",
+            "standard",
+            budget_k=2,
+            seed=0,
+            model="openrouter/foo/unknown-model",
+        )
+
+
+def test_a_broken_pool_aborts_instead_of_fabricating_the_rest_of_the_sweep(
+    monkeypatch,
+) -> None:
+    """Every remaining future raises the same BrokenProcessPool, so treating it
+    as a per-cell fault turns a sweep that died at cell 250 into an instant
+    completion with 200 fabricated error rows and exit 0."""
+    import concurrent.futures as cf
+    from concurrent.futures.process import BrokenProcessPool
+
+    from evaluation.chamber_pipeline.orchestrator import SweepSpec, run_sweep
+
+    monkeypatch.setattr(
+        cf,
+        "ProcessPoolExecutor",
+        TestParallelWorkerFailure._fake_pool_raising(BrokenProcessPool("worker died")),
+    )
+    monkeypatch.setattr(cf, "as_completed", lambda futs: list(futs))
+    sweep = SweepSpec(
+        chambers=("lt",), agent_names=("random",), budget_fractions=(0.1,), seeds=range(2)
+    )
+    with pytest.raises(RuntimeError, match="worker pool died"):
+        run_sweep(sweep, max_workers=2)

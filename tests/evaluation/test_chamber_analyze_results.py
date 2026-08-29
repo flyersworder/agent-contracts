@@ -1139,3 +1139,62 @@ def test_a_counter_null_because_pc_never_ran_is_not_flagged_as_partial() -> None
     frame["n_zero_variance_dropped"] = [3 if i % 2 == 0 else None for i in range(len(frame))]
     warns = validity_warnings(harness_validity_report(frame))
     assert not any(w.startswith("PARTIALLY RECORDED") for w in warns)
+
+
+def test_allow_mixed_provenance_reaches_the_aggregators() -> None:
+    """A flag honoured only at load time is a flag that does nothing.
+
+    `main` calls `aggregate_pareto` on every invocation and both aggregators
+    hold the same guard, so the advertised escape hatch raised anyway.
+    """
+    from evaluation.chamber_pipeline.analyze_results import (
+        MixedProvenanceError,
+        aggregate_pareto,
+        ladder_frame,
+    )
+
+    frame = _validity_frame()
+    frame["blas_backend"] = ["scipy-openblas"] * (len(frame) // 2) + ["accelerate"] * (
+        len(frame) - len(frame) // 2
+    )
+    for fn in (aggregate_pareto, ladder_frame):
+        with pytest.raises(MixedProvenanceError):
+            fn(frame)
+        fn(frame, allow_mixed_provenance=True)  # must not raise
+
+
+def test_an_all_null_provenance_column_is_unverifiable_not_confirmed() -> None:
+    """A Parquet consolidated from a fully-legacy sidecar has the column and
+    no values. Skipping it as homogeneous reports "single configuration"
+    where nothing was checked."""
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        provenance_problems,
+        validity_warnings,
+    )
+
+    frame = _validity_frame()
+    frame["blas_backend"] = None
+    frame["platform_tag"] = None
+    assert provenance_problems(frame) == []
+    warns = validity_warnings(harness_validity_report(frame))
+    assert any(w.startswith("UNVERIFIABLE: blas_backend") for w in warns)
+    assert any(w.startswith("UNVERIFIABLE: platform_tag") for w in warns)
+
+
+def test_a_non_llm_arm_does_not_trip_the_partial_counter_check() -> None:
+    """`random` and `greedy_ig` run PC and make no LLM calls, so
+    `n_selection_fallbacks` is legitimately null while `n_pc_degeneracies` is
+    not. Testing an LLM counter against `pc_ran` flagged every ladder frame
+    carrying a random baseline."""
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    frame = _validity_frame()
+    frame["n_pc_degeneracies"] = 0
+    frame["n_llm_calls"] = [30 if i % 2 == 0 else None for i in range(len(frame))]
+    frame["n_selection_fallbacks"] = [0 if i % 2 == 0 else None for i in range(len(frame))]
+    warns = validity_warnings(harness_validity_report(frame))
+    assert not any(w.startswith("PARTIALLY RECORDED") for w in warns)

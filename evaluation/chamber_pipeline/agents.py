@@ -1276,11 +1276,16 @@ def team_agents(
     # measured 10 + 4 against a 20 budget when `claim_a` reached 55 names.
     # See `_capped_claim` for why the cut is a seeded shuffle and not a slice.
     uncapped_a = list(source_a)
-    uncapped_b = [n for n in source_b if n not in set(source_a[:scout_a_budget])]
     claim_a = _capped_claim(uncapped_a, scout_a_budget, "a", seed)
-    claim_b = _capped_claim(
-        [n for n in source_b if n not in set(claim_a)], scout_b_budget, "b", seed
-    )
+    # Measured against the list the cap was actually applied to. An earlier
+    # version excluded `source_a[:scout_a_budget]` -- a MENU-ORDER slice --
+    # while the cap ran on the SHUFFLED `claim_a`. Same size, different
+    # membership, so the two base lists could differ in length and the counter
+    # over-reported: with source_a=[p,x], source_b=[x,y,z] and both budgets 1,
+    # it read 2 truncated where 1 had been. A counter lying by being measured
+    # against the wrong list is the defect this whole commit series is about.
+    uncapped_b = [n for n in source_b if n not in set(claim_a)]
+    claim_b = _capped_claim(uncapped_b, scout_b_budget, "b", seed)
     n_claim_truncated = max(0, len(uncapped_a) - len(claim_a)) + max(
         0, len(uncapped_b) - len(claim_b)
     )

@@ -1492,6 +1492,14 @@ def run_cell(
             finished_at=now_iso(),
             skip_reason=_truncate(str(exc), 500),
         )
+    except SweepConfigurationError:
+        # The SECOND place this has to re-raise. `_provider_order_for`'s
+        # unpinned-model raise fires inside `_CountingLLM.__call__`, i.e. in
+        # this block and not the adapter-construction one -- so guarding only
+        # the first left `--model <unlisted-id>` producing N identical error
+        # rows that every resume re-attempts, the exact loop the class exists
+        # to prevent.
+        raise
     except Exception as exc:
         return RunRecord(
             **_pc_provenance,
@@ -1611,7 +1619,7 @@ def count_cells(sweep: SweepSpec, *, exclude_skipped: bool = False) -> int:
     return sum(1 for spec, chamber, *_ in iter_sweep_cells(sweep) if spec.is_compatible(chamber))
 
 
-def _pc_provenance_snapshot() -> dict[str, Any]:
+def _pc_provenance_snapshot(pc_alpha: float) -> dict[str, Any]:
     """The PC/platform stamp for a record the PARENT synthesizes.
 
     A worker that died produced no cell of its own, but the row still has to
@@ -1622,7 +1630,12 @@ def _pc_provenance_snapshot() -> dict[str, Any]:
     from this process.
     """
     return {
-        "pc_alpha": 0.05,
+        # Taken from the payload, never hardcoded: `run_cell` stamps
+        # `sweep.pc_alpha`, so a literal here would give the synthesized row a
+        # different alpha from all the others -- and since `pc_alpha` is a
+        # provenance column checked BEFORE non-ok rows are dropped, one dead
+        # worker would make the entire Parquet raise MixedProvenanceError.
+        "pc_alpha": pc_alpha,
         "pc_max_rows": _PC_CALL_DEFAULTS["max_rows"],
         "pc_collinearity_threshold": _PC_CALL_DEFAULTS["collinearity_threshold"],
         "blas_backend": _RUNTIME["blas"],
@@ -1760,6 +1773,7 @@ def _run_sweep_parallel(
     Parquet row order must not depend on which worker finished first.
     """
     from concurrent.futures import ProcessPoolExecutor, as_completed
+    from concurrent.futures.process import BrokenProcessPool
 
     if llm is not None:
         raise ValueError(
@@ -1795,10 +1809,24 @@ def _run_sweep_parallel(
                 # cell would raise the same way; failing now shows the
                 # operator the message instead of 450 identical error rows.
                 raise
+            except BrokenProcessPool as exc:
+                # NOT a per-cell fault. Once the pool is broken every
+                # remaining future raises the same thing, so synthesizing a
+                # record each time turns a sweep that died at cell 250 into an
+                # instant "completion" with 200 fabricated error rows and exit
+                # 0 -- a success-shaped ending for a run that did a fraction of
+                # its work. Completed cells are already in the sidecar, so
+                # aborting loses nothing and resume picks up correctly.
+                raise RuntimeError(
+                    f"the worker pool died after {len(completed)} of {total} "
+                    f"cells ({exc}). Completed cells are in the sidecar; "
+                    "re-run the same command to resume. If this was an OOM, "
+                    "lower --max-workers (budget ~700 MB per worker)."
+                ) from exc
             except Exception as exc:
-                # `Exception`, not `BaseException`: `BrokenProcessPool`
-                # subclasses `RuntimeError`, so this catches the worker fault
-                # while leaving KeyboardInterrupt free to abort the sweep.
+                # A genuine per-cell fault: the worker survived, this cell did
+                # not. `Exception`, not `BaseException`, so KeyboardInterrupt
+                # still aborts the sweep.
                 # `run_cell` converts in-cell exceptions to error records, so
                 # reaching here means the WORKER died: OOM-killed (the
                 # docstring budgets ~700 MB/worker on an 8 GB VPS), or a
@@ -1811,8 +1839,9 @@ def _run_sweep_parallel(
                 # hour 12 over one worker fault. Synthesize the error record
                 # the serial path would have produced and keep going.
                 spec_name, chamber, configuration, budget_k, seed = payloads[i][:5]
+                cell_pc_alpha = payloads[i][5]
                 record = RunRecord(
-                    **_pc_provenance_snapshot(),
+                    **_pc_provenance_snapshot(cell_pc_alpha),
                     chamber=chamber,
                     configuration=configuration,
                     agent_name=spec_name,
