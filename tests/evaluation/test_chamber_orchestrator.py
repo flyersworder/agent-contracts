@@ -35,6 +35,7 @@ from evaluation.chamber_pipeline.orchestrator import (
     AGENT_REGISTRY,
     MENU_SIZES,
     AgentSpec,
+    SweepConfigurationError,
     SweepSpec,
     _budget_k_for,
     _build_agent_kwargs,
@@ -748,7 +749,7 @@ class TestCountingLLM:
             return {"choices": [{"message": {"content": "ok"}}]}
 
         wrapper = _CountingLLM(target=target)
-        result = wrapper(model="m", messages=[{"role": "user", "content": "hi"}])
+        result = wrapper(model=_PINNED_MODEL, messages=[{"role": "user", "content": "hi"}])
 
         assert len(captured) == 1
         assert result["choices"][0]["message"]["content"] == "ok"
@@ -763,8 +764,8 @@ class TestCountingLLM:
             }
 
         wrapper = _CountingLLM(target=target)
-        wrapper(model="m", messages=[])
-        wrapper(model="m", messages=[])
+        wrapper(model=_PINNED_MODEL, messages=[])
+        wrapper(model=_PINNED_MODEL, messages=[])
 
         assert wrapper.total_input_tokens == 200
         assert wrapper.total_output_tokens == 50
@@ -797,7 +798,7 @@ class TestCountingLLM:
             return _Resp()
 
         wrapper = _CountingLLM(target=target)
-        wrapper(model="m", messages=[])
+        wrapper(model=_PINNED_MODEL, messages=[])
 
         assert wrapper.total_input_tokens == 30
         assert wrapper.total_output_tokens == 10
@@ -810,7 +811,7 @@ class TestCountingLLM:
             return {"choices": [{"message": {"content": "x"}}]}
 
         wrapper = _CountingLLM(target=target)
-        wrapper(model="m", messages=[])
+        wrapper(model=_PINNED_MODEL, messages=[])
         assert len(wrapper.calls) == 1
         assert wrapper.total_input_tokens == 0
         assert wrapper.total_output_tokens == 0
@@ -825,7 +826,7 @@ class TestCountingLLM:
 
         wrapper = _CountingLLM(target=target)
         with pytest.raises(RuntimeError):
-            wrapper(model="m", messages=[])
+            wrapper(model=_PINNED_MODEL, messages=[])
         assert len(wrapper.calls) == 1
 
     def test_injects_default_num_retries(self) -> None:
@@ -840,7 +841,7 @@ class TestCountingLLM:
             return {"choices": [{"message": {"content": "ok"}}]}
 
         wrapper = _CountingLLM(target=target)
-        wrapper(model="m", messages=[])
+        wrapper(model=_PINNED_MODEL, messages=[])
         assert captured[0].get("num_retries") == _CountingLLM.DEFAULT_NUM_RETRIES
         assert captured[0]["num_retries"] == 3
 
@@ -853,13 +854,13 @@ class TestCountingLLM:
             return {"choices": [{"message": {"content": "ok"}}]}
 
         wrapper = _CountingLLM(target=target)
-        wrapper(model="m", messages=[], num_retries=0)
+        wrapper(model=_PINNED_MODEL, messages=[], num_retries=0)
         assert captured[0]["num_retries"] == 0
 
     def test_a_pro_model_request_carries_the_pro_provider_order(self) -> None:
         """The resolver must reach the REQUEST, not just exist.
 
-        `test_injects_default_provider_order` drives `model="m"`, which falls
+        `test_injects_default_provider_order` drives `model=_PINNED_MODEL`, which falls
         back to the default, so it passes whether or not per-model routing is
         wired in at all. This drives the real tag and asserts what actually
         goes on the wire -- the difference between a constant we declared and
@@ -891,7 +892,7 @@ class TestCountingLLM:
             return {"choices": [{"message": {"content": "ok"}}]}
 
         wrapper = _CountingLLM(target=target)
-        wrapper(model="m", messages=[])
+        wrapper(model=_PINNED_MODEL, messages=[])
         extra = captured[0].get("extra_body", {})
         assert "provider" in extra
         assert extra["provider"]["order"] == list(_CountingLLM.DEFAULT_PROVIDER_ORDER)
@@ -942,10 +943,13 @@ class TestCountingLLM:
         that does not serve it -- and a precision claim never checked for it.
         """
         family = _CountingLLM._provider_order_for("openrouter/deepseek/deepseek-v4-pro")
-        snapshot = _CountingLLM._provider_order_for("openrouter/deepseek/deepseek-v4-pro-0813")
         assert family == ("Baidu", "StreamLake", "SiliconFlow", "Novita")
-        assert snapshot == _CountingLLM.DEFAULT_PROVIDER_ORDER
-        assert snapshot != family
+        # The snapshot does not merely get a DIFFERENT order -- it gets none.
+        # Falling back to a default was still a silent extrapolation: it named
+        # four endpoints under `allow_fallbacks: False` without anyone having
+        # probed which of them serve this id.
+        with pytest.raises(SweepConfigurationError, match="deepseek-v4-pro-0813"):
+            _CountingLLM._provider_order_for("openrouter/deepseek/deepseek-v4-pro-0813")
 
     def test_provider_order_is_cheapest_first_for_the_model_it_names(self) -> None:
         """Measured 2026-08-27 from GET /models/{id}/endpoints: Parasail is
@@ -967,7 +971,7 @@ class TestCountingLLM:
 
         wrapper = _CountingLLM(target=target)
         wrapper(
-            model="m",
+            model=_PINNED_MODEL,
             messages=[],
             extra_body={"provider": {"order": ["DeepInfra"], "allow_fallbacks": False}},
         )
@@ -985,7 +989,7 @@ class TestCountingLLM:
             return {"choices": [{"message": {"content": "ok"}}]}
 
         wrapper = _CountingLLM(target=target)
-        wrapper(model="m", messages=[])
+        wrapper(model=_PINNED_MODEL, messages=[])
         assert captured[0].get("timeout") == _CountingLLM.DEFAULT_REQUEST_TIMEOUT_SECONDS
         # Deliberately NOT asserting a literal here. This test is about the
         # kwarg being injected at all; a second assertion pinning the value
@@ -1002,7 +1006,7 @@ class TestCountingLLM:
             return {"choices": [{"message": {"content": "ok"}}]}
 
         wrapper = _CountingLLM(target=target)
-        wrapper(model="m", messages=[], timeout=120.0)
+        wrapper(model=_PINNED_MODEL, messages=[], timeout=120.0)
         assert captured[0]["timeout"] == 120.0
 
     def test_finish_reason_error_triggers_provider_rotation(self) -> None:
@@ -1024,7 +1028,7 @@ class TestCountingLLM:
             return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
 
         wrapper = _CountingLLM(target=target)
-        response = wrapper(model="m", messages=[])
+        response = wrapper(model=_PINNED_MODEL, messages=[])
 
         # Two HTTP calls were made: first to the configured primary (failed),
         # second rotated to the next provider.
@@ -1055,7 +1059,7 @@ class TestCountingLLM:
             }
 
         wrapper = _CountingLLM(target=target)
-        response = wrapper(model="m", messages=[])
+        response = wrapper(model=_PINNED_MODEL, messages=[])
 
         # Exactly one attempt per provider in the default order.
         assert len(captured) == len(_CountingLLM.DEFAULT_PROVIDER_ORDER)
@@ -1077,7 +1081,7 @@ class TestCountingLLM:
 
         wrapper = _CountingLLM(target=target)
         wrapper(
-            model="m",
+            model=_PINNED_MODEL,
             messages=[],
             extra_body={"provider": {"order": ["DeepInfra"], "allow_fallbacks": False}},
         )
@@ -1106,18 +1110,20 @@ class TestCountingLLM:
             }
 
         wrapper = _CountingLLM(target=target)
-        wrapper(model="m", messages=[])
+        wrapper(model=_PINNED_MODEL, messages=[])
         # Two attempts, each consumed 10 in + 20 out.
         assert wrapper.total_input_tokens == 20
         assert wrapper.total_output_tokens == 40
 
 
 class TestReadLlmMetrics:
-    """The (n_llm_calls, tokens_in, tokens_out, cost_usd) extractor."""
+    """The (n_llm_calls, tokens_in, tokens_out, cost_usd, fallbacks, attempts)
+    extractor."""
 
     def test_none_wrapper_yields_all_none(self) -> None:
-        n, ti, to, c, fb = _read_llm_metrics(None)
+        n, ti, to, c, fb, att = _read_llm_metrics(None)
         assert fb is None
+        assert att is None
         assert (n, ti, to, c) == (None, None, None, None)
 
     def test_wrapper_with_calls_populates_all(self) -> None:
@@ -1127,21 +1133,24 @@ class TestReadLlmMetrics:
                 "usage": {"prompt_tokens": 10, "completion_tokens": 5},
             }
         )
-        wrapper(model="m", messages=[])
-        n, ti, to, c, fb = _read_llm_metrics(wrapper)
+        wrapper(model=_PINNED_MODEL, messages=[])
+        n, ti, to, c, fb, att = _read_llm_metrics(wrapper)
         assert n == 1
         assert ti == 10
         assert to == 5
         assert c == 0.0  # no cost reported but tracked
         assert fb == 0  # a healthy call records no selection fallback
+        # One logical call, one attempt: they diverge only under rotation.
+        assert att == 1
 
     def test_wrapper_with_zero_calls_yields_n_zero_tokens_none(self) -> None:
         """LLM variant ran a budget=0 short-circuit — n_llm_calls=0 but
         token / cost fields stay None to distinguish 'tracked zero' from
         'no measurement'."""
         wrapper = _CountingLLM()
-        n, ti, to, c, fb = _read_llm_metrics(wrapper)
+        n, ti, to, c, fb, att = _read_llm_metrics(wrapper)
         assert n == 0
+        assert att == 0
         assert ti is None
         assert to is None
         assert c is None
@@ -1407,14 +1416,14 @@ class TestLlmProvenance:
         seen = iter(["Novita", "Parasail"])
         wrapper = _CountingLLM(target=lambda **kw: self._response(provider=next(seen)))
         for _ in range(2):
-            wrapper(model="m", messages=[], extra_body={"reasoning": {"effort": "low"}})
+            wrapper(model=_PINNED_MODEL, messages=[], extra_body={"reasoning": {"effort": "low"}})
         _model, _effort, providers = _read_llm_provenance(wrapper)
         assert providers == "Novita,Parasail"  # sorted, deduplicated
 
     def test_absent_effort_is_recorded_as_unset_not_guessed(self) -> None:
         """An unset parameter is the exact failure mode being guarded against."""
         wrapper = _CountingLLM(target=lambda **kw: self._response())
-        wrapper(model="m", messages=[])
+        wrapper(model=_PINNED_MODEL, messages=[])
         _model, effort, _providers = _read_llm_provenance(wrapper)
         assert effort == "unset"
 
@@ -1889,6 +1898,12 @@ class TestCalibrationIsBudgetDependent:
 
 pytest.importorskip("causallearn")
 
+# A model that IS in `PROVIDER_ORDER_BY_MODEL`. Placeholder ids like "m" used
+# to work because an unlisted model silently inherited the flash pin; that
+# fallback is now a SweepConfigurationError, since with `allow_fallbacks:
+# False` the pin is a hard constraint rather than a preference.
+_PINNED_MODEL = "openrouter/deepseek/deepseek-v4-flash-0731"
+
 
 class TestCollinearDropCounting:
     """The collinear-drop count must reach the RunRecord.
@@ -2209,3 +2224,131 @@ class TestZeroVarianceCounting:
         singular = pd.DataFrame({"x": base, "y": 2.0 * base, "z": rng.normal(size=300)})
         counts = self._run(singular, ["x", "y", "z"], collinearity_threshold=None)
         assert counts == {"zerovar": 0, "collinear": 0, "degeneracy": 1}
+
+
+def test_rotation_inflates_attempts_but_not_logical_calls() -> None:
+    """`fallback_rate`'s denominator must not grow when providers misbehave.
+
+    `calls` records one entry per provider ATTEMPT so rotation shows up in
+    cost. Using that as the denominator for a per-decision rate means a cell
+    reports a LOWER degradation rate the worse the serving stack behaves --
+    a harness statistic that moves with conditions, which is the class of
+    defect the validity report exists to catch.
+    """
+    responses = [
+        {"choices": [{"message": {"content": ""}, "finish_reason": "error"}]},
+        {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]},
+    ]
+    wrapper = _CountingLLM(target=lambda **_: responses.pop(0))
+    wrapper(model=_PINNED_MODEL, messages=[])
+
+    n, _ti, _to, _c, _fb, attempts = _read_llm_metrics(wrapper)
+    assert attempts == 2, "both provider attempts are billed and must be counted"
+    assert n == 1, "one logical call, whatever it took to satisfy it"
+
+
+class TestSweepConfigurationErrors:
+    """Configuration faults must abort, not become an error RATE.
+
+    `run_cell` turns in-cell exceptions into `status="error"` records so one
+    bad cell cannot kill a 20-hour sweep. Applied to a configuration fault
+    that is exactly wrong: every cell raises identically, `done_cell_keys`
+    excludes errored cells so they can be retried, and each resume re-attempts
+    all of them forever while the message naming the fix sits truncated in
+    `error_message`.
+    """
+
+    def test_uncalibrated_budget_raises_instead_of_recording_an_error(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import _A95_RECONCILE_BY_K
+
+        # A WT budget that is deliberately not in the calibration table.
+        assert ("wt", 3) not in _A95_RECONCILE_BY_K
+        with pytest.raises(SweepConfigurationError, match="not calibrated"):
+            run_cell(get_spec("team"), "wt", "standard", budget_k=3, seed=0, llm=lambda **_: None)
+
+    def test_menu_size_drift_is_checked_for_every_arm_not_just_uncontracted(
+        self, monkeypatch
+    ) -> None:
+        """`_budget_k_for` converts fractions to k through `MENU_SIZES` for
+        EVERY arm, so a stale table mis-budgets contracted arms too. The guard
+        used to sit inside the `ignores_budget` branch."""
+        from evaluation.chamber_pipeline import orchestrator as orch
+
+        monkeypatch.setitem(orch.MENU_SIZES, "lt", 58)  # live menu is 59
+        with pytest.raises(SweepConfigurationError, match="disagrees with"):
+            run_cell(get_spec("random"), "lt", "standard", budget_k=3, seed=0)
+
+
+class TestParallelWorkerFailure:
+    """A dead worker costs one cell, not the sweep.
+
+    `run_cell` converts in-cell exceptions to records, so a raise out of
+    `fut.result()` means the WORKER died -- OOM-killed, or a result that would
+    not pickle. Uncaught it escapes the `with ProcessPoolExecutor(...)` block,
+    whose `__exit__` calls `shutdown(wait=True)`: the same wait-on-exit shape
+    this project already root-caused for ThreadPoolExecutor, discarding every
+    in-flight cell with no sidecar line.
+    """
+
+    @staticmethod
+    def _fake_pool_raising(exc: BaseException):
+        class _Fut:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def result(self):
+                raise exc
+
+        class _Pool:
+            def __init__(self, *a, **k):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def submit(self, _fn, payload):
+                return _Fut(payload)
+
+        return _Pool
+
+    def test_broken_pool_becomes_error_records_and_the_sweep_finishes(self, monkeypatch) -> None:
+        import concurrent.futures as cf
+        from concurrent.futures.process import BrokenProcessPool
+
+        from evaluation.chamber_pipeline.orchestrator import SweepSpec, run_sweep
+
+        monkeypatch.setattr(
+            cf, "ProcessPoolExecutor", self._fake_pool_raising(BrokenProcessPool("worker died"))
+        )
+        monkeypatch.setattr(cf, "as_completed", lambda futs: list(futs))
+
+        sweep = SweepSpec(
+            chambers=("lt",), agent_names=("random",), budget_fractions=(0.1,), seeds=range(2)
+        )
+        records = run_sweep(sweep, max_workers=2)
+
+        assert len(records) == 2, "every cell is accounted for, none silently dropped"
+        assert all(r.status == "error" for r in records)
+        assert all(r.error_type == "BrokenProcessPool" for r in records)
+        assert all("worker process died" in (r.error_message or "") for r in records)
+        # Provenance must survive, or this is the one row whose backend is
+        # unknown -- and register entry 10 forbids pooling across backends.
+        assert all(r.blas_backend for r in records)
+
+    def test_a_configuration_error_still_aborts_the_parallel_sweep(self, monkeypatch) -> None:
+        import concurrent.futures as cf
+
+        from evaluation.chamber_pipeline.orchestrator import SweepSpec, run_sweep
+
+        monkeypatch.setattr(
+            cf, "ProcessPoolExecutor", self._fake_pool_raising(SweepConfigurationError("bad k"))
+        )
+        monkeypatch.setattr(cf, "as_completed", lambda futs: list(futs))
+        sweep = SweepSpec(
+            chambers=("lt",), agent_names=("random",), budget_fractions=(0.1,), seeds=range(2)
+        )
+        with pytest.raises(SweepConfigurationError):
+            run_sweep(sweep, max_workers=2)

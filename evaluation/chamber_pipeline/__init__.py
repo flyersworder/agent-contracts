@@ -47,11 +47,14 @@ Future modules (M5+):
 """
 
 from .agents import (
+    fan_in_agents,
     greedy_ig_lite_agent,
     llm_only_agent,
     llm_pc_agent,
     planner_reasoner_agents,
     random_agent,
+    team_agents,
+    uncontracted_agent,
 )
 from .inference import (
     CAUSAL_LEARN_AVAILABLE,
@@ -102,6 +105,7 @@ __all__ = [
     "count_cells",
     "cpdag_to_directed_adjacency",
     "f1_edges",
+    "fan_in_agents",
     "get_spec",
     "greedy_ig_lite_agent",
     "iter_sweep_cells",
@@ -116,6 +120,8 @@ __all__ = [
     "run_pc",
     "run_sweep",
     "shd",
+    "team_agents",
+    "uncontracted_agent",
     "write_records_csv",
     "write_records_parquet",
 ]

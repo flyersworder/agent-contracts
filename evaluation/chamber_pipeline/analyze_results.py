@@ -805,6 +805,11 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
                 # No denominator but non-zero fallbacks is NOT a clean rate.
                 # Surface it as 1.0 so `validity_warnings` flags it, rather
                 # than dividing by a missing `n_llm_calls` into a silent 0.0.
+                # `n_llm_calls` is LOGICAL calls, which is the right
+                # denominator: `n_llm_attempts` includes provider rotation, so
+                # using it would report a LOWER degradation rate the worse the
+                # serving stack behaved -- a harness statistic that moves with
+                # conditions, the class of defect this report exists to catch.
                 "fallback_rate": (float(fb) / float(calls)) if calls else (1.0 if fb else 0.0),
                 "pc_degeneracy_rate": (float(pc) / len(ok)) if len(ok) else 0.0,
                 # Reported separately from pc_degeneracy_rate because a
@@ -882,6 +887,14 @@ def validity_warnings(report: pd.DataFrame) -> list[str]:
         Human-readable warnings; empty if every path is clean.
     """
     warnings: list[str] = []
+    if report.empty:
+        # `harness_validity_report` builds `pd.DataFrame([])` for a frame with
+        # no ok-cells, which has NO COLUMNS -- so the groupby below raises
+        # KeyError('agent_name'). Reached from the CLI whenever the chamber
+        # filter matches nothing, e.g. `--ladder` on a WT file while
+        # `--check-chamber` still defaults to 'lt'. An empty selection is a
+        # nothing-to-report, not a crash.
+        return warnings
     # Paths that CONTAMINATE the outcome, versus paths that ARE the outcome.
     # Only the first class can bias an accuracy comparison:
     #   * a selection fallback replaces the LLM's choice with `rng.choice`

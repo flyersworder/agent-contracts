@@ -52,6 +52,25 @@ _MAX_MENU_LINES = 200
 UNCONTRACTED_STOP_TOKEN = "DONE"
 
 
+def _render_menu(menu: list[str]) -> str:
+    """The menu as prompt text, truncated past `_MAX_MENU_LINES`.
+
+    One implementation for all four builders. It was three: the two selection
+    builders each carried a copy, and the two negotiation builders carried
+    none -- so the team arm, whose prompts already cost the most, was the one
+    that would have rendered an unbounded menu. That is latent at LT's 59 and
+    WT's 28 entries and would surface on a larger chamber as a conservation
+    failure attributed to the framework, since `_ladder_calibration` treats
+    the negotiation rounds as a FIXED per-scout overhead.
+    """
+    if len(menu) > _MAX_MENU_LINES:
+        return (
+            "\n".join(menu[:_MAX_MENU_LINES])
+            + f"\n... ({len(menu) - _MAX_MENU_LINES} more, omitted for brevity)"
+        )
+    return "\n".join(menu)
+
+
 def build_uncontracted_select_prompt(
     menu: list[str],
     remaining_budget: int,
@@ -74,11 +93,7 @@ def build_uncontracted_select_prompt(
     del remaining_budget  # see docstring: showing it would restore the cap
 
     chosen = already_chosen or []
-    if len(menu) > _MAX_MENU_LINES:
-        rendered_menu = "\n".join(menu[:_MAX_MENU_LINES])
-        rendered_menu += f"\n... ({len(menu) - _MAX_MENU_LINES} more, omitted for brevity)"
-    else:
-        rendered_menu = "\n".join(menu)
+    rendered_menu = _render_menu(menu)
 
     chosen_block = (
         "Already run (no longer on the menu):\n" + "\n".join(chosen) + "\n"
@@ -142,11 +157,7 @@ def build_select_prompt(
     chosen = already_chosen or []
 
     # Build the menu rendering. Truncate only if pathologically large.
-    if len(menu) > _MAX_MENU_LINES:
-        rendered_menu = "\n".join(menu[:_MAX_MENU_LINES])
-        rendered_menu += f"\n... ({len(menu) - _MAX_MENU_LINES} more, omitted for brevity)"
-    else:
-        rendered_menu = "\n".join(menu)
+    rendered_menu = _render_menu(menu)
 
     # Spent experiments are history, not options: `_llm_select_loop` removes
     # them from `menu` before calling this. The old wording ("do not repeat
@@ -374,7 +385,7 @@ def build_negotiate_propose_prompt(
     """Round 1: state which experiments this scout intends to claim."""
     user = (
         f"You are designer {role}. You may run {budget} experiment(s).\n\n"
-        f"Menu:\n" + "\n".join(menu) + "\n\n"
+        f"Menu:\n" + _render_menu(menu) + "\n\n"
         f"List the {budget} experiment name(s) you intend to claim, one per "
         "line, and no other commentary."
     )
@@ -399,7 +410,7 @@ def build_negotiate_revise_prompt(
         + "\n\nAny experiment you both named is wasted duplication. Revise "
         f"your claim to {budget} experiment name(s) from the menu below, one "
         "per line, and no other commentary.\n\n"
-        "Menu:\n" + "\n".join(menu)
+        "Menu:\n" + _render_menu(menu)
     )
     return [
         {"role": "system", "content": _NEGOTIATE_SYSTEM_MESSAGE},

@@ -423,3 +423,31 @@ class TestZeroVarianceLogging:
         message = next(r.getMessage() for r in caplog.records if "zero-variance" in r.getMessage())
         assert message.endswith("...")
         assert message.count(",") == _MAX_LOGGED_NAMES - 1
+
+
+def test_nan_variance_column_is_counted_not_silently_dropped(caplog) -> None:
+    """A NaN-variance column must reach the zero-variance counter.
+
+    `valid_cols` and `zero_variance` were written as two threshold tests
+    (`> 1e-12` and `<= 1e-12`), and BOTH are False for NaN -- so an all-NaN
+    column was dropped from inference while every counter read 0. That is the
+    untraceable degradation the counters exist to eliminate, so the second
+    list is now the complement of the first rather than a second test.
+    """
+    rng = np.random.default_rng(7)
+    data = pd.DataFrame(
+        {
+            "a": rng.normal(size=200),
+            "b": rng.normal(size=200),
+            "missing": np.full(200, np.nan),
+        }
+    )
+    with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+        adj = run_pc(data, ["a", "b", "missing"], alpha=0.05, seed=0)
+
+    hits = [r for r in caplog.records if "zero-variance" in r.getMessage().lower()]
+    assert len(hits) == 1, "an all-NaN column must be reported, not silently dropped"
+    assert hits[0].args[0] == 1
+    # And it is padded back, so the output still covers the full node set.
+    assert list(adj.index) == ["a", "b", "missing"]
+    assert adj.loc["missing"].sum() == 0

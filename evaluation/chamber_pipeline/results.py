@@ -74,8 +74,10 @@ class RunRecord:
         wall_time_seconds: How long the agent took (excluding adapter
             load + scoring). None for skipped/error cells.
         n_llm_calls: How many times the agent invoked the LLM
-            callable. None for non-LLM variants. 0 is a real
-            measurement (e.g., budget=0 short-circuit).
+            callable -- LOGICAL calls, one per invocation, regardless of how
+            many provider endpoints were tried to satisfy it. See
+            `n_llm_attempts` for the billed count. None for non-LLM variants.
+            0 is a real measurement (e.g., budget=0 short-circuit).
         n_selection_fallbacks: How many selection calls returned an
             unparseable response and fell back to a random unspent
             experiment. A nonzero value means the cell's "LLM selection"
@@ -142,6 +144,12 @@ class RunRecord:
             the budget curve can be decomposed into how much of the graph PC
             was asked about versus how well it answered. None for variants
             that never run PC.
+        n_llm_attempts: `n_llm_calls` plus provider-rotation retries. The two
+            differ only when a provider returned a body-encoded error and the
+            wrapper rotated; they are equal in every cell recorded before
+            2026-08-29. This is the cost-attribution number -- a rotated
+            attempt is billed -- while `n_llm_calls` is the denominator for
+            any per-decision rate, such as `fallback_rate`.
         n_pc_degeneracies: How many times PC's singular-matrix
             fallback fired during this cell. Captured by a logging
             handler the orchestrator installs around each cell. None
@@ -208,6 +216,7 @@ class RunRecord:
     n_pc_degeneracies: int | None = None
     n_collinear_dropped: int | None = None
     n_zero_variance_dropped: int | None = None
+    n_llm_attempts: int | None = None
 
     # --- PC provenance: the three parameters that silently determine the
     #     graph. Recorded per cell because `runs/m6-controls.parquet`

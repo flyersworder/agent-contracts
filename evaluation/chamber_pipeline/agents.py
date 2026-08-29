@@ -953,15 +953,6 @@ def planner_reasoner_agents(
     return run_pc(pooled, nodes, alpha=pc_alpha, seed=seed)
 
 
-__all__ = [
-    "greedy_ig_lite_agent",
-    "llm_only_agent",
-    "llm_pc_agent",
-    "planner_reasoner_agents",
-    "random_agent",
-]
-
-
 def fan_in_agents(
     adapter: ContractedChamberAgent,
     model: str = "openrouter/deepseek/deepseek-v4-flash",
@@ -1317,3 +1308,20 @@ def team_agents(
     if not dfs:
         return _empty_adjacency(nodes)
     return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+# Declared at the END of the module, after every agent it names. The previous
+# copy sat mid-file and listed only the five M4b arms, so the three ladder arms
+# defined below it were absent from `import *` and from the package's
+# re-exports -- a public surface that disagreed with the registry the sweep
+# actually runs.
+__all__ = [
+    "fan_in_agents",
+    "greedy_ig_lite_agent",
+    "llm_only_agent",
+    "llm_pc_agent",
+    "planner_reasoner_agents",
+    "random_agent",
+    "team_agents",
+    "uncontracted_agent",
+]

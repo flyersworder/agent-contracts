@@ -261,6 +261,22 @@ def get_spec(name: str) -> AgentSpec:
     )
 
 
+class SweepConfigurationError(ValueError):
+    """A mis-configured sweep, as distinct from a cell that failed at runtime.
+
+    `run_cell` deliberately converts every in-cell exception into a
+    `status="error"` record so one bad cell cannot abort a 20-hour sweep. That
+    is right for runtime faults and wrong for configuration faults: an
+    uncalibrated budget or an unpinned model is not a cell that failed, it is
+    a sweep that should never have started. Swallowed, it presents as an error
+    RATE -- and since `done_cell_keys` excludes errored cells so they can be
+    retried, every resume re-attempts all of them, forever, while the message
+    naming the fix scrolls past in a truncated `error_message` field.
+
+    Raised before any budget is spent and re-raised through both sweep paths.
+    """
+
+
 # ---------------------------------------------------------------------------
 # PC-degeneracy capture
 # ---------------------------------------------------------------------------
@@ -388,6 +404,19 @@ def _response_has_finish_reason_error(response: Any) -> bool:
         return False
 
 
+# Endpoints probed for the deepseek-v4-flash family: Parasail/SiliconFlow/Baidu
+# serve it at $0.280/M output against Novita's $1.320/M for identical weights,
+# and Parasail's latency (17-34s) gives no reason to pay the difference.
+# `Together` is excluded despite the low price -- it spends the whole token cap
+# on reasoning and returns empty content, which degrades to `rng.choice`.
+_FLASH_PROVIDER_ORDER: tuple[str, ...] = (
+    "Parasail",
+    "SiliconFlow",
+    "Baidu",
+    "Novita",
+)
+
+
 class _CountingLLM:
     """Per-cell LLM proxy that counts calls and accumulates token / cost.
 
@@ -424,6 +453,12 @@ class _CountingLLM:
         # when an LLM-bearing variant actually runs).
         self._target = target
         self.calls: list[dict[str, Any]] = []
+        # `calls` records one entry per provider ATTEMPT, deliberately, so
+        # rotation shows up in cost attribution. That makes it the wrong
+        # denominator for `fallback_rate`, whose numerator counts logical
+        # selections: a cell that rotated would report a LOWER degradation
+        # rate the worse the serving stack behaved. Counted separately.
+        self.n_requests = 0
         self.total_input_tokens: int = 0
         self.total_output_tokens: int = 0
         self.total_cost_usd: float = 0.0
@@ -524,15 +559,15 @@ class _CountingLLM:
     # fp8 and present in `PROVIDER_PRECISION`; the homogeneity test walks all
     # declared orders, not just the default.
     PROVIDER_ORDER_BY_MODEL: ClassVar[dict[str, tuple[str, ...]]] = {
+        # Every model the pipeline may run, named explicitly. The flash
+        # snapshots previously reached their order through a silent default,
+        # which meant an unlisted model reached it too.
+        "deepseek-v4-flash-0731": _FLASH_PROVIDER_ORDER,
+        "deepseek-v4-flash": _FLASH_PROVIDER_ORDER,
         "deepseek-v4-pro": ("Baidu", "StreamLake", "SiliconFlow", "Novita"),
     }
 
-    DEFAULT_PROVIDER_ORDER: tuple[str, ...] = (
-        "Parasail",
-        "SiliconFlow",
-        "Baidu",
-        "Novita",
-    )
+    DEFAULT_PROVIDER_ORDER: tuple[str, ...] = _FLASH_PROVIDER_ORDER
 
     @classmethod
     def _provider_order_for(cls, model: str) -> tuple[str, ...]:
@@ -547,10 +582,30 @@ class _CountingLLM:
         endpoint that does not serve it, and a precision claim that was never
         checked for it.
 
-        Unknown models fall back to `DEFAULT_PROVIDER_ORDER`.
+        Unknown models RAISE. They used to inherit `DEFAULT_PROVIDER_ORDER`,
+        which was safe only while the pin was a preference. It is not: since
+        `allow_fallbacks` became False (register entry 8) the order is a hard
+        constraint, so an unlisted model gets four endpoints chosen and
+        price/precision-verified for deepseek-v4-flash-0731 and nothing else.
+        If none serve it every cell errors; if some do, it runs on a precision
+        class `PROVIDER_PRECISION` never certified for it -- and the
+        homogeneity test still passes, because it checks the pin, not the
+        model. Same policy as `_ladder_calibration`: measure it, do not
+        extrapolate from a neighbouring configuration.
         """
         tag = model.rsplit("/", 1)[-1]
-        return cls.PROVIDER_ORDER_BY_MODEL.get(tag, cls.DEFAULT_PROVIDER_ORDER)
+        try:
+            return cls.PROVIDER_ORDER_BY_MODEL[tag]
+        except KeyError:
+            raise SweepConfigurationError(
+                f"no provider order is pinned for model {tag!r}; pinned models "
+                f"are {sorted(cls.PROVIDER_ORDER_BY_MODEL)}. `allow_fallbacks` "
+                "is False, so the order is a hard constraint and borrowing "
+                "another model's endpoints either fails every cell or runs on "
+                "an uncertified precision. Add the model to "
+                "PROVIDER_ORDER_BY_MODEL (and PROVIDER_PRECISION) after "
+                "probing which endpoints serve it."
+            ) from None
 
     # Per-request socket-level timeout (seconds). Without this, a single
     # litellm.completion call can BLOCK FOREVER on the underlying SSL
@@ -600,6 +655,7 @@ class _CountingLLM:
         # is safe across both the production litellm path and test
         # paths. Caller-supplied num_retries (e.g., 0 to disable for a
         # specific cell) wins.
+        self.n_requests += 1
         kwargs.setdefault("num_retries", self.DEFAULT_NUM_RETRIES)
 
         # Inject per-request timeout. Without this, a stuck SSL socket
@@ -981,7 +1037,7 @@ def _ladder_calibration(
         raise ValueError(f"{spec.name!r} is not a ladder arm")
     if (chamber, budget_k) not in _A95_RECONCILE_BY_K:
         known = sorted(k for c, k in _A95_RECONCILE_BY_K if c == chamber)
-        raise ValueError(
+        raise SweepConfigurationError(
             f"aggregator spend is not calibrated for chamber={chamber!r} at "
             f"k={budget_k}; calibrated budgets for that chamber are {known}. "
             "Measure it rather than extrapolating -- a wrong a95 fails "
@@ -1212,22 +1268,31 @@ def run_cell(
             intervention_budget=cap,
             **extra,
         )
-        if spec.ignores_budget:
-            # `MENU_SIZES` is a hardcoded table and its agreement with the
-            # live menu has been unverified since M4c. Here it MATTERS: too
-            # small and the "uncontracted" arm runs under a binding cap,
-            # producing a plausible-looking result that measures the
-            # opposite of what it claims. Fail loudly instead.
-            live = len(adapter.available_experiments())
-            if cap < live:
-                raise ValueError(
-                    f"MENU_SIZES[{chamber!r}]={cap} is below the live menu "
-                    f"({live}); the uncontracted arm would run capped."
-                )
+        # `MENU_SIZES` is a hardcoded table, and `_budget_k_for` converts
+        # every sweep's budget FRACTION into k through it -- for every arm,
+        # not just the uncontracted one. If it drifts from the live menu (the
+        # WT dataset changed release inside this branch, `wt_walks_v1` ->
+        # `wt_validate_v1`), every contracted arm silently runs at the wrong k
+        # and records a wrong `budget_fraction`, while only the uncontracted
+        # arm raises. Checked unconditionally, as an equality: too small caps
+        # the uncontracted arm, too large inflates every k.
+        live = len(adapter.available_experiments())
+        if MENU_SIZES[chamber] != live:
+            raise SweepConfigurationError(
+                f"MENU_SIZES[{chamber!r}]={MENU_SIZES[chamber]} disagrees with "
+                f"the live menu ({live}). Every budget fraction is converted to "
+                f"k through this table, so the whole sweep would run at the "
+                f"wrong budget. Update the table to match the dataset."
+            )
         if graph is not None:
             adapter.delegation_graph = graph  # read back by the P2 scorer
         menu_size = len(adapter.available_experiments())
         budget_fraction = _budget_fraction(budget_k, menu_size)
+    except SweepConfigurationError:
+        # Deliberately NOT recorded as a cell error. See the class docstring:
+        # a swallowed configuration fault becomes an error rate that every
+        # resume retries forever.
+        raise
     except Exception as exc:
         return RunRecord(
             **_pc_provenance,
@@ -1288,6 +1353,7 @@ def run_cell(
             tokens_out,
             cost_usd,
             n_selection_fallbacks,
+            n_llm_attempts,
         ) = _read_llm_metrics(counting_llm)
         model_id, reasoning_effort, providers_used = _read_llm_provenance(counting_llm)
 
@@ -1369,6 +1435,7 @@ def run_cell(
             n_edges_truth=n_edges_truth,
             wall_time_seconds=wall,
             n_llm_calls=n_llm_calls_for_cell,
+            n_llm_attempts=n_llm_attempts,
             n_selection_fallbacks=n_selection_fallbacks,
             model_id=model_id,
             reasoning_effort=reasoning_effort,
@@ -1535,6 +1602,25 @@ def count_cells(sweep: SweepSpec, *, exclude_skipped: bool = False) -> int:
     return sum(1 for spec, chamber, *_ in iter_sweep_cells(sweep) if spec.is_compatible(chamber))
 
 
+def _pc_provenance_snapshot() -> dict[str, Any]:
+    """The PC/platform stamp for a record the PARENT synthesizes.
+
+    A worker that died produced no cell of its own, but the row still has to
+    carry provenance or it becomes the one row in the frame whose backend is
+    unknown -- and register entry 10 forbids pooling across backends. These
+    are the parent's values, which is correct: `pc_alpha` aside, the backend
+    and platform are properties of the machine, and every worker is forked
+    from this process.
+    """
+    return {
+        "pc_alpha": 0.05,
+        "pc_max_rows": _PC_CALL_DEFAULTS["max_rows"],
+        "pc_collinearity_threshold": _PC_CALL_DEFAULTS["collinearity_threshold"],
+        "blas_backend": _RUNTIME["blas"],
+        "platform_tag": _RUNTIME["platform"],
+    }
+
+
 def _run_cell_in_worker(
     args: tuple[str, ChamberId, ConfigId, int, int, float, float | None, str | None],
 ) -> RunRecord:
@@ -1693,7 +1779,43 @@ def _run_sweep_parallel(
         futures = {pool.submit(_run_cell_in_worker, p): i for i, p in enumerate(payloads)}
         for fut in as_completed(futures):
             i = futures[fut]
-            record = fut.result()
+            try:
+                record = fut.result()
+            except SweepConfigurationError:
+                # A mis-configured sweep must still abort. Every remaining
+                # cell would raise the same way; failing now shows the
+                # operator the message instead of 450 identical error rows.
+                raise
+            except Exception as exc:
+                # `Exception`, not `BaseException`: `BrokenProcessPool`
+                # subclasses `RuntimeError`, so this catches the worker fault
+                # while leaving KeyboardInterrupt free to abort the sweep.
+                # `run_cell` converts in-cell exceptions to error records, so
+                # reaching here means the WORKER died: OOM-killed (the
+                # docstring budgets ~700 MB/worker on an 8 GB VPS), or a
+                # result that failed to pickle. Uncaught, that BrokenProcessPool
+                # propagates out of the `with ProcessPoolExecutor(...)` block,
+                # whose `__exit__` calls `shutdown(wait=True)` -- the same
+                # wait-on-exit shape as the ThreadPoolExecutor trap this
+                # project root-caused in M4b -- and every in-flight cell is
+                # discarded with no sidecar line. A 20-hour sweep would die at
+                # hour 12 over one worker fault. Synthesize the error record
+                # the serial path would have produced and keep going.
+                spec_name, chamber, configuration, budget_k, seed = payloads[i][:5]
+                record = RunRecord(
+                    **_pc_provenance_snapshot(),
+                    chamber=chamber,
+                    configuration=configuration,
+                    agent_name=spec_name,
+                    budget_k=budget_k,
+                    budget_fraction=0.0,
+                    seed=seed,
+                    status="error",
+                    started_at=now_iso(),
+                    finished_at=now_iso(),
+                    error_type=type(exc).__name__,
+                    error_message=_truncate(f"worker process died: {exc}", 500),
+                )
             completed.append((i, record))
             if on_cell is not None:
                 # `len(completed) - 1`, not `i`: the callback's index is a
@@ -1795,10 +1917,17 @@ def _read_llm_provenance(
 
 def _read_llm_metrics(
     counting_llm: _CountingLLM | None,
-) -> tuple[int | None, int | None, int | None, float | None, int | None]:
-    """Extract (n_llm_calls, tokens_in, tokens_out, cost_usd, fallbacks).
+) -> tuple[int | None, int | None, int | None, float | None, int | None, int | None]:
+    """Extract (n_llm_calls, tokens_in, tokens_out, cost_usd, fallbacks, attempts).
 
-    Returns a 5-tuple of Nones when the wrapper is None
+    `n_llm_calls` is LOGICAL calls -- one per `__call__` -- which is what the
+    name implies and what every recorded figure means (6/30/59 at the three
+    M4b budgets). `n_llm_attempts` adds provider-rotation retries, and is the
+    cost-attribution number. They are equal in every cell recorded before
+    2026-08-29, because rotation never fired: 0 extra attempts across all 450
+    loop cells.
+
+    Returns a 6-tuple of Nones when the wrapper is None
     (non-LLM variant). When the wrapper saw at least one call, all
     four are populated — even if the wrapped target reported zero
     tokens (e.g., FakeLLM). When the wrapper saw zero calls (LLM
@@ -1807,16 +1936,17 @@ def _read_llm_metrics(
     zero" distinguishable from "no measurement."
     """
     if counting_llm is None:
-        return None, None, None, None, None
-    n = len(counting_llm.calls)
+        return None, None, None, None, None, None
+    n = counting_llm.n_requests
     if n == 0:
-        return 0, None, None, None, 0
+        return 0, None, None, None, 0, len(counting_llm.calls)
     return (
         n,
         counting_llm.total_input_tokens,
         counting_llm.total_output_tokens,
         counting_llm.total_cost_usd,
         counting_llm.selection_fallbacks,
+        len(counting_llm.calls),
     )
 
 
@@ -1824,6 +1954,7 @@ __all__ = [
     "AGENT_REGISTRY",
     "MENU_SIZES",
     "AgentSpec",
+    "SweepConfigurationError",
     "SweepSpec",
     "count_cells",
     "get_spec",

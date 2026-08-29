@@ -471,6 +471,95 @@ irreproducible from the code (defect 13's own lesson), for a correction measured
 at below MDE. Fix it at the next data freeze, re-running the LLM-free `random`
 cells, which cost nothing.
 
+## 15. What an adversarial code review found that the audit did not (2026-08-29)
+
+Entry 13/14's audit asked "does this measure what it claims?". A `/code-review`
+pass over the branch (60 commits, ~8.5k insertions) asked whether the code is
+correct under conditions the sweeps happened not to hit. Different question,
+different defects: **all 551 chamber tests passed before and after.**
+
+Fifteen findings; each verified by execution here rather than accepted.
+
+**Touches a published number — one, and it is NOT the LT result:**
+
+- **`_parse_name_list` discards a genuinely-claimed experiment** whose name is
+  a substring of a longer co-claimed one. The word-boundary regex above the
+  guard already prevents the prefix inflation the guard was written for
+  (`_1` does not match inside `_10`), so the guard has no true positives left
+  and every firing is a false one. Verified: claiming `_1` and `_10` returns
+  only `_10`. **Scope, measured against the real menus: LT has ZERO
+  substring pairs**, so `m6-ladder` — the main topology result — is untouched.
+  WT has 3 of 28 (`validate_load_in`, `validate_load_out`, `validate_osr_in`),
+  so the exposure is the WT `team` arm's `n_contested` and claim split.
+  `fan_in_agg` ran LT-only, so the aggregator ablation is clean.
+- **`claim_a = list(source_a)[:budget]` truncates in MENU order.**
+  `_parse_name_list` returns menu order, which the comment eight lines below
+  explains is grouped by variable family — the exact bias the seeded shuffle
+  exists to remove — and the comment above confirms the truncation fires
+  ("10 + 4 against a 20 budget"). Every seed therefore truncates to the same
+  head families. `team` is one of only two resolved negatives (−0.047), so
+  **part of that deficit may be harness rather than coordination.** Not fixed
+  here: fixing changes behaviour and requires re-running the arm.
+
+**Real defects, measured zero effect on published data (fixed):**
+
+- **`fallback_rate`'s denominator counted provider ATTEMPTS**, not logical
+  calls, so a cell reported a *lower* degradation rate the worse the serving
+  stack behaved — a harness statistic moving with conditions, the class this
+  report exists to catch. Measured impact: **rotation fired 0 times across all
+  450 loop cells**, inflation 0.00%, so every published rate is correct.
+  `n_llm_calls` now means logical calls (what its name and every recorded
+  figure already implied) and `n_llm_attempts` carries the billed count.
+- **A dead worker killed the whole sweep.** `fut.result()` was unwrapped inside
+  `with ProcessPoolExecutor(...)`, so one OOM-killed worker propagates
+  `BrokenProcessPool` through an `__exit__` that calls `shutdown(wait=True)` —
+  the same wait-on-exit shape this project already root-caused for
+  `ThreadPoolExecutor` — discarding every in-flight cell with no sidecar line.
+  A 20-hour sweep would die at hour 12 over one cell.
+- **A mis-configured sweep looped forever instead of failing.**
+  `_ladder_calibration`'s deliberate "raise rather than extrapolate" was
+  swallowed by `run_cell`'s `except Exception` into per-cell error records;
+  `done_cell_keys` excludes errored cells so they retry, so every resume
+  re-attempted all of them while the message naming the fix sat truncated in
+  `error_message`. Configuration faults now raise `SweepConfigurationError`,
+  which both sweep paths re-raise.
+- **An unlisted model inherited a pin verified for another model.** Harmless
+  while the provider order was a preference; since `allow_fallbacks: False`
+  (entry 8) it is a hard constraint, so `--model <anything>` either failed
+  every cell or ran on an uncertified precision *while the homogeneity test
+  passed*, because that test checks the pin and not the model. Unknown models
+  now raise. The three we run are named explicitly.
+- **`MENU_SIZES` drift was checked only for the uncontracted arm**, though
+  `_budget_k_for` converts every sweep's budget fraction to `k` through that
+  table for every arm — and the WT dataset changed release inside this branch.
+  Now an unconditional equality check.
+- **A NaN-variance column escaped both counters.** `> 1e-12` and `<= 1e-12`
+  are both False for NaN, so the two lists were not a partition and an all-NaN
+  column was dropped with every counter reading 0 — the exact untraceable path
+  entry 14's counter was added to eliminate, reintroduced by its own patch.
+  Latent only: zero NaNs in either chamber.
+- **`validity_warnings` crashed on an empty selection** (`--ladder` on a WT
+  file while `--check-chamber` still defaults to `lt`).
+
+**Quality (fixed):** the negotiation prompts were the only builders skipping
+`_MAX_MENU_LINES`, and they belong to the arm whose per-call spend
+`_ladder_calibration` treats as a fixed overhead; the uncontracted prompt was a
+hand-maintained copy of `build_select_prompt`, so the arm's own scope-limit
+promise ("identical in every other respect") was enforced by two copies staying
+in sync — one `_render_menu` now serves all four builders, verified
+**byte-identical on all 12 prompt variants** before and after; a dead branch
+after the collinearity filter; O(n²) redundant array conversions in
+`select_noncollinear_columns` (hoisted, **not** replaced with `.corr()`, which
+would change the arithmetic — entry 10 measures what a 1e-10 perturbation does
+to PC — and verified bit-identical on 8 real cells including the WT ones where
+collinearity fires); `__all__` sat mid-file and omitted the three ladder arms.
+
+**Still open, deliberately:** `blas_backend` and the `pc_*` fields are stamped
+on every row and **read by no analyzer**. Concatenating `m4-pilot` (Accelerate)
+with `m6-ladder` (OpenBLAS) and running `--ladder` silently averages two
+backends across a 0.055 gap. The rule lives in prose in three documents and
+nowhere in code.
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there

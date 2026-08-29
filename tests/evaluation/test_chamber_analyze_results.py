@@ -984,3 +984,20 @@ def test_absent_zero_variance_column_is_reported_but_not_as_contamination() -> N
     assert len(warns) == 1
     assert warns[0].startswith("NOT RECORDED: n_zero_variance_dropped")
     assert "UNMEASURED" not in warns[0]
+
+
+def test_validity_warnings_on_an_empty_selection_is_empty_not_a_crash() -> None:
+    """`--ladder` on a WT file while `--check-chamber` still defaults to 'lt'
+    filters to zero rows. `harness_validity_report` then builds
+    `pd.DataFrame([])`, which has NO COLUMNS, and the groupby raised
+    KeyError('agent_name') -- a bare traceback where an empty table belongs.
+    """
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    empty = _validity_frame().iloc[0:0]
+    report = harness_validity_report(empty)
+    assert report.empty
+    assert validity_warnings(report) == []

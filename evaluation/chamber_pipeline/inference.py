@@ -213,13 +213,25 @@ def select_noncollinear_columns(
     Returns:
         `(kept, dropped)`, together a partition of `columns`.
     """
+    # Converted once per column, not once per (candidate, keeper) pair: the
+    # same keeper was previously re-materialised for every later candidate,
+    # ~700 redundant conversions per PC run on LT's 38 columns.
+    #
+    # Deliberately NOT replaced with a single `data[columns].corr()`. That
+    # would change the arithmetic -- a different summation order and a
+    # different BLAS path -- and entry 10 of the validity register measures
+    # what a ~1e-10 perturbation does to PC: it forks the conditioning-set
+    # search and changes the graph. The pairwise `np.corrcoef` calls below are
+    # byte-for-byte the ones that produced every recorded result.
+    arrays = {name: data[name].to_numpy(dtype=float) for name in columns}
+
     kept: list[str] = []
     dropped: list[str] = []
     for name in columns:
-        col = data[name].to_numpy(dtype=float)
+        col = arrays[name]
         redundant = False
         for keeper in kept:
-            other = data[keeper].to_numpy(dtype=float)
+            other = arrays[keeper]
             with np.errstate(invalid="ignore", divide="ignore"):
                 r = np.corrcoef(col, other)[0, 1]
             # NaN means one side had no variance, which the caller already
@@ -351,7 +363,13 @@ def run_pc(
     variances = pooled_data.var()
     valid_cols = [n for n in node_names if variances.get(n, 0.0) > 1e-12]
 
-    zero_variance = [n for n in node_names if variances.get(n, 0.0) <= 1e-12]
+    # The COMPLEMENT of `valid_cols`, not a second threshold test. Written as
+    # `<= 1e-12` this was not a partition: both comparisons are False for NaN,
+    # so an all-NaN column (a missing sensor stretch in a future release) was
+    # dropped from inference while every counter read 0 -- the exact
+    # untraceable degradation this warning exists to eliminate.
+    kept_set = set(valid_cols)
+    zero_variance = [n for n in node_names if n not in kept_set]
     if zero_variance:
         # Logged for the same reason as the collinear drop below: this is a
         # degradation path whose RATE TRACKS THE INDEPENDENT VARIABLE. The
@@ -398,12 +416,12 @@ def run_pc(
                 collinearity_threshold,
                 ", ".join(collinear_dropped),
             )
-        if not valid_cols:
-            return pd.DataFrame(
-                np.zeros((len(node_names), len(node_names)), dtype=int),
-                index=node_names,
-                columns=node_names,
-            )
+        # No `if not valid_cols` guard here, deliberately:
+        # `select_noncollinear_columns` starts from `kept = []`, so its first
+        # candidate has nothing to compare against and is always kept. With
+        # `len(valid_cols) > 1` on entry it cannot return an empty list, and a
+        # branch for a state the callee cannot produce implies a failure mode
+        # that does not exist.
 
     valid_data = pooled_data[valid_cols]
     data_array = valid_data.to_numpy(dtype=float)
