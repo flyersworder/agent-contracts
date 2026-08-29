@@ -415,3 +415,95 @@ def test_negotiation_failures_counts_rounds_not_scouts(make_ladder_adapter):
 
     assert len(negotiation_seen) == 4
     assert adapter.coordination_stats["n_negotiation_failures"] == 1
+
+
+class TestClaimCap:
+    """How an over-long claim is cut to budget.
+
+    The cap competes with the negotiation to decide the split, and at high
+    budget it wins: a full claim leaves no top-up, so it is ~77% of the pool
+    at LT k=45 against ~10% at k=6. A cut that is biased is therefore a
+    harness deciding what the arm buys, in proportion to the budget axis.
+    """
+
+    @staticmethod
+    def _menu(n: int = 40) -> list[str]:
+        # Two "families" in menu order, as the real menus are grouped.
+        return [f"head_{i}" for i in range(n // 2)] + [f"tail_{i}" for i in range(n // 2)]
+
+    def test_within_budget_the_claim_is_untouched(self) -> None:
+        from evaluation.chamber_pipeline.agents import _capped_claim
+
+        names = self._menu(10)
+        assert _capped_claim(names, 10, "a", 0) == names
+        assert _capped_claim(names, 99, "a", 0) == names
+
+    def test_the_cut_is_deterministic_for_a_seed(self) -> None:
+        from evaluation.chamber_pipeline.agents import _capped_claim
+
+        names = self._menu()
+        assert _capped_claim(names, 8, "a", 3) == _capped_claim(names, 8, "a", 3)
+
+    def test_the_cut_does_not_prefer_the_head_of_the_menu(self) -> None:
+        """A `[:budget]` slice keeps only `head_*`, in EVERY seed -- the same
+        blind spot the `rest` shuffle was introduced to remove (it handed
+        scout_a 0 of 3 `osr_c` and 0 of 2 `red` on LT, identically in all 30
+        seeds). Averaged over seeds the cut must sample both families.
+        """
+        from evaluation.chamber_pipeline.agents import _capped_claim
+
+        names = self._menu()
+        budget = 8
+        tail_counts = [
+            sum(1 for n in _capped_claim(names, budget, "a", s) if n.startswith("tail_"))
+            for s in range(30)
+        ]
+        # A menu-order slice scores 0 here for every seed.
+        mean_tail = sum(tail_counts) / len(tail_counts)
+        # Half the candidates are tail names, so an unbiased draw of 8 keeps
+        # ~4. Generous band: the point is that it is not ~0.
+        assert 2.5 < mean_tail < 5.5, f"mean tail kept = {mean_tail}"
+
+    def test_the_two_scouts_draw_independent_permutations(self) -> None:
+        """Keyed by stream name, so scout_b's cut is not scout_a's cut."""
+        from evaluation.chamber_pipeline.agents import _capped_claim
+
+        names = self._menu()
+        assert _capped_claim(names, 8, "a", 1) != _capped_claim(names, 8, "b", 1)
+
+    def test_the_claim_keeps_menu_order_after_the_draw(self) -> None:
+        """WHICH names survive is randomised; the order they are passed on in
+        stays the deterministic one every other list in the module uses."""
+        from evaluation.chamber_pipeline.agents import _capped_claim
+
+        names = self._menu()
+        kept = _capped_claim(names, 8, "a", 5)
+        assert kept == [n for n in names if n in set(kept)]
+
+
+def test_parse_name_list_keeps_a_claim_whose_longer_sibling_is_also_claimed() -> None:
+    """WT names three such pairs; LT none. The word-boundary regex already
+    prevents the prefix inflation, so the extra substring guard that used to
+    follow it only ever removed true claims."""
+    from evaluation.chamber_pipeline.agents import _parse_name_list
+
+    class _Resp:
+        def __init__(self, text: str) -> None:
+            self.choices = [type("C", (), {"message": type("M", (), {"content": text})()})()]
+
+    menu = ["validate_load_in", "validate_load_in_mic", "validate_osr_in"]
+    both = _parse_name_list(_Resp("validate_load_in\nvalidate_load_in_mic"), menu)
+    assert both == ["validate_load_in", "validate_load_in_mic"]
+    # ...and the inflation the regex guards against still does not happen.
+    only_longer = _parse_name_list(_Resp("I take validate_load_in_mic only"), menu)
+    assert only_longer == ["validate_load_in_mic"]
+
+
+@requires_causalchamber
+def test_claim_cap_activity_is_recorded(make_ladder_adapter, counting_llm):
+    """An unrecorded cap is a harness step deciding the split invisibly."""
+    adapter = make_ladder_adapter(counting_llm)
+    team_agents(adapter, seed=0, scout_a_budget=2, scout_b_budget=2, llm=counting_llm)
+    stats = adapter.coordination_stats
+    assert stats["n_claim_truncated"] >= 0
+    assert 0.0 <= stats["claim_pool_share"] <= 1.0

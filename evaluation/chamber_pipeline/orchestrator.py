@@ -1444,6 +1444,8 @@ def run_cell(
             n_experiments_distinct=coord.get("n_experiments_distinct"),
             n_contested=coord.get("n_contested"),
             n_negotiation_failures=coord.get("n_negotiation_failures"),
+            n_claim_truncated=coord.get("n_claim_truncated"),
+            claim_pool_share=coord.get("claim_pool_share"),
             conservation_certified=certified,
             aggregator_tokens=agg_tokens,
             scout_a_tokens=scout_a_tokens,

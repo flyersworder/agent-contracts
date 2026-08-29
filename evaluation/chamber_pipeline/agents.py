@@ -1094,6 +1094,15 @@ def _parse_name_list(response: Any, menu: list[str]) -> list[str]:
     through `_16`, so a response naming only `_10` and `_12` also matches
     `_1` -- inventing a claim the scout never made, inflating `contested`,
     and over-excluding the other scout.
+
+    The word boundaries are the WHOLE defence, and there is deliberately no
+    second one. A `not any(name in longer for longer in claimed)` guard used
+    to follow this loop, for the same prefix threat -- but the regex already
+    stops `_1` matching inside `_10`, so the guard had no true positives left
+    and every firing removed a real claim. Verified against the live menus:
+    WT names three droppable pairs (`validate_load_in`, `validate_load_out`,
+    `validate_osr_in`), LT none. Two layers against one bug means the second
+    one is only ever wrong.
     """
     from evaluation.chamber_pipeline.llm_planner import _response_text
 
@@ -1102,10 +1111,46 @@ def _parse_name_list(response: Any, menu: list[str]) -> list[str]:
     for name in sorted(menu, key=len, reverse=True):
         if not re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text):
             continue
-        if any(name in longer for longer in claimed):
-            continue  # a longer name already matched here
         claimed.append(name)
     return [n for n in menu if n in claimed]
+
+
+def _capped_claim(names: list[str], budget: int, stream: str, seed: int) -> list[str]:
+    """At most `budget` of `names`, chosen without menu-order bias.
+
+    A scout that reasons out loud over most of the menu claims more than it
+    can spend, so the claim has to be cut to size. `names` arrives in MENU
+    order -- `_parse_name_list` returns it that way -- and the menu is grouped
+    by variable family and intervention strength, so a plain `[:budget]` slice
+    keeps the head families and drops the tail ones, identically in every
+    seed. That is the same defect the `rest` shuffle below exists to fix,
+    where parity-slicing handed scout_a `0 of 3 osr_c and 0 of 2 red`
+    experiments on LT.
+
+    It matters most exactly where the effect is measured: the claim is ~10% of
+    scout_a's pool at LT k=6 and ~77% at k=45, because a full claim leaves no
+    top-up and only half the shuffled leftover as extra freedom.
+
+    A seeded shuffle, NOT the scout's stated order. Preference order would be
+    more faithful to the negotiation, but `_parse_name_list` scans the whole
+    response, and a revise reply restates the peer's proposals before making
+    its own -- so preference-order truncation could keep the PEER's names.
+    Fixing that needs answer/restatement separation (spec §11); until then an
+    unbiased subset is the honest cut.
+
+    The RNG is keyed by a string naming the stream, so scout_a's and scout_b's
+    permutations are independent of each other and of the `rest` shuffle,
+    which draws from `_random.Random(seed)`.
+    """
+    if len(names) <= budget:
+        return list(names)
+    shuffled = list(names)
+    _random.Random(f"team-claim-{stream}:{seed}").shuffle(shuffled)
+    # Re-sorted into menu order after the draw: WHICH names survive is now
+    # unbiased, and the order they are handed on in stays the deterministic
+    # one every other list in this module uses.
+    keep = set(shuffled[:budget])
+    return [n for n in names if n in keep]
 
 
 def team_agents(
@@ -1216,8 +1261,16 @@ def team_agents(
     # Cap each claim at its budget. Uncapped, a scout that reasons out loud
     # over most of the menu swallows the shared pool and starves its partner:
     # measured 10 + 4 against a 20 budget when `claim_a` reached 55 names.
-    claim_a = list(source_a)[:scout_a_budget]
-    claim_b = [n for n in source_b if n not in set(claim_a)][:scout_b_budget]
+    # See `_capped_claim` for why the cut is a seeded shuffle and not a slice.
+    uncapped_a = list(source_a)
+    uncapped_b = [n for n in source_b if n not in set(source_a[:scout_a_budget])]
+    claim_a = _capped_claim(uncapped_a, scout_a_budget, "a", seed)
+    claim_b = _capped_claim(
+        [n for n in source_b if n not in set(claim_a)], scout_b_budget, "b", seed
+    )
+    n_claim_truncated = max(0, len(uncapped_a) - len(claim_a)) + max(
+        0, len(uncapped_b) - len(claim_b)
+    )
 
     # Partition the REST of the menu between the scouts, so each selects from
     # a pool strictly larger than its budget. Two constraints, and an earlier
@@ -1304,6 +1357,17 @@ def team_agents(
         # negotiation worked.
         "n_contested": len(contested),
         "n_negotiation_failures": negotiation_failures,
+        # How many claimed names the budget cap discarded. Zero means the
+        # scouts claimed within budget and the cap never ran; a large number
+        # means the cap, not the negotiation, decided most of the split.
+        "n_claim_truncated": n_claim_truncated,
+        # The larger scout's claim as a share of what it could see. The cap
+        # only matters in proportion to this: at 0.1 the shuffled leftover
+        # dominates the pool, at 0.77 the claim does.
+        "claim_pool_share": max(
+            len(claim_a) / len(pool_a) if pool_a else 0.0,
+            len(claim_b) / len(pool_b) if pool_b else 0.0,
+        ),
     }
     if not dfs:
         return _empty_adjacency(nodes)

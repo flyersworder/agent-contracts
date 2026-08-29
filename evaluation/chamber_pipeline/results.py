@@ -150,6 +150,16 @@ class RunRecord:
             2026-08-29. This is the cost-attribution number -- a rotated
             attempt is billed -- while `n_llm_calls` is the denominator for
             any per-decision rate, such as `fallback_rate`.
+        n_claim_truncated: How many claimed experiment names the team arm's
+            budget cap discarded. 0 means both scouts claimed within budget
+            and the cap never ran. Recorded because the cap competes with the
+            negotiation to decide the split, and until 2026-08-29 it cut in
+            menu order -- which is grouped by variable family, so the same
+            families were dropped in every seed.
+        claim_pool_share: The larger scout's capped claim as a fraction of the
+            pool it selects from. The cap only matters in proportion to this:
+            ~0.10 at LT k=6, where the shuffled leftover dominates the pool,
+            and ~0.77 at k=45, where the claim does. None outside the team arm.
         n_pc_degeneracies: How many times PC's singular-matrix
             fallback fired during this cell. Captured by a logging
             handler the orchestrator installs around each cell. None
@@ -217,6 +227,8 @@ class RunRecord:
     n_collinear_dropped: int | None = None
     n_zero_variance_dropped: int | None = None
     n_llm_attempts: int | None = None
+    n_claim_truncated: int | None = None
+    claim_pool_share: float | None = None
 
     # --- PC provenance: the three parameters that silently determine the
     #     graph. Recorded per cell because `runs/m6-controls.parquet`
