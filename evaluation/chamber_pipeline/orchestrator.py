@@ -317,6 +317,42 @@ class _PcCollinearHandler(logging.Handler):
             self.count += int(first) if isinstance(first, int) else 1
 
 
+class _PcZeroVarianceHandler(logging.Handler):
+    """Counts how many columns PC dropped as constant in the pooled data.
+
+    The third and last of the PC degradation paths, and the one that most
+    directly tracks the experiment's independent variable: a variable that no
+    bought experiment perturbed is constant in the pooled view, gets dropped,
+    and is padded back with zeros -- a guaranteed false negative for every
+    edge incident to it. The fewer experiments bought, the more of the graph
+    is answered by padding rather than by inference.
+
+    That is not a confound between arms -- activating more variables is
+    precisely what good selection does, so this is the causal pathway rather
+    than a bias in it. It is counted so the budget curve can be decomposed
+    into "PC saw more nodes" versus "PC inferred better edges", which without
+    a counter is not recoverable from the recorded cells at all.
+
+    Distinct from a collinear drop (a column with signal that duplicates
+    another) and from a degeneracy fallback (total loss, all-zeros for every
+    node). The three markers are asserted mutually exclusive by
+    `test_pc_warning_markers_are_unambiguous`.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.count = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        # Inference logs "PC dropped N zero-variance column(s): ...".
+        # Recover N from the args so the count is columns-dropped, not
+        # warnings-emitted -- the same convention as the collinear handler.
+        message = record.getMessage().lower()
+        if "zero-variance" in message and "dropped" in message:
+            first = record.args[0] if isinstance(record.args, tuple) and record.args else 1
+            self.count += int(first) if isinstance(first, int) else 1
+
+
 # ---------------------------------------------------------------------------
 # LLM-call counting wrapper
 # ---------------------------------------------------------------------------
@@ -1213,8 +1249,10 @@ def run_cell(
     inference_logger = logging.getLogger("evaluation.chamber_pipeline.inference")
     handler = _PcDegeneracyHandler()
     collinear_handler = _PcCollinearHandler()
+    zerovar_handler = _PcZeroVarianceHandler()
     inference_logger.addHandler(handler)
     inference_logger.addHandler(collinear_handler)
+    inference_logger.addHandler(zerovar_handler)
     # Don't let the handler-level filter override the logger level.
     prev_level = inference_logger.level
     if prev_level > logging.WARNING:
@@ -1310,6 +1348,9 @@ def run_cell(
         # PC variants populate degeneracy count; llm_only doesn't run PC.
         n_pc_degen: int | None = None if spec.name == "llm_only" else handler.count
         n_collinear: int | None = None if spec.name == "llm_only" else collinear_handler.count
+        # `llm_only` never calls run_pc, so None (not 0) -- "not applicable"
+        # must stay distinguishable from "PC ran and dropped nothing".
+        n_zerovar: int | None = None if spec.name == "llm_only" else zerovar_handler.count
 
         return RunRecord(
             **_pc_provenance,
@@ -1344,6 +1385,7 @@ def run_cell(
             tree_would_refuse=refuse,
             n_pc_degeneracies=n_pc_degen,
             n_collinear_dropped=n_collinear,
+            n_zero_variance_dropped=n_zerovar,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost_usd=cost_usd,
@@ -1393,6 +1435,7 @@ def run_cell(
     finally:
         inference_logger.removeHandler(handler)
         inference_logger.removeHandler(collinear_handler)
+        inference_logger.removeHandler(zerovar_handler)
         inference_logger.setLevel(prev_level)
 
 

@@ -66,6 +66,11 @@ logger = logging.getLogger(__name__)
 _FISHERZ_SINGULAR_PHRASE = "correlation matrix is singular"
 _LINALG_SINGULAR_PHRASE = "singular matrix"
 
+# Cap on how many column names a drop warning spells out. At k=1 on LT nearly
+# all 38 nodes are constant, and the count -- not the roster -- is what the
+# orchestrator scrapes.
+_MAX_LOGGED_NAMES = 10
+
 # `causal-learn` is part of the chambers extra; importing it lazily so
 # tests of unrelated chamber-pipeline pieces don't fail at collection
 # time when the extra is uninstalled.
@@ -345,6 +350,30 @@ def run_pc(
     # perturbed something that drives that variable.
     variances = pooled_data.var()
     valid_cols = [n for n in node_names if variances.get(n, 0.0) > 1e-12]
+
+    zero_variance = [n for n in node_names if variances.get(n, 0.0) <= 1e-12]
+    if zero_variance:
+        # Logged for the same reason as the collinear drop below: this is a
+        # degradation path whose RATE TRACKS THE INDEPENDENT VARIABLE. The
+        # fewer experiments bought, the more variables no intervention
+        # perturbed, the more columns are constant and get padded back as
+        # zeros -- guaranteed false negatives concentrated at low budget.
+        # That is not a confound between arms (activating more variables is
+        # what good selection does; it is the causal pathway), but without a
+        # counter the budget curve cannot be decomposed into "PC saw more
+        # nodes" versus "PC inferred better edges".
+        #
+        # The message deliberately shares no marker substring with the
+        # collinear warning ("collinear") or the degeneracy warning ("fell
+        # back"); `test_pc_warning_markers_are_unambiguous` pins that, because
+        # three handlers scraping one logger is exactly where a counter starts
+        # silently double-counting.
+        logger.warning(
+            "PC dropped %d zero-variance column(s): %s",
+            len(zero_variance),
+            ", ".join(zero_variance[:_MAX_LOGGED_NAMES])
+            + (" ..." if len(zero_variance) > _MAX_LOGGED_NAMES else ""),
+        )
 
     if not valid_cols:
         # Nothing has signal — return all-zeros on the full node set.

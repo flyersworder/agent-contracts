@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 
 from evaluation.chamber_pipeline.inference import (
+    _MAX_LOGGED_NAMES,
     CAUSAL_LEARN_AVAILABLE,
     cpdag_to_directed_adjacency,
     pool_experiment_data,
@@ -376,3 +377,49 @@ class TestUnknownLinAlgErrorReraise:
         data = pd.DataFrame({"x": rng.standard_normal(50), "y": rng.standard_normal(50)})
         with pytest.raises(ValueError, match="contains nan"):
             run_pc(data, ["x", "y"])
+
+
+class TestZeroVarianceLogging:
+    """The zero-variance drop must be countable, like the other two paths.
+
+    Of PC's three degradation paths this is the one whose rate tracks the
+    independent variable most directly: a column no bought experiment
+    perturbed is constant, gets dropped, and is padded back with zeros. Until
+    2026-08-29 it was the only one that emitted nothing at all.
+    """
+
+    def test_zero_variance_drop_is_logged_with_its_count(self, caplog) -> None:
+        rng = np.random.default_rng(3)
+        data = pd.DataFrame(
+            {
+                "a": rng.normal(size=200),
+                "b": rng.normal(size=200),
+                "flat1": np.zeros(200),
+                "flat2": np.full(200, 7.0),
+            }
+        )
+        with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+            adj = run_pc(data, ["a", "b", "flat1", "flat2"], alpha=0.05, seed=0)
+
+        hits = [r for r in caplog.records if "zero-variance" in r.getMessage().lower()]
+        assert len(hits) == 1
+        # The COUNT must be the first logging arg, not merely inside the
+        # formatted string: `_PcZeroVarianceHandler` reads `record.args[0]` so
+        # that two columns dropped in one warning count as two.
+        assert hits[0].args[0] == 2
+        # And the drop is local -- the surviving pair is still scored.
+        assert adj.loc["flat1"].sum() == 0
+        assert adj["flat2"].sum() == 0
+
+    def test_long_drop_lists_are_truncated(self, caplog) -> None:
+        """At low budget nearly every LT node is constant; do not log 38 names."""
+        n = _MAX_LOGGED_NAMES + 5
+        data = pd.DataFrame({"a": np.random.default_rng(4).normal(size=100)})
+        for i in range(n):
+            data[f"flat{i}"] = 0.0
+        names = ["a"] + [f"flat{i}" for i in range(n)]
+        with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+            run_pc(data, names, alpha=0.05, seed=0)
+        message = next(r.getMessage() for r in caplog.records if "zero-variance" in r.getMessage())
+        assert message.endswith("...")
+        assert message.count(",") == _MAX_LOGGED_NAMES - 1

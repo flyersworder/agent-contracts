@@ -132,6 +132,16 @@ class RunRecord:
             the dropped node makes no claim while the rest of the graph is
             still inferred -- unlike `n_pc_degeneracies`, which is total.
             None for variants that never run PC.
+        n_zero_variance_dropped: How many columns PC dropped as constant in
+            the pooled data. Also a LOCAL loss, but distinct from a collinear
+            drop: a collinear column HAS signal that merely duplicates
+            another, while a zero-variance column has none, because no bought
+            experiment perturbed anything upstream of it. Its rate therefore
+            falls as the budget grows, which makes it the one degradation
+            path that tracks the independent variable directly. Recorded so
+            the budget curve can be decomposed into how much of the graph PC
+            was asked about versus how well it answered. None for variants
+            that never run PC.
         n_pc_degeneracies: How many times PC's singular-matrix
             fallback fired during this cell. Captured by a logging
             handler the orchestrator installs around each cell. None
@@ -197,6 +207,7 @@ class RunRecord:
     providers_used: str | None = None
     n_pc_degeneracies: int | None = None
     n_collinear_dropped: int | None = None
+    n_zero_variance_dropped: int | None = None
 
     # --- PC provenance: the three parameters that silently determine the
     #     graph. Recorded per cell because `runs/m6-controls.parquet`

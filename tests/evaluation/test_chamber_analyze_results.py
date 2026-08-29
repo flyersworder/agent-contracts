@@ -737,6 +737,7 @@ def _validity_frame(
                         # column is UNMEASURED, not clean -- which is the
                         # distinction `missing_columns` exists to make.
                         "n_collinear_dropped": 0,
+                        "n_zero_variance_dropped": 0,
                         "conservation_certified": True,
                     }
                 )
@@ -963,3 +964,23 @@ def test_suspend_between_the_two_clocks_is_surfaced() -> None:
         "a 700s span around 100s of compute is ~600s of suspend; reporting 0 "
         "would hide exactly the condition that stretched a 10h sweep to days"
     )
+
+
+def test_absent_zero_variance_column_is_reported_but_not_as_contamination() -> None:
+    """Its absence is a gap in decomposition, not evidence of a biased arm.
+
+    Distinguished from the `UNMEASURED` notices because a zero-variance drop
+    cannot bias an arm-vs-arm comparison: every arm at one budget faces the
+    same padding. Conflating the two would teach a reader to discount the
+    warning that does mean contamination.
+    """
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    frame = _validity_frame().drop(columns=["n_zero_variance_dropped"])
+    warns = validity_warnings(harness_validity_report(frame))
+    assert len(warns) == 1
+    assert warns[0].startswith("NOT RECORDED: n_zero_variance_dropped")
+    assert "UNMEASURED" not in warns[0]

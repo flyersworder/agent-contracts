@@ -42,6 +42,7 @@ from evaluation.chamber_pipeline.orchestrator import (
     _invoke_with_timeout,
     _PcCollinearHandler,
     _PcDegeneracyHandler,
+    _PcZeroVarianceHandler,
     _read_llm_metrics,
     _read_llm_provenance,
     count_cells,
@@ -2127,3 +2128,84 @@ class TestRunCellRecordsPcProvenance:
         )
         assert record.status == "skipped"
         assert record.pc_alpha == 0.01
+
+
+class TestZeroVarianceCounting:
+    """The zero-variance count must reach the RunRecord, and stay its own path.
+
+    Three handlers now scrape one logger. That is exactly the shape in which a
+    counter starts double-counting: `_PcCollinearHandler` matches "dropped",
+    and so does the zero-variance warning.
+    """
+
+    @staticmethod
+    def _run(data, names, **kwargs):
+        """Run PC with all three handlers attached; return their counts."""
+        from evaluation.chamber_pipeline.inference import run_pc
+
+        inference_logger = logging.getLogger("evaluation.chamber_pipeline.inference")
+        handlers = {
+            "zerovar": _PcZeroVarianceHandler(),
+            "collinear": _PcCollinearHandler(),
+            "degeneracy": _PcDegeneracyHandler(),
+        }
+        for h in handlers.values():
+            inference_logger.addHandler(h)
+        prev = inference_logger.level
+        inference_logger.setLevel(logging.WARNING)
+        try:
+            run_pc(data, names, alpha=0.05, seed=0, **kwargs)
+        finally:
+            for h in handlers.values():
+                inference_logger.removeHandler(h)
+            inference_logger.setLevel(prev)
+        return {k: h.count for k, h in handlers.items()}
+
+    def test_counts_columns_not_warnings(self) -> None:
+        # TWO constant columns, emitted in ONE warning -- so a handler that
+        # incremented by 1 per warning would read 1 and fail here. Same
+        # mutation guard as the collinear test above.
+        rng = np.random.default_rng(0)
+        data = pd.DataFrame(
+            {
+                "a": rng.normal(size=300),
+                "b": rng.normal(size=300),
+                "flat1": np.zeros(300),
+                "flat2": np.full(300, 3.0),
+            }
+        )
+        counts = self._run(data, ["a", "b", "flat1", "flat2"])
+        assert counts["zerovar"] == 2, "must count COLUMNS dropped, not warnings emitted"
+
+    def test_pc_warning_markers_are_unambiguous(self) -> None:
+        """Each degradation path must increment its own handler and no other.
+
+        Asserted by driving all three paths rather than by inspecting the
+        message strings, so a reworded warning that collides with another
+        handler's marker fails here instead of silently inflating a count.
+        """
+        rng = np.random.default_rng(1)
+
+        # Path 1: constant columns only.
+        base = rng.normal(size=300)
+        zero_var = pd.DataFrame(
+            {"a": base, "b": 2.0 * base + rng.normal(scale=0.5, size=300), "flat": np.zeros(300)}
+        )
+        counts = self._run(zero_var, ["a", "b", "flat"])
+        assert counts == {"zerovar": 1, "collinear": 0, "degeneracy": 0}
+
+        # Path 2: a numerically duplicate column, no constant one.
+        collinear = pd.DataFrame(
+            {
+                "a": base,
+                "b": 2.0 * base + rng.normal(scale=0.5, size=300),
+                "dup": base + rng.normal(scale=1e-7, size=300),
+            }
+        )
+        counts = self._run(collinear, ["a", "b", "dup"])
+        assert counts == {"zerovar": 0, "collinear": 1, "degeneracy": 0}
+
+        # Path 3: exact collinearity with the filter OFF -> singular fallback.
+        singular = pd.DataFrame({"x": base, "y": 2.0 * base, "z": rng.normal(size=300)})
+        counts = self._run(singular, ["x", "y", "z"], collinearity_threshold=None)
+        assert counts == {"zerovar": 0, "collinear": 0, "degeneracy": 1}

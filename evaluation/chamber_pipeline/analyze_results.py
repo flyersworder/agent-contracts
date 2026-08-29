@@ -756,6 +756,7 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         One row per (agent_name, budget_k): n_cells, error_rate,
         fallback_rate (fallbacks per LLM call), pc_degeneracy_rate,
+        collinear_drop_rate, zero_variance_drop_rate,
         conservation_fail_rate, wall_mean, wall_p95.
     """
     out = []
@@ -776,6 +777,13 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
         else:
             coll_rate = 0.0
             coll_mean = 0.0
+        if "n_zero_variance_dropped" in ok.columns and len(ok):
+            zv = ok["n_zero_variance_dropped"].fillna(0)
+            zv_rate = float((zv > 0).mean())
+            zv_mean = float(zv.mean())
+        else:
+            zv_rate = 0.0
+            zv_mean = 0.0
         if "conservation_certified" in ok.columns:
             judged = ok[ok["conservation_certified"].notna()]
             cons_fail = (
@@ -806,6 +814,18 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
                 # warnings, the mean says how much of the graph went silent.
                 "collinear_drop_rate": coll_rate,
                 "collinear_cols_mean": coll_mean,
+                # Deliberately NOT in `contaminating`, and deliberately not in
+                # the `rates` tuple that drives warnings. A zero-variance
+                # column is one no bought experiment perturbed, so this rate
+                # MUST fall as the budget rises -- it is the mechanism by
+                # which budget buys accuracy, not a defect in measuring it.
+                # Warning on its budget-variance would fire on every valid
+                # sweep, the same trap `conservation_fail_rate` is kept out of
+                # below. Recorded because the decomposition it enables -- how
+                # much of the graph PC was asked about, versus how well it
+                # answered -- is not recoverable from the cells otherwise.
+                "zero_variance_drop_rate": zv_rate,
+                "zero_variance_cols_mean": zv_mean,
                 "conservation_fail_rate": cons_fail,
                 # Wall-CLOCK span minus active compute. `wall_time_seconds`
                 # is `time.perf_counter()`, which on macOS does not advance
@@ -830,6 +850,7 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
             "n_selection_fallbacks",
             "n_pc_degeneracies",
             "n_collinear_dropped",
+            "n_zero_variance_dropped",
             "conservation_certified",
         )
         if c not in df.columns
@@ -887,6 +908,21 @@ def validity_warnings(report: pd.DataFrame) -> list[str]:
         "collinear_drop_rate",
     }
     for column in report.attrs.get("missing_columns", []):
+        if column == "n_zero_variance_dropped":
+            # Deliberately NOT phrased as contamination. This path cannot bias
+            # an arm-vs-arm comparison; what its absence costs is the ability
+            # to decompose the budget curve. Measured 2026-08-29 on LT:
+            # 18 of 38 nodes are padded at k=1, 9 at k=12, 1 at k=59. A frame
+            # without the column reads 0.00 and hides that entirely.
+            warnings.append(
+                "NOT RECORDED: n_zero_variance_dropped is absent, so "
+                "zero_variance_drop_rate reads 0.00 here. It does NOT bias "
+                "arm-vs-arm comparisons -- every arm at one budget faces the "
+                "same padding -- but without it the budget curve cannot be "
+                "split into how much of the graph PC was asked about versus "
+                "how well it answered."
+            )
+            continue
         warnings.append(
             f"UNMEASURED: {column} is absent from these records, so its rate "
             "reads 0.00 here. That is not evidence the path is clean -- "

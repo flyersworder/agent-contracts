@@ -564,17 +564,48 @@ raise.
 - **No duplicate cell keys, and ground truth is constant** (57 LT / 42 WT
   edges) across every headline file; one `model_id` per file.
 
-**Open instrumentation gap, recorded not fixed:** `run_pc` drops zero-variance
-columns silently — there is no logger call, so unlike PC degeneracy and
-collinear drops it has **no counter**. That path fires *more at low budget*
-(a variable no bought experiment perturbs is constant, gets dropped, and is
-padded back with zeros — guaranteed false negatives), so its rate tracks the
-independent variable, which is the entry-1 shape. It is not a confound between
-arms — activating more variables is exactly what good selection does, so this
-is the causal pathway rather than a bias — but with no counter we cannot
-decompose the budget curve into "PC saw more nodes" versus "PC inferred better
-edges". Adding `n_zero_variance_dropped` is purely additive and changes no
-computation.
+**Instrumentation gap CLOSED (same day):** `run_pc` dropped zero-variance
+columns silently — no logger call, so unlike PC degeneracy and collinear drops
+it had no counter. `n_zero_variance_dropped` now records it, via a third
+handler on the same logger; the three markers are asserted mutually exclusive
+by driving all three paths, not by comparing strings.
+
+What it shows, measured on `random` seed 0 immediately after wiring:
+
+| chamber | | | | |
+|---|---|---|---|---|
+| LT (38 nodes) | k=1: **18** | k=3: 15 | k=12: **9** | k=59: 1 |
+| WT (32 nodes) | k=1: **20** | k=7: 14 | k=14: **9** | k=28: 0 |
+
+So at the low end of our budget curves **a quarter of the graph is answered by
+zero-padding rather than by inference** — 9 of 38 LT nodes at k=12, 9 of 32 WT
+nodes at k=14 — and that was previously invisible. This is not a defect and not
+a confound: every arm at one budget faces the same padding, and activating more
+variables is precisely what good selection does, so it is the causal pathway
+rather than a bias in it. It is a **decomposition** the budget curve could not
+otherwise support: how much of the graph PC was asked about, versus how well it
+answered. Deliberately kept out of `contaminating` and out of the `rates` tuple
+that drives warnings — its rate MUST fall with budget, so warning on that would
+fire on every valid sweep, the trap `conservation_fail_rate` is already kept out
+of. A frame lacking the column gets a `NOT RECORDED` notice worded distinctly
+from `UNMEASURED`, so the two are not conflated.
+
+Two side findings from the same measurement:
+
+- **LT has a mild structural recall ceiling from subsampling, not from data.**
+  At the full 59-experiment pool no LT column is constant; in the 300-row
+  subsample `diode_vis_2` is, costing **1 of 57 edges — a recall ceiling of
+  0.982 at k=59**. Negligible next to WT's barometer ceiling of 0.786, and it
+  moves with the subsample seed (see entry 14).
+- **The path never fires on either chamber below the handler.** An earlier
+  measurement that reported zero drops everywhere was wrong for a harness
+  reason worth recording: the probe imported the pipeline via
+  `sys.path.insert("evaluation")`, so the module registered as
+  `chamber_pipeline.inference` while `run_cell` attaches its handlers to
+  `evaluation.chamber_pipeline.inference`. **The handlers were never attached
+  and every counter read 0** — including the collinear one, which we already
+  know fires 3 columns on WT. A counter that reads zero because nothing is
+  listening looks exactly like a clean run.
 
 ## How to add an entry
 
