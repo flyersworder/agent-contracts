@@ -54,6 +54,16 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# Incremented once per `run_pc` call. The orchestrator snapshots it around each
+# cell so a counter of 0 can be told from "inference never happened": seven
+# agents return `_empty_adjacency` early (zero budget, empty menu, or no frames
+# after every selection failed), and such a cell recorded
+# n_pc_degeneracies=n_collinear_dropped=n_zero_variance_dropped=0 -- reading in
+# the validity report exactly like a clean PC run. Module-level and not
+# thread-safe, the same assumption the logging handlers already make: cells are
+# serial within a process and parallel only across processes.
+PC_INVOCATIONS = 0
+
 # The exact error phrase causal-learn's Fisher-Z raises on a singular
 # sub-correlation matrix (verified against causallearn==0.1.4 at
 # .venv/lib/.../causallearn/utils/cit.py:218 and :482) and the phrase
@@ -335,6 +345,9 @@ def run_pc(
         ImportError: If `causal-learn` is not installed.
         ValueError: If `pooled_data` columns don't match `node_names`.
     """
+    global PC_INVOCATIONS
+    PC_INVOCATIONS += 1
+
     if not CAUSAL_LEARN_AVAILABLE:
         raise ImportError(
             "causal-learn is required for PC inference. "
@@ -395,6 +408,20 @@ def run_pc(
 
     if not valid_cols:
         # Nothing has signal — return all-zeros on the full node set.
+        #
+        # This is a TOTAL loss, identical in outcome to the singular-matrix
+        # fallback below: every node makes no claim and F1 is 0 by
+        # construction. It must therefore reach the degeneracy counter and not
+        # only `n_zero_variance_dropped`, which is deliberately excluded from
+        # the warning paths because its rate MUST fall with budget. Excluded,
+        # a cell whose graph is entirely padding printed "No degradation
+        # detected on any recorded path". The "fell back" marker is what
+        # `_PcDegeneracyHandler` scrapes.
+        logger.warning(
+            "PC inference fell back to all-zeros adjacency on %d-node input "
+            "(every column was constant in the pooled data)",
+            len(node_names),
+        )
         return pd.DataFrame(
             np.zeros((len(node_names), len(node_names)), dtype=int),
             index=node_names,

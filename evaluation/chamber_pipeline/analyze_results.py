@@ -346,6 +346,14 @@ LADDER_ORDER: tuple[str, ...] = (
 # printed next to the smallest difference this design could have detected.
 _MDE_Z = 2.8
 
+# Degradation counters whose absence on SOME rows silently becomes a zero.
+_COUNTER_COLUMNS: tuple[str, ...] = (
+    "n_selection_fallbacks",
+    "n_pc_degeneracies",
+    "n_collinear_dropped",
+    "n_zero_variance_dropped",
+)
+
 
 def ladder_frame(df: pd.DataFrame) -> pd.DataFrame:
     """One row per (ladder rung, budget) for the M6 coordination table.
@@ -967,6 +975,30 @@ def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
     # Record which source columns were ABSENT. Without this a frame that never
     # recorded a path is indistinguishable from one where the path never fired,
     # and `validity_warnings` would call an unmeasured harness clean.
+    # A column PARTLY populated is neither present nor absent, and `fillna(0)`
+    # silently averages the unrecorded half in as zeros. Reachable by normal
+    # workflow: the JSONL sidecar resumes across a counter's introduction, so
+    # the older lines inflate through `RunRecord(**d)` with the field
+    # defaulting to None and consolidate into one half-null column. Measured on
+    # a 6-cell frame where 3 cells dropped 38 columns and 3 predate the
+    # counter: the report printed mean 19.0 for a true 38 and a rate of 0.50
+    # for a true 1.00, with no warning. `provenance_problems` already refuses
+    # the same shape; the degradation counters had no equivalent.
+    #
+    # Detected against `n_pc_degeneracies` rather than against nullness alone,
+    # because a null counter is LEGITIMATE on a cell where PC never ran -- and
+    # since that field is now itself None exactly then, a row with a non-null
+    # degeneracy count and a null sibling can only be a legacy row.
+    partial: list[str] = []
+    if "n_pc_degeneracies" in df.columns:
+        pc_ran = df["n_pc_degeneracies"].notna()
+        for column in _COUNTER_COLUMNS:
+            if column not in df.columns:
+                continue
+            gaps = int((pc_ran & df[column].isna()).sum())
+            if gaps:
+                partial.append(f"{column} ({gaps} of {int(pc_ran.sum())} PC-cells unrecorded)")
+    report.attrs["partial_columns"] = partial
     report.attrs["missing_columns"] = [
         c
         for c in (
@@ -1039,6 +1071,13 @@ def validity_warnings(report: pd.DataFrame) -> list[str]:
         "pc_degeneracy_rate",
         "collinear_drop_rate",
     }
+    for detail in report.attrs.get("partial_columns", []):
+        warnings.append(
+            f"PARTIALLY RECORDED: {detail}. The unrecorded rows are averaged "
+            "in as zeros, so every rate and mean for this path reads LOW. "
+            "Usually a sidecar resumed across the counter's introduction -- "
+            "split the frame on the column's nullity rather than pooling it."
+        )
     for column in report.attrs.get("missing_columns", []):
         if column in ("blas_backend", "platform_tag"):
             # Absent, not mixed. A pre-2026-08-26 sweep predates the stamp, so
@@ -1060,11 +1099,11 @@ def validity_warnings(report: pd.DataFrame) -> list[str]:
             # without the column reads 0.00 and hides that entirely.
             warnings.append(
                 "NOT RECORDED: n_zero_variance_dropped is absent, so "
-                "zero_variance_drop_rate reads 0.00 here. It does NOT bias "
-                "arm-vs-arm comparisons -- every arm at one budget faces the "
-                "same padding -- but without it the budget curve cannot be "
-                "split into how much of the graph PC was asked about versus "
-                "how well it answered."
+                "zero_variance_drop_rate reads 0.00 here. Padding is not a "
+                "confound because it MEDIATES selection quality -- activating "
+                "more variables is what good selection does -- but without it "
+                "the budget curve cannot be split into how much of the graph "
+                "PC was asked about versus how well it answered."
             )
             continue
         warnings.append(

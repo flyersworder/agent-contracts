@@ -1102,3 +1102,40 @@ class TestProvenanceHomogeneity:
             blas_backend=["scipy-openblas", "scipy-openblas", "accelerate", "accelerate"]
         )
         require_homogeneous_provenance(mixed, allow_mixed=True)  # must not raise
+
+
+def test_a_partly_recorded_counter_is_flagged_not_averaged_as_zero() -> None:
+    """`fillna(0)` makes unrecorded rows read as clean ones.
+
+    Reachable by normal workflow: the JSONL sidecar resumes across a counter's
+    introduction, so older lines carry None and newer ones an int. Measured on
+    this frame the report shows mean 19.0 for a true 38 and rate 0.50 for a
+    true 1.00, so the warning is the only thing standing between a reader and
+    a halved degradation rate.
+    """
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    frame = _validity_frame()
+    frame["n_pc_degeneracies"] = 0
+    frame["n_zero_variance_dropped"] = [38 if i % 2 == 0 else None for i in range(len(frame))]
+    warns = validity_warnings(harness_validity_report(frame))
+    assert any(w.startswith("PARTIALLY RECORDED: n_zero_variance_dropped") for w in warns)
+
+
+def test_a_counter_null_because_pc_never_ran_is_not_flagged_as_partial() -> None:
+    """A null counter is legitimate when inference did not happen -- and since
+    `n_pc_degeneracies` is now itself None exactly then, the two cases are
+    distinguishable without guessing from the arm name."""
+    from evaluation.chamber_pipeline.analyze_results import (
+        harness_validity_report,
+        validity_warnings,
+    )
+
+    frame = _validity_frame()
+    frame["n_pc_degeneracies"] = [0 if i % 2 == 0 else None for i in range(len(frame))]
+    frame["n_zero_variance_dropped"] = [3 if i % 2 == 0 else None for i in range(len(frame))]
+    warns = validity_warnings(harness_validity_report(frame))
+    assert not any(w.startswith("PARTIALLY RECORDED") for w in warns)

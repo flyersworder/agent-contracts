@@ -729,9 +729,14 @@ What it shows, measured on `random` seed 0 immediately after wiring:
 So at the low end of our budget curves **a quarter of the graph is answered by
 zero-padding rather than by inference** — 9 of 38 LT nodes at k=12, 9 of 32 WT
 nodes at k=14 — and that was previously invisible. This is not a defect and not
-a confound: every arm at one budget faces the same padding, and activating more
-variables is precisely what good selection does, so it is the causal pathway
-rather than a bias in it. It is a **decomposition** the budget curve could not
+a confound, but NOT for the reason first written here. An earlier draft said
+"every arm at one budget faces the same padding", which is false and checkable:
+at a fixed k each arm buys a different set of experiments, so the set of
+unperturbed — hence constant, hence padded — columns differs by arm. That is
+precisely why the counter is recorded per arm. The correct argument is
+MEDIATION: padding differences are *caused by* selection quality, and
+activating more variables is what good selection does, so the path lies on the
+causal route being measured rather than beside it. It is a **decomposition** the budget curve could not
 otherwise support: how much of the graph PC was asked about, versus how well it
 answered. Deliberately kept out of `contaminating` and out of the `rates` tuple
 that drives warnings — its rate MUST fall with budget, so warning on that would

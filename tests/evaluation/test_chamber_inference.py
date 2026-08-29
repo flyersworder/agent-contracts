@@ -451,3 +451,26 @@ def test_nan_variance_column_is_counted_not_silently_dropped(caplog) -> None:
     # And it is padded back, so the output still covers the full node set.
     assert list(adj.index) == ["a", "b", "missing"]
     assert adj.loc["missing"].sum() == 0
+
+
+def test_an_all_constant_input_reaches_the_degeneracy_counter(caplog) -> None:
+    """A graph that is ENTIRELY padding is a total loss, like the singular
+    fallback, and must warn. `n_zero_variance_dropped` alone cannot carry it:
+    that counter is deliberately excluded from the warning paths because its
+    rate must fall with budget, so a fully-padded cell printed "No degradation
+    detected on any recorded path"."""
+    data = pd.DataFrame({"a": np.zeros(50), "b": np.zeros(50), "c": np.zeros(50)})
+    with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+        adj = run_pc(data, ["a", "b", "c"], alpha=0.05, seed=0)
+    assert int(adj.values.sum()) == 0
+    assert any("fell back" in r.getMessage().lower() for r in caplog.records)
+
+
+def test_run_pc_invocations_are_counted() -> None:
+    """Lets a caller tell "PC ran and found nothing" from "PC never ran"."""
+    from evaluation.chamber_pipeline import inference as inf
+
+    before = inf.PC_INVOCATIONS
+    rng = np.random.default_rng(11)
+    run_pc(pd.DataFrame({"a": rng.normal(size=80), "b": rng.normal(size=80)}), ["a", "b"], seed=0)
+    assert before + 1 == inf.PC_INVOCATIONS

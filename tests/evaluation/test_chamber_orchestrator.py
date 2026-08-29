@@ -2352,3 +2352,21 @@ class TestParallelWorkerFailure:
         )
         with pytest.raises(SweepConfigurationError):
             run_sweep(sweep, max_workers=2)
+
+
+@pytest.mark.parametrize("arm", ["random", "llm_pc"])
+def test_counters_are_none_when_pc_never_ran_for_a_non_llm_only_arm(arm: str) -> None:
+    """The gate must be "did `run_pc` execute", not "is this llm_only".
+
+    Seven agents return `_empty_adjacency` early -- zero budget, empty menu, or
+    no frames after every selection failed -- and `random` at k=0 is the
+    cheapest of them. Under the old name-based gate such a cell recorded
+    0/0/0 with an all-zeros adjacency, which reads in the validity report
+    exactly like a clean PC run on a graph it recovered nothing from.
+    """
+    record = run_cell(get_spec(arm), "lt", "standard", budget_k=0, seed=0)
+    assert record.status == "ok"
+    assert record.f1 == 0.0
+    assert record.n_pc_degeneracies is None
+    assert record.n_collinear_dropped is None
+    assert record.n_zero_variance_dropped is None

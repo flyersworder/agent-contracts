@@ -51,6 +51,7 @@ from agent_contracts.integrations.causalchamber import (
     create_contracted_chamber_agent,
 )
 
+from . import inference as inference_module
 from .agents import (
     fan_in_agents,
     greedy_ig_lite_agent,
@@ -1312,6 +1313,7 @@ def run_cell(
     # Wrap the agent invocation in a logging handler scoped to inference,
     # so we count PC-degeneracy fallbacks per cell.
     inference_logger = logging.getLogger("evaluation.chamber_pipeline.inference")
+    pc_calls_before = inference_module.PC_INVOCATIONS
     handler = _PcDegeneracyHandler()
     collinear_handler = _PcCollinearHandler()
     zerovar_handler = _PcZeroVarianceHandler()
@@ -1411,12 +1413,16 @@ def run_cell(
                 except ConservationViolationError:
                     certified = False
 
-        # PC variants populate degeneracy count; llm_only doesn't run PC.
-        n_pc_degen: int | None = None if spec.name == "llm_only" else handler.count
-        n_collinear: int | None = None if spec.name == "llm_only" else collinear_handler.count
-        # `llm_only` never calls run_pc, so None (not 0) -- "not applicable"
-        # must stay distinguishable from "PC ran and dropped nothing".
-        n_zerovar: int | None = None if spec.name == "llm_only" else zerovar_handler.count
+        # All three PC counters gate on whether `run_pc` ACTUALLY RAN, not on
+        # the arm's name. The name test covered `llm_only` and missed the seven
+        # agents that return `_empty_adjacency` early -- zero budget, empty
+        # menu, or no frames after every selection failed. Those cells recorded
+        # 0/0/0 with an all-zeros adjacency, reading in the validity report
+        # exactly like a clean PC run. None (not 0) means "not applicable".
+        pc_ran = pc_calls_before < inference_module.PC_INVOCATIONS
+        n_pc_degen: int | None = handler.count if pc_ran else None
+        n_collinear: int | None = collinear_handler.count if pc_ran else None
+        n_zerovar: int | None = zerovar_handler.count if pc_ran else None
 
         return RunRecord(
             **_pc_provenance,
