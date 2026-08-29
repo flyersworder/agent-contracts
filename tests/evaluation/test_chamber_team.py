@@ -507,3 +507,31 @@ def test_claim_cap_activity_is_recorded(make_ladder_adapter, counting_llm):
     stats = adapter.coordination_stats
     assert stats["n_claim_truncated"] >= 0
     assert 0.0 <= stats["claim_pool_share"] <= 1.0
+
+
+class TestSubstringConflictCounter:
+    """Incidence of the removed substring guard, measured not argued."""
+
+    def test_counts_a_shadowed_name(self) -> None:
+        from evaluation.chamber_pipeline.agents import _substring_shadowed
+
+        # WT's real shadowed pair: the shorter is contained in the longer.
+        assert _substring_shadowed(["validate_load_in", "validate_load_in_mic"]) == 1
+
+    def test_disjoint_names_score_zero(self) -> None:
+        from evaluation.chamber_pipeline.agents import _substring_shadowed
+
+        assert _substring_shadowed(["alpha", "beta", "gamma"]) == 0
+
+    def test_a_name_does_not_shadow_itself(self) -> None:
+        """Without the `n != other` guard every name shadows itself and the
+        counter reads len(claimed) -- a defect rate of 100% in every cell."""
+        from evaluation.chamber_pipeline.agents import _substring_shadowed
+
+        assert _substring_shadowed(["alpha", "beta"]) == 0
+
+    @requires_causalchamber
+    def test_the_counter_reaches_the_stats(self, make_ladder_adapter, counting_llm):
+        adapter = make_ladder_adapter(counting_llm)
+        team_agents(adapter, seed=0, scout_a_budget=2, scout_b_budget=2, llm=counting_llm)
+        assert adapter.coordination_stats["n_substring_conflicts"] >= 0

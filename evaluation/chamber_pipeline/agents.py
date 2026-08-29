@@ -1115,6 +1115,19 @@ def _parse_name_list(response: Any, menu: list[str]) -> list[str]:
     return [n for n in menu if n in claimed]
 
 
+def _substring_shadowed(claimed: list[str]) -> int:
+    """How many claimed names a substring guard would have discarded.
+
+    Exactly the rule removed on 2026-08-29: `any(name in longer for longer in
+    claimed)`. Kept as a COUNTER rather than a filter so the incidence of the
+    old defect is measurable on the arm it affected, instead of argued from
+    menu structure. WT names three shadowed pairs of 28 (`validate_load_in`,
+    `validate_load_out`, `validate_osr_in`); LT names none, so this is
+    structurally 0 on LT.
+    """
+    return sum(1 for n in claimed if any(n != other and n in other for other in claimed))
+
+
 def _capped_claim(names: list[str], budget: int, stream: str, seed: int) -> list[str]:
     """At most `budget` of `names`, chosen without menu-order bias.
 
@@ -1271,6 +1284,12 @@ def team_agents(
     n_claim_truncated = max(0, len(uncapped_a) - len(claim_a)) + max(
         0, len(uncapped_b) - len(claim_b)
     )
+    # Measured on the lists actually used, before the cap: this is the
+    # incidence of the defect removed with the substring guard, not its
+    # effect. Non-zero means the old code silently dropped a real claim here.
+    n_substring_conflicts = _substring_shadowed(list(source_a)) + _substring_shadowed(
+        list(source_b)
+    )
 
     # Partition the REST of the menu between the scouts, so each selects from
     # a pool strictly larger than its budget. Two constraints, and an earlier
@@ -1361,6 +1380,7 @@ def team_agents(
         # scouts claimed within budget and the cap never ran; a large number
         # means the cap, not the negotiation, decided most of the split.
         "n_claim_truncated": n_claim_truncated,
+        "n_substring_conflicts": n_substring_conflicts,
         # The larger scout's claim as a share of what it could see. The cap
         # only matters in proportion to this: at 0.1 the shuffled leftover
         # dominates the pool, at 0.77 the claim does.

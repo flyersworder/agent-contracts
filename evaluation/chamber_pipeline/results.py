@@ -156,6 +156,10 @@ class RunRecord:
             negotiation to decide the split, and until 2026-08-29 it cut in
             menu order -- which is grouped by variable family, so the same
             families were dropped in every seed.
+        n_substring_conflicts: How many claimed names a substring guard would
+            have discarded -- the incidence of the defect removed on
+            2026-08-29, measured rather than argued. Structurally 0 on LT,
+            whose menu has no shadowed pairs; WT has three of 28.
         claim_pool_share: The larger scout's capped claim as a fraction of the
             pool it selects from. The cap only matters in proportion to this:
             ~0.10 at LT k=6, where the shuffled leftover dominates the pool,
@@ -228,6 +232,7 @@ class RunRecord:
     n_zero_variance_dropped: int | None = None
     n_llm_attempts: int | None = None
     n_claim_truncated: int | None = None
+    n_substring_conflicts: int | None = None
     claim_pool_share: float | None = None
 
     # --- PC provenance: the three parameters that silently determine the
