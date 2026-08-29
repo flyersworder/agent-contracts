@@ -960,6 +960,7 @@ that document's final section. Harness defects stay in
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`
 - **Causal Chamber Plan**: `docs/causal_chamber_validation_plan.md` (full M4/M5/M6 spec for AAMAS 2027 / ECAI 2027)
+- **M7 plan + paper positioning**: `docs/superpowers/specs/2026-08-29-m7-mechanism-and-missing-arms.md` — §1 holds the loop-vs-graph positioning (what we contribute, the confound we remove, the objection that can sink it and the scoping answer); §5 the four phases
 - **OR/Optimization Ideas**: `docs/or_optimization_research_ideas.md` (backlog of 3 OR-inspired directions)
 - **Repository**: https://github.com/flyersworder/agent-contracts
 

@@ -5,7 +5,129 @@
 **Results of record**: `docs/chamber-results.md`
 **Harness defects**: `docs/chamber-harness-validity-register.md` (17 entries — read first)
 
-## 1. Why there is an M7
+## 1. Positioning: what this contributes to the loop-vs-graph debate
+
+Written down because it is the reason the phases below are worth their cost,
+and because it changes what Phase 4 has to say.
+
+### The open slot
+
+**Loop engineering** (named 2026-06-07) and **graph engineering** (~2026-07-18)
+put multi-agent topology on the field's agenda. Critical reviews of both land
+on the same complaint: **there is no comparative benchmark.** Both camps argue
+from production anecdote, and the loudest advocates for graphs have vendor
+stakes. "Someone should measure this" is the open slot.
+
+The reason nobody has filled it is not lack of interest. **The obvious
+comparison is confounded and hard to de-confound**: in every multi-agent-vs-
+single comparison in the wild, the multi-agent system is allowed to spend more
+— more calls, more tokens, more tool invocations. When the graph wins you
+cannot tell whether topology helped or whether it simply bought more; when the
+loop wins, the same problem inverted.
+
+### What we can claim, and what backs it
+
+Four properties, each of which a reviewer can check:
+
+1. **Spend is held exactly constant across topologies.** Every rung buys
+   exactly *k* interventions — verified from the data, not trusted from the
+   code: `distinct = |A| + |B| - shared` solved against recorded overlap on all
+   270 fan-in cells, residual 0.00, zero non-integer shared counts.
+2. **The score is objective and external.** F1 against a physically-constructed
+   ground-truth graph. No LLM judge, no rubric.
+3. **Replicated across two chambers** with different graphs, menus and sampling
+   regimes.
+4. **Replicated across two models** separated by 3.9x in price, where the
+   ordering survives and the expensive model is the *less* accurate one.
+
+That combination is the contribution before any result is stated.
+
+### The intellectual contribution is the reframing, not a winner
+
+We should not publish "loops beat graphs." The grid does not say that, and it
+is the less interesting claim.
+
+The debate is framed as a question about **shape**. Our grid says shape
+predicts little: `fan_in_homog` and `team` have very different shapes and
+similar deficits; `relay` and `llm_pc` have different shapes, no measurable
+gap, and `relay` is cheaper. What predicts performance is **how much of the
+running record survives the partition** (§3).
+
+> **Multi-agent structure is close to free when agents share the record of what
+> has been done, and costly when they do not. The measured cost is not of
+> having several agents; it is of partitioning their information.**
+
+This is friendly to both camps and useful to neither's slogan: build the graph,
+just do not let its nodes go blind. It is also falsifiable — it predicts a
+shared-blackboard topology collapses onto the loop, and that a blind fan-out
+loses in proportion to how much it partitions.
+
+**Status: hypothesis, not finding.** The axis was recognised *after* seeing the
+grid and both its endpoints are unrun. This is exactly why Phase 2 is
+load-bearing rather than optional.
+
+### The price, which the discourse has not measured at all
+
+Everyone argues capability; nobody publishes the bill. We can: **+0 calls for
+the relay, +1 for either fan-in rung, +5 for team — and F1 does not rise with
+it. 12 of 12 fan-in points strictly dominated** across both chambers. For a
+practitioner this is the most directly actionable result we hold, and it is a
+free byproduct of having budget-matched arms.
+
+### Contracts are the instrument, not adjacent decoration
+
+The connection to make explicit in the paper: **you cannot budget-match
+topologies without a mechanism that splits a budget across agents and verifies
+the split held** — which is flow conservation over a delegation DAG
+(`core/delegation_graph.py`). The benchmark the critics are asking for is
+blocked on an enforcement problem, and we built the enforcement first, for
+unrelated reasons.
+
+Contracts made the measurement possible; the measurement is what the discourse
+is missing. That is a better story than either half alone.
+
+### The objection that can sink this, and the answer
+
+A graph-camp reviewer will say: **your task has no context pressure and no
+feedback, which is the entire reason graphs exist.** They are right on both
+counts.
+
+- **No context pressure.** The strongest argument for decomposition is that one
+  agent's context saturates over a long horizon. Our loop's record is *k*
+  lines. **We cannot observe the failure mode graphs are designed to solve.**
+- **No feedback.** Every arm is blind to the data it bought. Much of the
+  loop-engineering case is about error correction from observed results, and
+  our design removes precisely that.
+
+Do not soften either. **Scope the claim to them, which sharpens it:**
+
+> In the regime where a single agent's context is *not* the bottleneck,
+> partitioning strictly loses, and it loses in proportion to how much of the
+> record it destroys.
+
+That is bounded, defensible, and makes a prediction about where graphs should
+start winning — when the running record exceeds one context. It invites the
+follow-up study instead of pretending to have done it.
+
+### What this positioning obliges the phases to do
+
+Not decoration: it changes the plan.
+
+- **Phase 2 is promoted to load-bearing.** Without `one_shot` and `critique`
+  the axis is post-hoc and a reviewer will say so. Its pre-registered
+  predictions are what convert the reframing into a test — including the one
+  that kills it (`one_shot` ≈ `loop` means the record was never load-bearing).
+- **Phase 3b is not optional.** The adaptive-feedback arm is the only thing
+  that answers the sinking objection on its own terms. Reported as a bound,
+  not a branch.
+- **Phase 1 is what makes the reframing an explanation rather than a
+  correlation.** We know `team` matches the loop's coverage and scores worse;
+  until `chosen_experiments` is analysed we cannot say *which* picks differ.
+- **Phase 4 must carry the scoping sentence verbatim**, and must state the
+  untested regimes (long-horizon context pressure, >2 agents, heterogeneous
+  tools) as scope limits rather than future work.
+
+## 2. Why there is an M7
 
 M6 answered *what*: of 24 topology-vs-loop contrasts, 10 resolve and 9 favour a
 single sequential loop. It did not answer *why*, and it left the comparison
@@ -25,7 +147,7 @@ Three gaps, in the order they hurt:
    "real scientists look at results." Both are foreseeable and both are cheap
    to address.
 
-## 2. The reframing this plan is built on
+## 3. The reframing this plan is built on
 
 The ladder is not varying *topology*. It varies **how much of the loop's
 running record survives**:
@@ -50,7 +172,7 @@ into the loop by construction — two agents alternating with full shared
 history IS the loop with two voices. Build it only if Phase 2 leaves the axis
 ambiguous.
 
-## 3. Naming
+## 4. Naming
 
 `planner_reasoner` is misleading: nothing is planned. It is one loop with a
 seam at the midpoint and a different system prompt on each half — which is
@@ -60,7 +182,7 @@ exactly why it resolves in neither direction in all six of its contrasts.
 identifier is the `agent_name` value in 450+ recorded rows and renaming it
 would orphan the data. One line in `VARIANT_LABELS`.
 
-## 4. Phases
+## 5. Phases
 
 ### Phase 1 — mechanism (~$5, highest value)
 
@@ -141,7 +263,21 @@ Rename `relay`; fold the mechanism into the results doc; scope the headline to
 the axis rather than to "topology"; state the untested shapes (critique with
 iteration, adversarial disagreement, >2 agents) as scope limits.
 
-## 5. Sequencing and the reason for it
+Three things §1 obliges this rewrite to do, which the earlier draft did not:
+
+1. **Carry the scoping sentence verbatim** — "in the regime where a single
+   agent's context is not the bottleneck, partitioning strictly loses, and it
+   loses in proportion to how much of the record it destroys." The bound is the
+   claim; an unbounded version is wrong.
+2. **State the two structural absences in the limitations, not in future
+   work**: no context pressure (our loop's record is *k* lines, so we cannot
+   observe the failure mode graphs exist to solve) and no feedback outside the
+   Phase 3b arm.
+3. **Make the instrument argument explicit** — budget-matching topologies is an
+   enforcement problem, flow conservation solves it, and that is why this
+   benchmark did not already exist.
+
+## 6. Sequencing and the reason for it
 
 **Phase 1 → look → then decide 2 and 3.** Each new arm is another chance to
 find a harness defect: 17 recorded so far, and three found today were in code
@@ -149,11 +285,15 @@ written the same day. The mechanism result may also reframe what is worth
 running — if the cause turns out to be forced allocation, `shared_blackboard`
 becomes the most interesting arm on the list rather than an optional one.
 
-## 6. Non-goals
+## 7. Non-goals
 
 - Not a causal-discovery methods paper. PC on pooled interventional data stays
   fixed and mis-specified-but-uniform; improving it would change every number
   and answer a different question.
 - Not >2 agents. The axis is about partitioning information, not scale.
+- **Not adjudicating loop engineering vs graph engineering.** We are not
+  crowning a winner; we are supplying the missing measurement and replacing
+  their axis (shape) with a better one (surviving record). A paper that reads
+  as "loops win" invites a rebuttal from a regime we never tested.
 - Not a cross-vendor model sweep. One additional model family answers the
   objection; a sweep is a different paper.
