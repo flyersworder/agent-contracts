@@ -183,6 +183,52 @@ cells (2.9%) from OpenInference/Relace/DigitalOcean — unpinned, unknown
 quantization. Impact nil (residualised +0.0095 vs −0.0003, p=0.55) but the
 guarantee was void; now False. See register §8.
 
+## COST–ACCURACY FRONTIER (2026-08-29): both blind fan-in rungs are dominated 12/12
+
+Free result from the existing ladders — no new compute. `analyze_results
+--cost-frontier` prices each arm in **LLM calls**, not dollars: call count is a
+property of the topology, while price is a property of the provider that week
+(the same model has billed 4.7x more on one endpoint than another). Every arm
+buys exactly *k* interventions by construction, so the difference is
+**coordination overhead alone**.
+
+| arm | calls | overhead | what the overhead buys |
+|---|---|---|---|
+| loop (`llm_pc`) | k | — | reference |
+| relay (`planner_reasoner`) | k | **+0** | a second system prompt at the seam |
+| ensemble (`fan_in_homog`) | k+1 | +1 | the aggregator call |
+| roles (`fan_in_spec`) | k+1 | +1 | the aggregator call |
+| team | k+5 | +5 | 2 proposals, 2 revisions, 1 reconciliation |
+
+At LT k=6 team's flat overhead is **+83%**; by k=45 it has amortised to +11%.
+
+**Frontier (★ = Pareto-optimal; everything else costs more calls AND scores lower):**
+
+| arm | LT k=30 | LT k=45 | WT k=14 | WT k=21 |
+|---|---|---|---|---|
+| loop | 0.420 / 30 | 0.417 / 45 | 0.239 / 14 | **0.285 / 21 ★** |
+| relay | **0.431 / 30 ★** | **0.440 / 45 ★** | **0.260 / 14 ★** | 0.262 / 21 |
+| ensemble | 0.341 / 31 | 0.409 / 46 | 0.191 / 15 | 0.234 / 22 |
+| roles | 0.369 / 31 | 0.431 / 46 | 0.194 / 15 | 0.236 / 22 |
+| team | 0.374 / 35 | 0.414 / 50 | 0.218 / 19 | 0.240 / 26 |
+
+**Across all six chamber x budget points, both blind fan-in rungs are strictly
+dominated — 12 of 12. Not one is worth its overhead at any budget on either
+chamber.**
+
+Two qualifications that must travel with this:
+
+1. **The relay's stars are not "the relay is better".** Its accuracy edge over
+   the loop is below MDE at every point (§"The chain resolves in neither
+   direction"). What the frontier shows is that it is the only arm adding
+   structure at *zero* call overhead. The honest sentence is **"structure is
+   free when it costs no extra calls, and not worth paying for when it does"**.
+2. **Pareto ranking ignores statistical resolution.** At LT k=6 and WT k=7
+   `team` also lands on the frontier — as the most expensive endpoint with the
+   nominally highest F1, and at both points that edge is below MDE. Read those
+   stars as "not dominated", never as "best". A reviewer will check this.
+
+
 ## LT LOOP CURVE COMPLETE (2026-08-27): the gap closes because random catches up
 
 `runs/m6-lt-loop-curve.parquet` — **420/420 cells, 420 ok, 0 errors, 0 PC
