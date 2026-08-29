@@ -202,6 +202,15 @@ class ContractedChamberAgent:
         # any subsequent load() / ground_truth() / query_*() call just works.
         os.makedirs(self.data_root, exist_ok=True)
         self._dataset: Any = None
+        # Every experiment this adapter actually served, in spending order.
+        # Recorded HERE rather than in each agent because the adapter is the
+        # single choke point every arm passes through -- seven agents can each
+        # forget to report their picks; `query_intervention` cannot. Until
+        # 2026-08-29 only the COUNT of distinct picks was kept, which made
+        # "why does an arm with identical coverage score worse?" unanswerable
+        # after the fact: the answer is in WHICH experiments were bought, and
+        # nothing wrote them down.
+        self.purchased: list[str] = []
         self._ground_truth: Any = None
 
     # ------------------------------------------------------------ data loading
@@ -338,7 +347,11 @@ class ContractedChamberAgent:
         # Run
         df = self._dataset.get_experiment(experiment_name).as_pandas_dataframe()
 
-        # Post: charge every monitor that approved it + emit audit event
+        # Post: charge every monitor that approved it + emit audit event.
+        # Appended on the SUCCESS path only, so the roster matches what the
+        # budget was actually charged for -- a failed lookup costs nothing and
+        # must not appear as a purchase.
+        self.purchased.append(experiment_name)
         for monitor in self._charged_monitors():
             monitor.usage.add_tool_invocation("intervene")
         self._enforcer._emit_event(

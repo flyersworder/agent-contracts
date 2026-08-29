@@ -1452,6 +1452,7 @@ def run_cell(
             n_negotiation_failures=coord.get("n_negotiation_failures"),
             n_claim_truncated=coord.get("n_claim_truncated"),
             n_substring_conflicts=coord.get("n_substring_conflicts"),
+            chosen_experiments=(",".join(adapter.purchased) or None),
             claim_pool_share=coord.get("claim_pool_share"),
             conservation_certified=certified,
             aggregator_tokens=agg_tokens,

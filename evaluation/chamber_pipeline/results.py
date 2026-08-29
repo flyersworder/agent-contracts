@@ -156,6 +156,13 @@ class RunRecord:
             negotiation to decide the split, and until 2026-08-29 it cut in
             menu order -- which is grouped by variable family, so the same
             families were dropped in every seed.
+        chosen_experiments: Every experiment the cell actually bought, in
+            spending order, comma-separated. The roster, not just the count --
+            two arms can buy the same NUMBER of distinct experiments and cover
+            very different numbers of graph variables, since one variable has
+            up to three menu entries. Without this, an arm that matches the
+            loop on coverage and loses on accuracy cannot be explained after
+            the fact. None when no experiment was bought.
         n_substring_conflicts: How many claimed names a substring guard would
             have discarded -- the incidence of the defect removed on
             2026-08-29, measured rather than argued. Structurally 0 on LT,
@@ -233,6 +240,7 @@ class RunRecord:
     n_llm_attempts: int | None = None
     n_claim_truncated: int | None = None
     n_substring_conflicts: int | None = None
+    chosen_experiments: str | None = None
     claim_pool_share: float | None = None
 
     # --- PC provenance: the three parameters that silently determine the

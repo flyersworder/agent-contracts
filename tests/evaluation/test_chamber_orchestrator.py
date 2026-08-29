@@ -2416,3 +2416,39 @@ def test_a_broken_pool_aborts_instead_of_fabricating_the_rest_of_the_sweep(
     )
     with pytest.raises(RuntimeError, match="worker pool died"):
         run_sweep(sweep, max_workers=2)
+
+
+def test_the_purchase_roster_is_recorded_for_every_arm() -> None:
+    """WHICH experiments were bought, not just how many.
+
+    Recorded at the adapter rather than per agent: seven agents can each
+    forget to report their picks, `query_intervention` cannot. Without the
+    roster, an arm that matches the loop on distinct-experiment coverage and
+    still loses on accuracy cannot be explained after the fact -- two arms can
+    buy 30 distinct experiments and touch very different numbers of graph
+    variables, since one variable has up to three menu entries.
+    """
+    record = run_cell(get_spec("random"), "lt", "standard", budget_k=5, seed=0)
+    assert record.status == "ok"
+    names = (record.chosen_experiments or "").split(",")
+    assert len(names) == 5, "one entry per unit of budget spent, in spending order"
+    assert len(set(names)) == 5
+    # The roster is the ground for the variable-coverage question: distinct
+    # menu entries is NOT distinct perturbed variables.
+    variables = {n.removeprefix("uniform_").rsplit("_", 1)[0] for n in names}
+    assert len(variables) <= len(names)
+
+
+def test_a_failed_query_does_not_enter_the_roster() -> None:
+    """Charge-on-success: a bad name costs no budget and must not appear as a
+    purchase, or the roster and the budget disagree."""
+    from agent_contracts.integrations.causalchamber import create_contracted_chamber_agent
+
+    adapter = create_contracted_chamber_agent(
+        chamber="lt", configuration="standard", intervention_budget=3
+    )
+    real = adapter.available_experiments()[0]
+    adapter.query_intervention(real)
+    with pytest.raises(KeyError):
+        adapter.query_intervention("no_such_experiment")
+    assert adapter.purchased == [real]
