@@ -21,6 +21,7 @@ from evaluation.chamber_pipeline.menu_taxonomy import (
     experiment_strength,
     experiment_variable,
     group_by_variable,
+    partition_pools_by_variable,
 )
 
 # The real LT shape, verified against the live menu: 59 entries over 30
@@ -228,3 +229,75 @@ class TestStrengthExclusion:
         a = coverage_ordered(menu, 30, seed=5, maximize=False)
         b = coverage_ordered(menu, 30, seed=5, maximize=False, exclude_strengths=())
         assert a == b
+
+
+class TestVariablePartition:
+    """The one property the arm exists for: no variable in both pools.
+
+    Everything else about `team_varsplit` is held identical to `team`, so if
+    the partition leaks a variable the contrast measures nothing.
+    """
+
+    @staticmethod
+    def _pools(claim_a, claim_b, seed=0, budget=15):
+        return partition_pools_by_variable(
+            _synthetic_menu(), claim_a, claim_b, budget, budget, seed
+        )
+
+    def test_no_variable_appears_in_both_pools(self) -> None:
+        for seed in range(10):
+            a, b = self._pools([], [], seed=seed)
+            va = {experiment_variable(n) for n in a}
+            vb = {experiment_variable(n) for n in b}
+            assert not va & vb, f"seed {seed} leaked {va & vb}"
+
+    def test_every_entry_of_a_variable_travels_together(self) -> None:
+        menu = _synthetic_menu()
+        a, b = self._pools([], [])
+        for variable, names in group_by_variable(menu).items():
+            assert set(names) <= a or set(names) <= b, variable
+
+    def test_the_pools_are_disjoint_and_cover_the_menu(self) -> None:
+        menu = _synthetic_menu()
+        a, b = self._pools([], [])
+        assert not a & b
+        assert a | b == set(menu)
+
+    def test_a_claim_wins_its_variable(self) -> None:
+        a, _ = self._pools(["uniform_v_0_mid"], [])
+        assert "uniform_v_0_mid" in a
+
+    def test_a_contested_variable_goes_to_a_matching_the_name_level_rule(self) -> None:
+        """`team_agents` resolves name conflicts in A's favour; so does this."""
+        a, b = self._pools(["uniform_v_25_weak"], ["uniform_v_25_strong"])
+        assert {"uniform_v_25_weak", "uniform_v_25_strong"} <= a
+        assert not {"uniform_v_25_weak", "uniform_v_25_strong"} & b
+
+    def test_a_variable_claimed_at_one_strength_carries_the_others(self) -> None:
+        """The whole point: claiming `weak` also removes `mid` and `strong`
+        from the peer's reach, which the name-level split does not do."""
+        menu = _synthetic_menu()
+        three_wide = next(v for v, names in group_by_variable(menu).items() if len(names) == 3)
+        one_name = group_by_variable(menu)[three_wide][0]
+        a, _ = self._pools([one_name], [])
+        assert set(group_by_variable(menu)[three_wide]) <= a
+
+    def test_free_variables_are_dealt_to_balance_entry_counts(self) -> None:
+        """Variables carry 1-3 entries, so an alternating deal balances the
+        wrong quantity. Pools should come out close in entry count."""
+        for seed in range(10):
+            a, b = self._pools([], [], seed=seed)
+            assert abs(len(a) - len(b)) <= 3, f"seed {seed}: {len(a)} vs {len(b)}"
+
+    def test_both_pools_strictly_exceed_their_budget(self) -> None:
+        for seed in range(10):
+            a, b = self._pools([], [], seed=seed)
+            assert len(a) > 15 and len(b) > 15
+
+    def test_an_infeasible_budget_raises_rather_than_going_inert(self) -> None:
+        with pytest.raises(ValueError, match="selection loop is inert"):
+            partition_pools_by_variable(_synthetic_menu(), [], [], 40, 15, 0)
+
+    def test_the_seed_changes_the_split(self) -> None:
+        seen = {tuple(sorted(self._pools([], [], seed=s)[0])) for s in range(8)}
+        assert len(seen) > 1

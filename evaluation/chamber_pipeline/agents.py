@@ -50,7 +50,7 @@ from .llm_planner import (
     parse_selection_response,
     summarize_experiments,
 )
-from .menu_taxonomy import coverage_ordered
+from .menu_taxonomy import coverage_ordered, partition_pools_by_variable
 
 if TYPE_CHECKING:
     from agent_contracts.integrations.causalchamber import ContractedChamberAgent
@@ -1479,6 +1479,7 @@ def team_agents(
     scout_a_budget: int,
     scout_b_budget: int,
     llm: LLMCallable | None = None,
+    partition: str = "experiment",
 ) -> pd.DataFrame:
     """Two scouts negotiate their split before executing — ladder rung 4.
 
@@ -1621,17 +1622,28 @@ def team_agents(
     # strength, so `rest[0::2]` handed scout_a 0 of 3 `osr_c` and 0 of 2 `red`
     # experiments on LT -- the same blind spot in all 30 seeds, since nothing
     # about the slice depends on the seed.
-    rest = [m for m in menu if m not in set(claim_a) | set(claim_b)]
-    _random.Random(seed).shuffle(rest)
-    need_a = max(0, scout_a_budget - len(claim_a))
-    need_b = max(0, scout_b_budget - len(claim_b))
-    take_a, take_b, leftover = (
-        rest[:need_a],
-        rest[need_a : need_a + need_b],
-        rest[need_a + need_b :],
-    )
-    pool_a = set(claim_a) | set(take_a) | set(leftover[0::2])
-    pool_b = set(claim_b) | set(take_b) | set(leftover[1::2])
+    if partition == "variable":
+        # Same negotiation, same A-wins-ties rule, same budgets; only the
+        # GRANULARITY of the split changes. See
+        # `partition_pools_by_variable` for why, and `menu_taxonomy` for the
+        # null model that says the name-level split protects nothing.
+        pool_a, pool_b = partition_pools_by_variable(
+            menu, claim_a, claim_b, scout_a_budget, scout_b_budget, seed
+        )
+    elif partition == "experiment":
+        rest = [m for m in menu if m not in set(claim_a) | set(claim_b)]
+        _random.Random(seed).shuffle(rest)
+        need_a = max(0, scout_a_budget - len(claim_a))
+        need_b = max(0, scout_b_budget - len(claim_b))
+        take_a, take_b, leftover = (
+            rest[:need_a],
+            rest[need_a : need_a + need_b],
+            rest[need_a + need_b :],
+        )
+        pool_a = set(claim_a) | set(take_a) | set(leftover[0::2])
+        pool_b = set(claim_b) | set(take_b) | set(leftover[1::2])
+    else:
+        raise ValueError(f"partition must be 'experiment' or 'variable', got {partition!r}")
 
     all_names = set(menu)
     with adapter.as_node("scout_a"):
@@ -1703,6 +1715,66 @@ def team_agents(
     return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
 
 
+def team_varsplit_agents(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    scout_a_budget: int,
+    scout_b_budget: int,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """`team`, partitioned by VARIABLE instead of by experiment name.
+
+    The one-change control for M7's mechanism finding. `team` loses ~0.048 F1
+    to the loop, and ~two-thirds of that is traced to buying 23.4 distinct
+    variables against the loop's 27.9 -- because its two pools are disjoint as
+    sets of EXPERIMENTS while a variable can sit in both at different
+    strengths. Measured, the cross-scout duplication is at chance: 5.6
+    observed against a random-split null of 4.11 +- 1.51.
+
+    This arm keeps the topology, the budgets, the four negotiation calls and
+    the A-wins-ties rule, and changes only what gets partitioned. If the
+    diagnosis holds it should recover most of the variable deficit and roughly
+    two-thirds of the F1 gap; if it does not, the cost is coordination itself
+    and the redundancy account is wrong.
+
+    `shared_variables` is 0 by construction here, exactly as `overlap_frac` is
+    0 by construction in both arms -- so neither is evidence of anything, and
+    the arm has to be judged on F1 and on distinct-variable count.
+
+    **This is not a free win, and the outcome is genuinely open.** Putting
+    every entry of a variable in one pool removes cross-scout duplication and
+    concentrates within-scout duplication: a pool of ~29 entries now spans only
+    ~15 variables, so a scout must pick almost exactly one entry per variable
+    to use its budget well. Measured against `team` under `--mock-llm`, where
+    selection degrades to seeded random, the two effects cancel almost exactly:
+
+    | | shared vars | per-scout distinct | total distinct |
+    |---|---|---|---|
+    | `team` | 3.83 | 12.5 / 12.3 | 21.0 |
+    | `team_varsplit` | **0.00** | 9.7 / 10.8 | 20.5 |
+
+    So the arm pays off only if the scouts are good at avoiding SELF-repetition
+    -- and the real ones are (0.8 and 0.2 repeats over 15 picks). If they hold
+    that behaviour inside the narrower pools, total distinct variables should
+    approach 29 against `team`'s 23.4. If they do not, this arm converts one
+    duplication problem into another and lands no better. The random-selection
+    control above is what separates those two outcomes.
+    """
+    return team_agents(
+        adapter,
+        model,
+        seed,
+        pc_alpha,
+        scout_a_budget=scout_a_budget,
+        scout_b_budget=scout_b_budget,
+        llm=llm,
+        partition="variable",
+    )
+
+
 # Declared at the END of the module, after every agent it names. The previous
 # copy sat mid-file and listed only the five M4b arms, so the three ladder arms
 # defined below it were absent from `import *` and from the package's
@@ -1722,5 +1794,6 @@ __all__ = [
     "planner_reasoner_agents",
     "random_agent",
     "team_agents",
+    "team_varsplit_agents",
     "uncontracted_agent",
 ]

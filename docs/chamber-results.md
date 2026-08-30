@@ -254,6 +254,87 @@ that were previously cross-platform.
 (90, confounded, retained for reproducibility), `runs/m7-coverage-ms.parquet`
 (60, deconfounded).
 
+## M7: `team`'s coordination is at CHANCE on the axis that costs it (2026-08-30)
+
+The mechanism result above says team duplicates variables. This asks whether
+its negotiation provides *any* protection against that, and the answer is no.
+
+### What the negotiation actually decides
+
+Four LLM calls (propose x2, revise x2), then a deterministic assembly. Recorded
+diagnostics at LT k=30, n=10:
+
+| | |
+|---|---|
+| conflicts to resolve (`n_contested`) | **1.2** of 30 claims |
+| negotiation parse failures | 0 |
+| claims needing truncation | 0 |
+| claim's share of the resulting pool (`claim_pool_share`) | **0.51** |
+
+Each scout claims its full 15 and they barely collide, because the menu is 59
+entries wide. So the negotiation arbitrates almost nothing; it sets about
+**half of each scout's option set**, and the other half is a seeded shuffle of
+the ~29 unclaimed entries. Each scout then runs its own selection loop and
+picks 15 from a pool of ~30.
+
+### The null model
+
+Split the menu into disjoint pools **at random**, pick 15 **at random** within
+each pool — team's structure with the intelligence removed. 8,000 draws:
+
+| | random null | actual `team` |
+|---|---|---|
+| scout A distinct variables (of 15) | 12.78 | **14.20** |
+| scout B distinct variables | 12.76 | **14.80** |
+| **variables bought by BOTH** | **4.11 ± 1.51** | **5.60** |
+| distinct overall | 21.44 | 23.40 |
+
+Two readings, and they are not in tension — `distinct = |A| + |B| − shared`:
+
+- **Inside its own pool each scout clearly beats chance** (14.2 and 14.8
+  against 12.8). The selection loops do real work.
+- **Across scouts the coordination buys nothing.** 5.6 duplicated variables
+  against 4.11 expected at random, z = +0.99 — if anything slightly worse, and
+  within noise at n=10. **On the axis that costs accuracy, four LLM calls of
+  negotiation perform at chance.**
+
+### Why
+
+Every stage that builds the pools is blind to variables. Conflict detection is
+a set intersection on experiment NAMES; the leftover split is a parity slice of
+a shuffled NAME list. Nothing in the pipeline knows `uniform_blue_mid` and
+`uniform_blue_strong` are one variable.
+
+**The scouts do not coordinate badly. They coordinate competently over the
+wrong object.** For the paper: when work is partitioned between agents, the
+partition has to be drawn where the *information* lives, not where the *task
+list* lives.
+
+### The one-change control: `team_varsplit`
+
+Built 2026-08-30. Identical topology, budgets, four negotiation calls and
+A-wins-ties rule; the only change is that pools are partitioned by VARIABLE, so
+every entry of a variable travels to one scout and cross-scout duplication is
+structurally impossible.
+
+**Not a free win, and the outcome is open.** Concentrating a variable's entries
+in one pool converts cross-scout duplication into within-scout duplication: a
+~29-entry pool now spans only ~15 variables, so a scout must pick almost
+exactly one entry per variable. Under `--mock-llm`, where selection degrades to
+seeded random, the two effects cancel:
+
+| | shared vars | per-scout distinct | total distinct |
+|---|---|---|---|
+| `team` | 3.83 | 12.5 / 12.3 | 21.0 |
+| `team_varsplit` | **0.00** | 9.7 / 10.8 | 20.5 |
+
+So the arm pays off only if scouts avoid SELF-repetition, which the real ones
+do (0.8 and 0.2 repeats over 15 picks). **Pre-registered prediction**: if that
+behaviour survives the narrower pools, distinct variables should reach ~29
+against `team`'s 23.4, worth about **+0.041 F1** at the measured
++0.0073/variable — enough to close most of the −0.048 gap. If it does not, the
+redundancy account is incomplete and the cost is coordination itself.
+
 ## M6 WT LADDER COMPLETE (2026-08-26): the topology result replicates
 
 `runs/m6-wt-ladder.parquet` — **750/750 cells, 750 ok, 0 errors, 0 PC

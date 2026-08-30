@@ -66,6 +66,7 @@ from .agents import (
     planner_reasoner_agents,
     random_agent,
     team_agents,
+    team_varsplit_agents,
     uncontracted_agent,
 )
 from .inference import pc_call_defaults, runtime_fingerprint
@@ -305,6 +306,22 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         accepts_llm=True,
         kind="llm_multi",
         extra_kwargs=("scout_a_budget", "scout_b_budget"),
+        scout_roles=("plain", "plain"),
+        negotiation_rounds=2,
+    ),
+    AgentSpec(
+        name="team_varsplit",
+        run=team_varsplit_agents,
+        # LT only: the variable partition reads the LT menu taxonomy, which
+        # WT names do not follow.
+        chambers=("lt",),
+        accepts_llm=True,
+        kind="llm_multi",
+        extra_kwargs=("scout_a_budget", "scout_b_budget"),
+        # Identical to `team` so `_ladder_calibration` resolves the same
+        # per-role and per-budget figures. The arm differs only in how pools
+        # are partitioned, which costs no extra LLM call, so its budget
+        # provisioning must not differ either.
         scout_roles=("plain", "plain"),
         negotiation_rounds=2,
     ),
