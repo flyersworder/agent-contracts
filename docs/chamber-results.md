@@ -254,6 +254,83 @@ that were previously cross-platform.
 (90, confounded, retained for reproducibility), `runs/m7-coverage-ms.parquet`
 (60, deconfounded).
 
+## M7 `team_varsplit` (2026-08-30): the deficit was redundancy, and a one-line change to WHAT is partitioned recovers it
+
+`runs/m7-varsplit.parquet` — **90/90 cells, 90 ok, 0 errors, 0 PC
+degeneracies.** LT, k=30, n=30 per arm, `deepseek-v4-flash-0731`, VPS
+(`scipy-openblas`), 2 h 55 m on 6 workers. All three arms in ONE run, so the
+contrast carries no cross-era confound.
+
+**The strongest result in the chamber pillar, because it is a manipulation
+confirming a mechanism rather than another observational contrast.**
+
+| arm | distinct variables | shared | F1 | sd | SHD |
+|---|---|---|---|---|---|
+| `llm_pc` (loop) | 27.5 | — | 0.411 | 0.044 | 54.3 |
+| `team` | 22.7 | **6.50** | 0.388 | 0.050 | 55.5 |
+| **`team_varsplit`** | **28.2** | **0.00** | **0.424** | 0.045 | **53.4** |
+
+### The pre-registered test
+
+The prediction was fixed before the run, from a slope measured on unrelated
+LLM-free arms (`coverage_*_ms`, +0.0073 F1 per distinct variable):
+
+| | |
+|---|---|
+| predicted gain, +0.0073 x 5.5 variables | **+0.0399** |
+| **observed gain** | **+0.0360** |
+
+| contrast | delta | MDE | verdict |
+|---|---|---|---|
+| `team_varsplit` − `team` | **+0.0360** | 0.0344 | **RESOLVED** |
+| `team_varsplit` − `llm_pc` | +0.0127 | 0.0322 | below MDE |
+| `team` − `llm_pc` | −0.0233 | 0.0342 | below MDE |
+
+Changing **only what gets partitioned** — identical topology, budgets, four
+negotiation calls and A-wins-ties rule — recovers the deficit and brings the
+two-agent arm level with the single sequential loop. Shared variables went
+6.50 → **exactly 0.00**; distinct variables 22.7 → 28.2, slightly above the
+loop's own 27.5.
+
+**For the paper**: the cost measured across the whole ladder is not the cost of
+having several agents, nor even of partitioning their information. It is the
+cost of partitioning it **on the wrong object**. Drawn where the information
+actually lives, a two-agent split is free.
+
+### The caveat that must travel with it
+
+`team` − `llm_pc` came in at **−0.023** here, against M6's −0.046 (n=30) and
+M7 Phase 1's −0.048 (n=10). Pooling this run with Phase 1 — provenance verified
+identical (OpenBLAS, flash-0731, LT k=30, same day) — gives **n=40 per arm:
+−0.0296 against an MDE of 0.0298, i.e. just below threshold.**
+
+So the honest statement is:
+
+> `team_varsplit` beats `team` by a resolved **+0.036** and matches the loop.
+> The `team`–loop deficit it closes is itself only marginally resolved at n=40
+> (−0.030, MDE 0.030) and varies run to run from −0.023 to −0.048.
+
+The recovery is **121% of the pooled deficit** — the arm fully closes a gap
+whose size we know less precisely than we would like.
+
+**The mechanism variable carries no such doubt.** Distinct variables are
+near-deterministic per arm across independent runs (`team` 22.7 / 23.4; loop
+27.5 / 27.9), and `shared` is 6.5 / 5.6 against a structural 0.00. Whatever is
+adding variance to F1 is not touching what the arms buy.
+
+### Why the F1 variance, and what follows
+
+`llm_pc` and `team` run with **temperature unpinned**, so the seed governs only
+the fallback RNG and PC; every cell is an independent draw from the provider's
+default sampling (project memory records the same seed giving F1 0.330 and
+0.482). This run is the clearest evidence yet that it inflates variance in
+**arm means**, not only in cells — three estimates of one contrast spanning
+−0.023 to −0.048.
+
+**Pin temperature on the LLM arms before the next comparative sweep**, and
+record the value per cell. Recorded as a scope limit on every contrast measured
+before that lands.
+
 ## M7: `team`'s coordination is at CHANCE on the axis that costs it (2026-08-30)
 
 The mechanism result above says team duplicates variables. This asks whether

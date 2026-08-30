@@ -35,6 +35,7 @@ Design (resolves the four open questions from M3 final review):
 
 from __future__ import annotations
 
+import inspect
 import logging
 import threading
 import time
@@ -1179,6 +1180,7 @@ def _build_agent_kwargs(
     pc_alpha: float,
     llm: LLMCallable | None,
     model: str | None = None,
+    temperature: float | None = None,
 ) -> dict[str, Any]:
     """Construct the kwargs dict to pass to `spec.run`.
 
@@ -1224,6 +1226,18 @@ def _build_agent_kwargs(
     if model is not None and spec.accepts_llm:
         kwargs["model"] = model
 
+    # Same rule and the same guard, with one extra condition: only arms that
+    # actually declare the parameter get it. `_SCOUT_TEMPERATURE` is
+    # deliberately NOT overridable -- it exists to stop two identically
+    # prompted scouts returning the same claim list, so pinning the fan-in
+    # rungs to one shared value would reintroduce the degeneracy it prevents.
+    if (
+        temperature is not None
+        and spec.accepts_llm
+        and "temperature" in inspect.signature(spec.run).parameters
+    ):
+        kwargs["temperature"] = temperature
+
     return kwargs
 
 
@@ -1242,6 +1256,7 @@ def run_cell(
     llm: LLMCallable | None = None,
     cell_timeout_seconds: float | None = None,
     model: str | None = None,
+    temperature: float | None = None,
 ) -> RunRecord:
     """Run one cell of the sweep grid and return a RunRecord.
 
@@ -1438,7 +1453,9 @@ def run_cell(
     # Wrap the LLM (user-supplied or lazy-imported litellm.completion)
     # in a per-cell _CountingLLM so n_llm_calls + tokens + cost can be
     # populated uniformly. Non-LLM variants get None for all four.
-    kwargs = _build_agent_kwargs(spec, budget_k, seed, pc_alpha, counting_llm, model=model)
+    kwargs = _build_agent_kwargs(
+        spec, budget_k, seed, pc_alpha, counting_llm, model=model, temperature=temperature
+    )
 
     t0 = time.perf_counter()
     _setup_seconds = t0 - _t_cell_start
@@ -1553,6 +1570,7 @@ def run_cell(
             n_llm_calls=n_llm_calls_for_cell,
             n_llm_attempts=n_llm_attempts,
             n_selection_fallbacks=n_selection_fallbacks,
+            temperature=temperature,
             model_id=model_id,
             reasoning_effort=reasoning_effort,
             providers_used=providers_used,
@@ -1763,7 +1781,7 @@ def _pc_provenance_snapshot(pc_alpha: float) -> dict[str, Any]:
 
 
 def _run_cell_in_worker(
-    args: tuple[str, ChamberId, ConfigId, int, int, float, float | None, str | None],
+    args: tuple[str, ChamberId, ConfigId, int, int, float, float | None, str | None, float | None],
 ) -> RunRecord:
     """Child-process entry point for the parallel sweep.
 
@@ -1772,7 +1790,17 @@ def _run_cell_in_worker(
     a worker fails at submit time. The child re-resolves through the registry
     instead -- the same object the parent would have used.
     """
-    spec_name, chamber, configuration, budget_k, seed, pc_alpha, timeout, model = args
+    (
+        spec_name,
+        chamber,
+        configuration,
+        budget_k,
+        seed,
+        pc_alpha,
+        timeout,
+        model,
+        temperature,
+    ) = args
     return run_cell(
         spec=get_spec(spec_name),
         chamber=chamber,
@@ -1782,6 +1810,7 @@ def _run_cell_in_worker(
         pc_alpha=pc_alpha,
         cell_timeout_seconds=timeout,
         model=model,
+        temperature=temperature,
     )
 
 
@@ -1791,6 +1820,7 @@ def run_sweep(
     on_cell: Callable[[RunRecord, int, int], None] | None = None,
     skip_keys: set[tuple[str, str, str, int, int]] | None = None,
     model: str | None = None,
+    temperature: float | None = None,
     max_workers: int | None = None,
 ) -> list[RunRecord]:
     """Run a full sweep and return all RunRecords.
@@ -1825,7 +1855,7 @@ def run_sweep(
     cells = list(raw_cells)
     total = len(cells)
     if max_workers is not None and max_workers > 1:
-        return _run_sweep_parallel(sweep, cells, on_cell, model, max_workers, llm)
+        return _run_sweep_parallel(sweep, cells, on_cell, model, temperature, max_workers, llm)
 
     records: list[RunRecord] = []
     for idx, (spec, chamber, budget_k, _fraction, seed) in enumerate(cells):
@@ -1839,6 +1869,7 @@ def run_sweep(
             llm=llm,
             cell_timeout_seconds=sweep.cell_timeout_seconds,
             model=model,
+            temperature=temperature,
         )
         records.append(record)
         if on_cell is not None:
@@ -1867,6 +1898,7 @@ def _run_sweep_parallel(
     cells: list[tuple[AgentSpec, ChamberId, int, float, int]],
     on_cell: Callable[[RunRecord, int, int], None] | None,
     model: str | None,
+    temperature: float | None,
     max_workers: int,
     llm: LLMCallable | None,
 ) -> list[RunRecord]:
@@ -1912,6 +1944,7 @@ def _run_sweep_parallel(
             sweep.pc_alpha,
             sweep.cell_timeout_seconds,
             model,
+            temperature,
         )
         for (spec, chamber, budget_k, _fraction, seed) in cells
     ]

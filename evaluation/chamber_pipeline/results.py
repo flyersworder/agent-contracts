@@ -122,6 +122,12 @@ class RunRecord:
             when the comparison carries no evidence: fewer than two parents,
             or a call neither encoding could fund.
         model_id: The model identifier requested for this cell.
+        temperature: Sampling temperature actually sent, or None when the
+            field was omitted and the provider's default applied. Recorded
+            because it is not inferable from any other column and it changes
+            what a seed controls: unpinned, the seed governs only the fallback
+            RNG and PC, so every cell is an independent draw from the provider.
+            Never pool rows whose `temperature` differs.
         reasoning_effort: The reasoning effort requested, or "unset" when the
             call relied on the provider default. Recorded because a pinned
             model snapshot does not pin behaviour: DeepSeek raised the default
@@ -232,6 +238,7 @@ class RunRecord:
     max_tree_fragment: int | None = None
     tree_would_refuse: bool | None = None
     model_id: str | None = None
+    temperature: float | None = None
     reasoning_effort: str | None = None
     providers_used: str | None = None
     n_pc_degeneracies: int | None = None

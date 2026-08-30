@@ -1826,15 +1826,19 @@ class TestParallelSweep:
         10x slower, and no other test would notice."""
         from evaluation.chamber_pipeline import orchestrator as _orch
 
-        called: list[int] = []
+        called: list[dict[str, object]] = []
 
-        def _fake(sweep, cells, on_cell, model, max_workers, llm):  # type: ignore[no-untyped-def]
-            called.append(max_workers)
+        def _fake(sweep, cells, on_cell, model, temperature, max_workers, llm):  # type: ignore[no-untyped-def]
+            called.append({"max_workers": max_workers, "temperature": temperature})
             return []
 
         monkeypatch.setattr(_orch, "_run_sweep_parallel", _fake)
-        run_sweep(self._spec(), max_workers=4)
-        assert called == [4]
+        run_sweep(self._spec(), max_workers=4, temperature=0.0)
+        # Both are asserted, and `temperature` is the more fragile: 0.0 is
+        # falsy, so any `if temperature:` guard on the way down would drop a
+        # pinned zero and silently restore provider-default sampling while
+        # every column still looked right.
+        assert called == [{"max_workers": 4, "temperature": 0.0}]
 
     def test_on_cell_fires_once_per_cell(self) -> None:
         """The CLI writes the checkpoint sidecar from this callback. It must
@@ -2554,3 +2558,49 @@ class TestTeamVarsplitIsAControlNotARung:
         assert var.negotiation_rounds == team.negotiation_rounds
         assert var.scout_roles == team.scout_roles
         assert var.extra_kwargs == team.extra_kwargs
+
+
+class TestTemperatureIsRecordedAndRouted:
+    """Temperature must reach the arms that declare it, and only those.
+
+    The failure this guards is silent in both directions: an unrouted pin looks
+    like a pinned run in the logs while sampling stays at the provider default,
+    and a pin forced onto the scout roles reintroduces the degeneracy
+    `_SCOUT_TEMPERATURE` exists to prevent.
+    """
+
+    def test_llm_pc_receives_a_pinned_temperature(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import (
+            _build_agent_kwargs,
+            get_spec,
+        )
+
+        kwargs = _build_agent_kwargs(get_spec("llm_pc"), 30, 0, 0.05, None, temperature=0.0)
+        assert kwargs["temperature"] == 0.0
+
+    def test_an_unset_temperature_sends_no_field_at_all(self) -> None:
+        """`None` must mean 'omit', not 'send None' — the recorded corpus was
+        produced with the field absent."""
+        from evaluation.chamber_pipeline.orchestrator import (
+            _build_agent_kwargs,
+            get_spec,
+        )
+
+        kwargs = _build_agent_kwargs(get_spec("llm_pc"), 30, 0, 0.05, None)
+        assert "temperature" not in kwargs
+
+    def test_arms_without_the_parameter_are_not_handed_one(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import (
+            _build_agent_kwargs,
+            get_spec,
+        )
+
+        for name in ("random", "team", "fan_in_homog"):
+            kwargs = _build_agent_kwargs(get_spec(name), 30, 0, 0.05, None, temperature=0.0)
+            assert "temperature" not in kwargs, name
+
+    def test_the_record_carries_the_field(self) -> None:
+        from evaluation.chamber_pipeline.results import RunRecord
+
+        assert "temperature" in RunRecord.__dataclass_fields__
+        assert RunRecord.__dataclass_fields__["temperature"].default is None

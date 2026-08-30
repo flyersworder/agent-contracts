@@ -180,6 +180,27 @@ _COORDINATION_REASONING_EFFORT = "high"
 # `overlap_frac` to 1.0 and collapse rung 1 into rung 0 at double the budget.
 _SCOUT_TEMPERATURE = 1.0
 
+# Sampling temperature. `None` means "send no `temperature` field", i.e. the
+# provider's default -- which is what every arm did up to 2026-08-30 and is
+# therefore what all recorded data was produced under.
+#
+# It is a REAL source of variance, not a nicety. `llm_pc` and `team` ran
+# unpinned through M6 and M7, so the cell seed governs only the fallback RNG and
+# PC, never the model: the same seed and config has produced F1 0.330 and 0.482.
+# The consequence showed up at the level of ARM MEANS, not just cells -- three
+# independent n>=10 estimates of the same `team` - `llm_pc` contrast span -0.023
+# to -0.048.
+#
+# The default stays `None` deliberately. Flipping it silently would make every
+# new cell incomparable with 2,000+ recorded ones while every column still
+# matched. Pass `--temperature` to pin it, and read `temperature` on the
+# RunRecord to know what a cell actually ran under.
+#
+# NOT applied to the scout roles: `_SCOUT_TEMPERATURE` exists to stop two
+# identically-prompted scouts returning the same claim list, and pinning them to
+# a shared low value would reintroduce exactly that degeneracy.
+_DEFAULT_TEMPERATURE: float | None = None
+
 
 # Pattern matching the LT experiment naming convention `uniform_<TARGET>_<STRENGTH>`
 # (and WT's analogous form). The single LT outlier `uniform_reference` is the
@@ -810,6 +831,7 @@ def llm_pc_agent(
     pc_alpha: float = 0.05,
     *,
     llm: LLMCallable | None = None,
+    temperature: float | None = _DEFAULT_TEMPERATURE,
 ) -> pd.DataFrame:
     """LLM plans intervention sequence; classical PC infers the graph.
 
@@ -841,7 +863,7 @@ def llm_pc_agent(
         return _empty_adjacency(nodes)
 
     llm = llm or _default_llm()
-    _chosen, dfs = _llm_select_loop(adapter, llm, model, seed)
+    _chosen, dfs = _llm_select_loop(adapter, llm, model, seed, temperature=temperature)
 
     if not dfs:
         return _empty_adjacency(nodes)

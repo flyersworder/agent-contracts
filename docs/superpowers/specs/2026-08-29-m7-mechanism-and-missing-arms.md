@@ -347,13 +347,40 @@ builds the pools is blind to variables: conflict detection is a set intersection
 on NAMES, the leftover split a parity slice of a shuffled NAME list. **The
 scouts coordinate competently over the wrong object.**
 
-**Built in response**: `team_varsplit` — identical topology, budgets, four
-negotiation calls and A-wins-ties rule, partitioned by VARIABLE so cross-scout
-duplication is structurally impossible. Running at n=30. Pre-registered: ~29
-distinct variables and **+0.041 F1** if the redundancy account holds. **Not a
-free win** — under `--mock-llm` the gain cancels exactly (shared 3.83 → 0.00 but
-per-scout distinct 12.4 → 10.3), so it pays off only if scouts avoid
-self-repetition, which the real ones do.
+**Built in response, and it worked**: `team_varsplit` — identical topology,
+budgets, four negotiation calls and A-wins-ties rule, partitioned by VARIABLE so
+cross-scout duplication is structurally impossible. **90/90 cells, n=30 per arm,
+2026-08-30:**
+
+| arm | distinct vars | shared | F1 |
+|---|---|---|---|
+| `llm_pc` | 27.5 | — | 0.411 |
+| `team` | 22.7 | 6.50 | 0.388 |
+| `team_varsplit` | **28.2** | **0.00** | **0.424** |
+
+Pre-registered **+0.0399**, observed **+0.0360** (MDE 0.0344, **RESOLVED**);
+against the loop, +0.0127, below MDE. **Changing only what is partitioned brings
+a two-agent arm level with the single loop.** This is the pillar's strongest
+result: a manipulation confirming a mechanism, with the prediction fixed
+beforehand from a slope measured on unrelated LLM-free arms.
+
+The mock-LLM control is what makes it a real test rather than a rigged one:
+under random selection the gain cancels exactly (shared 3.83 → 0.00 but
+per-scout distinct 12.4 → 10.3), so the arm pays off only if scouts avoid
+self-repetition — which the real ones do.
+
+**Caveat that travels with it**: `team` − `llm_pc` came in at −0.023 here
+against −0.046 (M6) and −0.048 (Phase 1); pooled n=40 gives −0.0296 at MDE
+0.0298. The deficit `team_varsplit` closes is itself only marginally resolved.
+Cause and fix in register entry 21 — temperature is unpinned, and it moves arm
+means, not only cells. `--temperature` and `RunRecord.temperature` shipped
+2026-08-30, default unset.
+
+**Consequence for the paper's claim.** The ladder's cost is not the cost of
+several agents, nor even of partitioning their information. It is the cost of
+partitioning it **on the wrong object**. Drawn where the information lives, a
+two-agent split is free. That is a friendlier and more useful claim than
+"loops win", and it is what §1 should say.
 
 **Two withdrawals, recorded rather than quietly re-founded**: Phase 1's first
 reading ("coverage does not explain the loss") was a range-and-power artifact;

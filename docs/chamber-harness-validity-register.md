@@ -880,6 +880,54 @@ structure's correlations. Before trusting one, tabulate every recorded
 attribute of the picks across the arms — not only the attribute being
 manipulated. Here one `groupby` over strength counts was the whole diagnosis.
 
+## 21. The seed does not control the LLM, and it moves ARM MEANS (2026-08-30)
+
+Known since 2026-08-26 as a note ("the seed does not control the LLM";
+`llm_pc_agent` passes no temperature, so the provider default applies and the
+same seed gave F1 0.330 and 0.482). It was recorded as *cell* variance and left
+unfixed. The M7 `team_varsplit` run shows it reaches further than that.
+
+**Three independent estimates of one contrast, `team` − `llm_pc` at LT k=30:**
+
+| run | n per arm | delta |
+|---|---|---|
+| M6 ladder, 24 Aug | 30 | −0.046 |
+| M7 Phase 1, 30 Aug | 10 | −0.048 |
+| M7 varsplit, 30 Aug | 30 | **−0.023** |
+| pooled Phase 1 + varsplit | 40 | −0.0296 (MDE 0.0298) |
+
+Same chamber, same budget, same model snapshot, same provider order, same BLAS.
+A contrast that resolves in one n=30 sample and not in another is a contrast
+whose point estimate carries provider sampling variance, not just cell noise.
+
+**What is NOT affected**, and this is the reassuring half: the mechanism
+variables are near-deterministic across the same runs — distinct variables
+`team` 22.7 / 23.4 and loop 27.5 / 27.9; shared variables 6.5 / 5.6. Whatever
+the sampler is doing, it is not changing what the arms buy. Every mechanism
+claim in `docs/chamber-results.md` stands; the F1 point estimates are the
+fragile part.
+
+**Fix shipped, deliberately inert by default.** `--temperature` pins it,
+`RunRecord.temperature` records what a cell actually ran under, and the default
+stays unset so no new cell silently becomes incomparable with the 2,000+
+recorded ones. Routed only to arms that declare the parameter: the fan-in rungs
+keep `_SCOUT_TEMPERATURE`, which exists to stop two identically-prompted scouts
+returning one claim list — pinning them to a shared value would reintroduce
+that degeneracy while looking like a tightening.
+
+Mutation-checked, because the pin is silent in both directions: a truthiness
+guard (`if temperature:`) drops a pinned **0.0** and restores provider sampling
+with every column still looking right; an unrouted pin logs as pinned and
+changes nothing.
+
+**Standing rule**: never pool rows whose `temperature` differs, alongside the
+same rule for `blas_backend` (entry 10) and `model_id`.
+
+**Still open**: whether to pin, and to what. Temperature 0 is not obviously
+right — it makes the loop deterministic given the prompt, which removes the
+seed-to-seed variation the MDE is computed over, and every arm would need a
+replication check before its old rows could be compared with new ones.
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there

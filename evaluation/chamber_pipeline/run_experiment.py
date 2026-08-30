@@ -260,6 +260,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help=(
+            "Sampling temperature for LLM selection. Default: unset, meaning "
+            "the field is omitted and the provider's default applies -- which "
+            "is how every cell recorded before 2026-08-30 was produced. "
+            "Unpinned, the seed governs only the fallback RNG and PC, so every "
+            "cell is an independent draw and arm MEANS carry provider variance: "
+            "three n>=10 estimates of one `team`-`llm_pc` contrast span -0.023 "
+            "to -0.048. Recorded per cell as `temperature`; never pool rows "
+            "whose value differs. Does not affect scout roles, whose distinct "
+            "temperature exists to stop two identical scouts making one claim."
+        ),
+    )
+    parser.add_argument(
         "--model",
         type=str,
         default=None,
@@ -575,6 +591,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         on_cell=progress,
         skip_keys=skip_keys,
         model=args.model,
+        temperature=args.temperature,
         max_workers=args.max_workers,
     )
 
