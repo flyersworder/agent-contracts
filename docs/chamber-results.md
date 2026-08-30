@@ -176,44 +176,83 @@ of what team does**.
   deficit.** 14.2 + 14.8 − 5.6 = 23.4 exactly. The entire 4.5-variable deficit
   is scouts unknowingly buying the same variable at different strengths.
 
-### But the duplication does not explain the accuracy loss
+### Does the duplication explain the accuracy loss? Yes, about two-thirds of it
 
-The obvious next step is to ask whether 23.4 variables is *worth* 0.048 F1.
-Within the loop arm it is not: the loop's own F1 is essentially flat in how
-many variables it happened to touch (**r = +0.027, slope +0.0007 F1 per
-variable** over an observed range of 25–30). Extrapolating that line to team's
-23.4 variables predicts **F1 = 0.424**; team scores **0.379**. The residual,
-**−0.046, is the entire gap.**
+Answered on 2026-08-30 by direct manipulation, after a first attempt got it
+wrong. Both attempts are recorded because the correction is instructive.
 
-So the mechanism instrument found a real and resolved difference in *what team
-buys*, and that difference does not account for *why team scores worse*.
+**Attempt 1, and why it does not count.** Within the loop arm, F1 looked flat
+in how many variables it happened to touch (r = +0.027, slope +0.0007 per
+variable) — but over a range of only 25–30 at n=10, extrapolated to team's
+23.4, which sits below the loop's observed minimum. That reading was reported
+and is **withdrawn**: it was a range-and-power artifact.
 
-**Honest limits on that last step**, both of which point the same way:
-the loop's variable range is only 25–30 with n=10, so the slope is weakly
-estimated; and 23.4 sits below the loop's observed minimum, so this is an
-extrapolation, not an interpolation. A flat slope measured over five units is
-not strong evidence that coverage is irrelevant.
+**Attempt 2: manipulate coverage directly.** Two LLM-free arms at LT k=30,
+`coverage_max` and `coverage_min`, spanning 11 to 30 distinct variables at
+identical budget and PC settings. 90 cells, $0 in API spend, plus `random` at
+n=30 on the VPS (which also closes the cross-platform gap in the loop-vs-random
+contrasts).
 
-### What this corrects
+That design was **confounded** — all 9 `weak` menu entries sit on exactly the
+variables `coverage_min` exhausts first, so the arms differed in breadth *and*
+intervention strength, correlated at −0.891. See register entry 20. Repeated
+with the menu restricted to mid+strong (`_ms` arms), giving 15 to 30 variables
+with zero weak at either end:
 
-Project memory recorded, from the 25 Aug free-results pass: *"`team` reaches
-identical 30/30 coverage and is still −0.047, so its cost is genuine
-coordination, not redundancy."* The premise was wrong — coverage is identical
-at the **experiment** level and demonstrably *not* at the **variable** level
-(23.4 vs 27.9). The conclusion survives anyway, but now for a measured reason
-rather than an assumed one: the variable deficit is real, and it still does not
-predict the F1 gap.
+| arm | variables | weak | F1 | SHD |
+|---|---|---|---|---|
+| `coverage_min_ms` | 15 | 0 | 0.325 ± 0.055 | 59.2 |
+| `coverage_max_ms` | 30 | 0 | 0.434 ± 0.043 | 52.4 |
 
-### The decisive follow-up, and it costs $0 in API spend
+**+0.109 F1 across 15 variables, MDE 0.030 — RESOLVED. Slope +0.0073 F1 per
+distinct variable.** Deconfounding *doubled* the effect rather than shrinking
+it (the confounded estimate was +0.0036/variable), because the two channels had
+been partly cancelling.
 
-Everything above hinges on whether variable coverage predicts F1 at fixed k,
-which the loop's narrow natural range cannot settle. The direct manipulation is
-two LLM-free arms at k=30 on LT — one that maximises distinct variables (30
-entries, 30 variables) and one that minimises them (all three strengths of ~10
-variables) — scored the usual way. No API calls; only agent code and CPU. If
-coverage matters, the two separate sharply and team's deficit is redundancy
-after all; if they do not, the cost is coordination itself and the ladder needs
-a different instrument to find it.
+### The attribution
+
+Both the loop (27.9) and team (23.4) sit inside the manipulated 15–30 span, so
+this is interpolation, not extrapolation:
+
+| | |
+|---|---|
+| coverage deficit, team vs loop | 4.5 variables |
+| predicted F1 cost at +0.0073/variable | **−0.033** |
+| measured team − loop | **−0.048** |
+| share explained by coverage | **≈68%** |
+| unexplained residual | −0.015 (below the loop-vs-team MDE of 0.036) |
+
+**So `team`'s deficit is mostly redundancy after all** — invisible at the
+experiment level, where `overlap_frac` reads exactly 0.0 by construction, and
+plainly visible at the variable level, where 5.6 of its ~29 variable-slots are
+spent twice. What remains after coverage is accounted for is smaller than the
+contrast's own detection threshold, so this analysis cannot say whether any
+genuine coordination cost exists on top.
+
+**Two assumptions this attribution rests on**, both worth a reviewer's
+attention. The slope is measured on arms with *deterministic* coverage, so
+applying it to LLM arms assumes variable identity does not matter beyond
+variable count — the manipulated arms choose how many, the LLM arms also choose
+which. And the `_ms` pair retains a mid/strong imbalance that, taken at face
+value, would move the attribution from 68% to 62% (register entry 20).
+
+### What this corrects, twice
+
+Project memory recorded from 25 Aug: *"`team` reaches identical 30/30 coverage
+and is still −0.047, so its cost is genuine coordination, not redundancy."*
+Coverage is identical at the **experiment** level and not at the **variable**
+level, and the variable deficit now accounts for about two-thirds of the gap.
+**The conclusion is withdrawn, not merely re-founded** — an earlier edit on
+30 Aug said it survived, which was based on the flat-slope reading now
+withdrawn above.
+
+`random`'s VPS baseline from the same sweep: 21.7 variables (range 17–26),
+F1 0.360 ± 0.051, `scipy-openblas` — available for the loop-vs-random contrasts
+that were previously cross-platform.
+
+**Datasets**: `runs/m7-phase1.parquet` (20 cells), `runs/m7-coverage.parquet`
+(90, confounded, retained for reproducibility), `runs/m7-coverage-ms.parquet`
+(60, deconfounded).
 
 ## M6 WT LADDER COMPLETE (2026-08-26): the topology result replicates
 

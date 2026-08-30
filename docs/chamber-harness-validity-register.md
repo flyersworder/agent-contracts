@@ -822,6 +822,64 @@ life of the branch. **CI is the only place the published platform is
 exercised** — which is an argument for pushing early, not for trusting a local
 green.
 
+## 20. The coverage manipulation measured strength, not only breadth (2026-08-30)
+
+The first defect in this register that sits in an arm built *to settle a
+question raised by the register itself*, and it was caught by checking a design
+rather than by a failing test.
+
+**The design.** M7 Phase 1 left open whether distinct-variable coverage
+predicts F1. Two LLM-free arms were built to manipulate it directly at LT
+k=30: `coverage_max` (one entry per variable, attaining 30) and `coverage_min`
+(fattest variables exhausted first, attaining 11). 90 cells, no API spend, and
+it resolved cleanly: **+0.069 F1, MDE 0.036.**
+
+**The defect.** On the LT menu all 9 `weak` entries sit on the 9 three-entry
+variables — exactly the variables `coverage_min` exhausts first. So the two
+arms differ in *two* things at once:
+
+| | variables | weak picks |
+|---|---|---|
+| `coverage_max` | 30 | 3.2 |
+| `coverage_min` | 11 | 9.0 |
+
+Across the 90 cells `n_variables` and `n_weak` correlate at **−0.891**. A weak
+intervention perturbs less and carries less signal, so the two channels were
+inseparable. Pooled, F1-vs-weak (r = −0.407) fitted about as well as
+F1-vs-variables (r = +0.471); and within `random`, where the two partly
+decouple (r = −0.355), a multiple regression put the effect on **weak
+(−0.0032) rather than variables (−0.0018, wrong sign)**. The sweep announced as
+decisive was not.
+
+**The fix and its result.** `coverage_ordered` gained `exclude_strengths`, and
+`coverage_max_ms` / `coverage_min_ms` restrict the menu to mid+strong: **15 to
+30 variables, zero weak at either end.** 60 further cells.
+
+**The correction ran the opposite way to the usual one.** Removing a confound
+normally shrinks an effect. Here it **doubled** it:
+
+| design | span | weak | delta F1 | per variable |
+|---|---|---|---|---|
+| confounded | 11→30 | 9.0→3.2 | +0.069 | +0.0036 |
+| deconfounded | 15→30 | 0→0 | **+0.109** | **+0.0073** |
+
+The confounded design was *understating* breadth, because its narrow arm was
+being handed extra weak picks that hurt it less than the missing breadth helped
+the wide arm — the two channels partly cancelled.
+
+**Residual imbalance, stated rather than waved away.** The `_ms` pair still
+differs in mid/strong mix (18.7/10.3 against 15.0/15.0), so the NARROW arm
+holds more `strong`. Measured within `coverage_max_ms`, where the split varies
+by seed, the strong channel is not measurably different from mid (slope
+−0.002/pick, r = −0.098, n=30). Taking that point estimate at face value would
+move the slope from 0.0073 to ~0.0066 and the attribution below from 68% to
+62%. It does not change any conclusion.
+
+**Lesson.** A manipulation built from a menu's own structure inherits that
+structure's correlations. Before trusting one, tabulate every recorded
+attribute of the picks across the arms — not only the attribute being
+manipulated. Here one `groupby` over strength counts was the whole diagnosis.
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
