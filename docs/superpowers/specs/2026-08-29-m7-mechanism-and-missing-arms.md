@@ -313,6 +313,23 @@ exactly why it resolves in neither direction in all six of its contrasts.
 identifier is the `agent_name` value in 450+ recorded rows and renaming it
 would orphan the data. One line in `VARIANT_LABELS`.
 
+**`shared_blackboard` claims more than it delivers, and the paper must say so.**
+In the classical sense (Hearsay-II and successors) a blackboard is a workspace
+where agents post partial hypotheses and read each other's *reasoning*. Ours
+shares only the running list of experiments already bought: the voices write a
+pick and nothing else — no rationale, no advice, no "I am covering the pressure
+sensors, you take the optics".
+
+That narrowness is deliberate, not an oversight. The axis is *how much of the
+loop's running record survives*, and the loop's record is exactly a list of
+picks. Sharing more would make the arm differ from the loop in TWO ways at once
+— shared record AND a new communication channel — and no difference could then
+be attributed to either.
+
+Either rename it (`shared_record` is honest and unglamorous) or state the
+restriction on first use. Do not let a reviewer assume the richer thing and
+find the thinner one.
+
 ## 5. Phases
 
 ### Phase 1 — mechanism: **COMPLETE 2026-08-30, $2**
@@ -545,3 +562,37 @@ results: look between phases rather than queueing them.
   ASYMMETRY, not task partition — a different axis with its own literature
   (Stasser-Titus). Parked as a journal extension; recorded here so it is not
   rediscovered as novel.
+- **Not the rationale-passing blackboard, this paper — but it is the most
+  natural next arm.** Recorded 2026-08-30. `shared_blackboard` shares the bare
+  record; let each voice post a one-line rationale alongside its pick and the
+  next voice reads both. Concretely: extend the already-chosen block from
+  `name` to `name — why`, and ask for `NAME | one-line reason` in the reply.
+
+  Why it is worth running later, in order of value:
+
+  1. **It is a second point on the SAME axis, not a different experiment.**
+     The axis measures how much of the record survives; this raises the
+     richness of the record rather than changing the topology. Bare record vs
+     record-plus-reasoning is exactly the gradation the ladder currently skips.
+  2. **It is the honest version of the name** (see §4), so running it would let
+     the paper use the classical term without the caveat.
+  3. **It is the first arm where agents could actually divide labour in
+     words** — "I am covering the pressure sensors" — which is what a reader
+     imagines multi-agent coordination to be, and which no rung on the current
+     ladder does.
+
+  Two design cautions to carry, both learned the hard way this milestone:
+
+  - **It must be compared against `shared_blackboard`, not against the loop.**
+    Against the loop it varies two things (two voices AND rationale) and
+    resolves nothing, which is the confound `team_varsplit` was built to avoid.
+  - **The rationale must not become extra budget.** It rides inside the
+    existing selection call, so call count is unchanged — but output tokens
+    rise, and the cost-frontier claim is denominated in CALLS precisely so
+    that this kind of change stays comparable. State the token delta rather
+    than hiding it.
+
+  A plausible failure worth pre-registering: the rationales are near-identical
+  across voices (low-variance conformity, §1), the channel carries no
+  information, and the arm lands on `shared_blackboard` exactly. That would be
+  a clean negative result about LLM-to-LLM coordination channels, not a null.

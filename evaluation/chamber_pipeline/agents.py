@@ -1429,6 +1429,19 @@ def shared_blackboard_agents(
     prompt's already-chosen block and removes those names from the selectable
     menu. No new selection machinery, so the arm inherits the loop's tested
     truncation, fallback and accounting behaviour.
+
+    **The board holds picks, not prose.** Neither voice can write a rationale,
+    an intention or a note to the other; the shared state is *what was done*,
+    never *what anyone thinks*. That is narrower than "blackboard" means in the
+    classical sense (Hearsay-II and successors), and the paper has to say so —
+    see spec §4. It is deliberate: the axis is how much of the loop's record
+    survives, the loop's record IS a list of picks, and sharing more would vary
+    two things at once.
+
+    A rationale-passing variant is the natural next arm and is specified in
+    spec §7: same topology, each pick carrying one line of reasoning the next
+    voice reads. It must be compared against THIS arm rather than against the
+    loop, or it varies two things and resolves nothing.
     """
     from evaluation.chamber_pipeline.llm_planner import (
         build_scout_broad_prompt,
