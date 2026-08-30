@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from agent_contracts.core.contract import Contract, ResourceConstraints
+from agent_contracts.core.monitor import ResourceMonitor
 from agent_contracts.core.wrapper import ContractViolationError
 from agent_contracts.integrations import (
     CAUSAL_CHAMBER_AVAILABLE,
@@ -367,3 +368,96 @@ def test_default_observation_budget_is_enforced_as_zero():
     assert limits["observe"] == 0
     assert agent._resource_monitor.can_use_tool("observe") is False
     assert agent._resource_monitor.can_use_tool("intervene") is True
+
+
+# --------------------------------------------------------------------------
+# M6 Task 1: additive per-node metering and token attribution
+# --------------------------------------------------------------------------
+
+
+@requires_causalchamber
+def test_as_node_blocks_on_the_node_limit():
+    agg = ResourceMonitor(ResourceConstraints(per_tool_limits={"intervene": 0}))
+    adapter = create_contracted_chamber_agent(
+        chamber="lt", intervention_budget=10, node_monitors={"aggregator": agg}
+    )
+    name = adapter.available_experiments()[0]
+    with adapter.as_node("aggregator"), pytest.raises(ContractViolationError):
+        adapter.query_intervention(name)
+
+
+@requires_causalchamber
+def test_aggregate_cap_still_binds_inside_as_node():
+    """Routing is additive: the k cap must stay live, not be bypassed."""
+    scout = ResourceMonitor(ResourceConstraints(per_tool_limits={"intervene": 99}))
+    adapter = create_contracted_chamber_agent(
+        chamber="lt", intervention_budget=2, node_monitors={"scout_a": scout}
+    )
+    menu = adapter.available_experiments()
+    with adapter.as_node("scout_a"):
+        adapter.query_intervention(menu[0])
+        adapter.query_intervention(menu[1])
+        with pytest.raises(ContractViolationError):  # aggregate k=2 exhausted
+            adapter.query_intervention(menu[2])
+
+
+@requires_causalchamber
+def test_as_node_attributes_token_delta_to_the_node():
+    counter = {"n": 0}
+    mon = ResourceMonitor(ResourceConstraints(per_tool_limits={"intervene": 5}))
+    adapter = create_contracted_chamber_agent(
+        chamber="lt",
+        intervention_budget=5,
+        node_monitors={"scout_a": mon},
+        token_meter=lambda: counter["n"],
+    )
+    with adapter.as_node("scout_a"):
+        counter["n"] += 1234  # stands in for _CountingLLM's totals
+    assert mon.usage.tokens == 1234
+
+
+@requires_causalchamber
+def test_as_node_rejects_an_unregistered_node():
+    adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=5)
+    with pytest.raises(KeyError), adapter.as_node("nobody"):
+        pass
+
+
+@requires_causalchamber
+def test_as_node_refuses_to_nest():
+    """Nesting would charge the inner block's tokens to both nodes."""
+    mons = {
+        "scout_a": ResourceMonitor(ResourceConstraints(per_tool_limits={"intervene": 5})),
+        "scout_b": ResourceMonitor(ResourceConstraints(per_tool_limits={"intervene": 5})),
+    }
+    adapter = create_contracted_chamber_agent(
+        chamber="lt", intervention_budget=5, node_monitors=mons
+    )
+    with adapter.as_node("scout_a"), pytest.raises(RuntimeError):  # noqa: SIM117
+        with adapter.as_node("scout_b"):
+            pass
+
+
+@requires_causalchamber
+def test_default_none_preserves_aggregate_behaviour():
+    adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=2)
+    menu = adapter.available_experiments()
+    adapter.query_intervention(menu[0])
+    adapter.query_intervention(menu[1])
+    with pytest.raises(ContractViolationError):
+        adapter.query_intervention(menu[2])
+
+
+def test_wrong_key_exp_leaves_intervene_unconstrained():
+    """Pins the trap: a zero-grant on an unknown key is silent."""
+    m = ResourceMonitor(ResourceConstraints(per_tool_limits={"exp": 0}))
+    assert m.can_use_tool("intervene") is True  # NOT blocked
+    m2 = ResourceMonitor(ResourceConstraints(per_tool_limits={"intervene": 0}))
+    assert m2.can_use_tool("intervene") is False
+
+
+def test_observe_absent_means_unlimited():
+    m = ResourceMonitor(ResourceConstraints(per_tool_limits={"intervene": 0}))
+    assert m.can_use_tool("observe") is True  # the side channel
+    m2 = ResourceMonitor(ResourceConstraints(per_tool_limits={"intervene": 0, "observe": 0}))
+    assert m2.can_use_tool("observe") is False

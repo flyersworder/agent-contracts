@@ -74,8 +74,103 @@ class RunRecord:
         wall_time_seconds: How long the agent took (excluding adapter
             load + scoring). None for skipped/error cells.
         n_llm_calls: How many times the agent invoked the LLM
-            callable. None for non-LLM variants. 0 is a real
-            measurement (e.g., budget=0 short-circuit).
+            callable -- LOGICAL calls, one per invocation, regardless of how
+            many provider endpoints were tried to satisfy it. See
+            `n_llm_attempts` for the billed count. None for non-LLM variants.
+            0 is a real measurement (e.g., budget=0 short-circuit).
+        n_selection_fallbacks: How many selection calls returned an
+            unparseable response and fell back to a random unspent
+            experiment. A nonzero value means the cell's "LLM selection"
+            was partly random; equal to `n_llm_calls` means it was entirely
+            random. None for non-LLM variants and for cells recorded before
+            this field existed (the M4b pilot).
+        overlap_frac: Fraction of the smaller scout selection also chosen by
+            the other scout. None when either scout selected nothing --
+            undefined, not zero, since zero is the perfectly-disjoint success
+            case. Only set for the fan-in and team rungs.
+        n_experiments_distinct: Distinct experiments the cell queried in total.
+        n_contested: For the team rung, how many experiment claims the
+            negotiation failed to resolve. Without it the rung's defining
+            mechanism is unmeasurable -- a team whose scouts never agree on a
+            split looks identical to one whose negotiation worked. None for
+            every other arm.
+        n_negotiation_failures: For the team rung, how many of the four
+            negotiation rounds (two proposals, two revisions) returned
+            nothing parseable. Non-zero does NOT imply the split degenerated:
+            a single unparseable revision still leaves that scout its own
+            proposal. Only a scout losing BOTH its rounds drops it to the
+            seeded fallback partition -- which still varies across seeds, so
+            even total failure does not produce identical queries. A single
+            integer cannot say WHICH rounds failed; 2 covers both one dead
+            scout and the more damaging both-revisions-lost case.
+        conservation_certified: Whether `DelegationGraph.verify()` passed at
+            the end of the cell (hypothesis H-C).
+        scout_a_tokens: Tokens scout_a spent, from its node monitor. Recorded
+            from 2026-08-24: the k=45 gate found the aggregator overrunning
+            its grant on 6 of 9 graph cells, and could NOT say whether the
+            scouts overran too, because only aggregator spend was stored. An
+            unrecorded node reads as a clean node.
+        scout_b_tokens: Same for scout_b.
+        aggregator_tokens: Tokens the aggregator spent on its single
+            indivisible reconciliation call.
+        max_tree_fragment: The largest single parent grant into the
+            aggregator -- the biggest indivisible call any tree encoding of
+            the same grants could fund.
+        tree_would_refuse: Whether `aggregator_tokens` landed in whitepaper
+            §4.6 P2's incompleteness window, `max_i a_i < c <= sum_i a_i`,
+            where the DAG law admits the call and no tree encoding does. None
+            when the comparison carries no evidence: fewer than two parents,
+            or a call neither encoding could fund.
+        model_id: The model identifier requested for this cell.
+        reasoning_effort: The reasoning effort requested, or "unset" when the
+            call relied on the provider default. Recorded because a pinned
+            model snapshot does not pin behaviour: DeepSeek raised the default
+            effort under unchanged 0423 weights on 2026-08-13.
+        providers_used: Comma-separated upstream providers that served this
+            cell, sorted. More than one means provider rotation fired.
+        n_collinear_dropped: How many columns PC dropped as numerically
+            duplicate of an earlier column (see
+            `inference.DEFAULT_COLLINEARITY_THRESHOLD`). A LOCAL loss --
+            the dropped node makes no claim while the rest of the graph is
+            still inferred -- unlike `n_pc_degeneracies`, which is total.
+            None for variants that never run PC.
+        n_zero_variance_dropped: How many columns PC dropped as constant in
+            the pooled data. Also a LOCAL loss, but distinct from a collinear
+            drop: a collinear column HAS signal that merely duplicates
+            another, while a zero-variance column has none, because no bought
+            experiment perturbed anything upstream of it. Its rate therefore
+            falls as the budget grows, which makes it the one degradation
+            path that tracks the independent variable directly. Recorded so
+            the budget curve can be decomposed into how much of the graph PC
+            was asked about versus how well it answered. None for variants
+            that never run PC.
+        n_llm_attempts: `n_llm_calls` plus provider-rotation retries. The two
+            differ only when a provider returned a body-encoded error and the
+            wrapper rotated; they are equal in every cell recorded before
+            2026-08-29. This is the cost-attribution number -- a rotated
+            attempt is billed -- while `n_llm_calls` is the denominator for
+            any per-decision rate, such as `fallback_rate`.
+        n_claim_truncated: How many claimed experiment names the team arm's
+            budget cap discarded. 0 means both scouts claimed within budget
+            and the cap never ran. Recorded because the cap competes with the
+            negotiation to decide the split, and until 2026-08-29 it cut in
+            menu order -- which is grouped by variable family, so the same
+            families were dropped in every seed.
+        chosen_experiments: Every experiment the cell actually bought, in
+            spending order, comma-separated. The roster, not just the count --
+            two arms can buy the same NUMBER of distinct experiments and cover
+            very different numbers of graph variables, since one variable has
+            up to three menu entries. Without this, an arm that matches the
+            loop on coverage and loses on accuracy cannot be explained after
+            the fact. None when no experiment was bought.
+        n_substring_conflicts: How many claimed names a substring guard would
+            have discarded -- the incidence of the defect removed on
+            2026-08-29, measured rather than argued. Structurally 0 on LT,
+            whose menu has no shadowed pairs; WT has three of 28.
+        claim_pool_share: The larger scout's capped claim as a fraction of the
+            pool it selects from. The cap only matters in proportion to this:
+            ~0.10 at LT k=6, where the shuffled leftover dominates the pool,
+            and ~0.77 at k=45, where the claim does. None outside the team arm.
         n_pc_degeneracies: How many times PC's singular-matrix
             fallback fired during this cell. Captured by a logging
             handler the orchestrator installs around each cell. None
@@ -125,7 +220,44 @@ class RunRecord:
     # --- runtime / instrumentation ---
     wall_time_seconds: float | None = None
     n_llm_calls: int | None = None
+    n_selection_fallbacks: int | None = None
+    overlap_frac: float | None = None
+    n_experiments_distinct: int | None = None
+    n_contested: int | None = None
+    n_negotiation_failures: int | None = None
+    conservation_certified: bool | None = None
+    aggregator_tokens: int | None = None
+    scout_a_tokens: int | None = None
+    scout_b_tokens: int | None = None
+    max_tree_fragment: int | None = None
+    tree_would_refuse: bool | None = None
+    model_id: str | None = None
+    reasoning_effort: str | None = None
+    providers_used: str | None = None
     n_pc_degeneracies: int | None = None
+    n_collinear_dropped: int | None = None
+    n_zero_variance_dropped: int | None = None
+    n_llm_attempts: int | None = None
+    n_claim_truncated: int | None = None
+    n_substring_conflicts: int | None = None
+    chosen_experiments: str | None = None
+    claim_pool_share: float | None = None
+
+    # --- PC provenance: the three parameters that silently determine the
+    #     graph. Recorded per cell because `runs/m6-controls.parquet`
+    #     disagreed with a later `random` run on identical seed, code and
+    #     dependency versions, and the disagreement was undiagnosable --
+    #     none of these travelled with the row. A cell that cannot state
+    #     the configuration that produced it cannot be pooled with another
+    #     cell, which is the only thing a sweep is for. ---
+    pc_alpha: float | None = None
+    pc_max_rows: int | None = None
+    pc_collinearity_threshold: float | None = None
+    # The linear-algebra backend is part of the configuration: identical
+    # code, seeds, data and package versions produce different graphs under
+    # Accelerate vs OpenBLAS. See `inference.runtime_fingerprint`.
+    blas_backend: str | None = None
+    platform_tag: str | None = None
 
     # --- LLM cost / token tracking ---
     # Populated by the orchestrator's _CountingLLM wrapper for cells whose

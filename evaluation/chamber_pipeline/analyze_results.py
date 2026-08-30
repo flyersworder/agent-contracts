@@ -63,6 +63,14 @@ VARIANT_COLORS: dict[str, str] = {
     "llm_only": "#ff7f0e",  # orange — pure LLM
     "llm_pc": "#2ca02c",  # green — main hybrid
     "planner_reasoner": "#d62728",  # red — multi-agent ⭐
+    # M6 coordination ladder
+    "fan_in_homog": "#9467bd",  # purple — ensemble
+    "fan_in_spec": "#8c564b",  # brown — parallel roles
+    "team": "#e377c2",  # pink — negotiation
+    "uncontracted": "#7f7f7f",  # gray — the ungoverned control
+    "fan_in_agg": "#17becf",  # cyan — rung-1 ablation, not a rung
+    "one_shot": "#bcbd22",  # olive — the no-history control
+    "critique": "#393b79",  # indigo — executor-evaluator
 }
 
 VARIANT_LABELS: dict[str, str] = {
@@ -71,6 +79,13 @@ VARIANT_LABELS: dict[str, str] = {
     "llm_only": "LLM-only",
     "llm_pc": "LLM+PC",
     "planner_reasoner": "Planner+Reasoner",
+    "fan_in_homog": "Ensemble (fan-in)",
+    "fan_in_spec": "Parallel roles (fan-in)",
+    "team": "Team (negotiation)",
+    "uncontracted": "Uncontracted (self-terminating)",
+    "fan_in_agg": "Ensemble (aggregator honored)",
+    "one_shot": "One-shot (no history)",
+    "critique": "Critique (executor-evaluator)",
 }
 
 # Marker + linestyle per variant so curves stay distinguishable when the
@@ -81,6 +96,13 @@ VARIANT_MARKERS: dict[str, str] = {
     "llm_only": "^",
     "llm_pc": "D",
     "planner_reasoner": "v",
+    "fan_in_homog": "P",
+    "fan_in_spec": "X",
+    "team": "*",
+    "uncontracted": "X",
+    "fan_in_agg": "P",
+    "one_shot": "*",
+    "critique": "h",
 }
 
 VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
@@ -89,6 +111,13 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "llm_only": "-",
     "llm_pc": "-.",
     "planner_reasoner": (0, (3, 1, 1, 1, 1, 1)),
+    "fan_in_homog": (0, (5, 1)),
+    "fan_in_spec": (0, (1, 1)),
+    "team": (0, (3, 5, 1, 5)),
+    "uncontracted": (0, (7, 2)),
+    "fan_in_agg": (0, (3, 1, 1, 1)),
+    "one_shot": "dashdot",
+    "critique": "dotted",
 }
 
 # Variant rendering order in legend (matches plan §5.3 description top-to-bottom).
@@ -98,6 +127,19 @@ VARIANT_ORDER: tuple[str, ...] = (
     "llm_only",
     "llm_pc",
     "planner_reasoner",
+    # The ungoverned control. Not a rung and not an M4b variant.
+    "uncontracted",
+    # M6 ladder, in rung order. Every figure and summary table iterates this
+    # tuple, so an arm missing here is silently dropped from the output --
+    # no error, no warning, just an absent curve.
+    "fan_in_homog",
+    "fan_in_spec",
+    # Ablation of rung 1, ordered beside it. Deliberately NOT in
+    # `LADDER_ORDER`: it is not a rung, and the ladder table must not list it.
+    "fan_in_agg",
+    "team",
+    "one_shot",
+    "critique",
 )
 
 
@@ -106,7 +148,110 @@ VARIANT_ORDER: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 
 
-def load_records(path: str | Path) -> pd.DataFrame:
+# Columns that must not vary WITHIN a frame being pooled into a mean.
+#
+# `blas_backend` is the one that has already changed a result: register entry
+# 10 measured macOS/Accelerate against Linux/OpenBLAS on the same seeded
+# `random` cells and found 0 of 120 identical, mean |dF1| = 0.055 -- LARGER
+# than most effects this pillar reports (team - loop = -0.047). PC is a
+# sequence of accept/reject tests at alpha, so a ~1e-10 difference in
+# `inv(C)` forks the conditioning-set search rather than nudging a number.
+#
+# The PC parameters are here for the same reason at a coarser scale: an alpha
+# or a row cap that differs between rows is two experiments in one frame.
+_PROVENANCE_COLUMNS: tuple[str, ...] = (
+    "blas_backend",
+    "platform_tag",
+    "pc_alpha",
+    "pc_max_rows",
+    "pc_collinearity_threshold",
+)
+
+
+class MixedProvenanceError(ValueError):
+    """Rows produced under different PC or platform configurations were pooled.
+
+    Until 2026-08-29 the rule "never pool rows whose `blas_backend` differs"
+    lived in prose in three documents and nowhere in code, while every
+    `RunRecord` dutifully carried the field and no analyzer read it. The
+    failure mode is silent by construction: concatenating
+    `runs/m4-pilot.parquet` (Accelerate) with `runs/m6-ladder.parquet`
+    (OpenBLAS) and calling `--ladder` produces a rung mean averaged across two
+    backends, with no error and no warning.
+    """
+
+
+def provenance_problems(df: pd.DataFrame) -> list[str]:
+    """Provenance columns that carry more than one value in this frame.
+
+    A column ABSENT from the frame entirely is not a problem -- pre-2026-08-26
+    sweeps predate the stamp, and "unverifiable" is a weaker statement than
+    "mixed". `harness_validity_report` reports that case separately.
+
+    A column PARTLY populated IS a problem, and this is the case that matters
+    most in practice. Concatenating `runs/m4-pilot.parquet` (unstamped,
+    Accelerate) with `runs/m6-lt-loop-curve.parquet` (stamped, OpenBLAS) --
+    the exact pooling the register warns about -- leaves one distinct non-null
+    backend and a block of nulls. Judging on `dropna().unique()` alone calls
+    that homogeneous, which is how a guard against mixing legacy and current
+    data misses the only mix anyone is likely to make. Verified by execution
+    against those two files.
+    """
+    problems: list[str] = []
+    for column in _PROVENANCE_COLUMNS:
+        if column not in df.columns:
+            continue
+        present = df[column].notna()
+        values = df.loc[present, column].unique()
+        if len(values) == 0:
+            # Column exists but is entirely null -- a Parquet consolidated from
+            # a fully-legacy sidecar. Neither mixed nor confirmed; the
+            # `UNVERIFIABLE` notice covers it, and treating it as homogeneous
+            # here would report "single configuration" where nothing was
+            # checked.
+            continue
+        if len(values) > 1:
+            rendered = ", ".join(repr(v) for v in sorted(values, key=str))
+            problems.append(f"{column}: {rendered}")
+        elif len(values) == 1 and not present.all():
+            problems.append(
+                f"{column}: {values[0]!r} on {int(present.sum())} rows and "
+                f"UNSTAMPED on {int((~present).sum())} -- the unstamped rows "
+                "predate the field and may come from any configuration"
+            )
+    return problems
+
+
+def require_homogeneous_provenance(df: pd.DataFrame, *, allow_mixed: bool = False) -> None:
+    """Raise unless every row shares one PC/platform configuration.
+
+    Args:
+        df: Cell-level frame.
+        allow_mixed: Escape hatch for a caller that genuinely wants the
+            comparison -- measuring the backend effect itself, for instance.
+            Never set it to silence the error on an analysis you intend to
+            publish.
+
+    Raises:
+        MixedProvenanceError: If any provenance column carries two values.
+    """
+    if allow_mixed:
+        return
+    problems = provenance_problems(df)
+    if problems:
+        raise MixedProvenanceError(
+            "these rows were produced under more than one configuration, and "
+            "pooling them averages two experiments into one number: "
+            + "; ".join(problems)
+            + ". Register entry 10 measures the backend effect at |dF1| = "
+            "0.055, larger than most effects reported from this pillar. "
+            "Analyse the groups separately, or pass allow_mixed=True "
+            "(--allow-mixed-provenance) if measuring the difference IS the "
+            "point."
+        )
+
+
+def load_records(path: str | Path, *, allow_mixed_provenance: bool = False) -> pd.DataFrame:
     """Load a Parquet or CSV produced by `run_experiment.py`.
 
     Auto-detects format from the file extension. Validates the schema
@@ -141,11 +286,17 @@ def load_records(path: str | Path) -> pd.DataFrame:
             f"Input file missing required columns: {sorted(missing)}. "
             f"Was this Parquet produced by `run_experiment.py`?"
         )
+    require_homogeneous_provenance(df, allow_mixed=allow_mixed_provenance)
     return df
 
 
-def aggregate_pareto(df: pd.DataFrame) -> pd.DataFrame:
+def aggregate_pareto(df: pd.DataFrame, *, allow_mixed_provenance: bool = False) -> pd.DataFrame:
     """Aggregate cell-level records into per-(chamber, agent, budget) Pareto points.
+
+    Refuses a frame whose rows come from more than one PC/platform
+    configuration. Checked HERE and not only at load time because this is
+    where rows actually become a mean: a caller that concatenated two
+    Parquets in a notebook never went through `load_records`.
 
     Drops non-"ok" cells (skipped/error) before aggregating — those
     don't contribute to the Pareto curve. Computes mean and standard
@@ -160,6 +311,7 @@ def aggregate_pareto(df: pd.DataFrame) -> pd.DataFrame:
         combination. Columns: chamber, agent_name, budget_k, budget_fraction,
         n_seeds, shd_mean, shd_sem, f1_mean, f1_sem.
     """
+    require_homogeneous_provenance(df, allow_mixed=allow_mixed_provenance)
     ok_only = df[df["status"] == "ok"].copy()
     if ok_only.empty:
         return pd.DataFrame(
@@ -191,6 +343,261 @@ def aggregate_pareto(df: pd.DataFrame) -> pd.DataFrame:
     agg["shd_sem"] = (agg["shd_std"] / np.sqrt(agg["n_seeds"])).fillna(0.0)
     agg["f1_sem"] = (agg["f1_std"] / np.sqrt(agg["n_seeds"])).fillna(0.0)
     return agg.drop(columns=["shd_std", "f1_std"])
+
+
+# M6 coordination ladder, in rung order: loop, ensemble, parallel roles,
+# chain, team. NOT `VARIANT_ORDER`, which is plan §5.1 numbering and places
+# `planner_reasoner` before the fan-in arms -- plotting the chain rung as if
+# it were less coordinated than the ensembles, which is the one axis the
+# ladder exists to order.
+LADDER_ORDER: tuple[str, ...] = (
+    # Ordered by how much of the loop's running record each arm retains:
+    # none, complete, complete-plus-a-reviewer, split-by-agreement, split
+    # blind. `one_shot` sits BELOW the reference because it removes the
+    # record rather than dividing it.
+    "one_shot",
+    "llm_pc",
+    "critique",
+    "fan_in_homog",
+    "fan_in_spec",
+    "planner_reasoner",
+    "team",
+)
+
+# 1.96 (two-sided alpha=0.05) + 0.84 (80% power). The paper reports an
+# equivalence bound rather than a null, so every accuracy comparison is
+# printed next to the smallest difference this design could have detected.
+_MDE_Z = 2.8
+
+# Degradation counters whose absence on SOME rows silently becomes a zero.
+#
+# Split by which subsystem populates them, because "legitimately null" differs:
+# a PC counter is null when inference never ran, an LLM counter when the arm
+# has no `_CountingLLM` at all. `random` and `greedy_ig` run PC and make no LLM
+# calls, so testing an LLM counter against `pc_ran` flagged every ladder frame
+# with a random baseline.
+_PC_COUNTER_COLUMNS: tuple[str, ...] = (
+    "n_pc_degeneracies",
+    "n_collinear_dropped",
+    "n_zero_variance_dropped",
+)
+_LLM_COUNTER_COLUMNS: tuple[str, ...] = ("n_selection_fallbacks",)
+_COUNTER_COLUMNS: tuple[str, ...] = _PC_COUNTER_COLUMNS + _LLM_COUNTER_COLUMNS
+
+
+def cost_frontier(df: pd.DataFrame, *, allow_mixed_provenance: bool = False) -> pd.DataFrame:
+    """Per (chamber, budget, arm): accuracy against coordination cost.
+
+    Cost is measured in **LLM calls**, not dollars. Dollars are a property of
+    the provider's price sheet that week -- register entry 3 measured the same
+    model billing 4.7x more on one endpoint than another -- while call count
+    is a property of the topology, which is the thing under study. A frontier
+    denominated in dollars would move when nobody changed the experiment.
+
+    Interventions are held EQUAL across arms by construction, so what varies
+    here is coordination overhead alone. In a real laboratory the experiment
+    would dominate and these differences would compress toward nothing; the
+    axis is meaningful because our experiments are pre-recorded and free.
+
+    `dominated` marks an arm that some other arm at the same (chamber, budget)
+    beats on BOTH axes -- fewer calls and higher F1. That is a stronger
+    statement than losing on accuracy: it means no cost argument rescues it.
+
+    Returns:
+        One row per (chamber, budget_k, agent_name) with `f1_mean`,
+        `calls_mean`, `usd_mean`, `n_ok` and `dominated`.
+    """
+    require_homogeneous_provenance(df, allow_mixed=allow_mixed_provenance)
+    ok = df[df["status"] == "ok"]
+    grouped = (
+        ok.groupby(["chamber", "budget_k", "agent_name"])
+        .agg(
+            f1_mean=("f1", "mean"),
+            calls_mean=("n_llm_calls", "mean"),
+            usd_mean=("cost_usd", "mean"),
+            n_ok=("f1", "size"),
+        )
+        .reset_index()
+    )
+
+    dominated: list[bool] = []
+    for row in grouped.itertuples():
+        peers = grouped[(grouped["chamber"] == row.chamber) & (grouped["budget_k"] == row.budget_k)]
+        # Strictly better on one axis and no worse on the other. `<=` on the
+        # cost side and `>=` on accuracy would call ties dominated, which
+        # would flag an arm that merely matches another as inferior to it.
+        beaten = (
+            (peers["calls_mean"] <= row.calls_mean)
+            & (peers["f1_mean"] >= row.f1_mean)
+            & ((peers["calls_mean"] < row.calls_mean) | (peers["f1_mean"] > row.f1_mean))
+        )
+        dominated.append(bool(beaten.any()))
+    grouped["dominated"] = dominated
+    return grouped
+
+
+def format_cost_frontier(df: pd.DataFrame, *, allow_mixed_provenance: bool = False) -> str:
+    """Render `cost_frontier` as a table, cheapest arm first within a budget."""
+    frame = cost_frontier(df, allow_mixed_provenance=allow_mixed_provenance)
+    if frame.empty:
+        return "No cells to place on the cost frontier."
+
+    lines: list[str] = []
+    for (chamber, budget), grp in frame.groupby(["chamber", "budget_k"], sort=True):
+        lines.append(f"\n{chamber.upper()} k={int(budget)}  (cheapest first)")
+        # Width taken from the longest label rather than a literal, so a new
+        # arm cannot silently overflow the column and misalign the table.
+        width = max(len(VARIANT_LABELS.get(a, a)) for a in frame["agent_name"]) + 2
+        lines.append(f"  {'arm':<{width}}{'F1':>8}{'calls':>8}{'USD':>10}{'n':>5}  frontier")
+        lines.append("  " + "-" * (width + 41))
+        for row in grp.sort_values("calls_mean").itertuples():
+            mark = "dominated" if row.dominated else "* optimal"
+            calls = "n/a" if pd.isna(row.calls_mean) else f"{row.calls_mean:.0f}"
+            usd = "n/a" if pd.isna(row.usd_mean) else f"{row.usd_mean:.4f}"
+            lines.append(
+                f"  {VARIANT_LABELS.get(row.agent_name, row.agent_name):<{width}}"
+                f"{row.f1_mean:>8.3f}{calls:>8}{usd:>10}{int(row.n_ok):>5}  {mark}"
+            )
+    lines.append(
+        "\nCost is LLM CALLS, not dollars: call count is a property of the "
+        "topology,\nwhile price is a property of the provider that week (the "
+        "same model has\nbilled 4.7x more on one endpoint than another). "
+        "Interventions are equal\nacross arms by construction, so this is "
+        "coordination overhead alone."
+    )
+    return "\n".join(lines)
+
+
+def ladder_frame(df: pd.DataFrame, *, allow_mixed_provenance: bool = False) -> pd.DataFrame:
+    """One row per (ladder rung, budget) for the M6 coordination table.
+
+    Refuses a frame spanning more than one PC/platform configuration; see
+    `require_homogeneous_provenance`.
+
+    `failure_rate` is computed BEFORE dropping non-"ok" cells. Filtering
+    first makes every rate exactly 0.0, which would erase the M4b finding
+    that `planner_reasoner` timed out on 8 of 30 cells at its top budget --
+    the arm's defining weakness and half of hypothesis H-A.
+
+    Non-ladder arms are dropped. The M6 analysis reuses
+    `runs/m4-pilot.parquet` for its `llm_pc` and `planner_reasoner` rows,
+    and that file also carries `random`, `greedy_ig`, and `llm_only`.
+
+    Args:
+        df: Cell-level DataFrame from `load_records`, one chamber only.
+
+    Returns:
+        DataFrame ordered by `LADDER_ORDER` then budget, with columns:
+        agent_name, budget_k, n_cells, n_ok, failure_rate, f1_mean, f1_sd,
+        shd_mean, tokens_mean, wall_time_mean, overlap_frac_mean.
+
+    Raises:
+        ValueError: If `df` mixes chambers. LT and WT have different menu
+            sizes, so the same `budget_k` is a different budget in each and
+            averaging them describes neither.
+    """
+    require_homogeneous_provenance(df, allow_mixed=allow_mixed_provenance)
+    if "chamber" in df.columns and df["chamber"].nunique(dropna=True) > 1:
+        found = sorted(df["chamber"].dropna().unique())
+        raise ValueError(f"ladder_frame needs a single chamber; got {found}. Filter first.")
+
+    rungs = df[df["agent_name"].isin(LADDER_ORDER)]
+    if rungs.empty:
+        return pd.DataFrame(
+            columns=[
+                "agent_name",
+                "budget_k",
+                "n_cells",
+                "n_ok",
+                "failure_rate",
+                "f1_mean",
+                "f1_sd",
+                "shd_mean",
+                "tokens_mean",
+                "wall_time_mean",
+                "overlap_frac_mean",
+            ]
+        )
+
+    # Denominator: every attempted cell. Numerator comes from ok-cells only,
+    # so the two are deliberately computed on different frames.
+    attempted = rungs.groupby(["agent_name", "budget_k"], as_index=False).agg(
+        n_cells=("seed", "count"),
+        n_ok=("status", lambda s: int((s == "ok").sum())),
+    )
+
+    ok_only = rungs[rungs["status"] == "ok"]
+    tokens = ok_only["tokens_in"].fillna(0) + ok_only["tokens_out"].fillna(0)
+    ok_only = ok_only.assign(_tokens_total=tokens)
+    # `runs/m4-pilot.parquet` predates the Task-8 columns and supplies two of
+    # the five rungs, so a hard reference here makes the ladder table
+    # unbuildable on exactly the data it exists to join. Absent optional
+    # columns read as NaN.
+    for optional in ("overlap_frac", "wall_time_seconds"):
+        if optional not in ok_only.columns:
+            ok_only = ok_only.assign(**{optional: float("nan")})
+    scored = ok_only.groupby(["agent_name", "budget_k"], as_index=False).agg(
+        f1_mean=("f1", "mean"),
+        f1_sd=("f1", "std"),
+        shd_mean=("shd", "mean"),
+        tokens_mean=("_tokens_total", "mean"),
+        wall_time_mean=("wall_time_seconds", "mean"),
+        overlap_frac_mean=("overlap_frac", "mean"),
+    )
+
+    # Left join on `attempted`: an all-error (rung, budget) has no ok-cells
+    # and so no `scored` row, but must still appear with failure_rate 1.0
+    # rather than vanishing from the table.
+    out = attempted.merge(scored, on=["agent_name", "budget_k"], how="left")
+    out["failure_rate"] = 1.0 - (out["n_ok"] / out["n_cells"])
+
+    rung_rank = {name: i for i, name in enumerate(LADDER_ORDER)}
+    out = out.sort_values(
+        by=["agent_name", "budget_k"],
+        key=lambda col: col.map(rung_rank) if col.name == "agent_name" else col,
+    ).reset_index(drop=True)
+    return out[
+        [
+            "agent_name",
+            "budget_k",
+            "n_cells",
+            "n_ok",
+            "failure_rate",
+            "f1_mean",
+            "f1_sd",
+            "shd_mean",
+            "tokens_mean",
+            "wall_time_mean",
+            "overlap_frac_mean",
+        ]
+    ]
+
+
+def minimum_detectable_effect(df: pd.DataFrame, agent: str, budget_k: int) -> float:
+    """Smallest F1 difference this design could detect at 80% power.
+
+    `2.8 * sd * sqrt(2/n)` for a two-sample comparison at n seeds per arm.
+
+    The SD is the within-arm per-cell SD over ok-cells with **ddof=1**
+    (pandas' `Series.std()` default). A NumPy implementation defaulting to
+    ddof=0 differs by sqrt(n/(n-1)) -- 1.7 % at n=30, small enough to read
+    as noise and large enough to move the equivalence bound.
+
+    Args:
+        df: Cell-level DataFrame.
+        agent: Arm name.
+        budget_k: Budget to slice on.
+
+    Returns:
+        The MDE in F1 units, or `nan` if fewer than two ok-cells exist.
+    """
+    sub = df[(df["agent_name"] == agent) & (df["budget_k"] == budget_k)]
+    sub = sub[sub["status"] == "ok"]
+    n = len(sub)
+    if n < 2:
+        return float("nan")
+    sd = float(sub["f1"].std())  # ddof=1
+    return _MDE_Z * sd * float(np.sqrt(2 / n))
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +873,30 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Print plan §9 M4 acceptance check (per-variant monotonic + LLM-beats-Random).",
     )
     parser.add_argument(
+        "--ladder",
+        action="store_true",
+        help="Print the M6 coordination-ladder table (with MDE) and, with --out-dir, its panels.",
+    )
+    parser.add_argument(
+        "--cost-frontier",
+        action="store_true",
+        help=(
+            "Print accuracy against coordination cost in LLM CALLS, marking "
+            "arms that another arm beats on both axes at the same budget."
+        ),
+    )
+    parser.add_argument(
+        "--allow-mixed-provenance",
+        action="store_true",
+        help=(
+            "Analyse rows spanning more than one BLAS backend / platform / PC "
+            "configuration. Off by default because pooling them averages two "
+            "experiments into one number -- the backend effect alone is "
+            "|dF1| = 0.055, larger than most effects this pillar reports. Use "
+            "only when measuring that difference IS the point."
+        ),
+    )
+    parser.add_argument(
         "--check-chamber",
         type=str,
         default="lt",
@@ -476,14 +907,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
-    df = load_records(args.input)
+    df = load_records(args.input, allow_mixed_provenance=args.allow_mixed_provenance)
+    # The flag has to reach the AGGREGATORS too: they hold the same guard,
+    # and `main` calls `aggregate_pareto` on every invocation, so a flag
+    # honoured only at load time is a flag that does nothing.
+    _allow_mixed = args.allow_mixed_provenance
     print(f"Loaded {len(df)} records from {args.input}")
     n_ok = (df["status"] == "ok").sum()
     n_skipped = (df["status"] == "skipped").sum()
     n_error = (df["status"] == "error").sum()
     print(f"  ok: {n_ok}, skipped: {n_skipped}, error: {n_error}")
 
-    agg = aggregate_pareto(df)
+    agg = aggregate_pareto(df, allow_mixed_provenance=_allow_mixed)
     if agg.empty:
         print("No 'ok' cells to analyze; bailing.")
         return 1
@@ -500,6 +935,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             plt.close(fig)
             print(f"Wrote {out_path}")
 
+    if args.ladder:
+        # One chamber only -- `ladder_frame` refuses a mixed frame, since the
+        # same budget_k is a different budget under a different menu size.
+        ladder_df = df[df["chamber"] == args.check_chamber] if "chamber" in df.columns else df
+        # Validity BEFORE accuracy, deliberately. A degradation rate that
+        # varies with budget biases the accuracy numbers, so reading the table
+        # first means reading numbers that may have to be discarded. The M4b
+        # pilot was interpreted in full before anyone checked whether the
+        # harness was working; ~43% of its k=30 selections were random.
+        print()
+        print("=== HARNESS VALIDITY ===")
+        report = harness_validity_report(ladder_df)
+        warnings = validity_warnings(report)
+        if warnings:
+            for warning in warnings:
+                print(f"  {warning}")
+            print(
+                "\n  Read these before the table below. A MODERATOR warning means "
+                "the\n  measured effect is biased, not merely noisy."
+            )
+        else:
+            print("  No degradation detected on any recorded path.")
+        print()
+        print(format_ladder_summary(ladder_df, allow_mixed_provenance=_allow_mixed))
+
+    if args.cost_frontier:
+        print(format_cost_frontier(df, allow_mixed_provenance=_allow_mixed))
+        if args.out_dir:
+            for written in plot_ladder(
+                ladder_df, Path(args.out_dir), allow_mixed_provenance=_allow_mixed
+            ):
+                print(f"Wrote {written}")
+
     if args.check_m4_acceptance:
         result = check_m4_acceptance(agg, chamber=args.check_chamber)
         print()
@@ -509,11 +977,440 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def _suspend_seconds(ok: pd.DataFrame) -> float:
+    """Total wall-clock time these cells spanned but did not spend computing.
+
+    Returns 0.0 when the timestamp columns are absent or unparseable rather
+    than raising: this is a diagnostic, and a frame that predates the columns
+    should still produce a validity report.
+    """
+    needed = {"started_at", "finished_at", "wall_time_seconds"}
+    if not needed.issubset(ok.columns) or not len(ok):
+        return 0.0
+    try:
+        start = pd.to_datetime(ok["started_at"], errors="coerce")
+        end = pd.to_datetime(ok["finished_at"], errors="coerce")
+    except (TypeError, ValueError):
+        return 0.0
+    span = (end - start).dt.total_seconds()
+    gap = span - ok["wall_time_seconds"]
+    # Negative gaps are clock jitter on sub-second cells, not negative sleep.
+    return float(gap[gap > 0].sum())
+
+
+def harness_validity_report(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-(arm, budget) rates for every scaffold degradation path.
+
+    Accuracy columns say what the agents scored; these say whether the harness
+    was working while they scored it. Keeping them separate matters because a
+    degraded cell still reports `status="ok"` and a plausible F1 -- that is how
+    a 43% random-selection rate at k=30 survived a full pilot unnoticed.
+
+    Args:
+        df: Cell-level DataFrame from `load_records`.
+
+    Returns:
+        One row per (agent_name, budget_k): n_cells, error_rate,
+        fallback_rate (fallbacks per LLM call), pc_degeneracy_rate,
+        collinear_drop_rate, zero_variance_drop_rate,
+        conservation_fail_rate, wall_mean, wall_p95.
+    """
+    out = []
+    for (agent, budget), grp in df.groupby(["agent_name", "budget_k"], sort=True):
+        ok = grp[grp["status"] == "ok"]
+        calls = ok["n_llm_calls"].sum() if "n_llm_calls" in ok.columns else 0
+        fb = ok["n_selection_fallbacks"].sum() if "n_selection_fallbacks" in ok.columns else 0
+        pc = ok["n_pc_degeneracies"].sum() if "n_pc_degeneracies" in ok.columns else 0
+        if "n_collinear_dropped" in ok.columns and len(ok):
+            dropped = ok["n_collinear_dropped"].fillna(0)
+            # FRACTION OF CELLS that dropped anything, not columns-per-cell.
+            # `_VARIATION_EPS` and the DEGRADED threshold both assume a rate
+            # in [0, 1]; a per-cell count (~3.1 on WT, where three redundant
+            # barometers are dropped every time) makes a 0.37 wobble look
+            # like a 0.02 moderator and false-alarms on every budget.
+            coll_rate = float((dropped > 0).mean())
+            coll_mean = float(dropped.mean())
+        else:
+            coll_rate = 0.0
+            coll_mean = 0.0
+        if "n_zero_variance_dropped" in ok.columns and len(ok):
+            zv = ok["n_zero_variance_dropped"].fillna(0)
+            zv_rate = float((zv > 0).mean())
+            zv_mean = float(zv.mean())
+        else:
+            zv_rate = 0.0
+            zv_mean = 0.0
+        if "conservation_certified" in ok.columns:
+            judged = ok[ok["conservation_certified"].notna()]
+            cons_fail = (
+                float((~judged["conservation_certified"].astype(bool)).mean())
+                if len(judged)
+                else float("nan")
+            )
+        else:
+            cons_fail = float("nan")
+        out.append(
+            {
+                "agent_name": agent,
+                "budget_k": int(budget),
+                "n_cells": len(grp),
+                "n_ok": len(ok),
+                # Denominator is every ATTEMPTED cell: an errored cell is the
+                # degradation, so filtering to ok-cells first would report 0.
+                "error_rate": 1.0 - (len(ok) / len(grp)) if len(grp) else float("nan"),
+                # No denominator but non-zero fallbacks is NOT a clean rate.
+                # Surface it as 1.0 so `validity_warnings` flags it, rather
+                # than dividing by a missing `n_llm_calls` into a silent 0.0.
+                # `n_llm_calls` is LOGICAL calls, which is the right
+                # denominator: `n_llm_attempts` includes provider rotation, so
+                # using it would report a LOWER degradation rate the worse the
+                # serving stack behaved -- a harness statistic that moves with
+                # conditions, the class of defect this report exists to catch.
+                "fallback_rate": (float(fb) / float(calls)) if calls else (1.0 if fb else 0.0),
+                "pc_degeneracy_rate": (float(pc) / len(ok)) if len(ok) else 0.0,
+                # Reported separately from pc_degeneracy_rate because a
+                # collinear drop is a LOCAL loss (the dropped node makes no
+                # claim, the rest of the graph is still inferred) rather than
+                # a total one. Two numbers, deliberately: the rate drives the
+                # warnings, the mean says how much of the graph went silent.
+                "collinear_drop_rate": coll_rate,
+                "collinear_cols_mean": coll_mean,
+                # Deliberately NOT in `contaminating`, and deliberately not in
+                # the `rates` tuple that drives warnings. A zero-variance
+                # column is one no bought experiment perturbed, so this rate
+                # MUST fall as the budget rises -- it is the mechanism by
+                # which budget buys accuracy, not a defect in measuring it.
+                # Warning on its budget-variance would fire on every valid
+                # sweep, the same trap `conservation_fail_rate` is kept out of
+                # below. Recorded because the decomposition it enables -- how
+                # much of the graph PC was asked about, versus how well it
+                # answered -- is not recoverable from the cells otherwise.
+                "zero_variance_drop_rate": zv_rate,
+                "zero_variance_cols_mean": zv_mean,
+                "conservation_fail_rate": cons_fail,
+                # Wall-CLOCK span minus active compute. `wall_time_seconds`
+                # is `time.perf_counter()`, which on macOS does not advance
+                # while the system is asleep, so this difference is suspend
+                # time. Reported because it is otherwise invisible: the
+                # 2026-08-25 WT gate ran 1.01h of work inside a 6.66h span.
+                # It is NOT a contaminating path -- sleeping between LLM calls
+                # cannot change what the agent chose -- it is an operations
+                # number. Run sweeps under `caffeinate -is`.
+                "suspend_seconds": _suspend_seconds(ok),
+                "wall_mean": ok["wall_time_seconds"].mean() if len(ok) else float("nan"),
+                "wall_p95": ok["wall_time_seconds"].quantile(0.95) if len(ok) else float("nan"),
+            }
+        )
+    report = pd.DataFrame(out)
+    # Record which source columns were ABSENT. Without this a frame that never
+    # recorded a path is indistinguishable from one where the path never fired,
+    # and `validity_warnings` would call an unmeasured harness clean.
+    # A column PARTLY populated is neither present nor absent, and `fillna(0)`
+    # silently averages the unrecorded half in as zeros. Reachable by normal
+    # workflow: the JSONL sidecar resumes across a counter's introduction, so
+    # the older lines inflate through `RunRecord(**d)` with the field
+    # defaulting to None and consolidate into one half-null column. Measured on
+    # a 6-cell frame where 3 cells dropped 38 columns and 3 predate the
+    # counter: the report printed mean 19.0 for a true 38 and a rate of 0.50
+    # for a true 1.00, with no warning. `provenance_problems` already refuses
+    # the same shape; the degradation counters had no equivalent.
+    #
+    # Detected against `n_pc_degeneracies` rather than against nullness alone,
+    # because a null counter is LEGITIMATE on a cell where PC never ran -- and
+    # since that field is now itself None exactly then, a row with a non-null
+    # degeneracy count and a null sibling can only be a legacy row.
+    partial: list[str] = []
+    for reference, columns, label in (
+        ("n_pc_degeneracies", _PC_COUNTER_COLUMNS, "PC-cells"),
+        ("n_llm_calls", _LLM_COUNTER_COLUMNS, "LLM-cells"),
+    ):
+        if reference not in df.columns:
+            continue
+        ran = df[reference].notna()
+        for column in columns:
+            if column not in df.columns or column == reference:
+                continue
+            gaps = int((ran & df[column].isna()).sum())
+            if gaps:
+                partial.append(f"{column} ({gaps} of {int(ran.sum())} {label} unrecorded)")
+    report.attrs["partial_columns"] = partial
+    # All-null counts as absent: the column carries no information, and the
+    # provenance guard now skips it for the same reason.
+    report.attrs["missing_columns"] = [
+        c
+        for c in (
+            "n_selection_fallbacks",
+            "n_pc_degeneracies",
+            "n_collinear_dropped",
+            "n_zero_variance_dropped",
+            "blas_backend",
+            "platform_tag",
+            "conservation_certified",
+        )
+        if c not in df.columns or df[c].isna().all()
+    ]
+    return report
+
+
+# A rate this far apart across budgets counts as varying rather than jitter.
+_VARIATION_EPS = 0.02
+
+
+def validity_warnings(report: pd.DataFrame) -> list[str]:
+    """Turn a validity report into explicit warnings, worst kind first.
+
+    Two severities, and the distinction is the whole point:
+
+      * A **flat** non-zero rate degrades every cell about equally. It adds
+        noise and weakens power.
+      * A rate that **varies with budget** is a moderator correlated with the
+        independent variable. It biases the measured effect. This is what made
+        `llm_pc` beat `random` at k=6 (+0.034) and not at k=30 (+0.018): the
+        selection-truncation rate went 0% -> 43% across those budgets, so the
+        treatment was being removed in proportion to the x-axis.
+
+    Args:
+        report: Output of `harness_validity_report`.
+
+    Returns:
+        Human-readable warnings; empty if every path is clean.
+    """
+    warnings: list[str] = []
+    if report.empty:
+        # `harness_validity_report` builds `pd.DataFrame([])` for a frame with
+        # no ok-cells, which has NO COLUMNS -- so the groupby below raises
+        # KeyError('agent_name'). Reached from the CLI whenever the chamber
+        # filter matches nothing, e.g. `--ladder` on a WT file while
+        # `--check-chamber` still defaults to 'lt'. An empty selection is a
+        # nothing-to-report, not a crash.
+        return warnings
+    # Paths that CONTAMINATE the outcome, versus paths that ARE the outcome.
+    # Only the first class can bias an accuracy comparison:
+    #   * a selection fallback replaces the LLM's choice with `rng.choice`
+    #   * a degenerate PC returns an all-zeros adjacency, zeroing F1
+    #   * an errored cell drops out of the mean (survivorship)
+    # `conservation_certified` and `tree_would_refuse` come from a post-hoc
+    # `verify()`. Token budgets are non-binding at execution -- node monitors
+    # record tokens for certification arithmetic and must not halt; only
+    # interventions are live-gated -- so a conservation failure cannot change
+    # what the agent did or what PC inferred. Calling its k-variance a bias is
+    # wrong, and it would fire permanently: k=6's 48.8x aggregator cost spread
+    # makes provisioning there unpredictable BY MEASUREMENT, which is one of
+    # the paper's findings, not a defect.
+    # `collinear_drop_rate` is contaminating too, and less obviously so than
+    # the others: dropping a numerically duplicate column forfeits every edge
+    # incident to it, and how many columns are duplicate depends on WHICH
+    # experiments were bought -- so the rate can move with the budget axis.
+    # On WT this is load-bearing: four barometers read the same quantity in
+    # the `standard` configuration, and 13 of 42 true edges point into them.
+    contaminating = {
+        "fallback_rate",
+        "error_rate",
+        "pc_degeneracy_rate",
+        "collinear_drop_rate",
+    }
+    for detail in report.attrs.get("partial_columns", []):
+        warnings.append(
+            f"PARTIALLY RECORDED: {detail}. The unrecorded rows are averaged "
+            "in as zeros, so every rate and mean for this path reads LOW. "
+            "Usually a sidecar resumed across the counter's introduction -- "
+            "split the frame on the column's nullity rather than pooling it."
+        )
+    for column in report.attrs.get("missing_columns", []):
+        if column in ("blas_backend", "platform_tag"):
+            # Absent, not mixed. A pre-2026-08-26 sweep predates the stamp, so
+            # single-configuration cannot be CHECKED -- which is a weaker
+            # statement than "these rows disagree", and a different one from
+            # the contaminating-path notices below.
+            warnings.append(
+                f"UNVERIFIABLE: {column} is absent from these records, so "
+                "single-configuration cannot be confirmed. Attribute the "
+                "platform from the run log and do not pool with stamped rows "
+                "unless the attribution is certain (register entries 10, 13)."
+            )
+            continue
+        if column == "n_zero_variance_dropped":
+            # Deliberately NOT phrased as contamination. This path cannot bias
+            # an arm-vs-arm comparison; what its absence costs is the ability
+            # to decompose the budget curve. Measured 2026-08-29 on LT:
+            # 18 of 38 nodes are padded at k=1, 9 at k=12, 1 at k=59. A frame
+            # without the column reads 0.00 and hides that entirely.
+            warnings.append(
+                "NOT RECORDED: n_zero_variance_dropped is absent, so "
+                "zero_variance_drop_rate reads 0.00 here. Padding is not a "
+                "confound because it MEDIATES selection quality -- activating "
+                "more variables is what good selection does -- but without it "
+                "the budget curve cannot be split into how much of the graph "
+                "PC was asked about versus how well it answered."
+            )
+            continue
+        warnings.append(
+            f"UNMEASURED: {column} is absent from these records, so its rate "
+            "reads 0.00 here. That is not evidence the path is clean -- "
+            "`runs/m4-pilot.parquet` shows 0.00 for it while ~43% of its k=30 "
+            "selections were in fact random."
+        )
+    rates = (
+        ("fallback_rate", "selection fallback rate"),
+        ("error_rate", "cell error rate"),
+        ("conservation_fail_rate", "conservation failure rate"),
+        ("pc_degeneracy_rate", "PC degeneracy rate"),
+        ("collinear_drop_rate", "collinear column-drop rate"),
+    )
+
+    # Varying-with-budget first: these bias, they do not merely blur.
+    for column, label in rates:
+        for agent, grp in report.groupby("agent_name", sort=True):
+            vals = grp[column].dropna()
+            if len(vals) < 2:
+                continue
+            if float(vals.max() - vals.min()) > _VARIATION_EPS:
+                by_k = ", ".join(
+                    f"k={int(r.budget_k)}:{getattr(r, column):.2f}"
+                    for r in grp.sort_values("budget_k").itertuples()
+                )
+                if column in contaminating:
+                    warnings.append(
+                        f"MODERATOR: {agent} {label} varies with budget ({by_k}); "
+                        "this biases the measured effect, it does not merely add noise"
+                    )
+                else:
+                    warnings.append(
+                        f"FINDING: {agent} {label} varies with budget ({by_k}); "
+                        "post-hoc certification, so it does NOT bias accuracy -- "
+                        "report it as a result about provisioning"
+                    )
+
+    for column, label in rates:
+        flagged = report[report[column].fillna(0.0) > 0.0]
+        for row in flagged.itertuples():
+            warnings.append(
+                f"DEGRADED: {row.agent_name} k={int(row.budget_k)} {label} = "
+                f"{getattr(row, column):.2f}"
+            )
+    return warnings
+
+
+def format_ladder_summary(
+    df: pd.DataFrame, reference: str = "llm_pc", *, allow_mixed_provenance: bool = False
+) -> str:
+    """Render the M6 ladder table, every delta paired with its MDE.
+
+    Spec §6 reports an equivalence bound rather than a null. A bare
+    rung-vs-rung accuracy difference reads as a finding, and the ladder's
+    central risk is that the rungs land within noise of one another -- so a
+    delta smaller than the minimum detectable effect is printed as
+    "below MDE" rather than as a number the reader might interpret.
+
+    Args:
+        df: Cell-level DataFrame, one chamber only.
+        reference: Rung every other rung is compared against. Defaults to
+            the loop rung, which is hypothesis H-A's baseline.
+
+    Returns:
+        A printable multi-line table.
+    """
+    frame = ladder_frame(df, allow_mixed_provenance=allow_mixed_provenance)
+    if frame.empty:
+        return "No ladder cells to summarize."
+
+    header = (
+        f"{'Rung':<26}{'k':>4}{'n_ok':>6}{'fail':>7}"
+        f"{'F1':>8}{'MDE':>8}{'delta vs ' + reference:>22}"
+    )
+    lines = [header, "-" * len(header)]
+
+    for _, row in frame.iterrows():
+        rung = str(row["agent_name"])
+        budget = int(row["budget_k"])
+        mde = minimum_detectable_effect(df, rung, budget)
+        ref_rows = frame[(frame["agent_name"] == reference) & (frame["budget_k"] == budget)]
+
+        if rung == reference or ref_rows.empty:
+            verdict = "--"
+        else:
+            delta = float(row["f1_mean"]) - float(ref_rows.iloc[0]["f1_mean"])
+            ref_mde = minimum_detectable_effect(df, reference, budget)
+            # Compare against the wider of the two arms' bounds: the pair is
+            # only resolvable if it clears whichever arm is noisier.
+            bound = (
+                max(m for m in (mde, ref_mde) if not np.isnan(m))
+                if not (np.isnan(mde) and np.isnan(ref_mde))
+                else float("nan")
+            )
+            if np.isnan(bound) or abs(delta) < bound:
+                verdict = f"{delta:+.3f} (below MDE)"
+            else:
+                verdict = f"{delta:+.3f} (resolved)"
+
+        f1 = float(row["f1_mean"])
+        lines.append(
+            f"{VARIANT_LABELS.get(rung, rung):<26}{budget:>4}{int(row['n_ok']):>6}"
+            f"{row['failure_rate']:>7.2f}{f1:>8.3f}{mde:>8.3f}{verdict:>22}"
+        )
+
+    lines.append("")
+    lines.append(
+        "MDE = 2.8 * sd * sqrt(2/n), the smallest F1 difference detectable at "
+        "80% power (alpha=0.05, two-sided). A delta below it is not evidence "
+        "of equality -- only that this design cannot resolve it."
+    )
+    return "\n".join(lines)
+
+
+def plot_ladder(
+    df: pd.DataFrame, out_dir: str | Path, *, allow_mixed_provenance: bool = False
+) -> list[Path]:
+    """Three ladder panels: accuracy, cost, and failure rate.
+
+    Rungs on the x-axis in `LADDER_ORDER`, one line per budget. Rung index
+    rather than a coordination score, because the ladder is ordinal -- the
+    spacing between rungs carries no meaning and a numeric axis would imply
+    it does.
+
+    Args:
+        df: Cell-level DataFrame, one chamber only.
+        out_dir: Directory to write the PNGs into. Created if absent.
+
+    Returns:
+        The three written paths, in panel order.
+    """
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    frame = ladder_frame(df, allow_mixed_provenance=allow_mixed_provenance)
+
+    panels = (
+        ("ladder_f1.png", "f1_mean", "F1 (higher is better)"),
+        ("ladder_tokens.png", "tokens_mean", "Tokens per cell"),
+        ("ladder_failures.png", "failure_rate", "Failure rate"),
+    )
+    present = [r for r in LADDER_ORDER if r in set(frame["agent_name"])]
+    xs = range(len(present))
+    written: list[Path] = []
+
+    for filename, column, ylabel in panels:
+        fig, ax = plt.subplots(figsize=(7.0, 4.0))
+        for budget in sorted(frame["budget_k"].unique()):
+            at_budget = frame[frame["budget_k"] == budget].set_index("agent_name")
+            ys = [at_budget[column].get(rung, float("nan")) for rung in present]
+            ax.plot(list(xs), ys, marker="o", label=f"k={budget}")
+        ax.set_xticks(list(xs))
+        ax.set_xticklabels([VARIANT_LABELS.get(r, r) for r in present], rotation=20, ha="right")
+        ax.set_xlabel("Coordination rung")
+        ax.set_ylabel(ylabel)
+        ax.legend(title="Budget")
+        ax.grid(alpha=0.3)
+        fig.tight_layout()
+        target = out_path / filename
+        fig.savefig(target, dpi=150)
+        plt.close(fig)
+        written.append(target)
+
+    return written
 
 
 __all__ = [
+    "LADDER_ORDER",
     "VARIANT_COLORS",
     "VARIANT_LABELS",
     "VARIANT_ORDER",
@@ -521,8 +1418,18 @@ __all__ = [
     "build_arg_parser",
     "check_m4_acceptance",
     "format_acceptance_summary",
+    "format_ladder_summary",
+    "harness_validity_report",
+    "ladder_frame",
     "load_records",
     "main",
     "make_pareto_figure",
+    "minimum_detectable_effect",
+    "plot_ladder",
     "plot_pareto",
+    "validity_warnings",
 ]
+
+
+if __name__ == "__main__":
+    sys.exit(main())

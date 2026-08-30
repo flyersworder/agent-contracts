@@ -287,3 +287,62 @@ class TestChamberCompatibility:
         assert "skip" in msg.lower()
         # Plan-doc reference → anyone confused has a place to read.
         assert "5.1" in msg
+
+
+# ---------------------------------------------------------------------------
+# The UNCONTRACTED control -- `llm_pc` with the contract removed
+# ---------------------------------------------------------------------------
+
+
+@requires_causalchamber
+class TestUncontractedAgent:
+    """Every other registered arm is contracted, so nothing measured what
+    governance costs. This arm is the other half of that comparison."""
+
+    def test_stops_when_the_agent_says_done(self) -> None:
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+        from evaluation.chamber_pipeline.agents import uncontracted_agent
+        from tests.evaluation.conftest import RecordingLLM, _menu_from
+
+        def responder(idx: int, msgs: list[dict[str, str]]) -> str:
+            menu = _menu_from(msgs)
+            if idx >= 2:
+                return "DONE"
+            return menu[idx % len(menu)] if menu else ""
+
+        llm = RecordingLLM(responder)
+        adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=59)
+        uncontracted_agent(adapter, seed=0, llm=llm)
+        stats = adapter.coordination_stats
+        assert stats["n_experiments_distinct"] == 2, stats
+        assert stats["agg_hit_safety_stop"] == 0
+
+    def test_a_never_stopping_agent_is_flagged_not_silently_capped(self) -> None:
+        """Running the whole menu by choice and by exhaustion are different
+        findings, and the experiment count alone cannot tell them apart."""
+        from agent_contracts.integrations.causalchamber import (
+            create_contracted_chamber_agent,
+        )
+        from evaluation.chamber_pipeline.agents import uncontracted_agent
+        from tests.evaluation.conftest import RecordingLLM, _menu_from
+
+        llm = RecordingLLM(lambda i, m: (_menu_from(m) or [""])[0])
+        adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=59)
+        uncontracted_agent(adapter, seed=0, llm=llm)
+        stats = adapter.coordination_stats
+        assert stats["agg_hit_safety_stop"] == 1, stats
+
+    def test_the_prompt_states_no_budget(self) -> None:
+        """The arm removes the contract; if the prompt still quotes a number
+        it removes enforcement only, which is a different experiment."""
+        from evaluation.chamber_pipeline.llm_planner import (
+            build_uncontracted_select_prompt,
+        )
+
+        msgs = build_uncontracted_select_prompt(["a_x", "b_y"], 59, [])
+        blob = " ".join(m["content"] for m in msgs)
+        assert "59" not in blob
+        assert "budget" not in blob.lower() or "no budget" in blob.lower()
+        assert "DONE" in blob

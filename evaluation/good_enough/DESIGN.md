@@ -119,9 +119,9 @@ evaluation/good_enough/
 class EmailScenario:
     id: str
     category: str  # meeting, request, apology, etc.
-    context: str   # Background situation
-    recipient: str # Who the email is to
-    goal: str      # What the email should achieve
+    context: str  # Background situation
+    recipient: str  # Who the email is to
+    goal: str  # What the email should achieve
     key_info: list[str]  # Required information points
 ```
 
@@ -129,11 +129,12 @@ class EmailScenario:
 ```python
 @dataclass
 class EmailQualityCriteria:
-    clear_purpose: bool      # Purpose stated in first 2 sentences
+    clear_purpose: bool  # Purpose stated in first 2 sentences
     professional_tone: bool  # Appropriate language
     key_info_complete: bool  # All required info present
-    appropriate_length: bool # 50-300 words
-    actionable: bool         # Clear next step
+    appropriate_length: bool  # 50-300 words
+    actionable: bool  # Clear next step
+
 
 class EmailQualityEvaluator:
     """LLM-as-judge for email quality."""
@@ -159,6 +160,7 @@ class IterativeEmailAgent:
     def refine(self, current_draft: str, feedback: str) -> str:
         """Refine draft based on feedback."""
 
+
 class ContractedEmailAgent(IterativeEmailAgent):
     """Agent with Q_min stopping behavior."""
 
@@ -177,7 +179,7 @@ class ContractedEmailAgent(IterativeEmailAgent):
                     draft=draft,
                     iterations=iteration + 1,
                     stopped_early=True,
-                    reason="Quality threshold met"
+                    reason="Quality threshold met",
                 )
 
         return ContractedResult(stopped_early=False, reason="Max iterations")

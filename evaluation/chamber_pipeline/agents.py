@@ -32,6 +32,7 @@ their oriented direction.
 
 from __future__ import annotations
 
+import contextlib
 import random as _random
 import re
 from collections.abc import Callable
@@ -63,12 +64,55 @@ LLMCallable = Callable[..., Any]
 # Per-LLM-call output cap for the selection step. Without a cap, the
 # model (DeepSeek v4 Flash specifically) generates ~1300 output tokens
 # of verbose reasoning for what is fundamentally a "pick one item from
-# this list" task. With this cap, per-call latency drops from ~37s to
-# ~1.5-3s — making the M4 pilot wall-time-feasible. The expected
-# response is just one menu name (~15-30 chars), so 200 tokens is
-# generous headroom for any reasoning prefix the model insists on.
-# Tests can monkey-patch this if they need different behavior.
-_SELECTION_MAX_TOKENS = 200
+# this list" task. Tests can monkey-patch this if they need different
+# behavior.
+# Raised 200 -> 2048 on 2026-08-23, then 2048 -> 32768 the same day. The old
+# cap could not hold a single selection call: measured on the real 59-item LT
+# menu, DeepSeek v4 Flash 0423 spends 821 reasoning tokens at the provider
+# default, 976 at `high`, 475 at `low`, 415 at `minimal` -- every level over
+# 200. All four pinned providers returned `finish_reason=length` with EMPTY
+# content, and the loop below then fell back to `rng.choice`, silently turning
+# LLM selection into random selection. M4b (2026-05-18) was unaffected: its
+# recorded 509-2376 output tokens per call prove the calls ran to completion,
+# because providers did not then count reasoning tokens against `max_tokens`.
+#
+# WHY 2048 WAS STILL WRONG, and the methodological error to avoid repeating:
+# those 415-976 figures were all measured on a call with an EMPTY history --
+# the FIRST and cheapest step of the loop. Reasoning volume scales with the
+# prompt, and the prompt grows by one spent-experiment line per step. Measured
+# on a late-loop call (25 already chosen, effort=low, providers pinned):
+# flash-0731 emits 2,175 tokens and flash 11,690 -- 1.1x and 5.7x the 2048 cap.
+#
+# The consequence was severe and invisible. An instrumented k=30 cell
+# (2026-08-24, 0731, pinned providers) attributed EVERY selection failure to
+# truncation: {'length': 13, 'empty': 0, 'offmenu': 0, 'ok': 17} -- 13 of 30
+# picks were `rng.choice`. Because the failure rate is a function of history
+# length, it was 0/36 at k=6 and ~43% at k=30, which made the harness a
+# MODERATOR CORRELATED WITH THE BUDGET: in M4b, `llm_pc` beat `random` by
+# +0.034 F1 at k=6 (resolved) and only +0.018 at k=30 (below MDE), so LLM
+# selection appeared to stop helping as budget grew. That was this cap, not a
+# property of the model.
+#
+# It also threatened M6 directly: the ladder varies how budget is SPLIT across
+# agents, and splitting shortens each agent's history. Two scouts at k=15 each
+# truncate less than one loop at k=30, so the fan-in rungs would have scored
+# better than the loop for reasons having nothing to do with coordination --
+# H-B could have come out positive as a pure `max_tokens` artifact.
+#
+# 32768 matches `_ADJACENCY_MAX_TOKENS`. `max_tokens` is a CEILING, not a
+# reservation -- billing follows tokens actually generated -- so sizing it
+# generously costs nothing and removes the failure mode instead of relocating
+# it to a larger k. Calibrate any future change on a LATE-loop call.
+_SELECTION_MAX_TOKENS = 32768
+
+# Pinned explicitly rather than inherited. M4b never set this and silently
+# tracked DeepSeek's default; that default then rose (M4b's ~509 output
+# tokens/call against 821 today) when three thinking-effort tiers shipped on
+# 2026-08-13, under a model snapshot whose weights never changed. Pinning the
+# weights does not pin the behaviour -- only setting the parameter does.
+# "low" (475 tokens) is the closest match to M4b's observed profile, which is
+# what keeps the reused rung-0 and rung-3 cells comparable.
+_SELECTION_REASONING_EFFORT = "low"
 
 # Per-LLM-call output cap for the adjacency-emission step in
 # `llm_only_agent`. Larger because the response is a JSON object
@@ -89,6 +133,51 @@ _SELECTION_MAX_TOKENS = 200
 # negligible vs the ~$1.40 pilot baseline. The 1M-token context
 # accommodates this trivially.
 _ADJACENCY_MAX_TOKENS = 32768
+
+# Reasoning calls must never reuse `_SELECTION_MAX_TOKENS`. DeepSeek v4 Flash
+# is a reasoning model whose `reasoning_tokens` routinely reach 95% of
+# `completion_tokens`, so a 200-token cap is consumed entirely by hidden
+# reasoning and the response comes back with empty `content`. That is the M4b
+# root-cause bug; these are sized 4-8x expected content to avoid repeating it.
+# Raised 8192 -> 32768 on 2026-08-24, alongside the selection cap, for the
+# same reason: the old value was calibrated on k=6-ish prompts (reconcile
+# median 2,826 / p95 6,375) while `_A95_RECONCILE` already measures 8,557 at
+# k=30, so an 8192 cap truncates at the budgets the ladder actually runs.
+#
+# CAVEAT, and it is not about accuracy. `team_agents`/`fan_in_agents` DISCARD
+# the reconcile response -- the merge below is a plain Python dedup plus PC --
+# so truncation here never changed a result. What it changed is COST: a
+# truncated call still generates and bills `max_tokens` of reasoning, which
+# `as_node("aggregator")` books into the aggregator's monitor. At 8192 a
+# truncated reconcile pinned aggregator spend to exactly 8192, which sits
+# inside P2's incompleteness window (6418, 12836] -- so `tree_would_refuse`
+# could report True because the call TRUNCATED, not because reconciliation is
+# genuinely indivisible-and-large.
+#
+# Consequence: `_A95_RECONCILE` and `_C95_NEGOTIATE` in `orchestrator.py` are
+# now calibrated against truncated calls and MUST be re-derived from
+# untruncated late-loop measurements at k=45 before any sweep whose H-C or P2
+# numbers are reported. Otherwise both are calibration artifacts. This is what
+# spec §3's c95(45) pre-flight probe measures.
+_RECONCILE_MAX_TOKENS = 32768  # aggregator merges two selection lists
+_NEGOTIATE_MAX_TOKENS = 32768  # short proposals in the team arm
+
+# Pinned for the same reason as `_SELECTION_REASONING_EFFORT`: an unset
+# parameter silently tracks a provider default, and DeepSeek raised that
+# default under unchanged weights on 2026-08-13. These two calls DO want real
+# deliberation -- reconciliation merges two selection lists, negotiation
+# reasons about a peer's claim -- so "high" is the right value, but it has to
+# be stated rather than inherited.
+_COORDINATION_REASONING_EFFORT = "high"
+
+# Rung 1's two scouts run the SAME prompt, so `seed` cannot decorrelate them:
+# `_llm_select_loop` uses it only for the fallback RNG reached on an off-menu
+# or duplicate response. On the happy path both scouts receive byte-identical
+# messages. Sampling temperature is therefore the entire diversity mechanism
+# for the homogeneous fan-in arm, and it is recorded per cell so the result is
+# reproducible. Left to the provider default, a low value would drive
+# `overlap_frac` to 1.0 and collapse rung 1 into rung 0 at double the budget.
+_SCOUT_TEMPERATURE = 1.0
 
 
 # Pattern matching the LT experiment naming convention `uniform_<TARGET>_<STRENGTH>`
@@ -351,6 +440,30 @@ def _default_llm() -> LLMCallable:
 PromptBuilder = Callable[[list[str], int, list[str] | None], list[dict[str, str]]]
 
 
+def _says_stop(response: Any, stop_token: str) -> bool:
+    """True iff the agent's LAST non-empty line is the stop token alone.
+
+    Deliberately strict, and the strictness is the point: a false stop is
+    unrecoverable. The run simply ends with less data than the agent wanted
+    and no error is raised, so the cell silently scores a shorter experiment
+    than the one we meant to run.
+
+    A word-boundary search over the whole response is too loose -- it fires
+    on "not done yet", which is an agent asking to CONTINUE. Matching the
+    final line against the token alone (bare trailing punctuation allowed)
+    matches what the prompt asks for and rejects prose.
+    """
+    from evaluation.chamber_pipeline.llm_planner import _response_text
+
+    text = _response_text(response)
+    if not text:
+        return False
+    lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip()]
+    if not lines:
+        return False
+    return lines[-1].strip(" .!*`'\"").upper() == stop_token.upper()
+
+
 def _llm_select_loop(
     adapter: ContractedChamberAgent,
     llm: LLMCallable,
@@ -360,6 +473,9 @@ def _llm_select_loop(
     spend: int | None = None,
     starting_chosen: list[str] | None = None,
     prompt_builder: PromptBuilder = build_select_prompt,
+    temperature: float | None = None,
+    exclude: set[str] | None = None,
+    stop_token: str | None = None,
 ) -> tuple[list[str], list[pd.DataFrame]]:
     """Step `spend` times: prompt LLM for one experiment, query, repeat.
 
@@ -392,13 +508,28 @@ def _llm_select_loop(
             Reasoner phase to inherit the Planner's picks.
         prompt_builder: Callable returning chat messages for the
             selection prompt. Defaults to the M3b opaque-menu prompt.
+        exclude: Experiment names removed from the selectable menu WITHOUT
+            appearing in the prompt. Used by the team arm's collision
+            backstop. Deliberately not routed through `starting_chosen`,
+            which would render the excluded names into the prompt as an
+            "Already spent" block, destroying the blindness of the execution
+            phase. NOTE that `exclude` narrows the menu and therefore DOES
+            feed `actual_spend = min(spend, len(available))`, exactly as
+            `starting_chosen` would: the two differ only in prompt rendering,
+            never on the spend axis. A caller excluding many names must top up
+            the selectable pool itself, or the scout silently under-spends.
+        temperature: Sampling temperature forwarded to the completion call.
+            None (the default) omits the argument entirely rather than
+            passing null, so rungs 0 and 3 reach the provider byte-identically
+            to M4b. The fan-in arms pass `_SCOUT_TEMPERATURE`; see its comment
+            for why the seed alone cannot decorrelate two scouts.
 
     Returns:
         `(chosen_names, experiment_dfs)` — parallel lists of just THIS
         loop's spend (does not include `starting_chosen`).
     """
     full_budget = _intervention_budget(adapter)
-    menu = list(adapter.available_experiments())
+    menu = [m for m in adapter.available_experiments() if m not in (exclude or set())]
 
     if full_budget <= 0 or not menu:
         return [], []
@@ -421,23 +552,61 @@ def _llm_select_loop(
         remaining = actual_spend - step
         # Compose the "already chosen" view: prior phase + this phase so far.
         all_chosen = starting_chosen + chosen
-        messages = prompt_builder(menu, remaining, all_chosen)
-        # Cap output to ~200 tokens. The expected response is just one
-        # menu name (~15-30 chars / ~5-10 tokens), but DeepSeek v4 Flash
-        # without max_tokens generates ~1300 output tokens of verbose
-        # reasoning per call (verified empirically during M4b debugging).
-        # 200 leaves ample headroom for the model's reasoning prefix
-        # while bringing per-call latency from ~37s back down to ~1.5-3s.
-        # Callers wanting a different cap can monkey-patch _SELECTION_MAX_TOKENS.
-        response = llm(model=model, messages=messages, max_tokens=_SELECTION_MAX_TOKENS)
-        name = parse_selection_response(response, menu)
+        # Offer only what is still unspent. Previously the full menu was
+        # rendered every step with the spent items still in it, the prompt
+        # said "do not repeat unless you have a reason", and the loop below
+        # treated any repeat as a failure and replaced it with `rng.choice`.
+        # Duplicates were invited and then punished: measured 6-10 of 30
+        # selections falling back to random at k=30, on BOTH model snapshots,
+        # which gave every ladder rung the same ~30% random component.
+        # `actual_spend <= len(available)` guarantees this is non-empty at
+        # every step.
+        selectable = [m for m in menu if m not in all_chosen]
+        messages = prompt_builder(selectable, remaining, all_chosen)
+        # See `_SELECTION_MAX_TOKENS` for why 200 was untenable once
+        # providers began counting reasoning tokens against `max_tokens`.
+        # Note the cap is NOT a hard bound when `reasoning.effort` is set:
+        # responses routinely exceed it and still finish with `stop`, so
+        # effort -- not max_tokens -- is the real cost control.
+        extra: dict[str, Any] = {
+            "extra_body": {"reasoning": {"effort": _SELECTION_REASONING_EFFORT}}
+        }
+        if temperature is not None:
+            extra["temperature"] = temperature
+        response = llm(
+            model=model,
+            messages=messages,
+            max_tokens=_SELECTION_MAX_TOKENS,
+            **extra,
+        )
+        # Validate against the SAME list the model was shown. Parsing against
+        # the full menu would accept a spent name as well-formed and then
+        # discard it one line later as a duplicate -- the failure this change
+        # removes.
+        name = parse_selection_response(response, selectable)
 
-        if name is None or name in all_chosen:
-            # Fallback: random unspent. If everything is spent (LLM kept
-            # picking duplicates and the menu is exhausted), fall back to
-            # random over the full menu so we still spend the slot.
-            unspent = [m for m in menu if m not in all_chosen]
-            name = rng.choice(unspent) if unspent else rng.choice(menu)
+        # Checked AFTER the parse (a named experiment wins over a stop
+        # token) but BEFORE the fallback below. `DONE` is not a menu name,
+        # so the parse returns None for it, and the fallback would convert
+        # the agent's decision to stop into a random PURCHASE -- turning a
+        # self-terminating agent into one that always spends the safety cap,
+        # silently.
+        if name is None and stop_token is not None and _says_stop(response, stop_token):
+            break
+
+        if name is None:
+            # Fallback: random unspent. Reachable now only on a genuinely
+            # unusable response (empty content from a truncated reasoning
+            # budget, or a name that is not on the offered list at all).
+            name = rng.choice(selectable) if selectable else rng.choice(menu)
+            # Record it. This fallback exists so a bad response degrades to
+            # random rather than crashing, and that graceful degradation is
+            # precisely what concealed a 100% selection-failure rate for the
+            # three months after providers began counting reasoning tokens
+            # against `max_tokens`. Degradation must never again be silent.
+            recorder = getattr(llm, "record_selection_fallback", None)
+            if recorder is not None:
+                recorder()
 
         chosen.append(name)
         dfs.append(adapter.query_intervention(name))
@@ -508,7 +677,21 @@ def llm_only_agent(
     # Cap output for the adjacency-emission step. Larger than the
     # selection cap because the response encodes the full directed-edge
     # JSON map for ~38-node chambers. See _ADJACENCY_MAX_TOKENS docstring.
-    response = llm(model=model, messages=adj_messages, max_tokens=_ADJACENCY_MAX_TOKENS)
+    response = llm(
+        model=model,
+        messages=adj_messages,
+        max_tokens=_ADJACENCY_MAX_TOKENS,
+        # Pinned like every other call. This is the pipeline's largest
+        # reasoning call and the one with a documented history of returning
+        # empty content when reasoning consumed the budget, so leaving it to
+        # track a provider default is the worst place to do so.
+        extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+    )
+    # A degenerate all-zero emission -- the M4b failure mode, where the model
+    # spends its budget on hidden reasoning and returns empty content -- is
+    # already unambiguous in the record as `n_edges_predicted == 0`. Counting
+    # it into `n_selection_fallbacks` would make one column mean two
+    # different failures.
     return parse_adjacency_response(response, nodes)
 
 
@@ -557,6 +740,68 @@ def llm_pc_agent(
 
     pooled = pool_experiment_data(dfs, nodes)
     return run_pc(pooled, nodes, alpha=pc_alpha, seed=seed)
+
+
+def uncontracted_agent(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """`llm_pc` with the contract removed: the agent decides when to stop.
+
+    The UNCONTRACTED half of the framework's central comparison, and the one
+    thing the chamber pillar was missing -- every other arm in the registry
+    is contracted, so nothing measured what governance costs or buys.
+
+    Identical to `llm_pc_agent` in mechanism (same iterative loop, same
+    fallback handling, same PC afterwards). Two differences, both essential
+    and neither cosmetic:
+
+    1. No budget is stated in the prompt, and the agent may answer
+       `DONE` instead of naming an experiment.
+    2. The adapter is built with `intervention_budget = len(menu)` rather
+       than `k`. That cap is a PHYSICAL limit -- there are only so many
+       distinct experiments on the menu -- not a governance bound. It exists
+       so a non-terminating agent cannot loop forever.
+
+    Because the cap can still bind, the arm records whether it did. An agent
+    that runs the whole menu because it never said `DONE` is a different
+    finding from one that chose to run the whole menu, and the two are
+    indistinguishable from the experiment count alone.
+    """
+    from evaluation.chamber_pipeline.llm_planner import (
+        UNCONTRACTED_STOP_TOKEN,
+        build_uncontracted_select_prompt,
+    )
+
+    nodes = _node_names(adapter)
+    menu = list(adapter.available_experiments())
+    if _intervention_budget(adapter) <= 0 or not menu:
+        adapter.coordination_stats = {"n_experiments_distinct": 0}
+        return _empty_adjacency(nodes)
+
+    llm = llm or _default_llm()
+    chosen, dfs = _llm_select_loop(
+        adapter,
+        llm,
+        model,
+        seed,
+        prompt_builder=build_uncontracted_select_prompt,
+        stop_token=UNCONTRACTED_STOP_TOKEN,
+    )
+
+    adapter.coordination_stats = {
+        "n_experiments_distinct": len(chosen),
+        # The safety cap bound iff the agent never volunteered a stop.
+        "agg_hit_safety_stop": int(len(chosen) >= len(menu)),
+    }
+
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
 
 
 def planner_reasoner_agents(
@@ -709,10 +954,661 @@ def planner_reasoner_agents(
     return run_pc(pooled, nodes, alpha=pc_alpha, seed=seed)
 
 
+def fan_in_agents(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    scout_a_budget: int,
+    scout_b_budget: int,
+    differentiate: bool = False,
+    honor_aggregator: bool = False,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """Two blind scouts fund one aggregator — ladder rungs 1 and 2.
+
+    ``differentiate=False`` is rung 1, a homogeneous ensemble whose only
+    source of divergence is sampling temperature. ``differentiate=True`` is
+    rung 2, where the scouts carry distinct role framings. Neither scout is
+    told the other exists: that blindness is what makes the pair isolate role
+    differentiation rather than communication, which is rung 4's business.
+
+    Budget flows through a :class:`DelegationGraph` whose scout and aggregator
+    nodes carry real monitors; the adapter routes each chamber call to the
+    monitor of whichever node is acting, additively with the aggregate cap.
+    """
+    from evaluation.chamber_pipeline.coordination import overlap_fraction
+    from evaluation.chamber_pipeline.llm_planner import (
+        build_reconcile_prompt,
+        build_scout_broad_prompt,
+        build_scout_targeted_prompt,
+    )
+
+    nodes = _node_names(adapter)
+    # Set on EVERY path, including the early returns below. Task 8's scorer
+    # reads this in `run_cell`; an attribute that exists only on the happy
+    # path raises AttributeError on empty-menu and zero-budget cells.
+    adapter.coordination_stats = {"overlap_frac": None, "n_experiments_distinct": 0}
+    if _intervention_budget(adapter) <= 0 or not adapter.available_experiments():
+        return _empty_adjacency(nodes)
+    llm = llm or _default_llm()
+
+    prompt_a = build_scout_broad_prompt if differentiate else build_select_prompt
+    prompt_b = build_scout_targeted_prompt if differentiate else build_select_prompt
+
+    # 2*seed and 2*seed+1, never seed and seed+1: M4b seeds are contiguous
+    # 0..29, so seed+1 would collide with the next cell's scout_a.
+    with adapter.as_node("scout_a"):
+        chosen_a, dfs_a = _llm_select_loop(
+            adapter,
+            llm,
+            model,
+            2 * seed,
+            spend=scout_a_budget,
+            starting_chosen=None,
+            prompt_builder=prompt_a,
+            temperature=_SCOUT_TEMPERATURE,
+        )
+    with adapter.as_node("scout_b"):
+        chosen_b, dfs_b = _llm_select_loop(
+            adapter,
+            llm,
+            model,
+            2 * seed + 1,
+            spend=scout_b_budget,
+            starting_chosen=None,
+            prompt_builder=prompt_b,
+            temperature=_SCOUT_TEMPERATURE,
+        )
+
+    # The aggregator's reconciliation call. REQUIRED, not decorative: PC is
+    # not an LLM call, so without it the aggregator consumes nothing, the
+    # fan-in edges carry budget nobody spends, `_consumed()` reads zero, and
+    # verify() is vacuously true. It is also the single indivisible request
+    # that puts this arm inside whitepaper §4.6 P2's incompleteness window.
+    with adapter.as_node("aggregator"):
+        agg_response = llm(
+            model=model,
+            messages=build_reconcile_prompt(chosen_a, chosen_b),
+            max_tokens=_RECONCILE_MAX_TOKENS,
+            extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+        )
+
+    # Duplicates still COST budget — each query_intervention was metered — but
+    # are dropped before pooling so PC does not see an inflated n.
+    seen: set[str] = set()
+    dfs: list[pd.DataFrame] = []
+    for name, frame in zip(chosen_a + chosen_b, dfs_a + dfs_b, strict=True):
+        if name not in seen:
+            seen.add(name)
+            dfs.append(frame)
+
+    # `honor_aggregator` is the ablation that answers the obvious review of
+    # this arm: "your aggregator's output is discarded, so a negative result
+    # about fan-in is an artifact of a null aggregator."
+    #
+    # By the time the aggregator runs the scouts have ALREADY BOUGHT their
+    # experiments, so its only levers are reordering (which reaches PC solely
+    # through `run_pc`'s row subsample) and dropping (strictly less data).
+    # It cannot un-buy, and it holds no information the scouts lack. That is
+    # a property of the architecture, not of this implementation -- but the
+    # claim has to be measured rather than argued, which is what this does.
+    #
+    # Hallucinated names are intersected away: `_parse_name_list` matches
+    # against the menu, not against what was purchased, so an aggregator may
+    # name an experiment nobody ran. Pooling that would fabricate data.
+    agg_diag: dict[str, int] = {}
+    if honor_aggregator:
+        bought = dict(zip(chosen_a + chosen_b, dfs_a + dfs_b, strict=True))
+        named = _parse_name_list(agg_response, list(adapter.available_experiments()))
+        kept = [n for n in named if n in bought]
+        agg_diag = {
+            "agg_named": len(named),
+            "agg_hallucinated": len(named) - len(kept),
+            "agg_dropped": len(seen) - len(kept),
+        }
+        # An empty or fully-hallucinated response must not silently pool
+        # nothing -- that would score the parser, not the topology.
+        if kept:
+            dfs = [bought[n] for n in kept]
+            seen = set(kept)
+        else:
+            agg_diag["agg_fallback"] = 1
+
+    adapter.coordination_stats = {
+        "overlap_frac": overlap_fraction(chosen_a, chosen_b),
+        "n_experiments_distinct": len(seen),
+        **agg_diag,
+    }
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+def _parse_name_list(response: Any, menu: list[str]) -> list[str]:
+    """Every menu name appearing in a response, deduplicated, in menu order.
+
+    Matches on word boundaries, longest name first, exactly as
+    `parse_selection_response` does. Plain substring containment is wrong on
+    any menu with prefix relationships: WT has `actuators_random_walk_1`
+    through `_16`, so a response naming only `_10` and `_12` also matches
+    `_1` -- inventing a claim the scout never made, inflating `contested`,
+    and over-excluding the other scout.
+
+    The word boundaries are the WHOLE defence, and there is deliberately no
+    second one. A `not any(name in longer for longer in claimed)` guard used
+    to follow this loop, for the same prefix threat -- but the regex already
+    stops `_1` matching inside `_10`, so the guard had no true positives left
+    and every firing removed a real claim. Verified against the live menus:
+    WT names three droppable pairs (`validate_load_in`, `validate_load_out`,
+    `validate_osr_in`), LT none. Two layers against one bug means the second
+    one is only ever wrong.
+    """
+    from evaluation.chamber_pipeline.llm_planner import _response_text
+
+    text = _response_text(response) or ""
+    claimed: list[str] = []
+    for name in sorted(menu, key=len, reverse=True):
+        if not re.search(rf"(?<![\w-]){re.escape(name)}(?![\w-])", text):
+            continue
+        claimed.append(name)
+    return [n for n in menu if n in claimed]
+
+
+def _substring_shadowed(claimed: list[str]) -> int:
+    """How many claimed names a substring guard would have discarded.
+
+    Exactly the rule removed on 2026-08-29: `any(name in longer for longer in
+    claimed)`. Kept as a COUNTER rather than a filter so the incidence of the
+    old defect is measurable on the arm it affected, instead of argued from
+    menu structure. WT names three shadowed pairs of 28 (`validate_load_in`,
+    `validate_load_out`, `validate_osr_in`); LT names none, so this is
+    structurally 0 on LT.
+    """
+    return sum(1 for n in claimed if any(n != other and n in other for other in claimed))
+
+
+def _capped_claim(names: list[str], budget: int, stream: str, seed: int) -> list[str]:
+    """At most `budget` of `names`, chosen without menu-order bias.
+
+    A scout that reasons out loud over most of the menu claims more than it
+    can spend, so the claim has to be cut to size. `names` arrives in MENU
+    order -- `_parse_name_list` returns it that way -- and the menu is grouped
+    by variable family and intervention strength, so a plain `[:budget]` slice
+    keeps the head families and drops the tail ones, identically in every
+    seed. That is the same defect the `rest` shuffle below exists to fix,
+    where parity-slicing handed scout_a `0 of 3 osr_c and 0 of 2 red`
+    experiments on LT.
+
+    It matters most exactly where the effect is measured: the claim is ~10% of
+    scout_a's pool at LT k=6 and ~77% at k=45, because a full claim leaves no
+    top-up and only half the shuffled leftover as extra freedom.
+
+    A seeded shuffle, NOT the scout's stated order. Preference order would be
+    more faithful to the negotiation, but `_parse_name_list` scans the whole
+    response, and a revise reply restates the peer's proposals before making
+    its own -- so preference-order truncation could keep the PEER's names.
+    Fixing that needs answer/restatement separation (spec §11); until then an
+    unbiased subset is the honest cut.
+
+    The RNG is keyed by a string naming the stream, so scout_a's and scout_b's
+    permutations are independent of each other and of the `rest` shuffle,
+    which draws from `_random.Random(seed)`.
+    """
+    if len(names) <= budget:
+        return list(names)
+    shuffled = list(names)
+    _random.Random(f"team-claim-{stream}:{seed}").shuffle(shuffled)
+    # Re-sorted into menu order after the draw: WHICH names survive is now
+    # unbiased, and the order they are handed on in stays the deterministic
+    # one every other list in this module uses.
+    keep = set(shuffled[:budget])
+    return [n for n in names if n in keep]
+
+
+def _maybe_node(adapter: ContractedChamberAgent, name: str) -> Any:
+    """`adapter.as_node(name)` when a delegation graph exists, else a no-op.
+
+    Node routing requires a sealed `DelegationGraph`, which `run_cell` builds
+    only for arms with measured per-role token costs -- `_ladder_calibration`
+    raises rather than extrapolate one. An arm whose accuracy we want before
+    its cost is calibrated would otherwise be unrunnable, so the routing
+    degrades instead of blocking: the adapter's aggregate monitor still gates
+    the intervention budget, and only the per-node token accounting is lost.
+    Such a cell is simply not conservation-certified, which `run_cell` already
+    records as None rather than as a pass.
+    """
+    if getattr(adapter, "delegation_graph", None) is None:
+        return contextlib.nullcontext()
+    return adapter.as_node(name)
+
+
+def _resolve_batch_selection(
+    named: list[str], menu: list[str], budget: int, seed: int, stream: str
+) -> tuple[list[str], int, int]:
+    """Turn a free-form batch answer into exactly `budget` distinct names.
+
+    A batch answer is unconstrained in a way a one-at-a-time answer is not:
+    the model may name more than the budget, fewer, or names it was not
+    offered. All three have to resolve to exactly `budget` picks or the arm is
+    not budget-comparable with the loop and the ladder stops being a
+    controlled comparison.
+
+    Over-long is cut with `_capped_claim`, i.e. a seeded shuffle rather than a
+    menu-order slice -- the menu is grouped by variable family, so a slice
+    keeps the head families in every seed. Short is topped up from the
+    remaining menu on the same seeded shuffle. Both are counted, because a
+    silent top-up would let a model that answered with one name score as a
+    full-budget arm.
+
+    Returns `(chosen, n_over, n_short)`.
+    """
+    offered = [n for n in named if n in set(menu)]
+    n_over = max(0, len(offered) - budget)
+    chosen = _capped_claim(offered, budget, stream, seed)
+    n_short = max(0, budget - len(chosen))
+    if n_short:
+        rest = [m for m in menu if m not in set(chosen)]
+        _random.Random(f"batch-topup-{stream}:{seed}").shuffle(rest)
+        chosen = chosen + rest[:n_short]
+    return [m for m in menu if m in set(chosen)], n_over, n_short
+
+
+def one_shot_agent(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """Pick the whole budget in ONE call, then infer. The no-history control.
+
+    Rung 0 spends `k` calls, each conditioned on everything picked so far.
+    This spends one. Every multi-agent rung on the ladder SPLITS that running
+    record between agents without anything establishing what an unsplit record
+    is worth -- so without this arm the ladder measures the cost of dividing a
+    resource whose value was never priced.
+    """
+    from evaluation.chamber_pipeline.llm_planner import build_batch_select_prompt
+
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = list(adapter.available_experiments())
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+
+    llm = llm or _default_llm()
+    budget = min(budget, len(menu))
+    response = llm(
+        model=model,
+        messages=build_batch_select_prompt(menu, budget),
+        max_tokens=_SELECTION_MAX_TOKENS,
+        extra_body={"reasoning": {"effort": _SELECTION_REASONING_EFFORT}},
+    )
+    chosen, n_over, n_short = _resolve_batch_selection(
+        _parse_name_list(response, menu), menu, budget, seed, "one_shot"
+    )
+    dfs = [adapter.query_intervention(name) for name in chosen]
+    adapter.coordination_stats = {
+        "n_experiments_distinct": len(set(chosen)),
+        "n_batch_over_budget": n_over,
+        "n_batch_topped_up": n_short,
+    }
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+def critique_agents(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """Executor-evaluator: propose a set, have it reviewed, revise, then infer.
+
+    The pattern reviewers name most often, and the only shape on the ladder
+    where a second agent does not take a share of the budget. Every other
+    multi-agent rung DIVIDES the work; this one leaves the proposer holding
+    the whole budget and adds an opinion about it.
+
+    Three calls regardless of `k`, so it is also the cheapest multi-agent arm
+    by a wide margin -- worth reporting on the cost axis whatever it does to
+    accuracy.
+
+    With no feedback available, the critic judges the SET from names alone:
+    what is over-covered, what is untouched, which swaps would help. It
+    advises and does not decide -- the proposer emits the final list, which is
+    what separates this from the team arm's negotiation, where both sides
+    hold budget.
+    """
+    from evaluation.chamber_pipeline.llm_planner import (
+        _response_text,
+        build_batch_select_prompt,
+        build_critique_prompt,
+        build_revise_after_critique_prompt,
+    )
+
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = list(adapter.available_experiments())
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+
+    llm = llm or _default_llm()
+    budget = min(budget, len(menu))
+    extra: dict[str, Any] = {"extra_body": {"reasoning": {"effort": _SELECTION_REASONING_EFFORT}}}
+
+    with _maybe_node(adapter, "proposer"):
+        first = llm(
+            model=model,
+            messages=build_batch_select_prompt(menu, budget),
+            max_tokens=_SELECTION_MAX_TOKENS,
+            **extra,
+        )
+    proposed, over_1, short_1 = _resolve_batch_selection(
+        _parse_name_list(first, menu), menu, budget, seed, "propose"
+    )
+
+    with _maybe_node(adapter, "critic"):
+        review = llm(
+            model=model,
+            messages=build_critique_prompt(menu, budget, proposed),
+            max_tokens=_RECONCILE_MAX_TOKENS,
+            extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+        )
+    critique_text = _response_text(review) or ""
+
+    with _maybe_node(adapter, "proposer"):
+        final = llm(
+            model=model,
+            messages=build_revise_after_critique_prompt(menu, budget, proposed, critique_text),
+            max_tokens=_SELECTION_MAX_TOKENS,
+            **extra,
+        )
+    # Tested BEFORE resolution, not after. `_resolve_batch_selection` tops a
+    # short answer up to the full budget, so `revised` is never empty and a
+    # post-hoc `revised or proposed` fallback can never fire -- an unreadable
+    # revise would silently become a random basket, scoring the arm on a
+    # top-up rather than on its proposal. A review nobody could read leaves
+    # the plan standing.
+    named_revised = _parse_name_list(final, menu)
+    if named_revised:
+        revised, over_2, short_2 = _resolve_batch_selection(
+            named_revised, menu, budget, seed, "revise"
+        )
+        chosen, revise_unusable = revised, 0
+    else:
+        chosen, over_2, short_2, revise_unusable = proposed, 0, 0, 1
+
+    dfs = [adapter.query_intervention(name) for name in chosen]
+    adapter.coordination_stats = {
+        "n_experiments_distinct": len(set(chosen)),
+        # How much the review actually moved the set. 0 means the critic was
+        # decorative, which is a result and must not be mistaken for one.
+        "n_critique_changed": len(set(chosen) ^ set(proposed)) // 2,
+        "n_critique_empty": int(not critique_text.strip()),
+        # The revise answer named nothing on the menu, so the proposal stands.
+        "n_revise_unusable": revise_unusable,
+        "n_batch_over_budget": over_1 + over_2,
+        "n_batch_topped_up": short_1 + short_2,
+    }
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+def team_agents(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    scout_a_budget: int,
+    scout_b_budget: int,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """Two scouts negotiate their split before executing — ladder rung 4.
+
+    One upfront round, O(1) in ``k``: each scout proposes, each sees the
+    other's proposal and revises once, a deterministic backstop resolves what
+    remains contested, and only then do both execute.
+
+    This is the ladder's only rung where a scout knows a peer exists. Rungs 1
+    and 2 stay blind so that they isolate role differentiation; making the
+    coordination explicit here is what separates the two comparisons.
+
+    The scout-to-scout channel is a Python variable, **not** a graph edge. A
+    bidirectional pair raises :class:`CycleError` regardless of carrying zero
+    tokens, because ``allocate()`` runs its reachability check before it
+    inspects the amount. Control flow may cycle; budget flow may not
+    (whitepaper §4.6 P3).
+    """
+    from evaluation.chamber_pipeline.coordination import overlap_fraction
+    from evaluation.chamber_pipeline.llm_planner import (
+        build_negotiate_propose_prompt,
+        build_negotiate_revise_prompt,
+        build_reconcile_prompt,
+    )
+
+    nodes = _node_names(adapter)
+    adapter.coordination_stats = {"overlap_frac": None, "n_experiments_distinct": 0}
+    if _intervention_budget(adapter) <= 0 or not adapter.available_experiments():
+        return _empty_adjacency(nodes)
+    llm = llm or _default_llm()
+    menu = list(adapter.available_experiments())
+
+    def negotiate(role: str, budget: int, node: str) -> list[str]:
+        with adapter.as_node(node):
+            proposal = llm(
+                model=model,
+                messages=build_negotiate_propose_prompt(menu, budget, role),
+                max_tokens=_NEGOTIATE_MAX_TOKENS,
+                # The two propose prompts differ only by the letter A/B, so
+                # without a temperature both scouts return the same claim list
+                # and the negotiation contributes noise instead of a split --
+                # the degeneracy `_SCOUT_TEMPERATURE` exists to prevent.
+                temperature=_SCOUT_TEMPERATURE,
+                extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+            )
+        return _parse_name_list(proposal, menu)
+
+    proposed_a = negotiate("A", scout_a_budget, "scout_a")
+    proposed_b = negotiate("B", scout_b_budget, "scout_b")
+
+    def revise(budget: int, own: list[str], other: list[str], node: str) -> list[str]:
+        with adapter.as_node(node):
+            revised = llm(
+                model=model,
+                messages=build_negotiate_revise_prompt(menu, budget, own, other),
+                max_tokens=_NEGOTIATE_MAX_TOKENS,
+                # The two propose prompts differ only by the letter A/B, so
+                # without a temperature both scouts return the same claim list
+                # and the negotiation contributes noise instead of a split --
+                # the degeneracy `_SCOUT_TEMPERATURE` exists to prevent.
+                temperature=_SCOUT_TEMPERATURE,
+                extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+            )
+        return _parse_name_list(revised, menu)
+
+    revised_a = revise(scout_a_budget, proposed_a, proposed_b, "scout_a")
+    revised_b = revise(scout_b_budget, proposed_b, proposed_a, "scout_b")
+
+    # Turn the negotiation into the actual split. An earlier version had both
+    # scouts run a blind loop and merely removed contested names from
+    # scout_b's menu, which was wrong three ways: the negotiated lists had no
+    # bearing on what either scout executed, so rung 4 was rung 1 with extra
+    # LLM calls; names scout_a claimed but never picked were queried by
+    # nobody; and the anti-starvation guard looked only at `contested`, not at
+    # the full exclusion, so scout_b silently under-spent -- 14 picks against
+    # a budget of 22, measured on the real LT menu.
+    source_a = revised_a or proposed_a
+    source_b = revised_b or proposed_b
+    # Count rounds that produced nothing usable. Unparseable negotiation is
+    # the documented empty-content mode, and it drops the affected scout to
+    # the seeded fallback partition while `overlap_frac` reads 0.0 and
+    # `n_contested` reads 0 -- indistinguishable from a perfect split. Unlike
+    # the selection loop, this path had no recorder at all.
+    # All four parses, not two scouts. Counting only scouts whose `revised or
+    # proposed` is empty misses the likelier and more damaging case: both
+    # propose rounds parse but both REVISE rounds return prose, which reduces
+    # rung 4 to one-shot proposals with no negotiation at all while reporting
+    # zero failures.
+    negotiation_failures = sum(
+        1 for parsed in (proposed_a, proposed_b, revised_a, revised_b) if not parsed
+    )
+    # `contested` is measured from the lists actually used, not from
+    # `revised_*`: when a revise reply is unparseable the code falls back to
+    # the proposals, and reading the discarded list reports 0 conflicts for a
+    # round that resolved none.
+    contested = set(source_a) & set(source_b)
+
+    # Cap each claim at its budget. Uncapped, a scout that reasons out loud
+    # over most of the menu swallows the shared pool and starves its partner:
+    # measured 10 + 4 against a 20 budget when `claim_a` reached 55 names.
+    # See `_capped_claim` for why the cut is a seeded shuffle and not a slice.
+    uncapped_a = list(source_a)
+    claim_a = _capped_claim(uncapped_a, scout_a_budget, "a", seed)
+    # Measured against the list the cap was actually applied to. An earlier
+    # version excluded `source_a[:scout_a_budget]` -- a MENU-ORDER slice --
+    # while the cap ran on the SHUFFLED `claim_a`. Same size, different
+    # membership, so the two base lists could differ in length and the counter
+    # over-reported: with source_a=[p,x], source_b=[x,y,z] and both budgets 1,
+    # it read 2 truncated where 1 had been. A counter lying by being measured
+    # against the wrong list is the defect this whole commit series is about.
+    uncapped_b = [n for n in source_b if n not in set(claim_a)]
+    claim_b = _capped_claim(uncapped_b, scout_b_budget, "b", seed)
+    n_claim_truncated = max(0, len(uncapped_a) - len(claim_a)) + max(
+        0, len(uncapped_b) - len(claim_b)
+    )
+    # Measured on the lists actually used, before the cap: this is the
+    # incidence of the defect removed with the substring guard, not its
+    # effect. Non-zero means the old code silently dropped a real claim here.
+    n_substring_conflicts = _substring_shadowed(list(source_a)) + _substring_shadowed(
+        list(source_b)
+    )
+
+    # Partition the REST of the menu between the scouts, so each selects from
+    # a pool strictly larger than its budget. Two constraints, and an earlier
+    # version satisfied only the first:
+    #
+    #  * The pool must EXCEED the budget, or `actual_spend ==
+    #    len(available)`, every name in the pool is queried, and the selection
+    #    loop is inert -- verified: the queried set was byte-identical whether
+    #    the selection LLM returned the first menu item, the last, or
+    #    "GARBAGE".
+    #  * The pool must never fall SHORT of the budget, or the scout silently
+    #    under-spends. A plain `rest[0::2]` / `rest[1::2]` split does fall
+    #    short once the claims are large: at k=45 with a full claim, measured
+    #    23 + 18 = 41 of 45, reported `status=ok` with conservation certified.
+    #    Each scout's shortfall is therefore reserved BEFORE the leftover is
+    #    divided.
+    #
+    # `rest` is shuffled on a seeded RNG rather than sliced by parity. The
+    # menu order is fixed and groups by variable family and intervention
+    # strength, so `rest[0::2]` handed scout_a 0 of 3 `osr_c` and 0 of 2 `red`
+    # experiments on LT -- the same blind spot in all 30 seeds, since nothing
+    # about the slice depends on the seed.
+    rest = [m for m in menu if m not in set(claim_a) | set(claim_b)]
+    _random.Random(seed).shuffle(rest)
+    need_a = max(0, scout_a_budget - len(claim_a))
+    need_b = max(0, scout_b_budget - len(claim_b))
+    take_a, take_b, leftover = (
+        rest[:need_a],
+        rest[need_a : need_a + need_b],
+        rest[need_a + need_b :],
+    )
+    pool_a = set(claim_a) | set(take_a) | set(leftover[0::2])
+    pool_b = set(claim_b) | set(take_b) | set(leftover[1::2])
+
+    all_names = set(menu)
+    with adapter.as_node("scout_a"):
+        chosen_a, dfs_a = _llm_select_loop(
+            adapter,
+            llm,
+            model,
+            2 * seed,
+            spend=scout_a_budget,
+            prompt_builder=build_select_prompt,
+            temperature=_SCOUT_TEMPERATURE,
+            exclude=all_names - pool_a,
+        )
+    with adapter.as_node("scout_b"):
+        chosen_b, dfs_b = _llm_select_loop(
+            adapter,
+            llm,
+            model,
+            2 * seed + 1,
+            spend=scout_b_budget,
+            prompt_builder=build_select_prompt,
+            temperature=_SCOUT_TEMPERATURE,
+            # `| set(chosen_a)` is belt-and-braces only: `pool_a` and
+            # `pool_b` are disjoint by construction, so it never removes
+            # anything. Kept so the disjointness is not silently load-bearing
+            # on one construction alone.
+            exclude=(all_names - pool_b) | set(chosen_a),
+        )
+
+    with adapter.as_node("aggregator"):
+        llm(
+            model=model,
+            messages=build_reconcile_prompt(chosen_a, chosen_b),
+            max_tokens=_RECONCILE_MAX_TOKENS,
+            extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+        )
+
+    seen: set[str] = set()
+    dfs: list[pd.DataFrame] = []
+    for name, frame in zip(chosen_a + chosen_b, dfs_a + dfs_b, strict=True):
+        if name not in seen:
+            seen.add(name)
+            dfs.append(frame)
+
+    adapter.coordination_stats = {
+        "overlap_frac": overlap_fraction(chosen_a, chosen_b),
+        "n_experiments_distinct": len(seen),
+        # How many claims the negotiation failed to resolve. Without this the
+        # rung's defining mechanism is unmeasurable: a `team` arm whose
+        # scouts never actually agree on a split looks identical to one whose
+        # negotiation worked.
+        "n_contested": len(contested),
+        "n_negotiation_failures": negotiation_failures,
+        # How many claimed names the budget cap discarded. Zero means the
+        # scouts claimed within budget and the cap never ran; a large number
+        # means the cap, not the negotiation, decided most of the split.
+        "n_claim_truncated": n_claim_truncated,
+        "n_substring_conflicts": n_substring_conflicts,
+        # The larger scout's claim as a share of what it could see. The cap
+        # only matters in proportion to this: at 0.1 the shuffled leftover
+        # dominates the pool, at 0.77 the claim does.
+        "claim_pool_share": max(
+            len(claim_a) / len(pool_a) if pool_a else 0.0,
+            len(claim_b) / len(pool_b) if pool_b else 0.0,
+        ),
+    }
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+# Declared at the END of the module, after every agent it names. The previous
+# copy sat mid-file and listed only the five M4b arms, so the three ladder arms
+# defined below it were absent from `import *` and from the package's
+# re-exports -- a public surface that disagreed with the registry the sweep
+# actually runs.
 __all__ = [
+    "critique_agents",
+    "fan_in_agents",
     "greedy_ig_lite_agent",
     "llm_only_agent",
     "llm_pc_agent",
+    "one_shot_agent",
     "planner_reasoner_agents",
     "random_agent",
+    "team_agents",
+    "uncontracted_agent",
 ]

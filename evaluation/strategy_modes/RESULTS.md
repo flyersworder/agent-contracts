@@ -40,16 +40,16 @@ This document presents results from two complementary experiments validating the
 ```python
 # Reasoning Effort (controls LLM thinking depth)
 MODE_REASONING_EFFORT = {
-    "urgent": "none",      # No extended thinking
+    "urgent": "none",  # No extended thinking
     "balanced": "medium",  # Full reasoning depth
-    "economical": "low",   # Minimal reasoning for cost savings
+    "economical": "low",  # Minimal reasoning for cost savings
 }
 
 # API Timeout Limits (seconds)
 MODE_TIMEOUTS = {
-    "urgent": 30.0,      # Speed pressure
+    "urgent": 30.0,  # Speed pressure
     "economical": 60.0,  # Moderate time
-    "balanced": 90.0,    # Ample time for reasoning
+    "balanced": 90.0,  # Ample time for reasoning
 }
 ```
 

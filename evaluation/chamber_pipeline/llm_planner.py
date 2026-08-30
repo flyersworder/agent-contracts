@@ -49,6 +49,83 @@ _MAX_MENU_LINES = 200
 # ---------------------------------------------------------------------------
 
 
+UNCONTRACTED_STOP_TOKEN = "DONE"
+
+
+def _render_menu(menu: list[str]) -> str:
+    """The menu as prompt text, truncated past `_MAX_MENU_LINES`.
+
+    One implementation for all four builders. It was three: the two selection
+    builders each carried a copy, and the two negotiation builders carried
+    none -- so the team arm, whose prompts already cost the most, was the one
+    that would have rendered an unbounded menu. That is latent at LT's 59 and
+    WT's 28 entries and would surface on a larger chamber as a conservation
+    failure attributed to the framework, since `_ladder_calibration` treats
+    the negotiation rounds as a FIXED per-scout overhead.
+    """
+    if len(menu) > _MAX_MENU_LINES:
+        return (
+            "\n".join(menu[:_MAX_MENU_LINES])
+            + f"\n... ({len(menu) - _MAX_MENU_LINES} more, omitted for brevity)"
+        )
+    return "\n".join(menu)
+
+
+def build_uncontracted_select_prompt(
+    menu: list[str],
+    remaining_budget: int,
+    already_chosen: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Selection prompt for the UNGOVERNED arm: no budget, agent stops itself.
+
+    Same shape as `build_select_prompt` so it drops into `_llm_select_loop`
+    unchanged, and deliberately identical in every other respect -- menu
+    rendering, history block, one-name-per-line answer format. The ONLY
+    differences are that no budget is stated and that stopping is offered.
+    Changing anything else would confound "removing the contract" with
+    "changing the prompt".
+
+    `remaining_budget` is accepted and IGNORED. It carries the safety cap,
+    which is the menu size -- a physical limit on how many distinct
+    experiments exist, not a governance bound. Showing it would reintroduce
+    exactly the budget signal this arm exists to remove.
+    """
+    del remaining_budget  # see docstring: showing it would restore the cap
+
+    chosen = already_chosen or []
+    rendered_menu = _render_menu(menu)
+
+    chosen_block = (
+        "Already run (no longer on the menu):\n" + "\n".join(chosen) + "\n"
+        if chosen
+        else "Already run: (none yet)\n"
+    )
+
+    system = (
+        "You are designing causal-discovery experiments on a physical "
+        "chamber. You will be shown a menu of available pre-recorded "
+        "interventional experiments. Your task is to pick ONE experiment "
+        "to query next, using only the experiment names. The names encode "
+        "what each experiment perturbs and how strongly. There is no budget: "
+        "run as many or as few experiments as you judge necessary to recover "
+        "the causal graph, and stop when further experiments would not help."
+    )
+
+    user = (
+        f"{chosen_block}\n"
+        f"Menu:\n{rendered_menu}\n\n"
+        "Respond with the exact name of ONE experiment from the menu, on "
+        f"its own line, with no other commentary -- or exactly "
+        f"{UNCONTRACTED_STOP_TOKEN} on its own line if you have run enough "
+        "experiments and want to stop."
+    )
+
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+
 def build_select_prompt(
     menu: list[str],
     remaining_budget: int,
@@ -63,14 +140,16 @@ def build_select_prompt(
     form to keep parsing stable.
 
     Args:
-        menu: All available experiment names (the chamber's `available_experiments()`).
+        menu: The experiments still SELECTABLE this step -- the chamber's
+            `available_experiments()` minus anything already spent.
         remaining_budget: Number of intervention queries the agent has left,
             including this one. Surfaced so the LLM can pace itself in
             principle (whether it actually does is the M3b empirical
             question).
         already_chosen: Experiments already spent in this run, in order.
-            Surfaced so the LLM can avoid duplicates if it cares to. None
-            and empty-list are equivalent.
+            Shown as history only -- callers are expected to have removed
+            them from `menu`, so they are not selectable. None and
+            empty-list are equivalent.
 
     Returns:
         List of `{role, content}` dicts in OpenAI / LiteLLM chat format.
@@ -78,14 +157,14 @@ def build_select_prompt(
     chosen = already_chosen or []
 
     # Build the menu rendering. Truncate only if pathologically large.
-    if len(menu) > _MAX_MENU_LINES:
-        rendered_menu = "\n".join(menu[:_MAX_MENU_LINES])
-        rendered_menu += f"\n... ({len(menu) - _MAX_MENU_LINES} more, omitted for brevity)"
-    else:
-        rendered_menu = "\n".join(menu)
+    rendered_menu = _render_menu(menu)
 
+    # Spent experiments are history, not options: `_llm_select_loop` removes
+    # them from `menu` before calling this. The old wording ("do not repeat
+    # unless you have a reason") invited a repeat that the loop then scored as
+    # a failure, so say plainly that they are gone.
     chosen_block = (
-        "Already spent (do not repeat unless you have a reason):\n" + "\n".join(chosen) + "\n"
+        "Already spent (no longer on the menu):\n" + "\n".join(chosen) + "\n"
         if chosen
         else "Already spent: (none yet)\n"
     )
@@ -173,6 +252,260 @@ def build_reasoner_select_prompt(
     msgs = build_select_prompt(menu, remaining_budget, already_chosen)
     msgs[0]["content"] = _REASONER_SYSTEM_MESSAGE
     return msgs
+
+
+# ---------------------------------------------------------------------------
+# Blind scout roles used by the fan-in arms (M6 rungs 1 and 2).
+#
+# "Blind" is the defining property: neither scout may learn that another
+# agent exists. Rung 1 runs two scouts on the SAME prompt and gets its
+# diversity from sampling temperature alone; rung 2 differentiates them by
+# role. If either prompt leaked the existence of a peer, the two rungs would
+# stop isolating role differentiation from mere ensembling, which is the
+# comparison the ladder is built to make.
+#
+# `already_chosen` here is the scout's own prior picks within its own loop --
+# never another agent's. It reaches these builders because
+# `_llm_select_loop` calls `prompt_builder(menu, remaining, all_chosen)`
+# positionally; a two-parameter builder raises TypeError on every call.
+# ---------------------------------------------------------------------------
+
+
+_SCOUT_BROAD_SYSTEM_MESSAGE = (
+    "You are designing causal-discovery experiments on a physical "
+    "chamber. You will be shown a menu of available pre-recorded "
+    "interventional experiments. Your task is to pick ONE experiment "
+    "to query next, using only the experiment names. The names encode "
+    "what each experiment perturbs and how strongly. Favour BREADTH: "
+    "prefer an experiment that perturbs a target no earlier pick has "
+    "touched, so that the set you accumulate covers as many distinct "
+    "intervention targets as possible."
+)
+
+
+_SCOUT_TARGETED_SYSTEM_MESSAGE = (
+    "You are designing causal-discovery experiments on a physical "
+    "chamber. You will be shown a menu of available pre-recorded "
+    "interventional experiments. Your task is to pick ONE experiment "
+    "to query next, using only the experiment names. The names encode "
+    "what each experiment perturbs and how strongly. Favour DEPTH: "
+    "prefer an experiment that disambiguates variables whose "
+    "relationships remain least constrained by what has been picked so "
+    "far, even if that means perturbing a target already touched."
+)
+
+
+def build_scout_broad_prompt(
+    menu: list[str],
+    remaining_budget: int,
+    already_chosen: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Coverage-seeking scout (rung 2's role A; rung 1 uses it for both).
+
+    Same user message as `build_select_prompt`; the system message asks for
+    breadth. Mentions no other agent.
+    """
+    msgs = build_select_prompt(menu, remaining_budget, already_chosen)
+    msgs[0]["content"] = _SCOUT_BROAD_SYSTEM_MESSAGE
+    return msgs
+
+
+def build_scout_targeted_prompt(
+    menu: list[str],
+    remaining_budget: int,
+    already_chosen: list[str] | None = None,
+) -> list[dict[str, str]]:
+    """Disambiguation-seeking scout (rung 2's role B).
+
+    Same user message as `build_select_prompt`; the system message asks for
+    depth. Mentions no other agent.
+    """
+    msgs = build_select_prompt(menu, remaining_budget, already_chosen)
+    msgs[0]["content"] = _SCOUT_TARGETED_SYSTEM_MESSAGE
+    return msgs
+
+
+_RECONCILE_SYSTEM_MESSAGE = (
+    "You are aggregating the experiment selections of two independent "
+    "designers who worked without knowledge of each other. Their lists "
+    "may overlap or conflict. Produce a single deduplicated ordering of "
+    "the experiments to run, most informative first, keeping every "
+    "distinct experiment exactly once."
+)
+
+
+def build_reconcile_prompt(
+    chosen_a: list[str],
+    chosen_b: list[str],
+) -> list[dict[str, str]]:
+    """Aggregator prompt: merge two scouts' selections into one ordering.
+
+    This is the aggregator's single indivisible call -- the one whose size
+    makes whitepaper §4.6 P2's fragmentation penalty concrete, since it
+    cannot be split across the two scouts' separate grants.
+    """
+    user = (
+        "Designer A selected:\n"
+        + ("\n".join(chosen_a) if chosen_a else "(nothing)")
+        + "\n\nDesigner B selected:\n"
+        + ("\n".join(chosen_b) if chosen_b else "(nothing)")
+        + "\n\nRespond with the deduplicated experiment names, one per line, "
+        "most informative first, and no other commentary."
+    )
+    return [
+        {"role": "system", "content": _RECONCILE_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Negotiation prompts for the team rung (M6 rung 4).
+#
+# This is the one rung where the scouts know a peer exists. Rungs 1 and 2 are
+# blind by construction, so keeping these prompts separate is what stops the
+# ladder's two comparisons -- role differentiation, and explicit coordination
+# -- from being confounded into one.
+# ---------------------------------------------------------------------------
+
+
+_NEGOTIATE_SYSTEM_MESSAGE = (
+    "You are one of two designers planning causal-discovery experiments on a "
+    "physical chamber. You share a fixed total budget with the other "
+    "designer, so an experiment one of you runs is one the other cannot. "
+    "Your aim is a joint plan that covers as much as possible, not the best "
+    "individual plan."
+)
+
+
+# ---------------------------------------------------------------------------
+# Batch selection and executor-evaluator critique
+# ---------------------------------------------------------------------------
+
+_BATCH_SYSTEM_MESSAGE = (
+    "You are designing causal-discovery experiments on a physical chamber. "
+    "You will be shown a menu of available pre-recorded interventional "
+    "experiments. Your task is to choose a SET of experiments to run, using "
+    "only the experiment names. The names encode what each experiment "
+    "perturbs and how strongly."
+)
+
+_CRITIC_SYSTEM_MESSAGE = (
+    "You are reviewing another designer's proposed set of causal-discovery "
+    "experiments on a physical chamber. You cannot run anything and you "
+    "cannot see any results -- judge the SET itself, from the experiment "
+    "names alone. Say what the set over-covers, what it leaves untouched, and "
+    "which specific swaps would improve it. Be concrete and brief."
+)
+
+
+def build_batch_select_prompt(menu: list[str], budget: int) -> list[dict[str, str]]:
+    """Ask for all `budget` experiments in ONE call.
+
+    The no-history control for the loop. Rung 0 spends `budget` calls, each
+    conditioned on everything picked so far; this spends one. The difference
+    between them is the value of the running record, which no other rung
+    isolates -- every multi-agent arm splits that record without ever
+    establishing what an unsplit one is worth.
+    """
+    user = (
+        f"You may run {budget} experiment(s) in total.\n\n"
+        f"Menu:\n{_render_menu(menu)}\n\n"
+        f"List exactly {budget} experiment name(s) you choose, one per line, "
+        "and no other commentary."
+    )
+    return [
+        {"role": "system", "content": _BATCH_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_critique_prompt(
+    menu: list[str], budget: int, proposed: list[str]
+) -> list[dict[str, str]]:
+    """Ask a second agent to review the proposed set.
+
+    Deliberately asks for a CRITIQUE, not a replacement list. An evaluator
+    that simply re-picks is a second proposer, and the arm would measure
+    resampling rather than review -- the same trap that makes rung 1's two
+    scouts a single opinion drawn twice.
+    """
+    user = (
+        f"A designer proposed these {len(proposed)} experiment(s) out of a "
+        f"budget of {budget}:\n" + "\n".join(proposed) + "\n\n"
+        f"Menu:\n{_render_menu(menu)}\n\n"
+        "Critique this set. Which perturbation targets are duplicated or "
+        "over-weighted? Which are missing entirely? Name specific swaps."
+    )
+    return [
+        {"role": "system", "content": _CRITIC_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_revise_after_critique_prompt(
+    menu: list[str], budget: int, proposed: list[str], critique: str
+) -> list[dict[str, str]]:
+    """Return the proposer's final set, having read the critique.
+
+    The proposer keeps authorship: the critic advises and does not decide.
+    That is what makes this executor-evaluator rather than a two-round
+    negotiation, where both sides hold budget.
+    """
+    user = (
+        f"You proposed these {len(proposed)} experiment(s):\n"
+        + "\n".join(proposed)
+        + "\n\nA reviewer responded:\n"
+        + critique.strip()
+        + f"\n\nMenu:\n{_render_menu(menu)}\n\n"
+        f"Give your FINAL list of exactly {budget} experiment name(s), one "
+        "per line, and no other commentary. You may keep or change any of "
+        "your original choices."
+    )
+    return [
+        {"role": "system", "content": _BATCH_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_negotiate_propose_prompt(
+    menu: list[str],
+    budget: int,
+    role: str,
+) -> list[dict[str, str]]:
+    """Round 1: state which experiments this scout intends to claim."""
+    user = (
+        f"You are designer {role}. You may run {budget} experiment(s).\n\n"
+        f"Menu:\n" + _render_menu(menu) + "\n\n"
+        f"List the {budget} experiment name(s) you intend to claim, one per "
+        "line, and no other commentary."
+    )
+    return [
+        {"role": "system", "content": _NEGOTIATE_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
+
+
+def build_negotiate_revise_prompt(
+    menu: list[str],
+    budget: int,
+    own: list[str],
+    other: list[str],
+) -> list[dict[str, str]]:
+    """Round 2: having seen the peer's claim, revise to reduce collisions."""
+    user = (
+        f"You may run {budget} experiment(s).\n\n"
+        "You proposed:\n" + ("\n".join(own) if own else "(nothing)") + "\n\n"
+        "The other designer proposed:\n"
+        + ("\n".join(other) if other else "(nothing)")
+        + "\n\nAny experiment you both named is wasted duplication. Revise "
+        f"your claim to {budget} experiment name(s) from the menu below, one "
+        "per line, and no other commentary.\n\n"
+        "Menu:\n" + _render_menu(menu)
+    )
+    return [
+        {"role": "system", "content": _NEGOTIATE_SYSTEM_MESSAGE},
+        {"role": "user", "content": user},
+    ]
 
 
 def parse_selection_response(response: Any, menu: list[str]) -> str | None:

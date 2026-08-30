@@ -167,7 +167,7 @@ mistaken for a topology result.
 | Overlap pre-flight probe | 24 | 3 new arms × **k=30** × 8 seeds. The budget must be named: at k=6 two blind scouts draw 3 each from 59, so overlap is near zero by chance; at k=45 it is near-forced. High overlap in `fan_in_homog` is the *expected* replication of arXiv:2602.03794. Abort only if `fan_in_spec` **and** `team` also exceed `overlap_frac` > 0.8 |
 | Reuse-validity guard | 20 | `llm_pc` ×15 at k=30 + `llm_only` ×5 (smoke only). **Test the mean against M4b's SEM, not the per-cell SD.** `llm_pc` per-cell SD is 0.040, so the old 5-cell / 1.5σ rule tolerated 0.059 F1 of drift — 2–8× the effect the paper measures. n=15 gives SEM 0.010, resolving ~0.02. `llm_only`'s SD of 0.274 makes any tight test on it vacuous |
 | New-arm timeout reserve | 20 | Rung 3 lost 8/30 at k=59 and its survivors averaged 1381 s against the 1800 s limit. Rungs 1/2/4 have at least as many chained calls |
-| Tight-budget P2 demonstration | 10 | Deliberately tight T, so total consumption approaches `B(root)`. Isolated from the main sweep — see §6 |
+| ~~Tight-budget P2 demonstration~~ | ~~10~~ | **CANCELLED 2026-08-24** — demonstrated H-1's double-count, which was withdrawn with P2's unsoundness claim. Incompleteness is measured in the main sweep by `tree_would_refuse` |
 | `planner_reasoner` k=59 timeout re-runs | 8 | Completes the M4b record for the saturation report |
 | Token-matched contingency | 90 (reserve) | Held back. Triggered only if a multi-agent rung beats rung 0 — pre-registered so the "gains bought with tokens" objection is answered with evidence |
 
@@ -312,24 +312,68 @@ behavior and M4b reuse stays valid.
 
 ## 6. Hypotheses
 
+> **H-1 WITHDRAWN 2026-08-24.** This section was written 2026-08-22, one day
+> before the theory track retracted P2's *unsoundness* claim. H-1 as stated
+> below — "tree accounting certifies a bound **exceeding** `B(root)` by the
+> fan-in double-count" — IS that retracted claim. Checked against this
+> framework's own tree law, `ContractingCapability` resolves a multi-parent
+> node by splitting it and the split encoding is **sound**: it refuses the
+> over-commitment the claim relied on. Only a *drop*-policy accountant, which
+> no real implementation uses, double-counts. See `docs/whitepaper.md` §4.6 P2
+> and the module docstring of `evaluation/chamber_pipeline/tree_accounting.py`.
+>
+> **Consequence: the 10-cell tight-budget demonstration is CANCELLED.** It
+> existed only to exhibit the double-count. The surviving result --
+> incompleteness, `max_i a_i < c <= sum_i a_i` -- is measured per cell by
+> `tree_would_refuse` in the MAIN sweep, and the k=45 gate already returned
+> `True` on 6 of 9 graph cells. Nothing about it needs a tight-T run.
+>
+> What remains true, and is now quantified rather than asserted: H-2
+> (conservation) and P2 still compete for the same provisioning constant,
+> because P2's window is only `n`-wide for `n` parents (§12). That is a
+> reporting caveat, not a reason for a second run.
+
+The original text follows, superseded:
+
 H-1 and H-2 pull in opposite directions on the same constant and must not share
 a run. Tree insufficiency needs total consumption near `B(root)`; certification
 needs headroom. They are therefore separated by design:
 
 - **P2 proves insufficiency analytically** (§2).
-- **A dedicated 10-cell run at deliberately tight T demonstrates it** — total
-  consumption approaches `B(root)`, so tree accounting's double-counted bound
-  admits executions the DAG law rejects.
+- ~~A dedicated 10-cell run at deliberately tight T demonstrates it~~ —
+  CANCELLED, see above.
 - **The main sweep runs at the loose T(k) of §4** and supports H-2.
 
 | | Claim | Where | Can it be null? |
 |---|---|---|---|
 | **H-1** | Tree accounting certifies a bound exceeding `B(root)` by the fan-in double-count, and executions fall in that gap | tight-budget demonstration (10 cells) | No — the gap is analytic (P2); the demonstration shows executions reaching it |
-| **H-2** | DAG conservation certified on **rungs 1, 2, 4** (the only rungs with a `DelegationGraph`), including abandonment cases, against `B(root) + Σ refunds`. Rung 3 reports *tree* conservation via `ContractingCapability` separately; rung 0 has no delegation structure | main sweep | No — reported as a certification claim, per P4. **Scope stated explicitly**: reused M4b cells predate `DelegationGraph`, so `conservation_certified` is null for them |
+| **H-2** | DAG conservation certified on **rungs 1, 2, 4** (the only rungs with a `DelegationGraph`), including abandonment cases, against `B(root) + Σ refunds`. Rung 3 reports *tree* conservation via `ContractingCapability` separately; rung 0 has no delegation structure | main sweep | No — reported as a certification claim, per P4. **Scope stated explicitly**: reused M4b cells predate `DelegationGraph`, so `conservation_certified` is null for them. **Report the mechanism and the forecast separately** (added 2026-08-24) — see below |
 | **H-3** | **Equivalence bound**: no rung differs from rung 0 by more than the minimum detectable effect at that budget | main sweep | Must be stated as a bound, not a null. See the power table below — the M4b rung-0-vs-rung-3 differences (0.028 at k=6, 0.007 at k=30) sit *below* what n=30 can resolve |
 | **H-4** | If any rung beats rung 0, expect it at the tightest budget (k=6) | main sweep | Pre-registered from Tran & Kiela's finding that SAS was best "for all budgets except the lowest one". **Caveat: k=6 is a floor regime.** All five M4b variants lie within 0.035 F1 of each other there (0.183–0.218) against an MDE of ~0.034, so a null at k=6 is indistinguishable from "nothing works at 6 experiments" |
 | **H-5** | Failure rate rises with coordination machinery | main sweep | M4b: rung 3 failed 8/30 at k=59, rung 0 failed 0/30 |
 | **H-6** | Among rungs 1, 2 and 4, overlap falls as coordination increases | main sweep | Secondary. **Within-{1,2,4} only** — rung 3's overlap is 0 by construction (`starting_chosen` excludes prior picks) and rung 0's is undefined, so a full-ladder monotonicity claim is malformed. Framed as replication of arXiv:2602.03794 in the acquisition regime, not novelty. Report K\* alongside `overlap_frac` |
+
+#### H-2 measures two things; report them apart
+
+A `conservation_certified=False` cell means the node consumed more than it was
+allocated. That is a true finding about **our budget forecast**, and a
+*success* for the mechanism: `verify()` detected the overrun, every time.
+Reporting a bare compliance rate conflates:
+
+- **the mechanism** — does the framework enforce the flow-conservation
+  invariant and detect violations? Measured at 100% across every cell run so
+  far, including all overruns.
+- **the forecast** — did `_A95_RECONCILE_BY_K` predict actual cost well enough
+  that no node overran? At k=45 it did not until recalibration; at k=6 it
+  cannot, because aggregator cost spreads 48.8x (500-24,415 tokens) while the
+  provisioning basis is a median.
+
+A reader shown "H-2 compliance = 56%" will conclude the framework failed. It
+did not; our cost model did. State the mechanism result, then report
+per-budget forecast adequacy as a separate, calibration-dependent number.
+
+Note the naming skew: this document numbers hypotheses H-1..H-6 while
+`CLAUDE.md` uses H-A/H-B/H-C. H-2 here is H-C there. Reconcile before drafting.
 
 ### Statistical power
 
@@ -452,9 +496,13 @@ window. M6 takes precedence; M5 resumes October.
 
 1. `per_tool={"exp": 0}` → `per_tool={"intervene": 0, "observe": 0}`. The wrong
    key fails silently; the missing key leaves a side channel
-2. H-A ("chain underperforms loop") is **already refuted on accuracy** by M4b at
-   matched inference; restate as "no consistent accuracy effect; coordination's
-   cost is reliability"
+2. H-A ("chain underperforms loop") is **unresolved, not refuted** (sharpened
+   2026-08-23). M4b at matched inference gives chain−loop deltas of −0.028 /
+   +0.007 / −0.027 at k = 6 / 30 / 59 against a pooled MDE of ~0.036 — all
+   below it, so the data licenses neither direction. Restate as "no accuracy
+   effect this design can resolve (equivalence bound ±0.036 F1);
+   coordination's measurable cost is reliability." Note n≈55 per arm would be
+   needed to resolve the observed ~0.03 gap
 3. Arm 1 was `llm_only`, which confounds topology with inference. Rung 0 is now
    `llm_pc`
 4. §7.7's claim of "no comparative benchmark" is **false as of April 2026**
@@ -466,6 +514,115 @@ window. M6 takes precedence; M5 resumes October.
    coverage
 7. `~$2` for a 450-cell sweep is wrong; M4b cost **$5.11**. Also correct in
    `CLAUDE.md`
+8. **P2's measurement window is k-independent and centred on the calibration
+   constant** (added 2026-08-23, from `tree_would_refuse` probes). The window
+   is `(0.75*a95, 1.5*a95]` = (6418, 12836] tokens at every budget, because
+   `build_fan_in_graph`'s forward flow depends only on `a95`, never on `k`.
+   Actual aggregator spend is strongly k-dependent, so the measured verdicts
+   are:
+
+   | k | reconcile spend | verdict |
+   |---|---|---|
+   | 6 | ~2,826 median (max 6,375) | `False` — below the window; a tree would cope |
+   | 30 | ~8,557 median | `True` — 33% up the window |
+   | 45 | pre-flight probe pending | could exceed 12,836, which returns `None` |
+
+   **State this honestly in the paper.** `a95` is the k=30 reconcile median
+   AND sets the threshold, so a typical k=30 cell landing inside the window is
+   substantially guaranteed by construction — the arm is *built* to sit in
+   P2's incompleteness regime, as `build_fan_in_graph`'s docstring says
+   outright. The measurement therefore confirms that real token spend stays
+   inside the constructed window; it does not discover that arbitrary
+   workloads happen to fall there. Report it as a demonstration of P2, not as
+   an estimate of how often tree encodings fail in the wild.
+
+   Corollary risk at k=45: `_A95_RECONCILE` is fixed at the k=30 median for
+   every budget, so if the real k=45 reconcile is much larger the aggregator
+   can overrun a grant sized for k=30 — an H-C conservation failure that is a
+   calibration artifact, exactly the failure mode the `_ROLE_C95` comment
+   warns about for the scouts. This is what pre-flight probe 3 measures.
+
+
+## 11. Known issue: rung 4's negotiation parser reads restatement as claim
+
+Found 2026-08-23 while fixing the selection-loop equivalent (which IS fixed --
+spent experiments now leave the menu, and parsing happens against the offered
+list). The negotiation path has the same shape and is **not** fixed.
+
+`build_negotiate_revise_prompt` renders "You proposed: <own>" and "The other
+designer proposed: <other>" above the full menu. `_parse_name_list(revised,
+menu)` then scans the **entire response text** for every menu name. A scout
+that reasons out loud -- "the other designer wants X and Y, so I will take
+Z" -- has X and Y counted as its OWN claim.
+
+Consequences, all on rung 4's headline metric:
+
+- `contested = set(source_a) & set(source_b)` inflates, so
+  `n_contested` reports conflicts the scouts never had.
+- `claim_a = list(source_a)[:scout_a_budget]` truncates in menu order, so a
+  phantom claim can displace a real one.
+
+Why it is NOT fixed the way selection was: filtering `other` out of the parse
+menu would be wrong. A scout claiming what the other proposed is a *genuine*
+contest, and that is exactly the signal rung 4 exists to measure. The fix has
+to separate the scout's ANSWER from its restatement of the prompt -- a
+delimited answer block, or parsing only lines that are bare menu names, which
+is what the prompt already asks for ("one per line, and no other
+commentary"). That is a prompt-and-parser change needing its own validation.
+
+**Measure before fixing.** The §3 overlap pre-flight probe (3 new arms x k=30
+x 8 seeds) records `n_contested` and `overlap_frac` and will show whether
+compliant responses make this rare. Do not stack a speculative parser change
+on top of the selection fix without that number.
+
+
+## 12. P2's demonstrable window has width equal to the fan-in degree
+
+Found 2026-08-24 while recalibrating `a95` from the k=45 gate. This is a
+theory-to-design connection, not a bug, and it bounds what the fan-in arms can
+show.
+
+P2's incompleteness condition is `max_i a_i < c <= sum_i a_i`: the aggregator's
+single call must exceed any ONE parent's forward but not their sum. With `n`
+parents each forwarding `f`, the admissible window is `(f, n*f]` -- so its
+**width ratio is exactly `n`, the fan-in degree.** Both fan-in rungs have two
+scouts, so the window is 2x wide, and `build_fan_in_graph` deliberately gives
+the aggregator no provisioning multiple (`forward = ceil(0.75 * a95)`) because
+a margin would push every single fragment above the call and a tree encoding
+would then have coped.
+
+That creates a structural tension between the two hypotheses:
+
+- **H-C (conservation)** wants generous provisioning, so no cell overruns.
+- **P2** wants tight provisioning, so the call lands above a single forward.
+
+They can both hold only while the aggregator's observed cost spread fits
+inside the window. Measured:
+
+| budget | aggregator spend | spread | window (n=2) | both hold? |
+|---|---|---|---|---|
+| k=45 | 9,783 - 25,168 | **2.6x** | 2x | marginal |
+| k=6 | 500 - 6,064 | **12x** | 2x | **no** |
+
+At k=6 the reconcile prompt lists only 3+3 names, so cost is dominated by
+erratic reasoning length rather than prompt size -- 12x variance within a
+single arm across seeds. No single `a95` can both conserve the 6,064 cell and
+keep the 500 cell inside the window.
+
+**Consequences, all reportable rather than fixable:**
+
+1. **P2 is demonstrable at k=45 and not at k=6.** State it as a scope limit on
+   the measurement: the DAG-vs-tree distinction is empirically visible only
+   where the aggregator's cost is predictable within a factor of `n`.
+2. **Do not tune `a95` until H-C reads 100%.** With a 2x window that trades
+   directly against P2, and `_PROVISION_MULTIPLE`'s comment already forbids it.
+   Report observed rates per budget.
+3. **Higher fan-in degree widens the window.** Three scouts would give a 3x
+   window and tolerate more variance. Not a change to make for M6 -- it alters
+   the rung definitions -- but it is the principled lever if a future design
+   needs P2 demonstrable at low budgets, and it is worth one sentence in the
+   paper: the empirical demonstrability of P2 improves with fan-in degree,
+   which is a statement about the theory, not about DeepSeek.
 
 ---
 

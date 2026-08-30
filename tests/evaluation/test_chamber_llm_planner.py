@@ -399,3 +399,64 @@ def test_numpy_pandas_available() -> None:
     """Sanity check: dependencies the parser needs are present in this env."""
     assert isinstance(np.zeros(2), np.ndarray)
     assert isinstance(pd.DataFrame({"x": [1]}), pd.DataFrame)
+
+
+class TestMenuRenderingIsShared:
+    """One menu renderer for all four builders.
+
+    It was three implementations: the two selection builders each carried a
+    copy of the `_MAX_MENU_LINES` logic, and the two negotiation builders
+    carried none.
+    """
+
+    @staticmethod
+    def _user(msgs: list[dict[str, str]]) -> str:
+        return next(m["content"] for m in msgs if m["role"] == "user")
+
+    def test_negotiation_prompts_truncate_like_every_other_builder(self) -> None:
+        """The team arm's prompts are the most expensive in the ladder, and
+        were the only ones that would render an unbounded menu. Latent at LT's
+        59 entries; on a larger chamber it inflates exactly the two calls
+        `_ladder_calibration` treats as a FIXED per-scout overhead, turning a
+        prompt-size change into a conservation failure blamed on the
+        framework."""
+        from evaluation.chamber_pipeline.llm_planner import (
+            _MAX_MENU_LINES,
+            build_negotiate_propose_prompt,
+            build_negotiate_revise_prompt,
+        )
+
+        menu = [f"exp_{i}" for i in range(_MAX_MENU_LINES + 25)]
+        for msgs in (
+            build_negotiate_propose_prompt(menu, 5, "broad"),
+            build_negotiate_revise_prompt(menu, 5, "broad", ["exp_0"]),
+        ):
+            body = self._user(msgs)
+            assert "25 more, omitted for brevity" in body
+            assert f"exp_{_MAX_MENU_LINES + 24}" not in body
+
+    def test_uncontracted_prompt_renders_the_menu_identically_to_the_contracted_one(
+        self,
+    ) -> None:
+        """The uncontracted arm's scope limit says the two prompts differ only
+        in the budget line and the `DONE` option. That promise used to be
+        enforced by two hand-maintained copies of the rendering; a change to
+        one would silently confound the control this arm exists to be."""
+        from evaluation.chamber_pipeline.llm_planner import (
+            _MAX_MENU_LINES,
+            _render_menu,
+            build_select_prompt,
+            build_uncontracted_select_prompt,
+        )
+
+        menu = [f"exp_{i}" for i in range(_MAX_MENU_LINES + 3)]
+        chosen = ["exp_0", "exp_1"]
+        rendered = _render_menu(menu)
+        contracted = self._user(build_select_prompt(menu, 4, chosen))
+        uncontracted = self._user(build_uncontracted_select_prompt(menu, 4, chosen))
+        assert rendered in contracted
+        assert rendered in uncontracted
+        # And the history block carries the same names in the same order.
+        for name in chosen:
+            assert name in contracted
+            assert name in uncontracted

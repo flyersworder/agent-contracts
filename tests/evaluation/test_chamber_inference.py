@@ -8,15 +8,20 @@ in isolation against synthesized linear-Gaussian data.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from evaluation.chamber_pipeline.inference import (
+    _MAX_LOGGED_NAMES,
     CAUSAL_LEARN_AVAILABLE,
+    DEFAULT_COLLINEARITY_THRESHOLD,
     cpdag_to_directed_adjacency,
     pool_experiment_data,
     run_pc,
+    select_noncollinear_columns,
 )
 
 requires_causal_learn = pytest.mark.skipif(
@@ -154,6 +159,66 @@ class TestRunPc:
         with pytest.raises(ValueError, match="columns must match"):
             run_pc(data, ["y", "w", "z"])  # wrong order
 
+    def test_near_duplicate_columns_are_dropped_not_fatal(self) -> None:
+        """A near-duplicate variable must degrade locally, not globally.
+
+        The WT chamber has four barometers that read the same physical
+        quantity in the `standard` configuration (pairwise r > 0.9998),
+        which makes Fisher-Z's sub-correlation inversion singular. Before
+        this filter, that aborted the whole PC run and returned all-zeros
+        for ALL 32 nodes -- F1=0 for the cell -- even though the other 28
+        variables carried perfectly good signal.
+
+        Dropping the redundant column and padding it back with zeros is the
+        same policy `run_pc` already applies to zero-variance columns:
+        "no independent signal, no claim". The loss is then bounded to
+        edges incident to the dropped node.
+        """
+        rng = np.random.default_rng(0)
+        n = 400
+        a = rng.normal(size=n)
+        b = 2.0 * a + rng.normal(scale=0.5, size=n)
+        # `dup` is `a` plus noise 1e-7 of its scale: numerically collinear.
+        dup = a + rng.normal(scale=1e-7, size=n)
+        data = pd.DataFrame({"a": a, "b": b, "dup": dup})
+
+        adj = run_pc(data, ["a", "b", "dup"], alpha=0.05, seed=0)
+
+        assert list(adj.index) == ["a", "b", "dup"], "must pad back to full node set"
+        # The duplicate is dropped -> no claim about it in either direction.
+        assert adj.loc["dup"].sum() == 0
+        assert adj["dup"].sum() == 0
+        # ...but the surviving a-b relationship is still recovered. This is
+        # the whole point: a local drop, not a global all-zeros abort.
+        assert adj.loc["a", "b"] + adj.loc["b", "a"] > 0
+
+    def test_collinear_drop_is_logged_for_sweep_visibility(self, caplog) -> None:
+        """The drop must be countable, or it is a silent moderator.
+
+        A degradation path that varies with the experiment's independent
+        variable and leaves no trace is how a harness ends up measuring
+        itself. `_PcCollinearHandler` scrapes this warning per cell, so the
+        phrase is load-bearing.
+        """
+        rng = np.random.default_rng(1)
+        a = rng.normal(size=300)
+        data = pd.DataFrame(
+            {"a": a, "b": rng.normal(size=300), "dup": a + rng.normal(scale=1e-7, size=300)}
+        )
+        with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+            run_pc(data, ["a", "b", "dup"], alpha=0.05, seed=0)
+        assert any("collinear" in r.getMessage().lower() for r in caplog.records)
+
+    def test_collinearity_filter_can_be_disabled(self) -> None:
+        """None disables the filter, so the old behaviour stays reachable."""
+        rng = np.random.default_rng(2)
+        a = rng.normal(size=300)
+        data = pd.DataFrame(
+            {"a": a, "b": rng.normal(size=300), "dup": a + rng.normal(scale=1e-9, size=300)}
+        )
+        adj = run_pc(data, ["a", "b", "dup"], alpha=0.05, seed=0, collinearity_threshold=None)
+        assert adj.shape == (3, 3)
+
     def test_singular_matrix_returns_zero_adjacency(self) -> None:
         """Highly-collinear data (rank-deficient correlation) -> all-zeros.
 
@@ -217,29 +282,90 @@ class TestPcAlphaParameterPlumbing:
 
 @requires_causal_learn
 class TestSingularFallbackLogging:
-    """Verify the singular-matrix fallback emits a warning for M5 sweep visibility."""
+    """The singular fallback: reachable, and correct when reached.
 
-    def test_warns_on_singular_matrix(self, caplog) -> None:
-        """Degenerate input → all-zeros output AND a warning logged."""
-        import logging
+    Split into two tests on 2026-08-30 after CI caught a latent BLAS
+    dependency. The original single test built a rank-deficient matrix and
+    asserted the fallback fired -- which it does under macOS/Accelerate and
+    does NOT under Linux/OpenBLAS, where `inv` returns a garbage-but-finite
+    inverse instead of raising and PC proceeds to emit 6 edges.
 
+    That is register entry 10 reappearing inside the suite: whether a
+    near-singular matrix raises is a property of the linear-algebra backend,
+    not of our code, so it must never be an assertion. The two properties the
+    original test conflated are now pinned separately, each backend-independent:
+
+    1. the pairwise collinearity filter is blind to higher-order dependence
+       (a claim about OUR filter, checkable in exact terms), and
+    2. when the singular failure IS raised, we degrade to zeros and say so
+       (a claim about OUR handler, checkable by injecting the error).
+    """
+
+    def test_pairwise_filter_is_blind_to_higher_order_collinearity(self) -> None:
+        """Rank-deficient as a SET, yet no PAIR trips the 0.999 cutoff.
+
+        This is why the singular fallback must stay reachable: the filter
+        added on 2026-08-25 compares columns pairwise, so a variable that is
+        a sum of several others is invisible to it. Asserted on the
+        correlation structure directly rather than on PC's output, because
+        only the former is backend-independent.
+        """
         rng = np.random.default_rng(0)
         x = rng.standard_normal(200)
-        y = 2.0 * x  # perfectly collinear → singular sub-correlation
+        y = rng.standard_normal(200)
         z = rng.standard_normal(200)
-        data = pd.DataFrame({"x": x, "y": y, "z": z})
+        a = rng.standard_normal(200)
+        data = pd.DataFrame(
+            {
+                "x": x,
+                "y": y,
+                "z": z,
+                "a": a,
+                "p": x + y,
+                "q": y + z,
+                "r": z + a,
+                "s": x + y + z + a,
+            }
+        )
+        cols = ["x", "y", "z", "a", "p", "q", "r", "s"]
+
+        corr = np.corrcoef(data[cols].to_numpy().T)
+        off_diagonal = np.abs(corr - np.eye(len(cols)))
+        # Exactly rank 4 of 8 in exact arithmetic, so the matrix IS singular...
+        assert np.linalg.matrix_rank(corr) < len(cols)
+        # ...yet the largest pairwise correlation is nowhere near the cutoff.
+        # Wide margin (0.76 vs 0.999), so backend noise at 1e-10 cannot flip it.
+        assert off_diagonal.max() < 0.8
+
+        kept, dropped = select_noncollinear_columns(data, cols, DEFAULT_COLLINEARITY_THRESHOLD)
+        assert kept == cols, "pairwise filter must drop nothing here"
+        assert dropped == []
+
+    def test_singular_failure_degrades_to_zeros_and_warns(self, monkeypatch, caplog) -> None:
+        """When the singular error IS raised, return zeros AND log the marker.
+
+        The error is injected rather than provoked. Provoking it requires a
+        matrix whose inversion the backend chooses to reject, which is not a
+        portable property -- see the class docstring.
+        """
+        from evaluation.chamber_pipeline import inference
+
+        def raising_pc(*args, **kwargs):
+            raise np.linalg.LinAlgError("Singular matrix")
+
+        monkeypatch.setattr(inference, "_causallearn_pc", raising_pc)
+        rng = np.random.default_rng(0)
+        cols = ["x", "y", "z"]
+        data = pd.DataFrame({c: rng.standard_normal(50) for c in cols})
 
         with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
-            adj = run_pc(data, ["x", "y", "z"])
+            adj = run_pc(data, cols)
 
-        # Output is well-typed (the all-zeros fallback).
         assert adj.shape == (3, 3)
-        # AND a warning was emitted about the fallback. The exact phrasing
-        # is implementation detail; we just check the keyword "fell back"
-        # which is in the log message.
-        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any("fell back" in m.lower() for m in warning_messages), (
-            f"Expected fallback warning; got: {warning_messages}"
+        assert adj.to_numpy().sum() == 0
+        messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any("fell back" in m.lower() for m in messages), (
+            f"Expected fallback warning; got: {messages}"
         )
 
 
@@ -285,3 +411,100 @@ class TestUnknownLinAlgErrorReraise:
         data = pd.DataFrame({"x": rng.standard_normal(50), "y": rng.standard_normal(50)})
         with pytest.raises(ValueError, match="contains nan"):
             run_pc(data, ["x", "y"])
+
+
+class TestZeroVarianceLogging:
+    """The zero-variance drop must be countable, like the other two paths.
+
+    Of PC's three degradation paths this is the one whose rate tracks the
+    independent variable most directly: a column no bought experiment
+    perturbed is constant, gets dropped, and is padded back with zeros. Until
+    2026-08-29 it was the only one that emitted nothing at all.
+    """
+
+    def test_zero_variance_drop_is_logged_with_its_count(self, caplog) -> None:
+        rng = np.random.default_rng(3)
+        data = pd.DataFrame(
+            {
+                "a": rng.normal(size=200),
+                "b": rng.normal(size=200),
+                "flat1": np.zeros(200),
+                "flat2": np.full(200, 7.0),
+            }
+        )
+        with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+            adj = run_pc(data, ["a", "b", "flat1", "flat2"], alpha=0.05, seed=0)
+
+        hits = [r for r in caplog.records if "zero-variance" in r.getMessage().lower()]
+        assert len(hits) == 1
+        # The COUNT must be the first logging arg, not merely inside the
+        # formatted string: `_PcZeroVarianceHandler` reads `record.args[0]` so
+        # that two columns dropped in one warning count as two.
+        assert hits[0].args[0] == 2
+        # And the drop is local -- the surviving pair is still scored.
+        assert adj.loc["flat1"].sum() == 0
+        assert adj["flat2"].sum() == 0
+
+    def test_long_drop_lists_are_truncated(self, caplog) -> None:
+        """At low budget nearly every LT node is constant; do not log 38 names."""
+        n = _MAX_LOGGED_NAMES + 5
+        data = pd.DataFrame({"a": np.random.default_rng(4).normal(size=100)})
+        for i in range(n):
+            data[f"flat{i}"] = 0.0
+        names = ["a"] + [f"flat{i}" for i in range(n)]
+        with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+            run_pc(data, names, alpha=0.05, seed=0)
+        message = next(r.getMessage() for r in caplog.records if "zero-variance" in r.getMessage())
+        assert message.endswith("...")
+        assert message.count(",") == _MAX_LOGGED_NAMES - 1
+
+
+def test_nan_variance_column_is_counted_not_silently_dropped(caplog) -> None:
+    """A NaN-variance column must reach the zero-variance counter.
+
+    `valid_cols` and `zero_variance` were written as two threshold tests
+    (`> 1e-12` and `<= 1e-12`), and BOTH are False for NaN -- so an all-NaN
+    column was dropped from inference while every counter read 0. That is the
+    untraceable degradation the counters exist to eliminate, so the second
+    list is now the complement of the first rather than a second test.
+    """
+    rng = np.random.default_rng(7)
+    data = pd.DataFrame(
+        {
+            "a": rng.normal(size=200),
+            "b": rng.normal(size=200),
+            "missing": np.full(200, np.nan),
+        }
+    )
+    with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+        adj = run_pc(data, ["a", "b", "missing"], alpha=0.05, seed=0)
+
+    hits = [r for r in caplog.records if "zero-variance" in r.getMessage().lower()]
+    assert len(hits) == 1, "an all-NaN column must be reported, not silently dropped"
+    assert hits[0].args[0] == 1
+    # And it is padded back, so the output still covers the full node set.
+    assert list(adj.index) == ["a", "b", "missing"]
+    assert adj.loc["missing"].sum() == 0
+
+
+def test_an_all_constant_input_reaches_the_degeneracy_counter(caplog) -> None:
+    """A graph that is ENTIRELY padding is a total loss, like the singular
+    fallback, and must warn. `n_zero_variance_dropped` alone cannot carry it:
+    that counter is deliberately excluded from the warning paths because its
+    rate must fall with budget, so a fully-padded cell printed "No degradation
+    detected on any recorded path"."""
+    data = pd.DataFrame({"a": np.zeros(50), "b": np.zeros(50), "c": np.zeros(50)})
+    with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
+        adj = run_pc(data, ["a", "b", "c"], alpha=0.05, seed=0)
+    assert int(adj.values.sum()) == 0
+    assert any("fell back" in r.getMessage().lower() for r in caplog.records)
+
+
+def test_run_pc_invocations_are_counted() -> None:
+    """Lets a caller tell "PC ran and found nothing" from "PC never ran"."""
+    from evaluation.chamber_pipeline import inference as inf
+
+    before = inf.PC_INVOCATIONS
+    rng = np.random.default_rng(11)
+    run_pc(pd.DataFrame({"a": rng.normal(size=80), "b": rng.normal(size=80)}), ["a", "b"], seed=0)
+    assert before + 1 == inf.PC_INVOCATIONS

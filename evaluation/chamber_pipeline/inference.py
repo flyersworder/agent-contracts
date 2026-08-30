@@ -45,6 +45,7 @@ CPDAG → directed-adjacency convention:
 
 from __future__ import annotations
 
+import inspect
 import logging
 from typing import Any
 
@@ -52,6 +53,16 @@ import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+# Incremented once per `run_pc` call. The orchestrator snapshots it around each
+# cell so a counter of 0 can be told from "inference never happened": seven
+# agents return `_empty_adjacency` early (zero budget, empty menu, or no frames
+# after every selection failed), and such a cell recorded
+# n_pc_degeneracies=n_collinear_dropped=n_zero_variance_dropped=0 -- reading in
+# the validity report exactly like a clean PC run. Module-level and not
+# thread-safe, the same assumption the logging handlers already make: cells are
+# serial within a process and parallel only across processes.
+PC_INVOCATIONS = 0
 
 # The exact error phrase causal-learn's Fisher-Z raises on a singular
 # sub-correlation matrix (verified against causallearn==0.1.4 at
@@ -64,6 +75,11 @@ logger = logging.getLogger(__name__)
 # path in numpy or causal-learn).
 _FISHERZ_SINGULAR_PHRASE = "correlation matrix is singular"
 _LINALG_SINGULAR_PHRASE = "singular matrix"
+
+# Cap on how many column names a drop warning spells out. At k=1 on LT nearly
+# all 38 nodes are constant, and the count -- not the roster -- is what the
+# orchestrator scrapes.
+_MAX_LOGGED_NAMES = 10
 
 # `causal-learn` is part of the chambers extra; importing it lazily so
 # tests of unrelated chamber-pipeline pieces don't fail at collection
@@ -162,6 +178,126 @@ def cpdag_to_directed_adjacency(pc_graph: np.ndarray, node_names: list[str]) -> 
 # it's seconds. Set max_rows=None to disable.
 DEFAULT_MAX_ROWS = 300
 
+# Pearson |r| above which two columns are treated as the same variable.
+#
+# Motivated by the WT chamber's four barometers -- pressure_upwind,
+# pressure_downwind, pressure_ambient and pressure_intake -- which in the
+# `standard` configuration all read essentially ambient atmospheric
+# pressure. Measured over the full wt_validate_v1 menu, all six pairs sit
+# above r=0.9998 and NONE of the six is a true edge. Four variables spanning
+# roughly one dimension leaves the correlation matrix rank-deficient by
+# three (cond(R) ~ 1e7), and Fisher-Z's sub-matrix inversion then raises --
+# aborting the entire PC run and returning all-zeros for all 32 nodes.
+#
+# Dropping the redundant columns and padding them back with zeros is the
+# same policy this module already applies to zero-variance columns, for the
+# same reason: a variable numerically indistinguishable from another
+# carries no independent signal, so "no claim" is the honest output. The
+# difference it makes is scope -- the loss becomes the edges incident to
+# the dropped nodes instead of the whole graph.
+#
+# 0.999 rather than something closer to 1.0 because float64 Fisher-Z fails
+# well before exact collinearity; the WT clique sits at 0.9998-0.99998.
+DEFAULT_COLLINEARITY_THRESHOLD = 0.999
+
+
+def select_noncollinear_columns(
+    data: pd.DataFrame, columns: list[str], threshold: float
+) -> tuple[list[str], list[str]]:
+    """Greedily keep columns that are not near-duplicates of a kept column.
+
+    Walks `columns` in order and keeps each one whose absolute Pearson
+    correlation with every already-kept column is below `threshold`. Order
+    matters and is therefore taken from the caller's node ordering, never
+    from a set or dict iteration, so the choice of which member of a
+    duplicate group survives is reproducible across runs and platforms.
+
+    Args:
+        data: Frame containing at least `columns`; already subsampled and
+            already filtered for zero variance by the caller.
+        columns: Candidate column names, in the order that decides which
+            member of a near-duplicate group is kept.
+        threshold: Absolute-correlation cutoff. See
+            `DEFAULT_COLLINEARITY_THRESHOLD`.
+
+    Returns:
+        `(kept, dropped)`, together a partition of `columns`.
+    """
+    # Converted once per column, not once per (candidate, keeper) pair: the
+    # same keeper was previously re-materialised for every later candidate,
+    # ~700 redundant conversions per PC run on LT's 38 columns.
+    #
+    # Deliberately NOT replaced with a single `data[columns].corr()`. That
+    # would change the arithmetic -- a different summation order and a
+    # different BLAS path -- and entry 10 of the validity register measures
+    # what a ~1e-10 perturbation does to PC: it forks the conditioning-set
+    # search and changes the graph. The pairwise `np.corrcoef` calls below are
+    # byte-for-byte the ones that produced every recorded result.
+    arrays = {name: data[name].to_numpy(dtype=float) for name in columns}
+
+    kept: list[str] = []
+    dropped: list[str] = []
+    for name in columns:
+        col = arrays[name]
+        redundant = False
+        for keeper in kept:
+            other = arrays[keeper]
+            with np.errstate(invalid="ignore", divide="ignore"):
+                r = np.corrcoef(col, other)[0, 1]
+            # NaN means one side had no variance, which the caller already
+            # excluded; treat it as "not redundant" rather than silently
+            # dropping a column for an unrelated reason.
+            if np.isfinite(r) and abs(r) >= threshold:
+                redundant = True
+                break
+        (dropped if redundant else kept).append(name)
+    return kept, dropped
+
+
+def runtime_fingerprint() -> dict[str, str]:
+    """Platform facts that change PC's output on byte-identical inputs.
+
+    Verified 2026-08-26, not inferred: macOS/Accelerate and Linux/OpenBLAS
+    disagree on `np.corrcoef` of the same matrix, and on `inv(C)[0,1]` from
+    the ~10th hex digit (relative ~1e-10). PC turns that into structural
+    noise -- it is a sequence of accept/reject tests at alpha, each
+    conditioned on the last, so one flipped borderline test forks the
+    conditioning-set search rather than perturbing a number. Seeded `random`
+    LT k=15 seed 0 gives F1 0.381 on Accelerate and 0.286 on OpenBLAS.
+
+    Cells from different backends therefore MUST NOT be pooled, and the only
+    way to notice is for each row to say which one produced it.
+    """
+    import platform as _platform
+
+    import numpy as np
+
+    blas = "unknown"
+    try:
+        deps = np.show_config("dicts").get("Build Dependencies", {})
+        blas = str(deps.get("blas", {}).get("name", "unknown"))
+    except Exception:  # pragma: no cover - numpy build without the dicts API
+        pass
+    return {
+        "blas": blas,
+        "platform": f"{_platform.system()}-{_platform.machine()}",
+    }
+
+
+def pc_call_defaults() -> dict[str, Any]:
+    """The values `run_pc` will actually use when called without them.
+
+    Read off the BOUND signature, not the module constants. Python
+    evaluates default arguments at def time, so reassigning
+    `DEFAULT_MAX_ROWS` after import moves the constant while leaving
+    `run_pc` untouched -- provenance stamped from the constant would then
+    describe a configuration that never ran. Every agent calls `run_pc`
+    without `max_rows` or `collinearity_threshold`, so these defaults are
+    what produced the graph.
+    """
+    params = inspect.signature(run_pc).parameters
+    return {name: p.default for name, p in params.items() if p.default is not p.empty}
+
 
 def run_pc(
     pooled_data: pd.DataFrame,
@@ -171,6 +307,7 @@ def run_pc(
     show_progress: bool = False,
     max_rows: int | None = DEFAULT_MAX_ROWS,
     seed: int = 0,
+    collinearity_threshold: float | None = DEFAULT_COLLINEARITY_THRESHOLD,
     **pc_kwargs: Any,
 ) -> pd.DataFrame:
     """Run PC on pooled chamber data, return directed-adjacency DataFrame.
@@ -194,6 +331,11 @@ def run_pc(
             level. Pass None to use all rows (slow at 38 nodes).
         seed: RNG seed for the subsampling. Has no effect when
             `max_rows is None` or `len(pooled_data) <= max_rows`.
+        collinearity_threshold: Absolute-correlation cutoff above which a
+            column is treated as a duplicate of an earlier one and dropped
+            (padded back with zeros). Pass None to disable and restore the
+            pre-2026-08-25 behaviour, where a numerically duplicate pair
+            aborted the whole run. See `DEFAULT_COLLINEARITY_THRESHOLD`.
         **pc_kwargs: Forwarded to `causallearn.search.ConstraintBased.PC.pc`.
 
     Returns:
@@ -203,6 +345,9 @@ def run_pc(
         ImportError: If `causal-learn` is not installed.
         ValueError: If `pooled_data` columns don't match `node_names`.
     """
+    global PC_INVOCATIONS
+    PC_INVOCATIONS += 1
+
     if not CAUSAL_LEARN_AVAILABLE:
         raise ImportError(
             "causal-learn is required for PC inference. "
@@ -231,13 +376,79 @@ def run_pc(
     variances = pooled_data.var()
     valid_cols = [n for n in node_names if variances.get(n, 0.0) > 1e-12]
 
+    # The COMPLEMENT of `valid_cols`, not a second threshold test. Written as
+    # `<= 1e-12` this was not a partition: both comparisons are False for NaN,
+    # so an all-NaN column (a missing sensor stretch in a future release) was
+    # dropped from inference while every counter read 0 -- the exact
+    # untraceable degradation this warning exists to eliminate.
+    kept_set = set(valid_cols)
+    zero_variance = [n for n in node_names if n not in kept_set]
+    if zero_variance:
+        # Logged for the same reason as the collinear drop below: this is a
+        # degradation path whose RATE TRACKS THE INDEPENDENT VARIABLE. The
+        # fewer experiments bought, the more variables no intervention
+        # perturbed, the more columns are constant and get padded back as
+        # zeros -- guaranteed false negatives concentrated at low budget.
+        # That is not a confound between arms (activating more variables is
+        # what good selection does; it is the causal pathway), but without a
+        # counter the budget curve cannot be decomposed into "PC saw more
+        # nodes" versus "PC inferred better edges".
+        #
+        # The message deliberately shares no marker substring with the
+        # collinear warning ("collinear") or the degeneracy warning ("fell
+        # back"); `test_pc_warning_markers_are_unambiguous` pins that, because
+        # three handlers scraping one logger is exactly where a counter starts
+        # silently double-counting.
+        logger.warning(
+            "PC dropped %d zero-variance column(s): %s",
+            len(zero_variance),
+            ", ".join(zero_variance[:_MAX_LOGGED_NAMES])
+            + (" ..." if len(zero_variance) > _MAX_LOGGED_NAMES else ""),
+        )
+
     if not valid_cols:
         # Nothing has signal — return all-zeros on the full node set.
+        #
+        # This is a TOTAL loss, identical in outcome to the singular-matrix
+        # fallback below: every node makes no claim and F1 is 0 by
+        # construction. It must therefore reach the degeneracy counter and not
+        # only `n_zero_variance_dropped`, which is deliberately excluded from
+        # the warning paths because its rate MUST fall with budget. Excluded,
+        # a cell whose graph is entirely padding printed "No degradation
+        # detected on any recorded path". The "fell back" marker is what
+        # `_PcDegeneracyHandler` scrapes.
+        logger.warning(
+            "PC inference fell back to all-zeros adjacency on %d-node input "
+            "(every column was constant in the pooled data)",
+            len(node_names),
+        )
         return pd.DataFrame(
             np.zeros((len(node_names), len(node_names)), dtype=int),
             index=node_names,
             columns=node_names,
         )
+
+    if collinearity_threshold is not None and len(valid_cols) > 1:
+        valid_cols, collinear_dropped = select_noncollinear_columns(
+            pooled_data, valid_cols, collinearity_threshold
+        )
+        if collinear_dropped:
+            # Logged, not merely returned, because the orchestrator scrapes
+            # this per cell (`_PcCollinearHandler`). A degradation path whose
+            # rate can vary with the experiment's independent variable and
+            # that leaves no trace is how a harness ends up measuring itself.
+            logger.warning(
+                "PC dropped %d collinear column(s) at |r|>=%.4g: %s",
+                len(collinear_dropped),
+                collinearity_threshold,
+                ", ".join(collinear_dropped),
+            )
+        # No `if not valid_cols` guard here, deliberately:
+        # `select_noncollinear_columns` starts from `kept = []`, so its first
+        # candidate has nothing to compare against and is always kept. With
+        # `len(valid_cols) > 1` on entry it cannot return an empty list, and a
+        # branch for a state the callee cannot produce implies a failure mode
+        # that does not exist.
 
     valid_data = pooled_data[valid_cols]
     data_array = valid_data.to_numpy(dtype=float)

@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import socket
 import sys
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
 from .checkpoint import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
     append_record_jsonl,
     done_cell_keys,
+    latest_per_cell,
     read_records_jsonl,
 )
 from .orchestrator import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
@@ -87,10 +89,59 @@ load_dotenv()
 # Pre-baked sweep specs matching plan §9 milestones. CLI flags --pilot
 # and --m5 select these; --custom (the default) lets the user override
 # every axis individually.
+# The five M4b variants, named EXPLICITLY rather than left as `None`.
+# `agent_names=None` means "every registered agent", so when the M6 ladder
+# arms joined the registry it silently redefined what `--pilot` and `--m5`
+# mean -- `--pilot` would no longer reproduce the pilot it is named after.
+# A preset that reproduces a published run must not depend on the registry
+# staying the size it was.
+_M4B_VARIANTS = (
+    "random",
+    "greedy_ig_lite",
+    "llm_only",
+    "llm_pc",
+    "planner_reasoner",
+)
+
+# The M6 coordination ladder: two M4b arms reused as rungs 0 and 3, plus the
+# three new ones. Selected with --variants; see spec §3.
+LADDER_VARIANTS = (
+    "llm_pc",  # rung 0: loop
+    "fan_in_homog",  # rung 1: ensemble
+    "fan_in_spec",  # rung 2: parallel roles
+    "planner_reasoner",  # rung 3: chain
+    "team",  # rung 4: negotiation
+)
+
 PILOT_SPEC = SweepSpec(
     chambers=("lt",),
     budget_fractions=(0.10, 0.50, 1.00),
-    agent_names=None,  # all 5 — LT runs everything per plan §5.1
+    agent_names=_M4B_VARIANTS,  # LT runs everything per plan §5.1
+    seeds=tuple(range(30)),
+    configuration="standard",
+)
+
+M6_SPEC = SweepSpec(
+    chambers=("lt",),
+    # {6, 30, 45}, NOT the pilot's {6, 30, 59}. At k=59 the budget equals the
+    # whole 59-item menu, so two blind scouts drawing 30 and 29 cover ~44
+    # distinct experiments against `llm_pc`'s 59 -- a 25% coverage deficit
+    # baked into the top budget point, the confound spec §3 rules out.
+    #
+    # A second reason not to raise this fraction: rung 4's pools are
+    # `budget + ceil((M-k)/2)` and `budget + floor((M-k)/2)`, so at k >= M-1
+    # the leftover runs out and a pool collapses to exactly its budget --
+    # every name in it gets queried and the selection loop goes inert, the
+    # same degeneracy `test_the_selection_loop_changes_which_experiments...`
+    # guards at k=20. LT k=45 leaves 14 spare; k=58 leaves 1.
+    #
+    # The middle fraction stays 0.50, matching PILOT_SPEC exactly. This is a
+    # readability choice, NOT a correctness one: the spec fraction never
+    # reaches the data. `run_sweep` discards it and `run_cell` recomputes
+    # `budget_fraction` as k/menu_size, so 0.50 and 0.51 both record
+    # 30/59 = 0.5084... and the reused-pilot rows join either way.
+    budget_fractions=(0.10, 0.50, 0.76),
+    agent_names=LADDER_VARIANTS,
     seeds=tuple(range(30)),
     configuration="standard",
 )
@@ -98,7 +149,7 @@ PILOT_SPEC = SweepSpec(
 M5_SPEC = SweepSpec(
     chambers=("lt", "wt"),
     budget_fractions=(0.10, 0.25, 0.50, 0.75, 1.00),
-    agent_names=None,  # all — registry handles WT-skip for greedy_ig_lite
+    agent_names=_M4B_VARIANTS,  # registry handles WT-skip for greedy_ig_lite
     seeds=tuple(range(30)),
     configuration="standard",
 )
@@ -126,6 +177,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--m5",
         action="store_true",
         help="Use the M5 full-sweep spec: both chambers, 5 budgets, all variants, 30 seeds.",
+    )
+    parser.add_argument(
+        "--m6",
+        action="store_true",
+        help=(
+            "Use the M6 coordination-ladder spec: LT, 3 budgets, the five "
+            "ladder rungs, 30 seeds. Typing the rungs by hand into --variants "
+            "risks a typo producing a silently smaller sweep."
+        ),
     )
 
     # Custom-sweep flags (used when no preset is selected).
@@ -200,6 +260,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help=(
+            "Override the LLM model id for every LLM-bearing variant "
+            "(e.g. 'openrouter/deepseek/deepseek-v4-flash-0731'). Omit to use "
+            "each agent's signature default. Recorded per cell in `model_id`."
+        ),
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help=(
+            "Run cells across this many worker PROCESSES. Default (None) is "
+            "the serial path. Cells are ~1.3%% CPU (nearly all LLM network "
+            "wait), so concurrency well above the core count is productive; "
+            "each worker holds the chamber dataset, so budget ~500 MB apiece."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the cell grid + count, do not invoke agents.",
@@ -240,25 +321,30 @@ def _parse_csv_list(s: str) -> list[str]:
 def _build_sweep_from_args(args: argparse.Namespace) -> SweepSpec:
     """Translate parsed argparse Namespace into a SweepSpec.
 
-    Pre-baked specs (--pilot, --m5) ignore custom-sweep flags entirely.
+    Pre-baked specs (--pilot, --m5, --m6) ignore custom-sweep flags entirely.
     Custom sweeps thread every CLI flag into the SweepSpec, including
     the per-cell timeout.
     """
+    # `replace` is imported at module scope, NOT inside these branches. Two of
+    # them used to do a function-local `from dataclasses import replace`, which
+    # binds the name as local for the WHOLE function -- so the `--m6` branch,
+    # which ran no import, raised UnboundLocalError and killed a 450-cell
+    # sweep at startup. Conditional local imports read like globals and are not.
+    #
+    # Apply only the timeout override; the rest of each pre-baked spec is
+    # plan-§9 fixed, and `replace` keeps the module-level spec immutable.
     if args.pilot:
-        # Apply only the timeout override (the rest of PILOT_SPEC is
-        # plan-§9 fixed); replace via dataclasses.replace so PILOT_SPEC
-        # itself stays immutable.
         if args.cell_timeout_seconds is not None:
-            from dataclasses import replace
-
             return replace(PILOT_SPEC, cell_timeout_seconds=args.cell_timeout_seconds)
         return PILOT_SPEC
     if args.m5:
         if args.cell_timeout_seconds is not None:
-            from dataclasses import replace
-
             return replace(M5_SPEC, cell_timeout_seconds=args.cell_timeout_seconds)
         return M5_SPEC
+    if getattr(args, "m6", False):
+        if args.cell_timeout_seconds is not None:
+            return replace(M6_SPEC, cell_timeout_seconds=args.cell_timeout_seconds)
+        return M6_SPEC
 
     # Custom sweep.
     chambers = tuple(_parse_csv_list(args.chambers))
@@ -483,13 +569,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         sys.stdout.flush()
 
-    new_records = run_sweep(sweep, llm=llm, on_cell=progress, skip_keys=skip_keys)
+    new_records = run_sweep(
+        sweep,
+        llm=llm,
+        on_cell=progress,
+        skip_keys=skip_keys,
+        model=args.model,
+        max_workers=args.max_workers,
+    )
 
     # Consolidate from sidecar (NOT the in-memory list) so the final
     # Parquet contains both the prior records and the new ones. Reading
     # back from disk is also a sanity check: if the sidecar wrote
     # successfully every cell, this should equal `prior_records + new_records`.
-    all_records = read_records_jsonl(sidecar_path)
+    # `latest_per_cell`, not the raw sidecar: a retried cell appends a second
+    # line for the same key, so consolidating raw would carry both its stale
+    # error and its good result -- two rows for one cell.
+    all_records = latest_per_cell(read_records_jsonl(sidecar_path))
 
     # Write output. Extension was validated above.
     if out.endswith(".csv"):

@@ -116,9 +116,21 @@ class TestPilotSpec:
     def test_pilot_thirty_seeds(self) -> None:
         assert len(PILOT_SPEC.seeds) == 30
 
-    def test_pilot_includes_all_variants(self) -> None:
-        """LT runs all 5 variants per plan §5.1."""
-        assert PILOT_SPEC.agent_names is None  # = all from registry
+    def test_pilot_pins_the_five_m4b_variants(self) -> None:
+        """Named explicitly, never `None`.
+
+        `None` means "every registered agent", so the preset would follow the
+        registry -- and `--pilot` would stop reproducing the published pilot
+        the moment any arm was added. It did: the M6 ladder took it from 450
+        to 720 cells before this was pinned.
+        """
+        assert PILOT_SPEC.agent_names == (
+            "random",
+            "greedy_ig_lite",
+            "llm_only",
+            "llm_pc",
+            "planner_reasoner",
+        )
 
     def test_pilot_total_cells_is_450(self) -> None:
         from evaluation.chamber_pipeline.orchestrator import count_cells
@@ -388,3 +400,75 @@ class TestEmptySeedsDryRun:
             ]
         )
         assert rc == 0
+
+
+class TestM6Spec:
+    """The ladder preset. Typing five rung names by hand invites a typo that
+    produces a silently smaller sweep rather than an error."""
+
+    def test_m6_runs_the_five_ladder_rungs(self) -> None:
+        from evaluation.chamber_pipeline.run_experiment import (
+            LADDER_VARIANTS,
+            M6_SPEC,
+        )
+
+        assert M6_SPEC.agent_names == LADDER_VARIANTS
+        assert set(LADDER_VARIANTS) == {
+            "llm_pc",
+            "fan_in_homog",
+            "fan_in_spec",
+            "planner_reasoner",
+            "team",
+        }
+
+    def test_every_ladder_variant_is_registered(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import get_spec
+        from evaluation.chamber_pipeline.run_experiment import LADDER_VARIANTS
+
+        for name in LADDER_VARIANTS:
+            assert get_spec(name).name == name
+
+    def test_m6_flag_selects_the_ladder_spec(self) -> None:
+        from evaluation.chamber_pipeline.run_experiment import (
+            M6_SPEC,
+            _build_sweep_from_args,
+            build_arg_parser,
+        )
+
+        args = build_arg_parser().parse_args(["--m6"])
+        assert _build_sweep_from_args(args) == M6_SPEC
+
+
+@pytest.mark.parametrize("flag", ["pilot", "m5", "m6"])
+def test_a_prebaked_spec_accepts_a_cell_timeout(flag: str) -> None:
+    """Every pre-baked spec must apply `--cell-timeout-seconds`.
+
+    `--m6 --cell-timeout-seconds 5400` crashed with UnboundLocalError on the
+    real sweep: `--pilot` and `--m5` each did a function-LOCAL
+    `from dataclasses import replace` inside their own branch, which makes
+    `replace` local to the whole function, so the `--m6` branch referenced an
+    unbound name. It passed every earlier check because `--m6 --dry-run` omits
+    the timeout and takes the other return path -- the bug lived in the
+    conjunction of two flags that were only ever tested apart.
+    """
+    from evaluation.chamber_pipeline.run_experiment import (
+        _build_sweep_from_args,
+        build_arg_parser,
+    )
+
+    args = build_arg_parser().parse_args(
+        [f"--{flag}", "--out", "x.parquet", "--cell-timeout-seconds", "5400"]
+    )
+    spec = _build_sweep_from_args(args)
+    assert spec.cell_timeout_seconds == 5400.0
+
+
+@pytest.mark.parametrize("flag", ["pilot", "m5", "m6"])
+def test_a_prebaked_spec_without_a_timeout_is_untouched(flag: str) -> None:
+    from evaluation.chamber_pipeline.run_experiment import (
+        _build_sweep_from_args,
+        build_arg_parser,
+    )
+
+    args = build_arg_parser().parse_args([f"--{flag}", "--out", "x.parquet"])
+    assert _build_sweep_from_args(args).cell_timeout_seconds is None

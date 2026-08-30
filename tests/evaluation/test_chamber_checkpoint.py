@@ -212,3 +212,63 @@ class TestAppendIsAppendNotOverwrite:
 
 if __name__ == "__main__":  # pragma: no cover
     pytest.main([__file__, "-v"])
+
+
+class TestErroredCellsAreRetriedOnResume:
+    """An error is not a result.
+
+    The M6 sweep lost 296 cells to an OpenRouter weekly-limit 403. Every one
+    was written to the sidecar with status="error", and `done_cell_keys`
+    counted them as done -- so resuming would have skipped them and frozen a
+    154-cell dataset as if it were complete. CLAUDE.md claimed a re-run
+    "only re-attempts the errors"; it never did.
+    """
+
+    def _rec(self, agent: str, seed: int, status: str) -> RunRecord:
+        return RunRecord(
+            chamber="lt",
+            configuration="standard",
+            agent_name=agent,
+            budget_k=30,
+            budget_fraction=0.5,
+            seed=seed,
+            status=status,  # type: ignore[arg-type]
+            started_at="2026-08-24T00:00:00Z",
+            finished_at="2026-08-24T00:00:01Z",
+        )
+
+    def test_an_errored_cell_is_not_done(self) -> None:
+        from evaluation.chamber_pipeline.checkpoint import done_cell_keys
+
+        keys = done_cell_keys([self._rec("llm_pc", 0, "error")])
+        assert keys == set(), "an errored cell must be retried, not skipped"
+
+    def test_ok_and_skipped_cells_are_done(self) -> None:
+        from evaluation.chamber_pipeline.checkpoint import done_cell_keys
+
+        keys = done_cell_keys([self._rec("llm_pc", 0, "ok"), self._rec("llm_pc", 1, "skipped")])
+        assert len(keys) == 2
+
+    def test_a_mixed_sidecar_retries_only_the_failures(self) -> None:
+        from evaluation.chamber_pipeline.checkpoint import done_cell_keys
+
+        recs = [self._rec("llm_pc", i, "ok") for i in range(3)]
+        recs += [self._rec("llm_pc", i, "error") for i in range(3, 8)]
+        keys = done_cell_keys(recs)
+        assert len(keys) == 3
+        assert all(k[4] < 3 for k in keys)
+
+    def test_a_retried_cell_does_not_duplicate_in_the_consolidation(self) -> None:
+        """The retry writes a SECOND line for the same key.
+
+        Consolidation reads the whole sidecar, so without dedup the Parquet
+        would carry both the stale error and the good result for one cell --
+        inflating n and poisoning every per-(arm, budget) mean.
+        """
+        from evaluation.chamber_pipeline.checkpoint import latest_per_cell
+
+        stale = self._rec("llm_pc", 0, "error")
+        good = self._rec("llm_pc", 0, "ok")
+        out = latest_per_cell([stale, good])
+        assert len(out) == 1
+        assert out[0].status == "ok", "the later record must win"

@@ -382,9 +382,9 @@ from agent_contracts.integrations.google_adk import DelegatingAdkAgent
 parent_contract = Contract(
     id="report-task",
     resources=ResourceConstraints(
-        tokens=100_000,      # Token budget
-        cost_usd=2.0,        # Cost cap
-        iterations=30,       # Runaway prevention
+        tokens=100_000,  # Token budget
+        cost_usd=2.0,  # Cost cap
+        iterations=30,  # Runaway prevention
     ),
     temporal=TemporalConstraints(
         max_duration=timedelta(minutes=15),
@@ -653,6 +653,7 @@ For each metric, we compute:
 # Example bootstrap analysis
 from scipy import stats
 import numpy as np
+
 
 def bootstrap_ci(data, n_bootstrap=10000, ci=0.95):
     """Compute bootstrap confidence interval using the percentile method."""
