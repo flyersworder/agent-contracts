@@ -64,7 +64,14 @@ def group_by_variable(menu: list[str]) -> dict[str, list[str]]:
     return dict(groups)
 
 
-def coverage_ordered(menu: list[str], budget: int, seed: int, *, maximize: bool) -> list[str]:
+def coverage_ordered(
+    menu: list[str],
+    budget: int,
+    seed: int,
+    *,
+    maximize: bool,
+    exclude_strengths: tuple[str, ...] = (),
+) -> list[str]:
     """Exactly `min(budget, len(menu))` names, chosen to widen or narrow coverage.
 
     `maximize=True` takes one entry from every variable before taking a second
@@ -77,6 +84,15 @@ def coverage_ordered(menu: list[str], budget: int, seed: int, *, maximize: bool)
     the fewest fresh variables come from spending as many picks as possible
     inside each.
 
+    `exclude_strengths` drops levels from the menu before ordering. It exists
+    because the unrestricted manipulation is CONFOUNDED: the fattest variables
+    are exactly the ones carrying a `weak` level, so `maximize=False` buys 9.0
+    weak interventions where `maximize=True` buys 3.2, and across the first
+    90-cell sweep `n_variables` and `n_weak` correlated at -0.89. A weak
+    intervention perturbs less and carries less signal, so the two channels
+    could not be told apart. Excluding `weak` narrows the LT k=30 span from
+    11-30 to 15-30 and buys a manipulation that varies breadth alone.
+
     Both shuffle on a seeded RNG before ordering -- within each variable, and
     across variables. The menu is grouped by variable family and strength, so
     resolving ties by menu order would hand every seed the same families and
@@ -84,6 +100,8 @@ def coverage_ordered(menu: list[str], budget: int, seed: int, *, maximize: bool)
     `_capped_claim` documents in `agents`, and it applies with more force here
     because these arms have no LLM to perturb the choice.
     """
+    if exclude_strengths:
+        menu = [n for n in menu if experiment_strength(n) not in exclude_strengths]
     rng = _random.Random(f"coverage:{seed}")
     items = []
     for variable, names in group_by_variable(menu).items():

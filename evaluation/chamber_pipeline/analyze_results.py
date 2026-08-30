@@ -75,6 +75,9 @@ VARIANT_COLORS: dict[str, str] = {
     # of a controlled variable-coverage span, drawn as a matched pair.
     "coverage_max": "#2b8a3e",  # deep green — widest portfolio
     "coverage_min": "#c92a2a",  # deep red — narrowest portfolio
+    # Deconfounded pair: same manipulation with `weak` excluded.
+    "coverage_max_ms": "#37b24d",  # light green — widest, mid+strong only
+    "coverage_min_ms": "#f03e3e",  # light red — narrowest, mid+strong only
 }
 
 VARIANT_LABELS: dict[str, str] = {
@@ -92,6 +95,8 @@ VARIANT_LABELS: dict[str, str] = {
     "critique": "Critique (executor-evaluator)",
     "coverage_max": "Coverage-max (30 variables)",
     "coverage_min": "Coverage-min (11 variables)",
+    "coverage_max_ms": "Coverage-max, no weak (30 variables)",
+    "coverage_min_ms": "Coverage-min, no weak (15 variables)",
 }
 
 # Marker + linestyle per variant so curves stay distinguishable when the
@@ -111,6 +116,8 @@ VARIANT_MARKERS: dict[str, str] = {
     "critique": "h",
     "coverage_max": "^",
     "coverage_min": "v",
+    "coverage_max_ms": "1",
+    "coverage_min_ms": "2",
 }
 
 VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
@@ -128,6 +135,8 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "critique": "dotted",
     "coverage_max": (0, (6, 2)),
     "coverage_min": (0, (2, 2, 6, 2)),
+    "coverage_max_ms": (0, (4, 2)),
+    "coverage_min_ms": (0, (1, 2, 4, 2)),
 }
 
 # Variant rendering order in legend (matches plan §5.3 description top-to-bottom).
@@ -153,6 +162,8 @@ VARIANT_ORDER: tuple[str, ...] = (
     # M7 coverage manipulation, last: bounds rather than rungs.
     "coverage_max",
     "coverage_min",
+    "coverage_max_ms",
+    "coverage_min_ms",
 )
 
 

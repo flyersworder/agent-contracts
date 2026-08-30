@@ -306,7 +306,12 @@ def random_agent(
 
 
 def _coverage_agent(
-    adapter: ContractedChamberAgent, seed: int, pc_alpha: float, *, maximize: bool
+    adapter: ContractedChamberAgent,
+    seed: int,
+    pc_alpha: float,
+    *,
+    maximize: bool,
+    exclude_strengths: tuple[str, ...] = (),
 ) -> pd.DataFrame:
     """Shared body: spend the whole budget on a coverage-ordered selection."""
     nodes = _node_names(adapter)
@@ -314,7 +319,13 @@ def _coverage_agent(
     menu = adapter.available_experiments()
     if budget <= 0 or not menu:
         return _empty_adjacency(nodes)
-    chosen = coverage_ordered(list(menu), min(budget, len(menu)), seed, maximize=maximize)
+    chosen = coverage_ordered(
+        list(menu),
+        min(budget, len(menu)),
+        seed,
+        maximize=maximize,
+        exclude_strengths=exclude_strengths,
+    )
     dfs = [adapter.query_intervention(name) for name in chosen]
     return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
 
@@ -346,6 +357,36 @@ def coverage_min_agent(
     single. Deliberately the worst portfolio the menu permits at that budget.
     """
     return _coverage_agent(adapter, seed, pc_alpha, maximize=False)
+
+
+def coverage_max_ms_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """`coverage_max` restricted to mid+strong — the DECONFOUNDED upper end.
+
+    The unrestricted pair varies breadth and intervention STRENGTH together
+    (see `coverage_ordered`), so it cannot say which one moved F1. Dropping
+    `weak` leaves 50 entries over the same 30 variables and closes the strength
+    channel: this arm and :func:`coverage_min_ms_agent` both buy zero weak
+    interventions.
+    """
+    return _coverage_agent(adapter, seed, pc_alpha, maximize=True, exclude_strengths=("weak",))
+
+
+def coverage_min_ms_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """`coverage_min` restricted to mid+strong — the DECONFOUNDED lower end.
+
+    At LT k=30 this touches 15 variables (the 15 fattest, each at both mid and
+    strong) against the max arm's 30, so the span is 15-30 rather than the
+    confounded 11-30, and neither end buys a weak intervention.
+    """
+    return _coverage_agent(adapter, seed, pc_alpha, maximize=False, exclude_strengths=("weak",))
 
 
 # ---------------------------------------------------------------------------
@@ -1669,7 +1710,9 @@ def team_agents(
 # actually runs.
 __all__ = [
     "coverage_max_agent",
+    "coverage_max_ms_agent",
     "coverage_min_agent",
+    "coverage_min_ms_agent",
     "critique_agents",
     "fan_in_agents",
     "greedy_ig_lite_agent",

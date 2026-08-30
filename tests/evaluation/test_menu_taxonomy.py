@@ -23,9 +23,20 @@ from evaluation.chamber_pipeline.menu_taxonomy import (
     group_by_variable,
 )
 
-# The real LT shape: 10 variables with one entry, 11 with two, 9 with three,
-# = 59 entries over 30 variables. Rebuilt rather than loaded so the test runs
-# without the dataset.
+# The real LT shape, verified against the live menu: 59 entries over 30
+# variables -- 10 with one entry, 11 with two, 9 with three. Rebuilt rather
+# than loaded so the tests run without the dataset.
+#
+# WHICH strengths each width carries is load-bearing and was wrong in the first
+# draft. All 9 `weak` entries in the LT menu belong to the 9 three-entry
+# variables; the two-entry variables are (mid, strong) and the one-entry
+# variables are (mid,). Modelling width 2 as (weak, mid) made excluding `weak`
+# shrink those variables to width 1 and moved every deconfounded bound.
+LT_WIDTH_STRENGTHS: dict[int, tuple[str, ...]] = {
+    1: ("mid",),
+    2: ("mid", "strong"),
+    3: ("weak", "mid", "strong"),
+}
 LT_SHAPE = {1: 10, 2: 11, 3: 9}
 
 
@@ -35,7 +46,7 @@ def _synthetic_menu() -> list[str]:
         for _ in range(count):
             var = f"v_{n}"
             n += 1
-            for strength in ("weak", "mid", "strong")[:width]:
+            for strength in LT_WIDTH_STRENGTHS[width]:
                 menu.append(f"uniform_{var}_{strength}")
     return menu
 
@@ -51,6 +62,20 @@ class TestTaxonomy:
         assert len(group_by_variable(menu)) == 30
         widths = Counter(len(v) for v in group_by_variable(menu).values())
         assert dict(sorted(widths.items())) == LT_SHAPE
+        # All 9 weak entries sit on three-entry variables -- the fact the
+        # deconfounding filter turns on.
+        strengths = Counter(experiment_strength(m) for m in menu)
+        assert strengths["weak"] == 9
+        assert {
+            len(group_by_variable(menu)[experiment_variable(m)])
+            for m in menu
+            if experiment_strength(m) == "weak"
+        } == {3}
+        no_weak = [m for m in menu if experiment_strength(m) != "weak"]
+        assert len(no_weak) == 50
+        assert dict(
+            sorted(Counter(len(v) for v in group_by_variable(no_weak).values()).items())
+        ) == {1: 10, 2: 20}
 
     @pytest.mark.parametrize(
         ("name", "variable", "strength"),
@@ -147,3 +172,59 @@ class TestCoverageOrdering:
             lo = _n_variables(coverage_ordered(menu, budget, seed=0, maximize=False))
             hi = _n_variables(coverage_ordered(menu, budget, seed=0, maximize=True))
             assert lo < hi, f"budget {budget}: {lo} !< {hi}"
+
+
+class TestStrengthExclusion:
+    """The deconfounding filter, which is the whole point of the `_ms` arms.
+
+    The unrestricted manipulation moves breadth and intervention strength
+    together -- the fattest variables are exactly the ones carrying a `weak`
+    level -- so the filter has to actually close the strength channel, not
+    merely narrow the span.
+    """
+
+    def test_no_excluded_strength_survives(self) -> None:
+        menu = _synthetic_menu()
+        for maximize in (True, False):
+            picks = coverage_ordered(
+                menu, 30, seed=0, maximize=maximize, exclude_strengths=("weak",)
+            )
+            assert not [p for p in picks if experiment_strength(p) == "weak"]
+
+    def test_excluding_weak_narrows_the_span_to_15_30(self) -> None:
+        """The real LT shape: 50 entries over 30 variables, 20 of width 2."""
+        menu = _synthetic_menu()
+        lo = coverage_ordered(menu, 30, seed=0, maximize=False, exclude_strengths=("weak",))
+        hi = coverage_ordered(menu, 30, seed=0, maximize=True, exclude_strengths=("weak",))
+        assert _n_variables(lo) == 15
+        assert _n_variables(hi) == 30
+
+    def test_the_filter_changes_the_lower_end_and_not_the_upper(self) -> None:
+        """Max already spends one pick per variable, so dropping a level
+        cannot reduce its coverage; min is the end the confound lived at."""
+        menu = _synthetic_menu()
+        raw_lo = _n_variables(coverage_ordered(menu, 30, seed=0, maximize=False))
+        raw_hi = _n_variables(coverage_ordered(menu, 30, seed=0, maximize=True))
+        f_lo = _n_variables(
+            coverage_ordered(menu, 30, seed=0, maximize=False, exclude_strengths=("weak",))
+        )
+        f_hi = _n_variables(
+            coverage_ordered(menu, 30, seed=0, maximize=True, exclude_strengths=("weak",))
+        )
+        assert (raw_lo, f_lo) == (11, 15), "the lower end moves"
+        assert raw_hi == f_hi == 30, "the upper end does not"
+
+    def test_budget_is_still_spent_in_full_after_filtering(self) -> None:
+        menu = _synthetic_menu()
+        for maximize in (True, False):
+            picks = coverage_ordered(
+                menu, 30, seed=2, maximize=maximize, exclude_strengths=("weak",)
+            )
+            assert len(picks) == 30
+            assert len(set(picks)) == 30
+
+    def test_an_empty_exclusion_is_the_unrestricted_ordering(self) -> None:
+        menu = _synthetic_menu()
+        a = coverage_ordered(menu, 30, seed=5, maximize=False)
+        b = coverage_ordered(menu, 30, seed=5, maximize=False, exclude_strengths=())
+        assert a == b
