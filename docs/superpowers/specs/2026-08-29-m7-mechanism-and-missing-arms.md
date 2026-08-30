@@ -1,6 +1,9 @@
 # M7: the mechanism, the missing arms, and the two reviewer objections
 
-**Status**: planning, opened 2026-08-29
+**Status**: Phase 1 complete 2026-08-30; `team_varsplit` running; Phase 2 next
+**Opened**: 2026-08-29
+**Last revised**: 2026-08-30 — Phase 1 results folded in, `shared_blackboard`
+promoted into Phase 2, external citations added to §1
 **Predecessor**: M6 coordination ladder (`2026-08-22-m6-coordination-ladder-design.md`)
 **Results of record**: `docs/chamber-results.md`
 **Harness defects**: `docs/chamber-harness-validity-register.md` (19 entries — read first)
@@ -24,6 +27,32 @@ single comparison in the wild, the multi-agent system is allowed to spend more
 — more calls, more tokens, more tool invocations. When the graph wins you
 cannot tell whether topology helped or whether it simply bought more; when the
 loop wins, the same problem inverted.
+
+**We no longer have to assert this. Anthropic's Frontier Red Team, 2026-08-13**
+(`docs/related-work/2026-08-13-anthropic-multiagent-patterns.md`, quotes
+verified against the raw page):
+
+> "the simple independent parallelized method produces 21 vulnerabilities over a
+> 6.5 million token run, while the coordinating agent swarm found 266
+> vulnerabilities over a 27 million token run."
+
+A **12.7x** headline advantage for the multi-agent system — on **4.2x the token
+spend**, and over a **search scope the two arms did not share** ("roughly half
+of these vulnerabilities were found outside of the core directories in which the
+simple independent parallel agents were told to focus"). The authors are candid
+about where that leaves the comparison:
+
+> "If we limit the swarm's outputs to only the vulnerabilities in the core
+> directories, the two methods seem comparable in terms of tokens per
+> vulnerability found."
+
+**Cite this carefully and generously.** The point is *not* that they erred —
+they state the caveat themselves, and their goal was systemic-risk
+characterisation, not benchmarking. The point is that the most careful public
+multi-agent-vs-single comparison available still cannot separate topology from
+spend, because nothing in the setup holds spend constant. That is the gap, and
+it is an enforcement problem before it is an experimental-design problem (see
+"Contracts are the instrument" below).
 
 ### What we can claim, and what backs it
 
@@ -105,6 +134,42 @@ who knows ensembles hands it straight back:
 The vote-aggregation version is an estimator change, not a topology change —
 see §7 for why it stays out.
 
+### Two of our findings now have independent corroboration
+
+Both from the same source, both verified verbatim.
+
+**Low-variance conformity explains our ensemble rung.** "Individual agents are
+'low variance': they often act the same in situations where different people
+might take a much more diverse range of actions." Their instances are stark —
+"18 out of 30 agents decided to create a git branch with the exact same branch
+name, 'mvp-game-loop'"; over half of a swarm asked to build something impressive
+chose ray tracers or self-hosting compilers.
+
+This is the criticism we already levelled at our own `fan_in_homog` (two scouts
+differing only by sampling temperature are the same opinion drawn twice), now
+supported from outside. It also **predicts a measurement we already have**:
+`team`'s negotiation resolves almost nothing (`n_contested` = 1.2 claims of 30)
+because near-identical agents have little to negotiate. And it makes
+`fan_in_spec`'s prompted role differentiation (overlap 0.79 -> 0.32) the right
+mitigation to have tested.
+
+**Hidden-profile is our thesis in another domain.** They distribute facts so
+that shared evidence supports the wrong choice while individuals hold pivotal
+private knowledge, and score whether the group recovers it (n=400 episodes per
+model, against a "solo ceiling baseline" in which one agent holds all the
+facts). Their own reading: "This matches the human literature where discussion
+converges on what everyone already knows."
+
+That is *the cost is partitioning the information* in an unrelated task, and it
+connects our framing to the Stasser-Titus hidden-profile literature — fifty
+years of grounding for an axis we otherwise introduce ourselves. Note their
+solo-ceiling baseline is structurally our loop.
+
+**Do not cite their hidden-profile or routing percentages.** Those quantities
+appear only in figures; a summarising fetch fabricated plausible values for
+them, and the notes file quarantines all four. Read the published figures
+directly if a number is wanted.
+
 ### The price, which the discourse has not measured at all
 
 Everyone argues capability; nobody publishes the bill. We can: **+0 calls for
@@ -148,6 +213,18 @@ That is bounded, defensible, and makes a prediction about where graphs should
 start winning — when the running record exceeds one context. It invites the
 follow-up study instead of pretending to have done it.
 
+**And the prediction already has a confirming instance, which we should cite
+rather than avoid.** Anthropic's coordinating swarm searched 15 codebases over a
+long horizon, specialised, and stayed genuinely complementary with the
+independent arm ("only 12 vulnerabilities in common"). That is a search space
+vastly exceeding one agent's context — the regime our bound excludes — and
+there partitioning does add value. Our LT menu is 59 entries: one loop covers
+all of it, so partitioning can only subtract.
+
+Presented this way the external result is **support for the bound, not a
+counterexample to the claim**, and it turns our scope limit from an admission
+into a positive prediction that someone else's data already satisfies.
+
 ### What this positioning obliges the phases to do
 
 Not decoration: it changes the plan.
@@ -160,11 +237,19 @@ Not decoration: it changes the plan.
   that answers the sinking objection on its own terms. Reported as a bound,
   not a branch.
 - **Phase 1 is what makes the reframing an explanation rather than a
-  correlation.** We know `team` matches the loop's coverage and scores worse;
-  until `chosen_experiments` is analysed we cannot say *which* picks differ.
+  correlation** — ~~pending~~ **done 2026-08-30**. It says which picks differ
+  (4.5 fewer distinct variables), what that costs (+0.0073 F1 per variable, so
+  about two-thirds of the gap), and that the negotiation protecting against it
+  performs at chance. The reframing now has a mechanism under it, not a
+  correlation.
 - **Phase 4 must carry the scoping sentence verbatim**, and must state the
   untested regimes (long-horizon context pressure, >2 agents, heterogeneous
   tools) as scope limits rather than future work.
+- **Phase 4 must cite the external work as motivation AND as boundary.**
+  The vulnerability comparison is what makes the confound concrete; the same
+  paper's swarm success in a context-saturated regime is what makes our bound a
+  prediction rather than an excuse. Both, or neither — quoting only the half
+  that flatters us is the version a reviewer will catch.
 
 ## 2. Why there is an M7
 
@@ -196,10 +281,17 @@ running record survives**:
 | `one_shot` | none — whole budget in one call | built 2026-08-29, unrun |
 | `llm_pc` (loop) | complete | M6 ✓ |
 | `critique` | complete, plus a reviewer holding no budget | built 2026-08-29, unrun |
-| `shared_blackboard` | complete, two voices alternating | **not built** |
+| `shared_blackboard` | complete, two voices alternating | **not built — Phase 2** |
 | `planner_reasoner` (relay) | complete, one seam | M6 ✓ |
 | `team` | split by agreement | M6 ✓ |
+| `team_varsplit` | split by agreement, on the RIGHT object | built 2026-08-30, running |
 | `fan_in_spec` / `fan_in_homog` | split blind | M6 ✓ |
+
+`team_varsplit` is the arm this table did not anticipate. It sits at the same
+point on the record axis as `team` — the running record is split the same way —
+but partitions the WORK by variable rather than by menu entry. It therefore
+separates two things the axis alone conflates: how much of the record survives,
+and whether the partition is drawn where the information actually lives.
 
 Stated as a claim to be tested: *multi-agent structure is free when agents
 share the record of what has been done, and costly when they do not. The
@@ -207,9 +299,9 @@ measured cost is not of having several agents; it is of partitioning their
 information.*
 
 `shared_blackboard` is the sharpest test and the one most likely to collapse
-into the loop by construction — two agents alternating with full shared
-history IS the loop with two voices. Build it only if Phase 2 leaves the axis
-ambiguous.
+into the loop by construction — two agents alternating with full shared history
+IS the loop with two voices. **Promoted 2026-08-30 from conditional to included
+in Phase 2**; see there for the three reasons that arrived together.
 
 ## 4. Naming
 
@@ -223,39 +315,52 @@ would orphan the data. One line in `VARIANT_LABELS`.
 
 ## 5. Phases
 
-### Phase 1 — mechanism (~$5, highest value)
+### Phase 1 — mechanism: **COMPLETE 2026-08-30, $2**
 
-**Question**: why does `team` lose at equal coverage?
+**Question**: why does `team` lose at equal coverage? **Answered**, and the
+answer moved twice before it settled. Full detail in `docs/chamber-results.md`
+§"M7 PHASE 1"; register entry 20 for the confound found on the way.
 
-Three hypotheses, currently indistinguishable because they predict the same
-symptom:
+**Result.** `team` buys 30 experiments but only **23.4 distinct variables**
+against the loop's **27.9**, because the LT menu carries up to three entries per
+variable and the two scout pools are disjoint as sets of EXPERIMENTS while a
+variable can sit in both. 5.6 variables are bought twice while `overlap_frac`
+reads exactly 0.0 in every cell — the safeguard was aimed at the wrong
+granularity.
 
-- **H1 experiments ≠ variables.** 30 distinct menu entries can touch 30
-  variables or 20, since one variable carries up to three entries
-  (mid/strong/weak). Team may be buying depth where the loop bought breadth.
-- **H2 forced allocation.** Scout pools are disjoint by construction, so each
-  scout must spend exactly ⌈k/2⌉ inside its own half even if that half
-  deserves less. The loop allocates all k adaptively. The cost would then be
-  *committing to a division of labour before knowing where the work is* —
-  which is a more interesting finding than "coordination is expensive".
-- **H3 blind depth duplication.** Zero overlap at the *experiment* level is
-  compatible with redundancy at the *variable* level.
+- **H1 (scouts buy depth) rejected.** Each scout is individually MORE
+  breadth-seeking than the loop: 0.053 and 0.013 repeats per pick against 0.070.
+- **H2 (lopsided allocation) rejected.** The split is even, 14.2 vs 14.8.
+- **H3 (cross-scout duplication) confirmed**: 14.2 + 14.8 − 5.6 = 23.4 exactly.
 
-**Instruments** (both shipped 2026-08-29):
-`chosen_experiments` (roster, spending order, recorded at the adapter so no
-agent can forget it) and `n_zero_variance_dropped` (how many variables never
-moved — H1 and H3 in the algorithm's own terms).
+**Does it cost accuracy?** Yes, ~two-thirds of it. A direct LLM-free
+manipulation (`coverage_max_ms` / `coverage_min_ms`, 30 vs 15 variables at the
+same budget with weak levels excluded) gives **+0.0073 F1 per distinct
+variable**, so team's 4.5-variable deficit predicts **−0.033** of the measured
+**−0.048**. The residual is below the contrast's own MDE.
 
-**Sweep**: LT, `llm_pc` + `team`, k=30, n=10. ~$2.
-**Analysis**: distinct *variables* touched per arm; breadth/depth mix;
-family distribution across the two scout pools; padding count per arm.
+**The negotiation is at chance on the axis that costs it.** Null model — pools
+split at random, picks at random within pool, 8,000 draws: each scout beats
+chance INSIDE its own pool (14.2/14.8 against 12.8) while cross-scout
+duplication does not (5.6 against **4.11 ± 1.51**, z = +0.99). Every stage that
+builds the pools is blind to variables: conflict detection is a set intersection
+on NAMES, the leftover split a parity slice of a shuffled NAME list. **The
+scouts coordinate competently over the wrong object.**
 
-**Decision rule**: if team touches materially fewer distinct variables at
-equal experiment count → H1/H3. If variable coverage matches but the
-family distribution is lopsided across pools → H2. If neither, the cause is
-not in what was bought and the ladder needs a different instrument.
+**Built in response**: `team_varsplit` — identical topology, budgets, four
+negotiation calls and A-wins-ties rule, partitioned by VARIABLE so cross-scout
+duplication is structurally impossible. Running at n=30. Pre-registered: ~29
+distinct variables and **+0.041 F1** if the redundancy account holds. **Not a
+free win** — under `--mock-llm` the gain cancels exactly (shared 3.83 → 0.00 but
+per-scout distinct 12.4 → 10.3), so it pays off only if scouts avoid
+self-repetition, which the real ones do.
 
-### Phase 2 — close the axis (~$8)
+**Two withdrawals, recorded rather than quietly re-founded**: Phase 1's first
+reading ("coverage does not explain the loss") was a range-and-power artifact;
+and the 25 Aug note "team's cost is genuine coordination, not redundancy" is
+withdrawn, not merely re-founded.
+
+### Phase 2 — close the axis (~$8), now with the blackboard
 
 Run `one_shot` and `critique` on both chambers at the M6 budgets and seeds.
 Both are built and unit-tested; neither has run against a live model at scale.
@@ -270,6 +375,29 @@ Both are built and unit-tested; neither has run against a live model at scale.
   three flat calls and does not divide the budget is the cheapest multi-agent
   shape on the ladder; if it holds accuracy, that is a positive result and the
   only one available to us.
+
+**`shared_blackboard` is promoted from conditional to included** (was: "build it
+only if Phase 2 leaves the axis ambiguous"). Three independent reasons arrived
+together on 2026-08-30:
+
+1. It is the **upper endpoint of the axis** and the axis is the contribution.
+   Leaving it unrun keeps the reframing post-hoc, which is the objection Phase 2
+   exists to answer.
+2. Anthropic's post names a **central forum** as the mitigation for exactly the
+   conformity failures we now know drive our fan-in deficits — "One possible
+   solution to this class of failures is to use something like a central forum
+   in which agents can agree on best practices and protocols" — and their
+   coordinating swarm, which had one, is the arm that worked. That is an
+   external pre-registered prediction for a rung we already planned to build.
+3. Phase 1 says team's loss is **duplicated work its agents could not see**. A
+   shared record is the direct fix; `team_varsplit` is the structural fix. Both
+   arms together separate "prevent the collision" from "see the collision",
+   which is a sharper result than either alone.
+
+**Prediction**: `shared_blackboard` ≈ `loop`, since two agents alternating with
+a complete shared history IS the loop with two voices. If it does NOT collapse
+onto the loop, the axis is wrong and the cost is in having several agents rather
+than in partitioning them — the most informative failure available to us.
 
 ### Phase 3 — the two objections (~$15)
 
@@ -322,13 +450,41 @@ Three things §1 obliges this rewrite to do, which the earlier draft did not:
    enforcement problem, flow conservation solves it, and that is why this
    benchmark did not already exist.
 
-## 6. Sequencing and the reason for it
+## 6. Sequencing — updated 2026-08-30, after looking
 
-**Phase 1 → look → then decide 2 and 3.** Each new arm is another chance to
-find a harness defect: 17 recorded so far, and three found today were in code
-written the same day. The mechanism result may also reframe what is worth
-running — if the cause turns out to be forced allocation, `shared_blackboard`
-becomes the most interesting arm on the list rather than an optional one.
+The original rule was **Phase 1 → look → then decide 2 and 3**, on the reasoning
+that each new arm is another chance to find a harness defect and that the
+mechanism result might reframe what is worth running. Both happened.
+
+**The defect did appear**, in an arm built the same day: the first coverage
+manipulation was confounded with intervention strength (register entry 20). It
+was caught by tabulating every recorded attribute of the picks across arms
+rather than only the manipulated one — one `groupby`. Deconfounding *doubled*
+the effect rather than shrinking it, so a confounded result had been reported
+as decisive in the wrong direction. The rule earned its keep; keep it.
+
+**And the result did reframe the plan**, though not the way the spec guessed.
+It anticipated that a forced-allocation answer would promote `shared_blackboard`.
+The answer was cross-scout duplication instead — and that promotes the
+blackboard anyway, for a different and better reason: the loss is work the
+agents could not see, and a shared record is the direct remedy. Paired with
+`team_varsplit` (the structural remedy) the two arms separate *preventing* the
+collision from *seeing* it.
+
+**Revised order:**
+
+1. ~~Phase 1 (mechanism)~~ — **complete**, $2.
+2. `team_varsplit` at n=30 — **running**, ~$4. Tests the redundancy account with
+   a one-change control.
+3. **Phase 2** — `one_shot`, `critique`, and now `shared_blackboard`. The axis
+   is the contribution and this is what closes it. Highest remaining value.
+4. **Phase 3** (the two objections) — unchanged, and 3b's direction is now
+   pre-registered by the bagging/boosting framing (§1).
+5. **Phase 4** (rewrite) — gains the external citations from §1 and the
+   mechanism result from Phase 1.
+
+Still true, and worth repeating because it keeps being the thing that saves
+results: look between phases rather than queueing them.
 
 ## 7. Non-goals
 
@@ -352,3 +508,13 @@ becomes the most interesting arm on the list rather than an optional one.
   as "loops win" invites a rebuttal from a regime we never tested.
 - Not a cross-vendor model sweep. One additional model family answers the
   objection; a sweep is a different paper.
+- **Not swarm scale, and not swarm vocabulary.** Anthropic's post runs 10-80
+  agents and asks about systemic risk; we run 2 and ask about per-topology
+  efficiency at matched budget. Borrowing "swarm" invites a comparison we would
+  lose, and their failure modes (collusion, turf wars, cascading conformity) are
+  not observable at n=2.
+- **Not the hidden-profile analogue, this paper.** Giving each scout different
+  partial DATA rather than a different slice of the menu tests information
+  ASYMMETRY, not task partition — a different axis with its own literature
+  (Stasser-Titus). Parked as a journal extension; recorded here so it is not
+  rediscovered as novel.
