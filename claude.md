@@ -916,7 +916,13 @@ compute; see the register and the analysis in-session):
   reaches identical 30/30 coverage and is still -0.047 (paired p=0.0005,
   Holm-adjusted 0.0016 across the 6 within-budget contrasts; unpaired Welch
   gives 0.0001 -- quote the Holm figure), so its cost is genuine coordination,
-  not redundancy.
+  not redundancy. **Premise corrected 2026-08-30 (M7 Phase 1)**: that coverage
+  is identical at the EXPERIMENT level and demonstrably not at the VARIABLE
+  level (team 23.4 vs the loop's 27.9), because 5.6 variables are bought by
+  both scouts while `overlap_frac` reads 0.0 by construction. The conclusion
+  survives -- the variable deficit does not predict the F1 gap either -- but it
+  now rests on a measurement instead of an assumption. See
+  `docs/chamber-results.md` §"M7 PHASE 1".
 - **Budget matching verified by identity**: solving `distinct = |A|+|B|-shared`
   against `overlap_frac` gives implied scout budgets of exactly 3/15/22 with
   zero non-integer cells across all fan-in cells.

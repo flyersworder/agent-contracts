@@ -119,6 +119,102 @@ observe defeats the guard. Instead the provenance was established by evidence:
 must be *established* rather than assumed, and a seeded LLM-free arm is the
 cheapest instrument for doing it.
 
+## M7 PHASE 1 (2026-08-30): `overlap_frac = 0.0` was a mirage, but redundancy is still not the cause
+
+`runs/m7-phase1.parquet` — **20/20 cells, 20 ok, 0 errors, 0 PC degeneracies.**
+LT, `llm_pc` + `team`, k=30, n=10, `deepseek-v4-flash-0731`, VPS
+(`scipy-openblas`), ~35 min wall on 6 workers.
+
+**The question**: why does `team` lose to the loop at equal experiment count?
+Three hypotheses predicted the same recorded symptom, so they could only be
+separated by what each arm actually *bought* — hence the `chosen_experiments`
+roster instrument (shipped 2026-08-29, which is why M6's rows cannot answer
+this and the cells had to be re-run).
+
+### It replicates M6 first
+
+| | loop | team | delta |
+|---|---|---|---|
+| M6, 24 Aug, n=30 | 0.420 ± 0.039 | 0.374 ± 0.046 | **−0.046** |
+| M7 P1, 30 Aug, n=10 | 0.427 ± 0.042 | 0.379 ± 0.056 | **−0.048** |
+
+Six days, a separate sweep, and the delta reproduces to 0.002. The n=10 delta
+is itself *below* its own MDE (0.062) — n=10 was sized for the mechanism, not
+for the contrast — but the contrast was already resolved at n=30, and the two
+runs agreeing this closely is the useful part.
+
+### What team buys, in variables rather than menu entries
+
+The LT menu carries up to three entries per actuated variable
+(`weak`/`mid`/`strong`), so 30 distinct *experiments* can touch 30 variables or
+12. Counting in variables:
+
+| | loop | team | delta | MDE | |
+|---|---|---|---|---|---|
+| experiments bought | 30.0 | 30.0 | +0.000 | 0.000 | matched by construction |
+| **distinct variables** | **27.9** | **23.4** | **−4.500** | 2.273 | **RESOLVED** |
+| variables bought at >1 strength | 1.8 | 6.3 | +4.500 | 1.951 | **RESOLVED** |
+| zero-variance columns dropped | 0.9 | 3.1 | — | — | consistent |
+
+**`overlap_frac` reads exactly 0.0 in all ten team cells, and 5.6 variables
+were bought by both scouts** — 24% of team's variable coverage. The metric is
+structurally incapable of seeing this: the two pools are disjoint *at the
+experiment level by construction*, so zero measured overlap is guaranteed
+rather than earned, while a quarter of the variable budget is spent twice.
+This is H3 (blind depth duplication), and it is confirmed as a **description
+of what team does**.
+
+### Which hypothesis, precisely
+
+- **H1 (scouts buy depth) — rejected.** Each scout individually is *more*
+  breadth-seeking than the loop, not less: scout A repeats 0.8 variables over
+  15 picks (0.053/pick), scout B 0.2 (0.013/pick), the loop 2.1 over 30
+  (0.070/pick). Nothing is wrong with either scout's own behaviour.
+- **H2 (forced allocation, lopsided) — rejected in that form.** The split is
+  even: A touches 14.2 distinct variables, B 14.8. Neither pool is starved.
+- **H3 (cross-scout duplication) — confirmed as the mechanism of the variable
+  deficit.** 14.2 + 14.8 − 5.6 = 23.4 exactly. The entire 4.5-variable deficit
+  is scouts unknowingly buying the same variable at different strengths.
+
+### But the duplication does not explain the accuracy loss
+
+The obvious next step is to ask whether 23.4 variables is *worth* 0.048 F1.
+Within the loop arm it is not: the loop's own F1 is essentially flat in how
+many variables it happened to touch (**r = +0.027, slope +0.0007 F1 per
+variable** over an observed range of 25–30). Extrapolating that line to team's
+23.4 variables predicts **F1 = 0.424**; team scores **0.379**. The residual,
+**−0.046, is the entire gap.**
+
+So the mechanism instrument found a real and resolved difference in *what team
+buys*, and that difference does not account for *why team scores worse*.
+
+**Honest limits on that last step**, both of which point the same way:
+the loop's variable range is only 25–30 with n=10, so the slope is weakly
+estimated; and 23.4 sits below the loop's observed minimum, so this is an
+extrapolation, not an interpolation. A flat slope measured over five units is
+not strong evidence that coverage is irrelevant.
+
+### What this corrects
+
+Project memory recorded, from the 25 Aug free-results pass: *"`team` reaches
+identical 30/30 coverage and is still −0.047, so its cost is genuine
+coordination, not redundancy."* The premise was wrong — coverage is identical
+at the **experiment** level and demonstrably *not* at the **variable** level
+(23.4 vs 27.9). The conclusion survives anyway, but now for a measured reason
+rather than an assumed one: the variable deficit is real, and it still does not
+predict the F1 gap.
+
+### The decisive follow-up, and it costs $0 in API spend
+
+Everything above hinges on whether variable coverage predicts F1 at fixed k,
+which the loop's narrow natural range cannot settle. The direct manipulation is
+two LLM-free arms at k=30 on LT — one that maximises distinct variables (30
+entries, 30 variables) and one that minimises them (all three strengths of ~10
+variables) — scored the usual way. No API calls; only agent code and CPU. If
+coverage matters, the two separate sharply and team's deficit is redundancy
+after all; if they do not, the cost is coordination itself and the ladder needs
+a different instrument to find it.
+
 ## M6 WT LADDER COMPLETE (2026-08-26): the topology result replicates
 
 `runs/m6-wt-ladder.parquet` — **750/750 cells, 750 ok, 0 errors, 0 PC
