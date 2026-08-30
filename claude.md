@@ -968,6 +968,12 @@ that document's final section. Harness defects stay in
 ## References
 
 - **Chamber results**: `docs/chamber-results.md` (every experiment and what it showed)
+- **Related work notes**: `docs/related-work/` — verified reading notes on external
+  papers/posts. `2026-08-13-anthropic-multiagent-patterns.md` supplies M7 §1's
+  motivating citation (a 12.7x multiagent 'win' on 4.2x the tokens that the authors
+  themselves reduce to 'comparable' once scope is matched). **Each file quarantines
+  figures that could not be confirmed against source text** — a summarising fetch
+  invents plausible numbers for quantities that exist only as chart axes.
 - **Harness validity register**: `docs/chamber-harness-validity-register.md`
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`
