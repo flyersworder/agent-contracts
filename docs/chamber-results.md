@@ -4,14 +4,15 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the seventeen
+**Companions.** `docs/chamber-harness-validity-register.md` records the eighteen
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-08-28**: 2,050 cells, **$90.80**, **zero errored cells**,
-across two chambers and two models.
+**Corpus as of 2026-08-30**: 2,221 cells, **$94.05**, **zero errored cells**,
+across two chambers and two models. (The earlier "2,050 / $90.80" line omitted
+the 12 incidence-probe cells; the table below is the arithmetic of record.)
 
 | dataset | cells | cost | what it establishes |
 |---|---|---|---|
@@ -25,7 +26,8 @@ across two chambers and two models.
 | `runs/pro-wt.parquet` | 100 | $7.16 | v4-pro robustness, WT |
 | `runs/team-preflight.parquet` + `-lowk` | 9 | $0.42 | claim-cap incidence, LT k=45 and k=6 |
 | `runs/wt-team-probe.parquet` | 3 | $0.04 | substring-conflict incidence, WT k=21 |
-| `runs/m6-wt-team-rerun.parquet` | 150 | ~$2.3 | **IN FLIGHT** — WT `team` re-run under the fixed parser |
+| `runs/m6-wt-team-rerun.parquet` | 150 | $2.78 | WT `team` re-run under the fixed parser; spliced into `m6-wt-ladder-final.parquet` |
+| `runs/_provprobe.parquet` | 9 | $0.00 | VPS BLAS-stability probe; reproduces `wt-random-vps` 9/9 exactly |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -50,34 +52,72 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
-## STATUS 2026-08-29: WT `team` is being re-run; every other number is final
+## STATUS 2026-08-30: WT `team` re-run COMPLETE — every verdict unchanged
 
-A parser defect that fires **only on WT and only on rung 4** is being retired
-by re-running that arm. Nothing else in this document is affected.
+The parser defect that fired **only on WT and only on rung 4** is retired.
+150 cells re-run, **150 ok / 0 errors / 0 PC degeneracies**. Spliced into
+`runs/m6-wt-ladder-final.parquet` (750 rows; the 26 Aug
+`runs/m6-wt-ladder.parquet` is left untouched for audit).
 
 - **What was wrong.** `_parse_name_list` carried a substring guard on top of a
   word-boundary regex that already prevented the problem it was written for,
   so every time it fired it deleted a genuine claim. Three WT names can be
   deleted this way (`validate_load_in`, `validate_load_out`, `validate_osr_in`
   — the short, unqualified member of each family), each replaced by a random
-  top-up. **LT's menu has no such pairs, so LT is untouched.**
-- **How often.** Measured, not assumed: a 3-cell WT probe at k=21 gave
-  `n_substring_conflicts` = 0, 0, **2**. Non-zero, so the recorded WT `team`
-  rows are perturbed; at n=3 the rate itself is barely constrained.
-- **What is being re-run.** 150 cells: WT x `team` x k in {7,14,21} x 50
-  seeds, on the VPS (`scipy-openblas`, matching `m6-wt-ladder`). The other
-  four WT rungs are untouched by the fix, so the ladder stays within-version.
-- **What could move.** `team`'s three WT deltas (+0.034 R at k=7, −0.021 ns at
-  k=14, −0.045 R at k=21) and its `n_contested`, which is computed from the
-  same parsed lists. **Until it lands, treat the WT `team` row of the ladder
-  table below as provisional.** The LT ladder, both loop curves, the
-  aggregator ablation, the uncontracted control and the v4-pro check are all
-  final.
-- **A companion defect, measured and dismissed.** The claim cap that truncated
-  over-long claims in menu order never fires: `n_claim_truncated` = 0 in all
-  12 cells across both chambers, because the propose prompt asks for exactly
-  `budget` names and the model complies. See register entry 16 — this is why
-  the LT `team` arm needed no re-run.
+  top-up. **LT's menu has no such pairs, so LT was untouched.**
+- **How often — now measured at n=50 per budget**, via the
+  `n_substring_conflicts` counter that records what the removed guard *would*
+  have dropped: **0.02 / 0.14 / 1.02 per cell at k = 7 / 14 / 21**. The
+  incidence scales with budget, as expected (more claims, more chances to
+  collide), reaching ~1 affected pick in 21 at the top budget. The earlier
+  3-cell probe (0, 0, 2 at k=21) was consistent with this.
+- **What it moved: nothing that resolves.** `team` rose at every budget by
+  **+0.0059 / +0.0075 / +0.0048**, all far below MDE, **all p ≥ 0.56**. The
+  direction is as predicted — restoring deleted claims should help the arm —
+  but the magnitude is not detectable.
+
+| k | team (26 Aug) | team (re-run) | loop | delta vs loop | MDE | Welch p | verdict |
+|---|---|---|---|---|---|---|---|
+| 7 | 0.1791 | 0.1850 | 0.1451 | **+0.040** | 0.033 | 0.0008 | resolved (team) |
+| 14 | 0.2176 | 0.2251 | 0.2388 | −0.014 | 0.032 | 0.31 | below MDE |
+| 21 | 0.2402 | 0.2451 | 0.2854 | **−0.040** | 0.040 | 0.0051 | resolved (loop) |
+
+**All three verdicts are unchanged**, so the headline tally is unchanged:
+**24 contrasts, 10 resolve, 9 favour the loop, 1 favours a topology.** The WT
+k=21 loop win survives at −0.040 (was −0.045); the WT k=7 inversion survives
+at +0.040 (was +0.034) and is still explained by the broken denominator there
+(the loop loses to random at k=7).
+
+The cost frontier is also unchanged in every verdict: `team` moves 0.218 →
+0.225 at k=14 and 0.240 → 0.245 at k=21, dominated at both, and **both blind
+fan-in rungs remain strictly dominated 12/12** across the six chamber-budget
+points.
+
+### Provenance: this splice crosses a stamp boundary, and here is why it is sound
+
+`m6-wt-ladder.parquet` (26 Aug) predates the provenance columns — 38 columns
+against the re-run's 48, no `blas_backend`. So comparing new `team` rows to
+old `llm_pc` rows is exactly the mixed-provenance case
+`require_homogeneous_provenance` exists to refuse, and the analyzer *did*
+refuse until passed `--allow-mixed-provenance`.
+
+We did **not** backfill stamps onto the old file — writing a stamp we did not
+observe defeats the guard. Instead the provenance was established by evidence:
+
+1. **Origin.** The VPS holds `m6-wt-ladder.parquet` at a byte-identical md5
+   (`b416f14f…`) to the local copy, dated 26 Aug — it was produced there.
+2. **Backend today.** The VPS reports `scipy-openblas 0.3.34.0.0` on
+   `Linux-x86_64`, matching the re-run's stamp.
+3. **Backend stability across the window.** A 9-cell seeded, LLM-free `random`
+   sweep run on the VPS on 30 Aug **reproduces `wt-random-vps.parquet`
+   (26 Aug, stamped OpenBLAS) exactly — 9/9 on both F1 and SHD, max |diff| =
+   0.000e+00.** Since PC amplifies a 1e-10 perturbation into structural noise
+   (§"BLAS backend"), bit-exact reproduction is a sharp test: any backend
+   change would have shown.
+
+**Rule for the next such splice**: unstamped is not the same as wrong, but it
+must be *established* rather than assumed, and a seeded LLM-free arm is the
+cheapest instrument for doing it.
 
 ## M6 WT LADDER COMPLETE (2026-08-26): the topology result replicates
 
@@ -100,7 +140,7 @@ That is the claim the full grid does not support, for two reasons that must
 travel with it.
 
 **Exception 1 — at the lowest WT budget the ordering inverts, because the
-baseline is broken there.** `team` beats the loop by **+0.034, resolved** at
+baseline is broken there.** `team` beats the loop by **+0.040, resolved** at
 WT k=7, and all four topologies are nominally above it (fan-in +0.029, roles
 +0.016, chain +0.031, all below MDE). The reason is visible one table down:
 **at WT k=7 the loop is itself significantly WORSE than random** — 0.145 vs
@@ -128,15 +168,15 @@ Every contrast, so the claim can be checked rather than taken:
 | ensemble `fan_in_homog` | −0.013 ns | −0.079 **R** | −0.009 ns | +0.029 ns | −0.048 **R** | −0.052 **R** |
 | roles `fan_in_spec` | −0.046 **R** | −0.051 **R** | +0.014 ns | +0.016 ns | −0.044 **R** | −0.049 **R** |
 | chain `planner_reasoner` | −0.038 ns | +0.011 ns | +0.023 ns | +0.031 ns | +0.022 ns | −0.024 ns |
-| team (negotiation) | +0.006 ns | −0.047 **R** | −0.003 ns | **+0.034 R** | −0.021 ns | −0.045 **R** |
+| team (negotiation) | +0.006 ns | −0.047 **R** | −0.003 ns | **+0.040 R** | −0.014 ns | −0.040 **R** |
 
 **R** = resolved against that cell's MDE; ns = below it. Negative favours the
 loop. Reproduce with `analyze_results --input <ladder>.parquet --ladder`.
 
 **The defensible sentence** is therefore: *where the comparison resolves, the
-sequential loop is matched or beaten by no fan-in topology, and beats them by
-0.044-0.079 F1 at middle budgets on both chambers; the one resolved exception
-is negotiation at the smallest WT budget.* The replication across two
+sequential loop is matched or beaten by no fan-in topology, and where it
+resolves in the loop's favour the margin is 0.040-0.079 F1, on both chambers;
+the one resolved exception is negotiation at the smallest WT budget.* The replication across two
 chambers, different graphs (38 nodes/57 edges vs 32/42), different menus (59
 vs 28) and different sample regimes (1,000 vs ~840 rows/experiment) is real
 and is **the external-validity answer to "everything rests on LT's single
@@ -210,7 +250,7 @@ At LT k=6 team's flat overhead is **+83%**; by k=45 it has amortised to +11%.
 | relay | **0.431 / 30 ★** | **0.440 / 45 ★** | **0.260 / 14 ★** | 0.262 / 21 |
 | ensemble | 0.341 / 31 | 0.409 / 46 | 0.191 / 15 | 0.234 / 22 |
 | roles | 0.369 / 31 | 0.431 / 46 | 0.194 / 15 | 0.236 / 22 |
-| team | 0.374 / 35 | 0.414 / 50 | 0.218 / 19 | 0.240 / 26 |
+| team | 0.374 / 35 | 0.414 / 50 | 0.225 / 19 | 0.245 / 26 |
 
 **Across all six chamber x budget points, both blind fan-in rungs are strictly
 dominated — 12 of 12. Not one is worth its overhead at any budget on either

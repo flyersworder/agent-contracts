@@ -700,6 +700,79 @@ one commit and missed the four that contained the sweep-runner control flow —
 the highest-risk surface. Use the range form, `3c67b32..HEAD`, and check the
 scope line in the reply before trusting a clean result.
 
+## 18. The substring guard: real defect, measured incidence, undetectable effect (2026-08-30)
+
+**Closes the open item from entry 15.** `_parse_name_list` carried a substring
+guard on top of a word-boundary regex that already prevented the collision it
+was written for. Every time the guard fired it deleted a *genuine* claim, which
+was then replaced by a random top-up. Only WT can trigger it — exactly three
+menu names are the short, unqualified member of a family
+(`validate_load_in`, `validate_load_out`, `validate_osr_in`) — and only rung 4
+parses peer claims, so only WT `team` was exposed.
+
+**What makes this entry worth keeping is the shape of the answer, not the fix.**
+The defect was real, its incidence was non-trivial and *budget-dependent*, and
+its effect on the reported result was still below MDE. All three had to be
+measured; none could be argued.
+
+`n_substring_conflicts` counts what the removed guard would have dropped,
+recorded on all 150 re-run cells:
+
+| k | conflicts / cell | picks affected |
+|---|---|---|
+| 7 | 0.02 | 0.3% |
+| 14 | 0.14 | 1.0% |
+| 21 | 1.02 | 4.9% |
+
+Incidence rises with budget — more claims, more chances to collide — which is
+the signature of a harness fault that **moderates the independent variable**
+(entry 4). That is why it could not be dismissed on the 3-cell probe (0, 0, 2)
+and had to be re-run rather than argued away.
+
+**Effect, at n=50 per budget:** `team` rose **+0.0059 / +0.0075 / +0.0048** at
+k = 7 / 14 / 21. Every one below MDE, **every p ≥ 0.56**. Direction as
+predicted (restoring deleted claims should help), magnitude not detectable.
+**All three verdicts against the loop are unchanged**: +0.040 R, −0.014 ns,
+−0.040 R.
+
+**The generalisable lesson.** A guard that is *redundant* is not harmless. This
+one sat behind a regex that already did its job, so it never prevented
+anything and only ever deleted true positives — a pure false-positive filter
+with no true-positive workload. When removing a defensive check, the question
+is not "is it correct?" but "what does it fire on that the layer beneath
+already handled?" Where the answer is "everything", the check is subtracting
+signal.
+
+### The provenance sub-problem this created
+
+The re-run is stamped (`blas_backend`, `platform_tag`, PC parameters); the
+26 Aug `m6-wt-ladder.parquet` it must be compared against predates those
+columns — 38 columns against 48. So the contrast crosses the boundary
+`require_homogeneous_provenance` refuses, and the analyzer correctly refused
+until passed `--allow-mixed-provenance`.
+
+**We did not backfill the stamps.** Writing a value we did not observe is
+precisely the failure the guard exists to catch, and it would have left no
+trace for the next reader. Provenance was established by evidence instead:
+
+1. **Origin** — the VPS holds `m6-wt-ladder.parquet` at a byte-identical md5
+   to the local copy, dated 26 Aug.
+2. **Backend now** — VPS reports `scipy-openblas 0.3.34.0.0`, `Linux-x86_64`.
+3. **Backend stability across the window** — a 9-cell seeded, LLM-free
+   `random` sweep run 30 Aug **reproduces `wt-random-vps.parquet` (26 Aug,
+   stamped) exactly: 9/9 on F1 and SHD, max |diff| = 0.000e+00.**
+
+Step 3 is the sharp one. Because PC amplifies a ~1e-10 numerical perturbation
+into structural graph differences (entry 10), bit-exact reproduction of a
+seeded arm is a strong test of backend identity — far stronger than comparing
+version strings, which were identical across the macOS/Linux split that
+*did* diverge.
+
+**Method to reuse:** an unstamped legacy file is not disqualified, but its
+provenance must be *established* rather than assumed, and **a seeded,
+LLM-free arm is the cheapest instrument for establishing it** — nine cells,
+no tokens, minutes.
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
