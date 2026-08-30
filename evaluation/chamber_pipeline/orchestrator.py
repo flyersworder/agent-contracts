@@ -66,6 +66,7 @@ from .agents import (
     one_shot_agent,
     planner_reasoner_agents,
     random_agent,
+    shared_blackboard_agents,
     team_agents,
     team_varsplit_agents,
     uncontracted_agent,
@@ -265,6 +266,17 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         run=critique_agents,
         chambers=("lt", "wt"),
         accepts_llm=True,
+        kind="llm_multi",
+    ),
+    AgentSpec(
+        name="shared_blackboard",
+        run=shared_blackboard_agents,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        # No `scout_roles`: the two voices share one undivided budget and one
+        # record, so there is no per-role allocation to calibrate and no
+        # delegation graph to seal. `_maybe_node` degrades the routing
+        # accordingly, exactly as `critique` does.
         kind="llm_multi",
     ),
     AgentSpec(

@@ -1391,6 +1391,96 @@ def one_shot_agent(
     return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
 
 
+def shared_blackboard_agents(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """Two voices alternating over ONE complete shared record — the axis's top.
+
+    The ladder orders its rungs by how much of the loop's running record
+    survives the partition. Every multi-agent rung until now destroys some of
+    it: the fan-in rungs split it in half and blind each side, `team` splits it
+    by negotiated agreement, the relay leaves one seam. This arm removes the
+    partition entirely while keeping two agents — they alternate turns, they
+    draw from the SAME undivided menu, and each one sees every pick either has
+    made.
+
+    **It should collapse onto the loop, and that is the point.** Two agents
+    alternating with a complete shared history IS the loop with two voices, so
+    the pre-registered prediction is `shared_blackboard` ~ `llm_pc`. If it does
+    NOT collapse, the record axis is wrong: the cost would then be in having
+    several agents at all rather than in partitioning what they know, and the
+    paper's reframing fails. That is the most informative failure available to
+    this plan, which is why the arm is worth its cost even though its expected
+    result is "no difference".
+
+    The two voices are the coverage-seeking and disambiguation-seeking framings
+    already used by `fan_in_spec` (rung 2). Reusing them is deliberate: rung 2
+    gives those same two roles a SPLIT record and loses, so running them here
+    over a SHARED record isolates the record from the roles. Any gap between
+    the two arms is attributable to the partition and to nothing else.
+
+    Implementation is one `_llm_select_loop` call per pick, with the running
+    record threaded through `starting_chosen` — which both renders it into the
+    prompt's already-chosen block and removes those names from the selectable
+    menu. No new selection machinery, so the arm inherits the loop's tested
+    truncation, fallback and accounting behaviour.
+    """
+    from evaluation.chamber_pipeline.llm_planner import (
+        build_scout_broad_prompt,
+        build_scout_targeted_prompt,
+    )
+
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = adapter.available_experiments()
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+    llm = llm or _default_llm()
+
+    voices = (
+        ("voice_a", build_scout_broad_prompt),
+        ("voice_b", build_scout_targeted_prompt),
+    )
+    record: list[str] = []
+    dfs: list[pd.DataFrame] = []
+    for step in range(min(budget, len(menu))):
+        node, builder = voices[step % 2]
+        with _maybe_node(adapter, node):
+            # A distinct seed per step: `seed` drives only the fallback RNG,
+            # and reusing one value would correlate every fallback pick across
+            # the whole record. Offset by `step`, not by `step + 1`, so step 0
+            # reproduces a plain loop's first call exactly.
+            picked, frames = _llm_select_loop(
+                adapter,
+                llm,
+                model,
+                seed * 1000 + step,
+                spend=1,
+                starting_chosen=record,
+                prompt_builder=builder,
+            )
+        if not picked:
+            # The menu is exhausted, or the adapter refused the purchase. Either
+            # way another turn cannot help, and looping would burn the rest of
+            # the budget on calls that buy nothing.
+            break
+        record.extend(picked)
+        dfs.extend(frames)
+
+    adapter.coordination_stats = {
+        "overlap_frac": None,  # no partition exists, so there is nothing to overlap
+        "n_experiments_distinct": len(set(record)),
+    }
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
 def critique_agents(
     adapter: ContractedChamberAgent,
     model: str = "openrouter/deepseek/deepseek-v4-flash",
@@ -1815,6 +1905,7 @@ __all__ = [
     "one_shot_agent",
     "planner_reasoner_agents",
     "random_agent",
+    "shared_blackboard_agents",
     "team_agents",
     "team_varsplit_agents",
     "uncontracted_agent",

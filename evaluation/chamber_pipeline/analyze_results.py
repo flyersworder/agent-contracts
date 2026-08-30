@@ -71,6 +71,7 @@ VARIANT_COLORS: dict[str, str] = {
     "fan_in_agg": "#17becf",  # cyan — rung-1 ablation, not a rung
     "one_shot": "#bcbd22",  # olive — the no-history control
     "critique": "#393b79",  # indigo — executor-evaluator
+    "shared_blackboard": "#00838f",  # teal — two voices, one record
     # M7 coverage manipulation. Not agents anyone would deploy: the two ends
     # of a controlled variable-coverage span, drawn as a matched pair.
     "coverage_max": "#2b8a3e",  # deep green — widest portfolio
@@ -94,6 +95,7 @@ VARIANT_LABELS: dict[str, str] = {
     "fan_in_agg": "Ensemble (aggregator honored)",
     "one_shot": "One-shot (no history)",
     "critique": "Critique (executor-evaluator)",
+    "shared_blackboard": "Shared blackboard (two voices)",
     "coverage_max": "Coverage-max (30 variables)",
     "coverage_min": "Coverage-min (11 variables)",
     "coverage_max_ms": "Coverage-max, no weak (30 variables)",
@@ -116,6 +118,7 @@ VARIANT_MARKERS: dict[str, str] = {
     "fan_in_agg": "P",
     "one_shot": "*",
     "critique": "h",
+    "shared_blackboard": "8",
     "coverage_max": "^",
     "coverage_min": "v",
     "coverage_max_ms": "1",
@@ -136,6 +139,7 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "fan_in_agg": (0, (3, 1, 1, 1)),
     "one_shot": "dashdot",
     "critique": "dotted",
+    "shared_blackboard": (0, (5, 1, 1, 1)),
     "coverage_max": (0, (6, 2)),
     "coverage_min": (0, (2, 2, 6, 2)),
     "coverage_max_ms": (0, (4, 2)),
@@ -164,6 +168,7 @@ VARIANT_ORDER: tuple[str, ...] = (
     "team_varsplit",
     "one_shot",
     "critique",
+    "shared_blackboard",
     # M7 coverage manipulation, last: bounds rather than rungs.
     "coverage_max",
     "coverage_min",
@@ -386,6 +391,7 @@ LADDER_ORDER: tuple[str, ...] = (
     # record rather than dividing it.
     "one_shot",
     "llm_pc",
+    "shared_blackboard",
     "critique",
     "fan_in_homog",
     "fan_in_spec",

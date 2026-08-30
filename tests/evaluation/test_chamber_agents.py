@@ -16,11 +16,16 @@ import pytest
 
 from agent_contracts.core.wrapper import ContractViolationError
 from agent_contracts.integrations import CAUSAL_CHAMBER_AVAILABLE
+from agent_contracts.integrations.causalchamber import (
+    ContractedChamberAgent,
+    create_contracted_chamber_agent,
+)
 from evaluation.chamber_pipeline.agents import (
     _parse_target,
     greedy_ig_lite_agent,
     random_agent,
 )
+from tests.evaluation.conftest import RecordingLLM, _menu_from
 
 requires_causalchamber = pytest.mark.skipif(
     not CAUSAL_CHAMBER_AVAILABLE,
@@ -197,7 +202,6 @@ class TestAgentBudgetContract:
     def test_overshooting_raises_via_query_intervention(self) -> None:
         """Construct a degenerate 'agent' that intentionally overshoots."""
         from agent_contracts.integrations.causalchamber import (
-            ContractedChamberAgent,
             create_contracted_chamber_agent,
         )
 
@@ -346,3 +350,66 @@ class TestUncontractedAgent:
         assert "59" not in blob
         assert "budget" not in blob.lower() or "no budget" in blob.lower()
         assert "DONE" in blob
+
+
+class TestSharedBlackboard:
+    """The axis's top rung: two voices, one undivided record and menu.
+
+    Its whole value is being the arm that SHOULD collapse onto the loop, so the
+    properties that make that a fair test are the ones worth pinning: the
+    record must be shared and complete, the menu must never be partitioned, and
+    the turns must actually alternate. A blackboard that quietly handed each
+    voice half the menu would be `fan_in_spec` under another name, and would
+    "fail" to collapse for a reason having nothing to do with the axis.
+    """
+
+    @staticmethod
+    def _run(k: int, llm: RecordingLLM) -> ContractedChamberAgent:
+        from evaluation.chamber_pipeline.agents import shared_blackboard_agents
+
+        adapter = create_contracted_chamber_agent(chamber="lt", intervention_budget=k)
+        shared_blackboard_agents(adapter, seed=0, llm=llm)
+        return adapter
+
+    def test_it_spends_the_whole_budget_on_distinct_experiments(
+        self, fake_llm: RecordingLLM
+    ) -> None:
+        adapter = self._run(6, fake_llm)
+        assert len(adapter.purchased) == 6
+        assert len(set(adapter.purchased)) == 6
+
+    def test_turns_alternate_between_two_distinct_voices(self, fake_llm: RecordingLLM) -> None:
+        """Different system prompts on odd and even steps, else it is one voice."""
+        self._run(6, fake_llm)
+        systems = [c["messages"][0]["content"] for c in fake_llm.calls]
+        even, odd = {systems[0], systems[2], systems[4]}, {systems[1], systems[3], systems[5]}
+        assert len(even) == 1, "voice A must be consistent across its turns"
+        assert len(odd) == 1, "voice B must be consistent across its turns"
+        assert even != odd, "the two voices must actually differ"
+
+    def test_every_call_sees_the_complete_shared_record(self, fake_llm: RecordingLLM) -> None:
+        """The defining property: each prompt carries every prior pick,
+        including the ones the OTHER voice made. That is what separates this
+        arm from every partitioned rung on the ladder."""
+        adapter = self._run(6, fake_llm)
+        for step, call in enumerate(fake_llm.calls):
+            body = str(call["messages"])
+            for prior in adapter.purchased[:step]:
+                assert prior in body, f"step {step} cannot see earlier pick {prior}"
+
+    def test_the_menu_is_never_partitioned(self, fake_llm: RecordingLLM) -> None:
+        """Both voices must be able to reach every experiment not yet bought."""
+        adapter = self._run(4, fake_llm)
+        for step, call in enumerate(fake_llm.calls):
+            offered = set(_menu_from(call["messages"]))
+            bought = set(adapter.purchased[:step])
+            assert not offered & bought, f"step {step} was re-offered a bought name"
+            assert len(offered) + len(bought) == 59, (
+                f"step {step} saw {len(offered)} of the 59-entry menu — partitioned"
+            )
+
+    def test_a_budget_over_the_menu_stops_rather_than_spinning(
+        self, fake_llm: RecordingLLM
+    ) -> None:
+        adapter = self._run(70, fake_llm)
+        assert len(adapter.purchased) == 59
