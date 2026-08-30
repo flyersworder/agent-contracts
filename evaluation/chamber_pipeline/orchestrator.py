@@ -53,6 +53,8 @@ from agent_contracts.integrations.causalchamber import (
 
 from . import inference as inference_module
 from .agents import (
+    coverage_max_agent,
+    coverage_min_agent,
     critique_agents,
     fan_in_agents,
     greedy_ig_lite_agent,
@@ -159,6 +161,22 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         name="random",
         run=random_agent,
         chambers=("lt", "wt"),
+        accepts_llm=False,
+        kind="non_llm",
+    ),
+    AgentSpec(
+        name="coverage_max",
+        run=coverage_max_agent,
+        # LT only: the taxonomy these arms are built on parses
+        # `uniform_<variable>_<strength>`, which WT names do not follow.
+        chambers=("lt",),
+        accepts_llm=False,
+        kind="non_llm",
+    ),
+    AgentSpec(
+        name="coverage_min",
+        run=coverage_min_agent,
+        chambers=("lt",),
         accepts_llm=False,
         kind="non_llm",
     ),

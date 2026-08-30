@@ -104,9 +104,10 @@ class FakeLLM:
 class TestAgentRegistry:
     """Inventory of the registered agents, plus AgentSpec.is_compatible."""
 
-    def test_registry_has_twelve_agents(self) -> None:
-        """Five M4b variants, three ladder arms, one ablation, one control."""
-        assert len(AGENT_REGISTRY) == 12
+    def test_registry_has_fourteen_agents(self) -> None:
+        """Five M4b variants, three ladder arms, one ablation, one control,
+        the two shared-record arms, and the two coverage-manipulation arms."""
+        assert len(AGENT_REGISTRY) == 14
 
     def test_registry_names_are_unique(self) -> None:
         names = [s.name for s in AGENT_REGISTRY]
@@ -114,7 +115,8 @@ class TestAgentRegistry:
 
     def test_registry_matches_plan_5_1_plus_the_ladder(self) -> None:
         """Plan §5.1's five variants, the ladder's three arms, one ablation,
-        and the two shared-record arms added 2026-08-29."""
+        the two shared-record arms added 2026-08-29, and the two
+        coverage-manipulation arms added 2026-08-30 (M7 Phase 1 follow-up)."""
         actual = sorted(s.name for s in AGENT_REGISTRY)
         expected = sorted(
             [
@@ -130,6 +132,8 @@ class TestAgentRegistry:
                 "team",
                 "one_shot",
                 "critique",
+                "coverage_max",
+                "coverage_min",
             ]
         )
         assert actual == expected

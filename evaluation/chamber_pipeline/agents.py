@@ -50,6 +50,7 @@ from .llm_planner import (
     parse_selection_response,
     summarize_experiments,
 )
+from .menu_taxonomy import coverage_ordered
 
 if TYPE_CHECKING:
     from agent_contracts.integrations.causalchamber import ContractedChamberAgent
@@ -279,6 +280,72 @@ def random_agent(
     dfs = [adapter.query_intervention(name) for name in chosen]
     pooled = pool_experiment_data(dfs, nodes)
     return run_pc(pooled, nodes, alpha=pc_alpha)
+
+
+# ---------------------------------------------------------------------------
+# Coverage-manipulation controls (M7 Phase 1 follow-up). Neither uses an LLM.
+#
+# Phase 1 found `team` buys 23.4 distinct VARIABLES against the loop's 27.9 at
+# an identical 30 experiments, because two scouts unknowingly buy the same
+# variable at different strengths while `overlap_frac` reads 0.0 by
+# construction. What it could NOT settle is whether that deficit matters: the
+# loop's own F1 is flat in its variable count, but over a range of only 25-30
+# with n=10, and team's 23.4 sits below that range.
+#
+# These two arms replace the extrapolation with a direct manipulation. At LT
+# k=30 they span 11 to 30 distinct variables -- the full achievable range,
+# bracketing both the loop and team -- at an identical budget, identical PC
+# settings and no LLM in the loop to add variance. If F1 tracks coverage across
+# that span, team's deficit is redundancy after all; if it does not, the
+# coordination cost is real and the ladder needs a different instrument.
+#
+# `seed` is forwarded to `run_pc` as `llm_pc` and `team` do, NOT withheld as
+# `random_agent` does -- these are compared against the ladder rungs, so they
+# must draw their PC subsample the same way those do.
+# ---------------------------------------------------------------------------
+
+
+def _coverage_agent(
+    adapter: ContractedChamberAgent, seed: int, pc_alpha: float, *, maximize: bool
+) -> pd.DataFrame:
+    """Shared body: spend the whole budget on a coverage-ordered selection."""
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = adapter.available_experiments()
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+    chosen = coverage_ordered(list(menu), min(budget, len(menu)), seed, maximize=maximize)
+    dfs = [adapter.query_intervention(name) for name in chosen]
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+def coverage_max_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Spend `k` on as many DISTINCT variables as `k` allows — the upper bound.
+
+    One entry from every variable before a second from any, so at LT k=30 this
+    touches all 30 variables. Not an agent anyone would deploy: it is the
+    high-coverage end of a manipulation, and its only job is to sit opposite
+    :func:`coverage_min_agent` at the same budget.
+    """
+    return _coverage_agent(adapter, seed, pc_alpha, maximize=True)
+
+
+def coverage_min_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Spend `k` on as FEW distinct variables as `k` allows — the lower bound.
+
+    Fattest variables first, each exhausted before the next, so at LT k=30 this
+    touches 11 variables: nine at all three strengths, then one pair and one
+    single. Deliberately the worst portfolio the menu permits at that budget.
+    """
+    return _coverage_agent(adapter, seed, pc_alpha, maximize=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1601,6 +1668,8 @@ def team_agents(
 # re-exports -- a public surface that disagreed with the registry the sweep
 # actually runs.
 __all__ = [
+    "coverage_max_agent",
+    "coverage_min_agent",
     "critique_agents",
     "fan_in_agents",
     "greedy_ig_lite_agent",

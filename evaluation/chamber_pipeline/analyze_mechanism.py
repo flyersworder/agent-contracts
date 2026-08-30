@@ -37,29 +37,10 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-STRENGTHS = ("weak", "mid", "strong")
-_PREFIX = "uniform_"
-
-
-def experiment_variable(name: str) -> str:
-    """`uniform_osr_c_strong` -> `osr_c`; `uniform_reference` -> `reference`.
-
-    Variable names themselves contain underscores, so the split is on the
-    KNOWN strength suffix, never on a token count.
-    """
-    stem = name[len(_PREFIX) :] if name.startswith(_PREFIX) else name
-    for s in STRENGTHS:
-        if stem.endswith("_" + s):
-            return stem[: -(len(s) + 1)]
-    return stem
-
-
-def experiment_strength(name: str) -> str:
-    """The intervention strength, or `none` for the observational entry."""
-    for s in STRENGTHS:
-        if name.endswith("_" + s):
-            return s
-    return "none"
+from evaluation.chamber_pipeline.menu_taxonomy import (  # noqa: F401  (re-exported)
+    experiment_strength,
+    experiment_variable,
+)
 
 
 def parse_roster(cell: str | float | None) -> list[str]:

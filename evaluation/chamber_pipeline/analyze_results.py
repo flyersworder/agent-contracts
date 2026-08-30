@@ -71,6 +71,10 @@ VARIANT_COLORS: dict[str, str] = {
     "fan_in_agg": "#17becf",  # cyan — rung-1 ablation, not a rung
     "one_shot": "#bcbd22",  # olive — the no-history control
     "critique": "#393b79",  # indigo — executor-evaluator
+    # M7 coverage manipulation. Not agents anyone would deploy: the two ends
+    # of a controlled variable-coverage span, drawn as a matched pair.
+    "coverage_max": "#2b8a3e",  # deep green — widest portfolio
+    "coverage_min": "#c92a2a",  # deep red — narrowest portfolio
 }
 
 VARIANT_LABELS: dict[str, str] = {
@@ -86,6 +90,8 @@ VARIANT_LABELS: dict[str, str] = {
     "fan_in_agg": "Ensemble (aggregator honored)",
     "one_shot": "One-shot (no history)",
     "critique": "Critique (executor-evaluator)",
+    "coverage_max": "Coverage-max (30 variables)",
+    "coverage_min": "Coverage-min (11 variables)",
 }
 
 # Marker + linestyle per variant so curves stay distinguishable when the
@@ -103,6 +109,8 @@ VARIANT_MARKERS: dict[str, str] = {
     "fan_in_agg": "P",
     "one_shot": "*",
     "critique": "h",
+    "coverage_max": "^",
+    "coverage_min": "v",
 }
 
 VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
@@ -118,6 +126,8 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "fan_in_agg": (0, (3, 1, 1, 1)),
     "one_shot": "dashdot",
     "critique": "dotted",
+    "coverage_max": (0, (6, 2)),
+    "coverage_min": (0, (2, 2, 6, 2)),
 }
 
 # Variant rendering order in legend (matches plan §5.3 description top-to-bottom).
@@ -140,6 +150,9 @@ VARIANT_ORDER: tuple[str, ...] = (
     "team",
     "one_shot",
     "critique",
+    # M7 coverage manipulation, last: bounds rather than rungs.
+    "coverage_max",
+    "coverage_min",
 )
 
 
