@@ -17,9 +17,11 @@ import pytest
 from evaluation.chamber_pipeline.inference import (
     _MAX_LOGGED_NAMES,
     CAUSAL_LEARN_AVAILABLE,
+    DEFAULT_COLLINEARITY_THRESHOLD,
     cpdag_to_directed_adjacency,
     pool_experiment_data,
     run_pc,
+    select_noncollinear_columns,
 )
 
 requires_causal_learn = pytest.mark.skipif(
@@ -280,32 +282,39 @@ class TestPcAlphaParameterPlumbing:
 
 @requires_causal_learn
 class TestSingularFallbackLogging:
-    """Verify the singular-matrix fallback emits a warning for M5 sweep visibility."""
+    """The singular fallback: reachable, and correct when reached.
 
-    def test_warns_on_singular_matrix(self, caplog) -> None:
-        """Degenerate input → all-zeros output AND a warning logged.
+    Split into two tests on 2026-08-30 after CI caught a latent BLAS
+    dependency. The original single test built a rank-deficient matrix and
+    asserted the fallback fired -- which it does under macOS/Accelerate and
+    does NOT under Linux/OpenBLAS, where `inv` returns a garbage-but-finite
+    inverse instead of raising and PC proceeds to emit 6 edges.
 
-        Uses a THREE-way linear dependence (`w = x + y + z`) rather than a
-        pairwise duplicate. This matters: the collinearity filter added on
-        2026-08-25 compares columns pairwise, so it cannot see a variable
-        that is a sum of several others -- here every pairwise |r| is only
-        about 0.58, far below the 0.999 cutoff, while the correlation matrix
-        is exactly rank-deficient.
+    That is register entry 10 reappearing inside the suite: whether a
+    near-singular matrix raises is a property of the linear-algebra backend,
+    not of our code, so it must never be an assertion. The two properties the
+    original test conflated are now pinned separately, each backend-independent:
 
-        So this test pins the property that the pairwise filter is a
-        mitigation and not a replacement: the singular fallback must remain
-        reachable for the higher-order collinearity the filter is blind to.
+    1. the pairwise collinearity filter is blind to higher-order dependence
+       (a claim about OUR filter, checkable in exact terms), and
+    2. when the singular failure IS raised, we degrade to zeros and say so
+       (a claim about OUR handler, checkable by injecting the error).
+    """
+
+    def test_pairwise_filter_is_blind_to_higher_order_collinearity(self) -> None:
+        """Rank-deficient as a SET, yet no PAIR trips the 0.999 cutoff.
+
+        This is why the singular fallback must stay reachable: the filter
+        added on 2026-08-25 compares columns pairwise, so a variable that is
+        a sum of several others is invisible to it. Asserted on the
+        correlation structure directly rather than on PC's output, because
+        only the former is backend-independent.
         """
-        import logging
-
         rng = np.random.default_rng(0)
         x = rng.standard_normal(200)
         y = rng.standard_normal(200)
         z = rng.standard_normal(200)
         a = rng.standard_normal(200)
-        # Overlapping sums: rank-deficient as a set, but every PAIRWISE |r|
-        # is around 0.5-0.7, nowhere near the 0.999 cutoff. The filter runs
-        # and drops nothing; PC still hits a singular sub-matrix.
         data = pd.DataFrame(
             {
                 "x": x,
@@ -320,18 +329,43 @@ class TestSingularFallbackLogging:
         )
         cols = ["x", "y", "z", "a", "p", "q", "r", "s"]
 
+        corr = np.corrcoef(data[cols].to_numpy().T)
+        off_diagonal = np.abs(corr - np.eye(len(cols)))
+        # Exactly rank 4 of 8 in exact arithmetic, so the matrix IS singular...
+        assert np.linalg.matrix_rank(corr) < len(cols)
+        # ...yet the largest pairwise correlation is nowhere near the cutoff.
+        # Wide margin (0.76 vs 0.999), so backend noise at 1e-10 cannot flip it.
+        assert off_diagonal.max() < 0.8
+
+        kept, dropped = select_noncollinear_columns(data, cols, DEFAULT_COLLINEARITY_THRESHOLD)
+        assert kept == cols, "pairwise filter must drop nothing here"
+        assert dropped == []
+
+    def test_singular_failure_degrades_to_zeros_and_warns(self, monkeypatch, caplog) -> None:
+        """When the singular error IS raised, return zeros AND log the marker.
+
+        The error is injected rather than provoked. Provoking it requires a
+        matrix whose inversion the backend chooses to reject, which is not a
+        portable property -- see the class docstring.
+        """
+        from evaluation.chamber_pipeline import inference
+
+        def raising_pc(*args, **kwargs):
+            raise np.linalg.LinAlgError("Singular matrix")
+
+        monkeypatch.setattr(inference, "_causallearn_pc", raising_pc)
+        rng = np.random.default_rng(0)
+        cols = ["x", "y", "z"]
+        data = pd.DataFrame({c: rng.standard_normal(50) for c in cols})
+
         with caplog.at_level(logging.WARNING, logger="evaluation.chamber_pipeline.inference"):
             adj = run_pc(data, cols)
 
-        # Output is well-typed (the all-zeros fallback).
-        assert adj.shape == (8, 8)
+        assert adj.shape == (3, 3)
         assert adj.to_numpy().sum() == 0
-        # AND a warning was emitted about the fallback. The exact phrasing
-        # is implementation detail; we just check the keyword "fell back"
-        # which is in the log message.
-        warning_messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
-        assert any("fell back" in m.lower() for m in warning_messages), (
-            f"Expected fallback warning; got: {warning_messages}"
+        messages = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any("fell back" in m.lower() for m in messages), (
+            f"Expected fallback warning; got: {messages}"
         )
 
 

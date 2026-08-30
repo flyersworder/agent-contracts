@@ -3,7 +3,7 @@
 **Status**: planning, opened 2026-08-29
 **Predecessor**: M6 coordination ladder (`2026-08-22-m6-coordination-ladder-design.md`)
 **Results of record**: `docs/chamber-results.md`
-**Harness defects**: `docs/chamber-harness-validity-register.md` (18 entries — read first)
+**Harness defects**: `docs/chamber-harness-validity-register.md` (19 entries — read first)
 
 ## 1. Positioning: what this contributes to the loop-vs-graph debate
 

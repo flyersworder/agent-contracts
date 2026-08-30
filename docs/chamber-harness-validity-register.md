@@ -773,6 +773,55 @@ provenance must be *established* rather than assumed, and **a seeded,
 LLM-free arm is the cheapest instrument for establishing it** — nine cells,
 no tokens, minutes.
 
+## 19. Our own test suite carried the BLAS dependency it documents (2026-08-30)
+
+Found by CI on PR #89, not by us. `test_warns_on_singular_matrix` passed on
+macOS/Accelerate for weeks and **failed on both Linux CI runners** —
+`assert np.int64(6) == 0`.
+
+**The mechanism is entry 10, one level up.** The test built a matrix that is
+exactly rank 4 of 8 in exact arithmetic (`p=x+y`, `q=y+z`, `r=z+a`,
+`s=x+y+z+a`), `cond ≈ 3e17`, and asserted that PC hits the singular fallback
+and returns an all-zeros adjacency. Under Accelerate the inversion raises and
+the fallback fires. **Under OpenBLAS it does not raise** — it returns a
+finite, meaningless inverse, PC proceeds normally, and emits 6 edges.
+
+**Whether a near-singular matrix raises is a property of the linear-algebra
+backend, not of our code.** It must therefore never be an assertion. The
+original test had encoded a platform-specific numerical outcome as if it were
+universal, in a suite whose own register documents that exact hazard.
+
+**The fix is a split, not a tolerance.** The test conflated two properties;
+each is now pinned separately and each is backend-independent:
+
+1. `test_pairwise_filter_is_blind_to_higher_order_collinearity` — asserts on
+   the correlation structure directly: rank-deficient as a set
+   (`matrix_rank < 8`) while the largest pairwise |r| is 0.76, far below the
+   0.999 cutoff, so `select_noncollinear_columns` drops nothing. This is a
+   claim about *our filter* and is checkable in exact terms. The 0.76-vs-0.999
+   margin is wide enough that backend noise at 1e-10 cannot flip it.
+2. `test_singular_failure_degrades_to_zeros_and_warns` — **injects**
+   `LinAlgError("Singular matrix")` via monkeypatch rather than provoking it,
+   then asserts zeros plus the "fell back" marker. This is a claim about *our
+   handler*, and injection is the only portable way to reach it.
+
+Both mutation-verified, and each mutation kills exactly one test: breaking
+`_LINALG_SINGULAR_PHRASE` fails only (2); dropping
+`DEFAULT_COLLINEARITY_THRESHOLD` to 0.5 fails only (1).
+
+**The generalisable rule.** In a suite that depends on floating-point linear
+algebra, *never assert that a computation fails.* Failure to converge, failure
+to invert, and failure to reach a tolerance are all backend-chosen. Assert the
+handler's behaviour by injecting the failure, and assert the mathematical
+property (rank, correlation, margin) directly. A test that provokes a
+numerical error is testing LAPACK's opinion, not your code.
+
+**Why local runs could not catch this.** Development is macOS/Accelerate; every
+sweep of record is Linux/OpenBLAS. The suite was green locally for the entire
+life of the branch. **CI is the only place the published platform is
+exercised** — which is an argument for pushing early, not for trusting a local
+green.
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
