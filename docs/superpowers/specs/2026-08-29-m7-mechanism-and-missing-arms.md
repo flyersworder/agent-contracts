@@ -66,6 +66,45 @@ loses in proportion to how much it partitions.
 grid and both its endpoints are unrun. This is exactly why Phase 2 is
 load-bearing rather than optional.
 
+### The axis has a name already: bagging vs boosting
+
+Recorded 2026-08-30 because it costs nothing and makes the claim legible to a
+reader who has never thought about agent topology but has trained a hundred
+gradient-boosted trees.
+
+The reframing above maps onto ensemble learning almost exactly:
+
+| our rung | ensemble shape | aggregation |
+|---|---|---|
+| `fan_in_homog` / `fan_in_spec` / `team` | bagging — independent learners | at the end |
+| `llm_pc` (loop), `planner_reasoner` (relay) | boosting — sequential learners | continuous |
+
+Our measured ordering is the one ensemble theory predicts, **for the reason it
+gives**: parallel learners duplicate because nothing tells them what the others
+already covered; sequential learners condition on what came before. That is the
+partition-of-the-record claim in different vocabulary, and the vocabulary is
+sixty years old and uncontroversial, which is worth borrowing.
+
+**Two things this framing must not be allowed to overclaim**, or a reviewer
+who knows ensembles hands it straight back:
+
+1. **Our loop is not boosting.** Boosting conditions each learner on the
+   *residual error*. Our loop conditions only on *what was already bought* —
+   there is no feedback at all (the structural absence admitted above). So the
+   analogy motivates Phase 3b; it does not describe what we ran. Used
+   correctly it makes 3b stronger: adding the current adjacency estimate as
+   feedback is precisely what makes the loop boosting-like, so 3b stops being
+   "answering an objection" and becomes "testing a prediction the framing
+   makes."
+2. **We have never tested ensemble *aggregation*, only ensemble
+   *acquisition*.** `fan_in_homog` runs independent selectors and combines
+   their purchased **data**, then runs PC once. Bagging proper would run PC per
+   scout and vote the edges. So "bagging lost in our grid" is NOT shown; what
+   lost is parallel acquisition with pooled data. State the weaker claim.
+
+The vote-aggregation version is an estimator change, not a topology change —
+see §7 for why it stays out.
+
 ### The price, which the discourse has not measured at all
 
 Everyone argues capability; nobody publishes the bill. We can: **+0 calls for
@@ -257,6 +296,12 @@ adjacency estimate* after each purchase — cheap to compute, and it is what a
 scientist would actually look at. Not the score, which does not exist at run
 time without the answer key.
 
+Since §1's bagging/boosting framing, this arm carries a **pre-registered
+direction**: feeding back the current adjacency estimate is what turns the
+loop from sequential-without-residual into something boosting-shaped, so it
+should HELP. If it does not, the framing is weakened as well as the objection
+answered, and both go in the write-up.
+
 ### Phase 4 — rewrite
 
 Rename `relay`; fold the mechanism into the results doc; scope the headline to
@@ -290,6 +335,16 @@ becomes the most interesting arm on the list rather than an optional one.
 - Not a causal-discovery methods paper. PC on pooled interventional data stays
   fixed and mis-specified-but-uniform; improving it would change every number
   and answer a different question.
+- **Not bagged/stability-selected scoring**, which is the specific form the
+  point above takes for the §1 ensemble framing. Bootstrap-resampling the
+  purchased rows and majority-voting the edges is an ESTIMATOR change: it
+  moves every number in all 2,221 recorded cells, and register entry 10
+  forbids pooling rows scored differently, so adopting it forks the dataset
+  rather than extending it (~$90 to re-run). **Parked as a journal-extension
+  question with a $0 way in**: score the LLM-free `random` arm both ways and
+  compare the sd across seeds. If PC's own instability is a large share of our
+  spread, bagged scoring would shrink the MDE and more than 10 of 24 contrasts
+  would resolve — worth knowing, not worth doing before the ladder reports.
 - Not >2 agents. The axis is about partitioning information, not scale.
 - **Not adjudicating loop engineering vs graph engineering.** We are not
   crowning a winner; we are supplying the missing measurement and replacing
