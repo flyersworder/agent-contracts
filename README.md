@@ -2,71 +2,212 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/ai-agent-contracts.svg)](https://pypi.org/project/ai-agent-contracts/)
 [![Tests](https://github.com/flyersworder/agent-contracts/actions/workflows/ci.yml/badge.svg)](https://github.com/flyersworder/agent-contracts/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-A formal framework for governing autonomous AI agents through explicit resource constraints and temporal boundaries.
+A formal framework for governing autonomous AI agents through explicit resource
+constraints and temporal boundaries.
 
-## Overview
+Agent Contracts turn autonomous agents from unbounded explorers into **bounded
+optimizers**: declare a budget, and the framework tracks consumption as the
+agent runs, enforces the limit, and leaves an audit trail. It wraps six agent
+frameworks without changing how you write agents.
 
-**Agent Contracts** transforms autonomous AI agents from unbounded explorers into **bounded optimizers** by introducing formal contracts that specify:
+```bash
+pip install ai-agent-contracts
+```
 
-- 🎯 **Resource Budgets** - Tokens, API calls, compute time, and costs
-- ⏱️ **Temporal Constraints** - Deadlines, duration limits, and lifecycle boundaries
-- 📊 **Success Criteria** - Measurable conditions for contract fulfillment
-- 🔄 **Lifecycle Management** - Clear states from activation to termination
+## Contents
 
-### The Problem
+- [Why](#why)
+- [Quick start](#quick-start)
+- [Integrations](#integrations)
+- [Key concepts](#key-concepts)
+- [Feature guide](#feature-guide)
+- [Research: the causal-chamber pillar](#research-the-causal-chamber-pillar)
+- [Documentation](#documentation)
+- [Installation](#installation)
+- [Development](#development)
+- [Project structure](#project-structure)
+- [Status](#status)
+- [Contributing](#contributing)
 
-Current agentic AI systems face critical challenges:
-- **Unbounded Resource Consumption** - Agents can consume unpredictable amounts of tokens, API calls, and compute time
-- **Unclear Lifecycles** - No explicit termination criteria, leading to resource leaks
-- **Difficult Governance** - Hard to audit, ensure compliance, and attribute costs
-- **Coordination Complexity** - Multi-agent systems lack formal resource allocation mechanisms
+## Why
 
-### The Solution
+Agentic systems fail in ways ordinary software does not:
 
-Agent Contracts provide a mathematical framework that enables:
-- **Predictable Costs** - Explicit resource budgets prevent runaway consumption
-- **Formal Verification** - Contract states and constraints are machine-verifiable
-- **Time-Resource Tradeoffs** - Strategic optimization between speed and economy
-- **Multi-Agent Coordination** - Hierarchical contracts and resource markets
+| Problem | What a contract adds |
+|---|---|
+| **Unbounded consumption** — an agent can burn unpredictable tokens, calls and time | An explicit budget, enforced *during* execution rather than reported after |
+| **Unclear lifecycles** — no explicit termination criterion | Machine-verifiable states from activation to fulfilment |
+| **Hard governance** — difficult to audit, attribute cost, or prove compliance | An event stream and audit trail per contract |
+| **Multi-agent coordination** — no formal allocation between agents | Hierarchical delegation and DAG flow conservation, with a provable global bound |
 
-## Quick Examples
+A contract is `C = (I, O, S, R, T, Φ, Ψ)` — inputs, outputs, state, resources,
+time, preconditions, postconditions. The [whitepaper](./docs/whitepaper.md) has
+the formal treatment.
 
-### Basic LLM Integration
+## Quick start
 
 ```python
-from agent_contracts import Contract, ContractedLLM, ResourceConstraints, ContractMode
+from agent_contracts import Contract, ContractedLLM, ContractMode, ResourceConstraints
 
-# Define a contract with resource budgets
 contract = Contract(
     id="research-task",
     name="Research Assistant",
-    mode=ContractMode.BALANCED,  # Optimize for quality-cost-time balance
+    mode=ContractMode.BALANCED,          # quality-cost-time balance
     resources=ResourceConstraints(
-        tokens=10000,
+        tokens=10_000,
         api_calls=50,
-        cost_usd=1.0
-    )
+        cost_usd=1.0,
+    ),
 )
 
-# Execute LLM calls within contract constraints
 with ContractedLLM(contract) as llm:
     response = llm.completion(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": "Summarize recent AI papers"}]
+        messages=[{"role": "user", "content": "Summarize recent AI papers"}],
     )
-
-# Contract automatically enforces:
-# ✅ Token budget limits
-# ✅ API call tracking
-# ✅ Cost monitoring
-# ✅ Violations trigger warnings or stops
+    usage = llm.get_usage_summary()["usage"]
+    print(f"{usage['tokens']} tokens · ${usage['cost_usd']:.4f}")
 ```
 
-### Per-Tool Resource Limits
+Token budgets, call counts and cost are tracked as the agent runs; crossing a
+limit raises or warns depending on whether you run strict or lenient.
 
-Fine-grained control over individual tool usage:
+## Integrations
+
+Six integrations share one contract object. The value scales with how many
+calls a framework can make on your behalf.
+
+| Integration | Calls per run | Budget risk | What the contract buys |
+|---|---|---|---|
+| **LiteLLM** | 1 per call | Low | Universal baseline — 100+ providers, token counting, cost |
+| **LangChain** | 3–10 | Low–moderate | Multi-call protection, audit trail, policy compliance |
+| **LangGraph** ⭐ | 30+ (cycles, retries, parallel agents) | **Very high** | Loop protection, multi-agent budget sharing, cumulative tracking across every node |
+| **Claude Agent SDK** | 10–100+ tool calls | High | Per-tool limits and temporal enforcement via `PreToolUse` hooks; audit via `PostToolUse` |
+| **Google ADK** | 10–50+ | High | Multi-turn protection, hierarchical governance, prompt/response/thinking/cached token split |
+| **Causal Chambers** | research harness | — | Budget-matched agent experiments on a physical testbed |
+
+**LangGraph is where the framework earns its keep.** A graph with a validation
+cycle can spiral past $10 unbounded; the contract enforces one budget across
+every node and every iteration.
+
+<details>
+<summary><b>LangGraph</b> — one budget across a whole graph, cycles included</summary>
+
+```python
+from langgraph.graph import END, StateGraph
+
+from agent_contracts import Contract, ResourceConstraints
+from agent_contracts.integrations import ContractedGraph
+
+graph = StateGraph(AgentState)
+graph.add_node("researcher", research_node)
+graph.add_node("validator", validate_node)
+graph.add_conditional_edges(
+    "validator", should_retry, {"retry": "researcher", "done": END}
+)
+
+contract = Contract(
+    id="research-workflow",
+    name="Research Workflow",
+    resources=ResourceConstraints(tokens=50_000, api_calls=20),
+)
+
+contracted = ContractedGraph(contract, graph.compile())
+result = contracted.invoke({"query": "..."})
+print(contracted.get_remaining_budget())
+```
+
+The budget is cumulative across all nodes and cycles, so a retry loop that
+never terminates hits the contract instead of your bill.
+
+</details>
+
+<details>
+<summary><b>Google ADK</b> — one budget for a multi-agent hierarchy</summary>
+
+```python
+from google.adk.agents import Agent
+
+from agent_contracts import Contract, ResourceConstraints
+from agent_contracts.integrations import ContractedAdkAgent
+
+coordinator = Agent(
+    name="coordinator",
+    model="gemini-2.0-flash",
+    sub_agents=[researcher, analyst],
+)
+
+contract = Contract(
+    id="multi-agent-research",
+    name="Multi-Agent Research",
+    resources=ResourceConstraints(tokens=30_000, api_calls=15),
+)
+
+contracted = ContractedAdkAgent(contract, coordinator)
+result = contracted.run(
+    user_id="u1", session_id="s1", message="Analyze the EV market"
+)
+```
+
+Token tracking is broken out by prompt, response, thinking and cached.
+
+</details>
+
+## Key concepts
+
+### Contract definition
+
+An Agent Contract `C = (I, O, S, R, T, Φ, Ψ)`:
+
+| Symbol | Field | Meaning |
+|---|---|---|
+| **I** | `inputs` | Input specification |
+| **O** | `outputs` | Output specification |
+| **S** | `state` | Current lifecycle state |
+| **R** | `resources` | Resource constraints — tokens, calls, cost, tools, memory |
+| **T** | `temporal` | Deadlines and duration limits |
+| **Φ** | `success_criteria` | Preconditions and success conditions |
+| **Ψ** | `termination_conditions` | Postconditions and termination rules |
+
+### Contract states
+
+```text
+DRAFT → ACTIVE → {FULFILLED, VIOLATED, EXPIRED, TERMINATED}
+```
+
+### Time-resource tradeoff
+
+Contract modes let you trade quality, cost and time explicitly rather than
+implicitly. Validated on an N=20 benchmark — no mode dominates another, so the
+three sit on a Pareto frontier:
+
+| Mode | Quality | Effect |
+|---|---|---|
+| `URGENT` | 87% | ~50% faster, ~20% more tokens |
+| `BALANCED` | 85% | Balanced resources |
+| `ECONOMICAL` | 81% | ~32% fewer tokens, longer runtime |
+
+```python
+from agent_contracts import Contract, ContractMode, ResourceConstraints
+
+contract = Contract(
+    id="urgent-task",
+    name="Urgent Task",
+    mode=ContractMode.URGENT,
+    resources=ResourceConstraints(tokens=10_000),
+)
+```
+
+## Feature guide
+
+<details>
+<summary><b>Per-tool resource limits</b></summary>
+
+Per-tool limits are checked before the aggregate limit. An **omitted key means
+unconstrained, not zero** — grant an explicit `0` when you mean zero.
 
 ```python
 from agent_contracts import Contract, ResourceConstraints
@@ -75,22 +216,26 @@ contract = Contract(
     id="research-agent",
     name="Research Agent",
     resources=ResourceConstraints(
-        tokens=10000,
-        tool_invocations=20,  # Total limit across all tools
+        tokens=10_000,
+        tool_invocations=20,        # aggregate limit across all tools
         per_tool_limits={
-            "web_search": 5,   # Max 5 web searches
-            "code_exec": 3,    # Max 3 code executions
-            # Other tools limited only by aggregate
-        }
-    )
+            "web_search": 5,
+            "code_exec": 3,
+            # tools not listed are bounded only by the aggregate
+        },
+    ),
 )
 ```
 
-### Delegation Graphs (Multi-Parent Budgets)
+</details>
+
+<details>
+<summary><b>Delegation graphs (multi-parent budgets)</b></summary>
 
 When one agent is funded by several others — an aggregator merging two workers,
-a shared reviewer — a strict hierarchy cannot express it without double-counting.
-`DelegationGraph` models delegation as a DAG where budget flows along edges:
+a shared reviewer — a strict hierarchy cannot express it without
+double-counting. `DelegationGraph` models delegation as a DAG where budget
+flows along edges:
 
 ```python
 from agent_contracts import Contract, ResourceConstraints
@@ -111,29 +256,41 @@ graph.allocate("root", "scout_b", tokens=40_000, per_tool={"web_search": 10})
 graph.allocate("scout_a", "aggregator", tokens=15_000, per_tool={"web_search": 0})
 graph.allocate("scout_b", "aggregator", tokens=15_000, per_tool={"web_search": 0})
 
-graph.seal()  # validates the whole graph, then freezes its topology
+graph.seal()  # validate the whole graph, then freeze its topology
 
 graph.contract_for("aggregator").resources.tokens  # 30_000 — the sum of its in-edges
-graph.verify()                                     # every node satisfies the invariant
+graph.verify()                                     # raises if any node breaks the invariant
 ```
 
 The invariant at every node is `in-flow ≥ own consumption + out-flow`. Because
-that is a purely local check, and internal allocations cancel when summed across
-the graph, satisfying it everywhere guarantees total consumption never exceeds
-the root budget — with no global lock and no central accountant. See
-[whitepaper §4.6](docs/whitepaper.md) for the proof and its scope.
+that is a purely local check, and internal allocations cancel when summed
+across the graph, satisfying it everywhere guarantees total consumption never
+exceeds the root budget — **with no global lock and no central accountant**.
+See [whitepaper §4.6](docs/whitepaper.md) for the proof and its scope.
 
-### Pre-Execution Hooks (Custom Policy)
+Two semantics worth knowing: control flow may cycle but **budget flow must
+not** (a cycle would let a node refund its own ancestor), and refunds are
+computed against original allocations rather than live ones, which is what
+makes releasing sibling edges order-independent.
 
-Add custom governance logic that runs before every constraint check:
+</details>
+
+<details>
+<summary><b>Pre-execution hooks (custom policy)</b></summary>
+
+Custom governance logic that runs before every constraint check, on all
+integrations:
 
 ```python
 from agent_contracts import (
-    Contract, ContractedLLM, CheckContext, HookResult,
-    EnforcementAction, ResourceConstraints,
+    CheckContext,
+    Contract,
+    ContractedLLM,
+    EnforcementAction,
+    HookResult,
+    ResourceConstraints,
 )
 
-# Define a hook that blocks off-topic requests
 def topic_guard(ctx: CheckContext) -> HookResult:
     messages = ctx.metadata.get("messages", [])
     if any("off-topic" in str(m) for m in messages):
@@ -146,504 +303,244 @@ def topic_guard(ctx: CheckContext) -> HookResult:
 
 contract = Contract(
     id="guarded-agent",
-    resources=ResourceConstraints(tokens=10000, cost_usd=1.0)
+    name="Guarded Agent",
+    resources=ResourceConstraints(tokens=10_000, cost_usd=1.0),
 )
 
 with ContractedLLM(contract) as llm:
     llm.enforcer.add_pre_check_hook(topic_guard)
-    # Hooks fire automatically on every LLM call
-    # Works with all integrations: LiteLLM, LangGraph, Google ADK, Claude SDK
 ```
 
-### LangGraph Multi-Agent Workflows ⭐
+`WARN` and `THROTTLE` are informational; `SOFT_STOP` and `HARD_STOP` block.
+Post-check hooks are observational and cannot block. See
+[docs/pre-execution-hooks.md](./docs/pre-execution-hooks.md).
 
-For complex workflows with cycles and multi-agent coordination:
+</details>
+
+<details>
+<summary><b>Agent skills (agentskills.io standard)</b></summary>
 
 ```python
-from langgraph.graph import StateGraph, END
-from agent_contracts import Contract, ResourceConstraints
-from agent_contracts.integrations.langgraph import ContractedGraph
+from agent_contracts import Capabilities, Contract, SkillSpec
 
-# Build complex graph with validation cycle
-workflow = StateGraph(AgentState)
-workflow.add_node("research", research_agent)
-workflow.add_node("validate", validate_agent)
-workflow.add_conditional_edges(
-    "validate",
-    should_retry,
-    {True: "research", False: END}  # Can loop!
-)
-app = workflow.compile()
-
-# Wrap with contract to prevent runaway loops
-contract = Contract(
-    id="research-workflow",
-    resources=ResourceConstraints(
-        tokens=50000,
-        api_calls=25,  # Limit iterations!
-        cost_usd=2.0
-    )
-)
-
-contracted_workflow = ContractedGraph(contract=contract, graph=app)
-result = contracted_workflow.invoke({"query": "Research topic"})
-
-# Budget enforced across ALL nodes and cycles:
-# ✅ Prevents infinite loops
-# ✅ Multi-agent budget sharing
-# ✅ Real-time violation detection
-# ✅ Cumulative tracking across entire graph
-```
-
-### Google ADK Multi-Agent Systems
-
-For Google ADK-based agents and multi-agent hierarchies:
-
-```python
-from google.adk.agents import LlmAgent
-from agent_contracts import Contract, ResourceConstraints
-from agent_contracts.integrations.google_adk import ContractedAdkAgent
-
-# Create multi-agent hierarchy
-researcher = LlmAgent(
-    name="researcher",
-    model="gemini-2.0-flash",
-    instruction="You research topics thoroughly."
-)
-
-summarizer = LlmAgent(
-    name="summarizer",
-    model="gemini-2.0-flash",
-    instruction="You create concise summaries."
-)
-
-coordinator = LlmAgent(
-    name="coordinator",
-    model="gemini-2.0-flash",
-    instruction="You coordinate research and summarization.",
-    sub_agents=[researcher, summarizer]
-)
-
-# Single budget for ENTIRE multi-agent system
-contract = Contract(
-    id="research-system",
-    resources=ResourceConstraints(
-        tokens=50000,  # For ALL agents combined
-        api_calls=25,
-        cost_usd=2.0
-    )
-)
-
-contracted_system = ContractedAdkAgent(contract=contract, agent=coordinator)
-result = contracted_system.run(
-    user_id="user1",
-    session_id="session1",
-    message="Research and summarize quantum computing"
-)
-
-# Budget enforced across ALL agents in hierarchy:
-# ✅ Detailed token tracking (prompt/response/thinking/cached)
-# ✅ Multi-turn conversation protection
-# ✅ Multi-agent coordination governance
-# ✅ Tool execution monitoring
-```
-
-### Contract Modes
-
-Choose the mode that fits your requirements:
-
-```python
-# URGENT mode: Minimize time, accept higher costs
-contract = Contract(
-    mode=ContractMode.URGENT,
-    resources=ResourceConstraints(tokens=10000)
-)
-# → 50% faster execution, 20% more tokens
-
-# BALANCED mode: Optimize quality-cost-time tradeoff
-contract = Contract(
-    mode=ContractMode.BALANCED,
-    resources=ResourceConstraints(tokens=10000)
-)
-# → Standard execution with quality focus
-
-# ECONOMICAL mode: Minimize costs, accept longer runtime
-contract = Contract(
-    mode=ContractMode.ECONOMICAL,
-    resources=ResourceConstraints(tokens=10000)
-)
-# → 60% fewer tokens, 50% longer execution
-```
-
-## Documentation
-
-📚 **[Complete Documentation](./docs/README.md)**
-
-### Key Resources
-
-- **[Whitepaper](./docs/whitepaper.md)** - Complete theoretical framework with mathematical foundations
-- **[Pre-Execution Hooks](./docs/pre-execution-hooks.md)** - Custom governance hooks and behavioral monitor design
-- **[Examples](./docs/examples/)** - Coming soon: Practical implementation examples
-
-### Quick Start by Role
-
-- **Researchers**: Read the [Formal Framework](./docs/whitepaper.md#2-formal-framework) and [Future Directions](./docs/whitepaper.md#8-future-directions)
-- **Engineers**: Check [Implementation Architecture](./docs/whitepaper.md#5-implementation-architecture) and [Use Cases](./docs/whitepaper.md#6-use-cases-and-examples)
-- **Product Managers**: Start with the [Introduction](./docs/whitepaper.md#1-introduction) and [Use Cases](./docs/whitepaper.md#6-use-cases-and-examples)
-
-## Key Concepts
-
-### Contract Definition
-
-An Agent Contract `C = (I, O, S, R, T, Φ, Ψ)` includes:
-
-- **I**: Input specification
-- **O**: Output specification
-- **S**: Skills (tools, capabilities)
-- **R**: Resource constraints
-- **T**: Temporal constraints
-- **Φ**: Success criteria
-- **Ψ**: Termination conditions
-
-### Time-Resource Tradeoff
-
-Agents can optimize along multiple dimensions:
-
-| Mode | Time | Resources | Quality |
-|------|------|-----------|---------|
-| Urgent | Low ⚡ | High 💰 | 85% |
-| Balanced | Medium ⏱️ | Medium 💵 | 95% |
-| Economical | High 🐢 | Low 💸 | 90% |
-
-### Contract States
-
-```
-DRAFTED → ACTIVE → {FULFILLED, VIOLATED, EXPIRED, TERMINATED}
-```
-
-### Agent Skills (agentskills.io Standard)
-
-Agent Contracts supports the **agentskills.io** open standard for defining reusable agent behaviors:
-
-```python
-from agent_contracts import SkillSpec, Capabilities, Contract
-
-# Define a rich skill with full instructions
 code_review = SkillSpec(
     name="code-reviewer",
     description="Review code for best practices, security issues, and test coverage.",
     instructions="""
     ## Instructions
     1. Read the target files
-    2. Check for common issues:
-       - Error handling
-       - Security vulnerabilities
-       - Test coverage
+    2. Check error handling, security, and test coverage
     3. Provide detailed feedback
     """,
     allowed_tools=["Read", "Grep", "Glob"],
     version="1.0.0",
 )
 
-# Use in capabilities (mix strings and SkillSpec)
 contract = Contract(
     id="review-task",
     name="Code Review",
     capabilities=Capabilities(
-        skills=[code_review, "simple-skill"],  # Both types work
+        skills=[code_review, "simple-skill"],  # SkillSpec and plain strings both work
         tools=["web_search"],
     ),
 )
 
-# Access skills programmatically
 skill = contract.capabilities.get_skill("code-reviewer")
-print(skill.instructions)
 ```
 
-**Features:**
-- ✅ Compatible with Microsoft, OpenAI, Cursor, and other adopters
-- ✅ SKILL.md import/export (`to_skill_md()`, `from_skill_md()`)
-- ✅ Progressive disclosure (metadata vs full instructions)
-- ✅ Backward compatible (string skills still work)
+SKILL.md import/export via `to_skill_md()` / `from_skill_md()`, progressive
+disclosure (metadata ≈ 100 tokens, instructions loaded on activation), and
+backward compatibility with plain string skills.
 
-## Repository Status
+</details>
 
-🎉 **Ready for Release** (November 2025)
+## Research: the causal-chamber pillar
 
-**Current Version**: 0.1.0
-**Status**: Production-ready, validated, documented
+Beyond the library, this repository hosts an empirical research pillar that
+uses contracts as a measurement instrument. Because budgets can be split across
+agents *and verified*, agent topologies can be compared at **exactly matched
+spend** — which is what makes the comparison meaningful.
 
-**Phase 1: Core Framework** ✅ Complete
-- ✅ Contract data structures (C = I, O, S, R, T, Φ, Ψ)
-- ✅ Resource monitoring and enforcement
-- ✅ Token counting and cost tracking
-- ✅ LiteLLM integration wrapper
-- ✅ 145 tests, 96% coverage
-- ✅ Live demo with Gemini 2.0 Flash
+The M6 experiment runs a five-rung coordination ladder (single loop, ensemble,
+parallel roles, relay, negotiating team) on two
+[Causal Chambers](https://causalchamber.org) — physical devices whose true
+causal graph is known by construction, so a recovered graph can be graded
+objectively rather than by an LLM judge.
 
-**Phase 2A: Strategic Optimization** ✅ Complete
-- ✅ Contract modes (URGENT, BALANCED, ECONOMICAL)
-- ✅ Budget-aware prompt generation
-- ✅ Strategic planning utilities
-- ✅ Quality-cost-time Pareto benchmark
-- ✅ 209 core tests passing
+**2,221 cells, $94.05, zero errored cells, two chambers, two models.** Of 24
+topology-vs-loop contrasts, 10 resolve and 9 favour a single sequential loop.
 
-**Phase 2B: Governance & Benchmarks** ✅ Complete
-- ✅ Multi-step research benchmark (research agent with quality evaluation)
-- ✅ Budget violation policy testing (100% enforcement validation)
-- ✅ Cost governance validation (organizational policy compliance)
-- ✅ Variance reduction analysis (N=20 validation, temperature=0 effect discovered)
-- ✅ Quality metrics framework (3-phase validation study, CV=5.2%)
-- ✅ LangChain 1.0+ integration (governance & compliance)
-- ✅ Pre-commit hooks and code quality infrastructure
+- [`docs/chamber-results.md`](./docs/chamber-results.md) — every experiment and
+  what it showed
+- [`docs/chamber-harness-validity-register.md`](./docs/chamber-harness-validity-register.md)
+  — 19 harness defects that each changed, or could have changed, a number.
+  **Read this before trusting any figure**; six of them looked like findings first.
+- [`docs/causal_chamber_validation_plan.md`](./docs/causal_chamber_validation_plan.md)
+  — the full experiment plan
 
-**LangGraph Integration** ✅ Complete (Premium Feature)
-- ✅ ContractedGraph for complex multi-agent workflows
-- ✅ Cumulative budget tracking across ALL nodes and cycles
-- ✅ Loop/retry protection (prevents runaway costs)
-- ✅ Multi-agent budget sharing
-- ✅ 27 comprehensive tests, 85% coverage
-- ✅ Real-world demos (validation cycles, parallel agents)
+The harness lives in [`evaluation/chamber_pipeline/`](./evaluation/chamber_pipeline/)
+and needs the `chambers` extra.
 
-**Google ADK Integration** ✅ Complete
-- ✅ ContractedAdkAgent for Google ADK agents
-- ✅ Detailed token tracking (prompt, response, thinking, cached)
-- ✅ Multi-turn conversation protection
-- ✅ Multi-agent hierarchy governance
-- ✅ Tool execution monitoring
-- ✅ 11 comprehensive tests, 90% coverage
-- ✅ Real-world demos (multi-turn, multi-agent)
+## Documentation
 
-**Claude Agent SDK Integration** ✅ Complete
-- ✅ ContractedClaudeAgent with hook-based enforcement
-- ✅ Exact token tracking from AssistantMessage.usage
-- ✅ Per-tool limits and temporal enforcement via PreToolUse hooks
-- ✅ Audit trail via PostToolUse hooks
-- ✅ Full SDK passthrough (tools, MCP, subagents, skills, permissions)
-- ✅ Dual API: async `aexecute()` and sync `execute()`
-- ✅ 33 comprehensive tests
+📚 **[Complete documentation index](./docs/README.md)**
 
-**Pre-Execution Hooks** ✅ Complete
-- ✅ User-defined pre/post-check hooks on ContractEnforcer
-- ✅ `CheckContext`, `HookResult`, `CheckHook` types for custom policy governance
-- ✅ Integration metadata pass-through (all 5 integrations)
-- ✅ Hook actions: WARN, THROTTLE (informational) and SOFT_STOP, HARD_STOP (blocking)
-- ✅ Post-check hooks are observational (cannot block)
-- ✅ Backward compatible — existing code works unchanged
+| Document | What it covers |
+|---|---|
+| [Whitepaper](./docs/whitepaper.md) | Formal framework, the conservation proof, use cases |
+| [Pre-execution hooks](./docs/pre-execution-hooks.md) | Custom governance hooks and monitor design |
+| [Testing strategy](./docs/testing-strategy.md) | Test plan and validation approach |
+| [Chamber results](./docs/chamber-results.md) | Empirical results of record |
+| [Validity register](./docs/chamber-harness-validity-register.md) | Every harness defect found, and its effect |
+| [Quality measurement](./docs/quality_measurement_research.md) | LLM-as-judge under rating indeterminacy |
 
-**Evaluation Pipelines** ✅ Complete
-- ✅ Research Pipeline: Multi-agent report generation (25 topics)
-- ✅ Code Review Pipeline: Coder↔Reviewer loop (175 LiveCodeBench problems)
-- ✅ CONTRACTED vs UNCONTRACTED comparison framework
-- ✅ Conservation law enforcement in multi-agent delegation
-- ✅ Iteration limits prevent runaway agent loops
-
-**Total**: 646+ tests, 81%+ coverage
-
-## Use Cases
-
-Agent Contracts are designed for:
-
-- **Production AI Systems** - Cost control and SLA compliance
-- **Complex Multi-Agent Workflows** ⭐ - LangGraph loops, retries, validation cycles
-- **Enterprise Deployments** - Governance, audit trails, and compliance
-- **Claude Agent SDK** - Govern Claude agents with per-tool limits and audit trails
-- **Google ADK Applications** - Multi-turn conversations and multi-agent hierarchies
-- **LangChain Applications** - Simple chains with budget enforcement
-- **Research** - Studying optimal agent behavior under constraints
-
-### Where Agent Contracts Shines
-
-**LangChain** (simple chains):
-- 3-10 LLM calls per execution
-- Budget risk: LOW to MODERATE
-- Value: Governance, compliance, multi-call protection
-
-**LangGraph** (complex workflows) ⭐:
-- 30+ LLM calls per execution (cycles, retries, parallel agents)
-- Budget risk: VERY HIGH (can spiral to $10+ without limits!)
-- Value: Loop protection, multi-agent coordination, cumulative tracking
-- **This is the killer feature for production deployments**
-
-**Claude Agent SDK** (agentic coding & file/web/terminal):
-- 10-100+ tool calls per session (Read, Edit, Bash, WebSearch, subagents)
-- Budget risk: HIGH (open-ended agents with many tools can spiral)
-- Value: Per-tool limits, temporal enforcement, audit trail, hook-based governance
-- Ideal for: Claude-powered agents, coding assistants, research agents
-
-**Google ADK** (multi-turn & multi-agent):
-- 10-50+ LLM calls per conversation (turns, agent coordination, tool use)
-- Budget risk: HIGH (multi-agent hierarchies can explode costs)
-- Value: Multi-turn protection, hierarchical governance, detailed token tracking
-- Ideal for: Google Cloud deployments, Gemini-based agents, conversational AI
-
-## Project Structure
-
-```
-agent-contracts/
-├── src/agent_contracts/           # Core package
-│   ├── core/
-│   │   ├── contract.py           # Contract data structures
-│   │   ├── monitor.py            # Resource monitoring
-│   │   ├── enforcement.py        # Constraint enforcement
-│   │   ├── tokens.py             # Token counting
-│   │   ├── planning.py           # Strategic planning
-│   │   └── prompts.py            # Budget-aware prompts
-│   └── integrations/
-│       ├── litellm_wrapper.py    # LiteLLM integration
-│       ├── langchain.py          # LangChain integration
-│       ├── langgraph.py          # LangGraph integration ⭐
-│       ├── google_adk.py         # Google ADK integration
-│       └── claude_agent_sdk.py   # Claude Agent SDK integration
-├── tests/                         # 247+ tests, 94%+ coverage
-│   ├── core/                     # Core module tests (209 tests)
-│   └── integrations/             # Integration tests (38 tests)
-├── benchmarks/                    # Live demonstrations & benchmarks
-│   ├── demo_phase1.py            # Phase 1 interactive demo
-│   ├── strategic/                # Strategic optimization benchmarks
-│   ├── research_agent/           # Multi-step research benchmark
-│   ├── governance/               # Policy & governance tests
-│   ├── langchain/                # LangChain demos
-│   ├── langgraph/                # LangGraph demos (multi-agent)
-│   └── google_adk/               # Google ADK demos (multi-turn, multi-agent)
-├── evaluation/                    # Experimental evaluations
-│   ├── research_pipeline/        # Multi-agent research experiment
-│   └── code_review_pipeline/     # Coder↔Reviewer experiment
-├── docs/
-│   ├── whitepaper.md             # Complete theoretical framework
-│   └── testing-strategy.md       # Testing & validation plan
-├── pyproject.toml                 # Package configuration
-└── README.md                      # This file
-```
+**By role**: researchers start with the
+[formal framework](./docs/whitepaper.md#2-formal-framework); engineers with
+[implementation architecture](./docs/whitepaper.md#5-implementation-architecture);
+product managers with the [introduction](./docs/whitepaper.md#1-introduction).
 
 ## Installation
 
 ```bash
-# Install from PyPI
-pip install ai-agent-contracts
-
-# Or with uv
-uv add ai-agent-contracts
+pip install ai-agent-contracts     # or: uv add ai-agent-contracts
 ```
 
-The package is importable as `agent_contracts`:
+The package imports as `agent_contracts`:
 
 ```python
 from agent_contracts import Contract, ResourceConstraints
 ```
 
-**For development** (from source):
+**Requirements**: Python ≥ 3.12.
 
-```bash
-git clone https://github.com/flyersworder/agent-contracts.git
-cd agent-contracts
-uv sync --dev
-```
+**Optional extras** — install only what you use:
 
-**Requirements**: Python ≥ 3.12
-
-**Optional dependencies**:
-- `litellm` - For LLM integration (automatically installed)
-- `langchain` - For LangChain integration (`uv sync --extra langchain`)
-- `langgraph` - For LangGraph integration ⭐ (`uv sync --extra langgraph`)
-- `google-adk` - For Google ADK integration (`uv sync --extra google-adk`)
-- `claude-agent-sdk` - For Claude Agent SDK integration (`uv sync --extra claude-agent-sdk`)
-- `matplotlib` - For visualization benchmarks (`pip install matplotlib`)
+| Extra | Install | For |
+|---|---|---|
+| `litellm` | `uv sync --extra litellm` | 100+ LLM providers |
+| `langchain` | `uv sync --extra langchain` | LangChain chains |
+| `langgraph` ⭐ | `uv sync --extra langgraph` | LangGraph graphs |
+| `google-adk` | `uv sync --extra google-adk` | Google ADK agents |
+| `claude-agent-sdk` | `uv sync --extra claude-agent-sdk` | Claude Agent SDK |
+| `chambers` | `uv sync --extra chambers` | Causal-chamber research harness |
+| `eval` | `uv sync --extra eval` | Benchmark datasets and plots |
 
 ## Development
 
-### Setup
-
-This project uses [uv](https://github.com/astral-sh/uv) for dependency management. To set up the development environment:
-
 ```bash
-# Install uv (if not already installed)
+# Install uv if needed
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Clone the repository
 git clone https://github.com/flyersworder/agent-contracts.git
 cd agent-contracts
 
-# Install dependencies (including dev dependencies)
-uv sync --dev
-
-# Install pre-commit hooks
+uv sync --dev              # or --all-extras for every integration
 uv run pre-commit install
 ```
 
-### Code Quality
-
-This project uses several tools to maintain code quality:
-
-- **[Ruff](https://github.com/astral-sh/ruff)**: Fast Python linter and formatter (replaces black, isort, flake8)
-- **[mypy](https://github.com/python/mypy)**: Static type checker
-- **[pre-commit](https://pre-commit.com/)**: Git hooks for automated checks
-
-Pre-commit hooks will automatically run on every commit. To manually run all checks:
-
 ```bash
-# Run all pre-commit hooks
-uv run pre-commit run --all-files
+uv run pytest                                        # run the suite
+uv run pytest --cov=agent_contracts --cov-report=html  # with coverage
 
-# Run specific tools
-uv run ruff check .                    # Linting
-uv run ruff format .                   # Formatting
-uv run mypy .                          # Type checking
+uv run pre-commit run --all-files                    # all checks
+uv run ruff check .                                  # lint
+uv run ruff format .                                 # format
+uv run mypy .                                        # type check
 ```
 
-### Running Tests
+Quality gates: [Ruff](https://github.com/astral-sh/ruff) (lint + format),
+[mypy](https://github.com/python/mypy) in strict mode, and
+[pre-commit](https://pre-commit.com/) hooks that run on every commit. CI must
+be green on Python 3.12 and 3.13 before merge.
 
-```bash
-# Run tests (when available)
-uv run pytest
+## Project structure
 
-# Run with coverage
-uv run pytest --cov=agent_contracts --cov-report=html
+```text
+agent-contracts/
+├── src/agent_contracts/
+│   ├── core/
+│   │   ├── contract.py           # Contract, ResourceConstraints, Capabilities
+│   │   ├── monitor.py            # Real-time resource tracking
+│   │   ├── enforcement.py        # Constraint enforcement and hooks
+│   │   ├── delegation.py         # Hierarchical delegation (tree)
+│   │   ├── delegation_graph.py   # DAG delegation with flow conservation
+│   │   ├── resource_vector.py    # Resource algebra
+│   │   ├── skillspec.py          # agentskills.io SkillSpec
+│   │   ├── tokens.py             # Token counting and cost
+│   │   ├── planning.py           # Strategic planning
+│   │   ├── executor.py           # Contract execution
+│   │   └── prompts.py            # Budget-aware prompts
+│   └── integrations/
+│       ├── litellm_wrapper.py    # LiteLLM
+│       ├── langchain.py          # LangChain
+│       ├── langgraph.py          # LangGraph ⭐
+│       ├── google_adk.py         # Google ADK
+│       ├── claude_agent_sdk.py   # Claude Agent SDK
+│       └── causalchamber.py      # Causal Chambers (research)
+├── tests/                        # 1,507 tests
+├── benchmarks/                   # Live demos: governance, strategic, per-framework
+├── evaluation/                   # Experiments
+│   ├── chamber_pipeline/         # Causal-chamber coordination ladder
+│   ├── research_pipeline/        # Multi-agent research
+│   └── code_review_pipeline/     # Coder ↔ Reviewer loop
+└── docs/                         # Whitepaper, results, validity register
 ```
 
-### Project Structure
+## Status
 
-- `docs/` - Documentation (whitepaper, testing strategy)
-- `src/` - Source code (planned)
-- `tests/` - Test suite (planned)
-- `pyproject.toml` - Project configuration and dependencies
-- `uv.lock` - Locked dependencies for reproducibility
+**v0.5.0 — production ready.** 1,507 tests, 1 skipped, **91% coverage**,
+`mypy --strict` clean, CI green on Python 3.12 and 3.13.
+
+| Area | State |
+|---|---|
+| Core framework — contracts, monitoring, enforcement, tokens | ✅ |
+| Integrations — LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK | ✅ |
+| Contract modes and strategic planning | ✅ Validated at N=20 |
+| Per-tool limits and SkillSpec (agentskills.io) | ✅ |
+| Pre-execution hooks (custom policy) | ✅ All integrations |
+| Delegation: hierarchical tree and DAG flow conservation | ✅ v0.4.0 |
+| Evaluation pipelines — research, code review | ✅ |
+| Causal-chamber research pillar | ✅ M6 complete, M7 planned |
+| AutoGen / CrewAI integrations | 🔜 Planned |
+| Audit dashboards and cost-attribution reporting | 🔜 Planned |
+
+**Known limitation**: `ResourceConstraints.iterations` is honoured only by
+Google ADK (`max_llm_calls`) and the Claude Agent SDK (`max_turns`). LiteLLM,
+LangChain and LangGraph neither track nor enforce it.
 
 ## Contributing
 
-This is an evolving framework. We welcome contributions in:
-- Reference implementations (Python, TypeScript)
-- Integration with existing frameworks (LangChain, AutoGPT, etc.)
-- Practical examples and tutorials
-- Empirical studies and benchmarks
+Contributions welcome — reference implementations, new framework integrations,
+practical examples, and empirical studies. Please open an issue to discuss
+substantial changes first.
 
 ## License
 
-This project is licensed under CC BY 4.0.
+Apache License 2.0 — see [LICENSE](./LICENSE).
 
 ## Authors
 
-Qing Ye (with assistance from Claude, Anthropic)
+Qing Ye (with assistance from Claude, Anthropic).
 
 ## Citation
 
-If you use this framework in your research, please cite:
-
 ```bibtex
 @techreport{ye2025agentcontracts,
-  title={Agent Contracts: A Resource-Bounded Optimization Framework for Autonomous AI Systems},
+  title={Agent Contracts: A Resource-Bounded Optimization Framework
+         for Autonomous AI Systems},
   author={Ye, Qing},
   year={2025},
   month={October}
 }
 ```
 
-## Learn More
+## Learn more
 
-- 📖 [Read the Whitepaper](./docs/whitepaper.md)
-- 🎯 [Browse Documentation](./docs/README.md)
-- 💬 [Open an Issue](../../issues) for questions or discussions
+- 📖 [Whitepaper](./docs/whitepaper.md)
+- 🔬 [Chamber results](./docs/chamber-results.md)
+- 🎯 [Documentation index](./docs/README.md)
+- 💬 [Open an issue](../../issues)
 
 ---
 
-**Version**: 0.5.0 | **Last Updated**: August 22, 2026 | **Status**: Production Ready ⭐
+**v0.5.0** · Last updated 30 August 2026
