@@ -1,9 +1,10 @@
 # M7: the mechanism, the missing arms, and the two reviewer objections
 
-**Status**: Phase 1 complete 2026-08-30; `team_varsplit` running; Phase 2 next
+**Status**: Phases 1 and 2 complete (2026-08-30 / 2026-08-31). Phase 3 next.
 **Opened**: 2026-08-29
-**Last revised**: 2026-08-30 — Phase 1 results folded in, `shared_blackboard`
-promoted into Phase 2, external citations added to §1
+**Last revised**: 2026-08-31 — Phase 2 results folded in; the record axis is
+unsupported at 5 of 6 budgets, and §1/§3 must no longer argue from it except
+at the middle budget
 **Predecessor**: M6 coordination ladder (`2026-08-22-m6-coordination-ladder-design.md`)
 **Results of record**: `docs/chamber-results.md`
 **Harness defects**: `docs/chamber-harness-validity-register.md` (19 entries — read first)
@@ -404,7 +405,42 @@ reading ("coverage does not explain the loss") was a range-and-power artifact;
 and the 25 Aug note "team's cost is genuine coordination, not redundancy" is
 withdrawn, not merely re-founded.
 
-### Phase 2 — close the axis (~$8), now with the blackboard
+### Phase 2 — **COMPLETE 2026-08-31, $11.57, 960 cells, 0 errors**
+
+Full panels, both chambers, in `docs/chamber-results.md` §"M7 PHASE 2
+COMPLETE". Scorecard against what was pre-registered below:
+
+| prediction | outcome |
+|---|---|
+| `one_shot` < loop | **FALSE at 5 of 6 budgets.** Holds only at LT k=6 (−0.059). Ties at LT k=30/45 and all three WT budgets. |
+| `critique` ≈ loop | **FALSE.** Resolved *worse* at LT k=30 (−0.032) and k=45 (−0.038); WT's largest delta (−0.030 at k=14) agrees in sign. Never above zero by more than noise. |
+| `shared_blackboard` ≈ loop | **TRUE except at LT k=6** (−0.079 there; ties at the other five). |
+
+The spec anticipated the `one_shot` outcome and named its consequence:
+"the honest claim becomes 'how selection is organised barely matters'". That
+is now the measured result, and it is stated in the results doc rather than
+softened. Two things keep it from being a pure null:
+
+1. **The axis test resolves at the middle budget on both chambers.**
+   `shared_blackboard` vs `fan_in_spec` — same two role prompts, record shared
+   vs split — gives **+0.053 (LT k=30)** and **+0.046 (WT k=14)**, both above
+   MDE, with nothing resolving at the small or large budget on either. Sharing
+   a record beats *splitting* one; sharing one with yourself (the loop) is
+   worth nothing. Caveats in the results doc: cross-run, and WT sits on the
+   MDE boundary after drift adjustment.
+2. **`critique` is a clean pre-registered negative** — the one positive result
+   this phase could have produced, tested properly and refused.
+
+**Consequence for §1 and §3.** The ladder's rungs are ordered by
+record-survival, and Phase 2 shows that ordering is not what produces the M6
+effect. The M6 result stands (it replicates on WT under a 3.9x pricier model);
+its *explanation* does not. Phase 4's rewrite must not argue from the record
+axis except at the middle budget, where it is the best-evidenced claim we hold.
+
+<details>
+<summary>Original Phase 2 specification (pre-registration, kept verbatim)</summary>
+
+#### Phase 2 — close the axis (~$8), now with the blackboard
 
 Run `one_shot` and `critique` on both chambers at the M6 budgets and seeds.
 Both are built and unit-tested; neither has run against a live model at scale.
@@ -442,6 +478,8 @@ together on 2026-08-30:
 a complete shared history IS the loop with two voices. If it does NOT collapse
 onto the loop, the axis is wrong and the cost is in having several agents rather
 than in partitioning them — the most informative failure available to us.
+
+</details>
 
 ### Phase 3 — the two objections (~$15)
 

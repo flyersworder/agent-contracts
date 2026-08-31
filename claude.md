@@ -944,7 +944,7 @@ This file is project memory loaded into every session; it holds instructions,
 operational lessons and status. Results are a growing archive and belong in a
 document you open deliberately.
 
-As of 2026-08-28: **2,050 cells, $90.80, zero errored cells**, two chambers,
+As of 2026-08-31: **3,441 cells, $108.39, zero errored cells**, two chambers,
 two models. Headlines, with the detail and the caveats in the results doc:
 
 - **Where the comparison resolves, no fan-in topology beats a single
@@ -960,6 +960,20 @@ two models. Headlines, with the detail and the caveats in the results doc:
 - **The contract is a floor on effort, not only a ceiling on spend.**
 - **Topology is at least as large a lever as model choice, and cheaper.**
 - The aggregator is **inert by measurement**, not by omission (30/30 cells).
+- **The running record is not load-bearing** (M7 Phase 2, 2026-08-31, 960
+  cells). `one_shot` — ONE call picking all k experiments, no record at all —
+  ties the loop at LT k=30/45 and at all three WT budgets, losing only at
+  LT k=6 (−0.059). The M6 ordering replicates, but **the record-survival axis
+  we built the ladder on does not explain it**; do not draft from that axis.
+- **What the axis DOES buy, on both chambers, at the middle budget only**:
+  sharing a record beats *splitting* one. `shared_blackboard` vs
+  `fan_in_spec` — same two role prompts — gives +0.053 (LT k=30) and +0.046
+  (WT k=14), both resolved, nothing at the small or large budget. Sharing a
+  record with yourself (the loop) is worth nothing. Cross-run; WT sits on the
+  MDE boundary after drift adjustment.
+- **`critique` is a clean pre-registered negative**: a reviewer pass over the
+  selection costs 3 flat calls and resolves *worse* at LT k=30/45. Nine
+  contrasts, none positive beyond noise.
 
 Paper readiness, the ranked open threats, and the per-dataset index are in
 that document's final section. Harness defects stay in

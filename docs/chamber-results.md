@@ -4,15 +4,16 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the nineteen
+**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-two
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-08-30**: 2,221 cells, **$94.05**, **zero errored cells**,
-across two chambers and two models. (The earlier "2,050 / $90.80" line omitted
-the 12 incidence-probe cells; the table below is the arithmetic of record.)
+**Corpus as of 2026-08-31**: 3,441 cells, **$108.39**, **zero errored cells**,
+across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
+it predated the seven M7 files, which add 1,220 cells and $14.34. The table
+below is the arithmetic of record.)
 
 | dataset | cells | cost | what it establishes |
 |---|---|---|---|
@@ -28,6 +29,12 @@ the 12 incidence-probe cells; the table below is the arithmetic of record.)
 | `runs/wt-team-probe.parquet` | 3 | $0.04 | substring-conflict incidence, WT k=21 |
 | `runs/m6-wt-team-rerun.parquet` | 150 | $2.78 | WT `team` re-run under the fixed parser; spliced into `m6-wt-ladder-final.parquet` |
 | `runs/_provprobe.parquet` | 9 | $0.00 | VPS BLAS-stability probe; reproduces `wt-random-vps` 9/9 exactly |
+| `runs/m7-phase1.parquet` | 20 | $0.53 | mechanism probe: variable- vs experiment-level coverage |
+| `runs/m7-coverage.parquet` + `-ms` | 150 | $0.00 | LLM-free coverage manipulation, the +0.0073/variable price |
+| `runs/m7-varsplit.parquet` | 90 | $2.25 | `team_varsplit`: partition variables, not experiments |
+| `runs/m7-p2-lt.parquet` | 270 | $3.72 | Phase 2 LT: `one_shot`, `critique`, `shared_blackboard` |
+| `runs/m7-p2-ref.parquet` | 90 | $2.29 | same-era LT `llm_pc` reference for the Phase 2 panel |
+| `runs/m7-p2-wt.parquet` | 600 | $5.56 | Phase 2 WT, all four arms including the loop, in one sweep |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -49,6 +56,111 @@ cross-backend gap is ΔF1 = 0.055, larger than most effects reported below.
 Chambers: light tunnel (LT) 38 nodes / 57 edges / 59-experiment menu; wind
 tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
+
+---
+
+## M7 PHASE 2 COMPLETE (2026-08-31): the running record is not load-bearing
+
+960 cells across both chambers, **960 ok / 0 errors**, $11.57. Phase 2 tests
+the ladder's central axis directly — how much of the loop's running record
+survives — by adding three arms at the ends of it:
+
+| arm | record | cost shape |
+|---|---|---|
+| `one_shot` | **none**: one call picks all k experiments | 1 LLM call |
+| `shared_blackboard` | complete, but written by two role-framed voices | k calls |
+| `critique` | complete, plus a reviewer pass over the selection | k + 3 calls |
+
+Datasets: `runs/m7-p2-lt.parquet` (270) + `runs/m7-p2-ref.parquet` (90, the
+same-era `llm_pc` reference), `runs/m7-p2-wt.parquet` (600, all four arms
+in one sweep). All post-collinear-fix, `scipy-openblas`, flash-0731.
+
+### The panels
+
+LT, n=30, against the same-day loop reference:
+
+| k | loop | `one_shot` | `critique` | `shared_blackboard` |
+|---|---|---|---|---|
+| 6 | 0.219 | 0.160 (**−0.059 worse**) | 0.191 (−0.027) | 0.140 (**−0.079 worse**) |
+| 30 | 0.428 | 0.439 (+0.012) | 0.396 (**−0.032 worse**) | 0.423 (−0.005) |
+| 45 | 0.436 | 0.418 (−0.018) | 0.398 (**−0.038 worse**) | 0.425 (−0.011) |
+
+WT, n=50, all four arms **within one sweep** — no cross-run splice:
+
+| k | loop | `one_shot` | `critique` | `shared_blackboard` |
+|---|---|---|---|---|
+| 7 | 0.170 | 0.172 (+0.002) | 0.175 (+0.005) | 0.169 (−0.002) |
+| 14 | 0.247 | 0.241 (−0.006) | 0.216 (−0.030) | 0.240 (−0.007) |
+| 21 | 0.254 | 0.252 (−0.002) | 0.260 (+0.006) | 0.261 (+0.007) |
+
+MDEs 0.028–0.037 throughout; bold marks the four contrasts that resolve.
+**On WT nothing resolves at all** — nine ties.
+
+### What it establishes
+
+**1. One call matches k calls above the smallest budget.** `one_shot` carries
+no record whatsoever, and it ties the loop at LT k=30 and k=45 and at all
+three WT budgets. Five of six chances to beat it, and the loop takes none. The
+record only pays at LT k=6, where it is worth +0.059.
+
+This is the reverse of the ladder's premise. M6 ordered the rungs by how much
+of the record survives a partition; Phase 2 removes the record entirely and
+loses nothing. The M6 ordering is therefore **not explained by the record
+axis**, and any account of why fan-in underperforms has to work without it.
+
+**2. `critique` fails its pre-registration on both chambers.** Predicted
+≈ loop; measured resolved *worse* at LT k=30 and k=45, with WT's only sizable
+delta (−0.030 at k=14) pointing the same way. Nine contrasts, not one above
+zero by more than noise. A reviewer pass over the selection costs three flat
+calls and never helps. Reported as a negative result.
+
+**3. Structure matters only in the middle of the budget range.** Read down the
+columns: at the small budget the arms scatter (LT spread 0.079) but not along
+the record axis; at the large budget everything converges (LT 0.398–0.436, WT
+0.252–0.261, both narrower than a single arm's sd). The mid-budget cell is the
+only place a coordination difference both exists and is detectable — consistent
+with the loop saturating at F1 ≈ 0.42 by k=30 (see the LT loop curve section).
+
+### The axis test: sharing a record beats splitting it, at one budget
+
+`shared_blackboard` versus `fan_in_spec` isolates the axis properly. Both run
+the same two role prompts; the only difference is whether the two voices write
+into one record or two.
+
+| chamber | small k | middle k | large k |
+|---|---|---|---|
+| LT | −0.016 (MDE 0.027) | **+0.053 (MDE 0.039) RESOLVED** | −0.006 (MDE 0.026) |
+| WT | +0.007 (MDE 0.032) | **+0.046 (MDE 0.039) RESOLVED** | +0.025 (MDE 0.038) |
+
+Different graph, different menu, different budget fractions — and both chambers
+resolve **only at the middle budget**, within 0.007 of each other. This is the
+sharpest replication in the corpus.
+
+Three caveats travel with it, all of them live:
+
+- **Cross-run.** `fan_in_spec` comes from the M6 ladders, `shared_blackboard`
+  from Phase 2. Era drift measured on `llm_pc` is +0.017/+0.008/+0.019 (LT) and
+  +0.025/+0.008/−0.032 (WT). At the middle budget drift is +0.008 on both, so
+  adjusting leaves LT at ≈+0.045 (clear) and WT at ≈+0.038 against an MDE of
+  0.039 — **WT lands exactly on the boundary**. State it as such.
+- **LT crosses the collinear-fix boundary** (`m6-ladder` is pre-fix). Measured
+  rather than assumed: on post-fix LT the drop fires for 0% of cells at k=45,
+  3% at k=30, and only at k=6 is it common. The budget where the LT axis test
+  resolves is 3%-vs-0% affected. WT is post-fix on both sides and clean.
+- **`shared_blackboard` vs the *loop* varies two things** (shared record AND
+  two role-framed voices), which is why `fan_in_spec` and not `llm_pc` is its
+  comparator here. The same caution the spec already carries for the parked
+  rationale-passing arm.
+
+### A confound checked and killed
+
+At LT k=6 the collinear drop fires for **90% of `one_shot` cells** against 20%
+for the loop — a rate correlated with the arm, which is exactly the shape of a
+harness moderator. It is not one: the drop costs ~nothing. Pooled across arms,
+drop-fired 0.172 vs not-fired 0.182; within `critique` −0.006, within
+`shared_blackboard` −0.002. (`llm_pc` shows +0.036 on n=6, the wrong sign for
+the confound and too small to weigh.) `one_shot`'s −0.059 at k=6 is a real
+record effect, not a collinearity artifact.
 
 ---
 
@@ -775,7 +887,22 @@ per-model order, no strays. Single BLAS, single platform, single model tag.
 
 ---
 
-## Paper readiness (assessed 2026-08-28)
+## Paper readiness (assessed 2026-08-28; Phase 2 amendment 2026-08-31)
+
+> **Phase 2 amendment.** The two lead sentences below both survive Phase 2 —
+> neither depends on the record axis. What Phase 2 changes is the *explanation*
+> the paper may offer for the M6 ordering. `one_shot` carries no record and
+> ties the loop at five of six budgets, so **the ordering is not explained by
+> how much of the record survives**, and a draft that argues it that way is now
+> contradicted by our own data. Two consequences: threat 1 below gains a
+> sibling (the ladder's organising axis is unsupported at 5/6 budgets, which is
+> a finding to report, not a defect to fix), and `critique` enters as a clean
+> pre-registered negative. The one place the axis does hold — sharing a record
+> beats splitting it at the middle budget, +0.053 LT / +0.046 WT — replicates
+> across chambers and is the strongest single result in the corpus, but it is a
+> mid-budget-only claim and must be stated as one.
+
+
 
 **The empirical work now carries an AAMAS main-track submission.** Two weeks
 earlier it did not — not because the results were weak, but because the title
@@ -804,6 +931,13 @@ nothing measured what governance costs.
    not knowable in advance.
 
 ### Still open, ranked
+
+0. **The ladder's organising axis is unsupported at 5 of 6 budgets**
+   (new 2026-08-31). Removing the record entirely (`one_shot`) costs nothing
+   outside LT k=6. Report it: the M6 ordering is real and replicated, but the
+   record-survival story we built it on is not what produces it. What remains
+   is narrower and better evidenced — sharing a record beats splitting one at
+   the middle budget, on both chambers.
 
 1. ~~**The negative is carried by middle budgets.**~~ **CLOSED
    2026-08-29.** The headline above now states the scope it can support: of

@@ -928,6 +928,51 @@ right — it makes the loop deterministic given the prompt, which removes the
 seed-to-seed variation the MDE is computed over, and every arm would need a
 replication check before its old rows could be compared with new ones.
 
+## 22. The collinear-drop rate correlates with the ARM — checked, inert (2026-08-31)
+
+**Shape of the suspicion.** §1's lesson is that a scaffold failure rate which
+varies with the experiment's x-axis makes the curve measure the harness. M7
+Phase 2 produced a rate that varies with the *arm*, which is the same defect
+one axis over. On LT k=6, the fraction of cells where PC dropped a collinear
+column is:
+
+| arm | k=6 | k=30 | k=45 |
+|---|---|---|---|
+| `one_shot` | **0.90** | 0.00 | 0.00 |
+| `critique` | 0.37 | 0.00 | 0.00 |
+| `shared_blackboard` | 0.30 | 0.03 | 0.00 |
+| `llm_pc` (loop) | 0.20 | 0.00 | 0.00 |
+
+`one_shot` is the arm that *loses* at k=6 (−0.059, resolved) and it is also the
+arm that trips the degenerate path 4.5x as often as its comparator. If dropping
+a column cost accuracy, the entire k=6 result would be an artifact.
+
+**Measured, not argued: the drop costs ~nothing.** Stratifying LT k=6 cells by
+whether the drop fired:
+
+- pooled across arms: fired 0.172 vs not-fired 0.182 (n=53 / n=67)
+- within `critique`: −0.006 · within `shared_blackboard`: −0.002
+- within `llm_pc`: **+0.036** on n=6 — the wrong sign for the confound
+
+A −0.010 pooled penalty cannot produce a −0.059 arm deficit at a 0.90-vs-0.20
+rate differential; the implied contribution is under −0.01. `one_shot`'s loss
+at LT k=6 is a record effect.
+
+**Why the rate is arm-dependent at all** (mechanism, not defect): at k=6 the
+purchased design matrix is tiny, so whether two columns exceed r > 0.999
+depends on which six experiments were bought — and *what gets bought* is the
+independent variable. The rate collapses to zero by k=30 on LT because more
+experiments break the duplication. It stays high on WT at every budget (479 of
+600 Phase 2 cells) for the unrelated barometer reason in §13.
+
+**Standing rule this reinforces.** A degeneracy counter is not decoration —
+`n_collinear_dropped` existed only because §13 added it, and it is what made
+this a five-minute check instead of an unanswerable objection. Keep counting
+every path where the harness silently substitutes different behaviour.
+
+**Related:** §1 (rate varying with the x-axis), §13 (the collinear fix and the
+pre/post-fix pooling boundary).
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
