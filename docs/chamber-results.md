@@ -10,10 +10,10 @@ before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-08-31**: 6,741 cells, **$108.39**, **zero errored cells**,
+**Corpus as of 2026-08-31**: 9,891 cells, **$108.39**, **zero errored cells**,
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
-LLM-free variance probes, which add 3,300 cells at no cost. The table below is
+LLM-free variance probes, which add 6,450 cells at no cost. The table below is
 the arithmetic of record.)
 
 | dataset | cells | cost | what it establishes |
@@ -38,6 +38,7 @@ the arithmetic of record.)
 | `runs/m7-p2-wt.parquet` | 600 | $5.56 | Phase 2 WT, all four arms including the loop, in one sweep |
 | `runs/variance-probe.parquet` | 3,150 | $0.00 | selection vs measurement variance, 7 LT budgets, no LLM |
 | `runs/variance-probe-1500.parquet` | 150 | $0.00 | max-rows control; refutes the subsample-thinning mechanism |
+| `runs/variance-probe-wt.parquet` | 3,150 | $0.00 | the same decomposition on WT, 7 budgets, no LLM |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -277,6 +278,79 @@ cannot be retrofitted: `max_rows=300` is the configuration of record for all
 3,441 corpus cells, and changing it would fork the pooling boundary the way
 the collinear fix did. Worth stating as a known headroom, not a change.
 
+### WT: the mechanism half-transfers, and the noise floor is the real constraint
+
+Run on WT the same day (`runs/variance-probe-wt.parquet`, 3,150 runs, no LLM,
+7 budgets x 30 selections x 15 subsample seeds). The k=M validation passes
+again — at k=28 all 30 buys are identical and the decomposition returns
+sd 0.007 without being told.
+
+| k | k/M | mean F1 | sd total | sd PC noise | sd selection | loop−random | gap in selection-sd |
+|---|---|---|---|---|---|---|---|
+| 3 | 0.11 | 0.130 | 0.056 | 0.033 | **0.046** | — | — |
+| 7 | 0.25 | 0.191 | 0.055 | 0.039 | 0.039 | −0.011 | −0.3 |
+| 10 | 0.36 | 0.206 | 0.051 | 0.043 | 0.027 | — | — |
+| 14 | 0.50 | 0.213 | 0.056 | 0.049 | 0.027 | +0.039 | **+1.4** |
+| 19 | 0.68 | 0.227 | 0.064 | 0.054 | 0.034 | — | — |
+| 21 | 0.75 | 0.233 | 0.065 | 0.053 | 0.040 | +0.020 | +0.5 |
+| 28 | 1.00 | 0.248 | 0.067 | 0.067 | **0.007** | — | — |
+
+**What replicates.** Skill peaks in the middle: the loop captures **+1.4
+selection-sd at k=14** against −0.3 at k=7 and +0.5 at k=21, the same shape as
+LT's 2.1 at k=30 versus 1.3 at k=6. And selection variance collapses to nothing
+at k=M on both chambers, which is forced rather than discovered.
+
+**What does not.** On LT the room to differ falls monotonically (0.036 →
+0.005). On WT it does **not**: 0.046 → 0.027 at mid-range, then back up to
+0.040 at k=21 before collapsing. So the LT sentence "room falls while skill
+rises, and the payoff peaks where they cross" is **LT-specific**. The
+chamber-general statement is weaker and should be the one the paper makes:
+
+> **The payoff to good selection peaks in the middle of the budget range on
+> both chambers, because that is where agents exploit the available room best.
+> On LT the room also shrinks with budget, which sharpens the peak; on WT it
+> does not.**
+
+The rise at WT k=19–21 is ~2 sigma on the estimate's own uncertainty (±13% at
+30 groups), so it is suggestive rather than established. **Collinearity is
+ruled out as its cause**: the collinear drop count is flat at ~3.1 columns from
+k=7 upward (between-selection sd 0.20 at k=19 and k=21), so it cannot generate
+between-selection variance there. Zero-variance drops fall monotonically
+(16.25 → 2.18 columns) and correlate −0.38 to −0.47 with F1.
+
+**A WT scope note this exposes.** At k=3, **16.25 of 32 columns** are dropped
+as zero-variance and padded back with zeros — over half the graph is answered
+by padding rather than inference. Much of WT's large small-budget selection
+variance is therefore "which half of the graph did you make measurable at all",
+not "did you choose informatively". State it before reading WT's small-budget
+numbers as selection quality.
+
+### The MDE is mostly measurement noise, and that is a design constraint
+
+The probe permits a calculation the corpus could not do before: what the MDE
+would be if two arms selected *identically* and only PC noise separated them.
+
+| | noise-only MDE | observed MDEs |
+|---|---|---|
+| LT k=6, n=30 | 0.023 | 0.031–0.038 |
+| LT k=30, n=30 | 0.031 | 0.029–0.036 |
+| WT k=14, n=50 | 0.028 | 0.035–0.037 |
+| WT k=21, n=50 | 0.029 | 0.036–0.037 |
+
+**Most of our resolving power is spent on measurement noise, not on arm
+variability** — at LT k=30 the observed MDEs sit at or below the noise-only
+floor. Two consequences:
+
+1. **WT Phase 2's nine ties are partly a noise result.** WT noise doubles
+   across the budget range (0.033 → 0.067), so at k=21 roughly 80% of the MDE
+   is PC. An arm genuinely 0.025 better could not have been resolved there at
+   n=50.
+2. **The fix is seeds, not better agents.** Resolving a 0.02 difference at WT
+   k=21 needs **n ≈ 110 per arm**; at LT k=30, **n ≈ 75**. No agent design
+   closes a floor set by the inference procedure. Quote these when reporting
+   an equivalence bound, so "below MDE" reads as a power statement rather than
+   a null.
+
 ### What this does and does not license
 
 It **does** support scoping every coordination claim in this pillar to the
@@ -284,10 +358,9 @@ middle of the budget range, with a mechanism rather than an apology: at the top
 no topology can differ, and at the bottom the room exists but agents cannot
 find it.
 
-It **does not** transfer to WT without re-measurement — the probe is LT-only,
-and WT's menu is 28 wide with a 0.786 recall ceiling from the dropped barometer
-sinks. Running it there is ~5 minutes and no LLM cost; do it before the WT
-scoping sentence relies on this mechanism.
+It **does not** transfer to WT whole. Measured the same day (section above):
+the "skill peaks mid-range" half replicates, the "room falls with budget" half
+does not. Use the chamber-general sentence, not the LT one.
 
 ---
 ## STATUS 2026-08-30: WT `team` re-run COMPLETE — every verdict unchanged

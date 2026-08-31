@@ -983,9 +983,20 @@ two models. Headlines, with the detail and the caveats in the results doc:
   exploiting it rises; the payoff peaks where they cross.** That accounts for
   the inverted-U on both chambers, the axis test resolving only mid-range, and
   `one_shot` sitting exactly on random at LT k=6 (0.160 vs 0.163) yet matching
-  the loop at k=30. Probe is LT-only — **re-run it on WT (5 min, no LLM)
-  before any WT claim leans on this mechanism.**
-  `uv run python -m evaluation.chamber_pipeline.variance_probe --chamber wt --budgets 7,14,21,28`
+  the loop at k=30.
+- **WT half-replicates it** (same day, 3,150 more runs). Skill peaks mid-range
+  on both (loop captures +1.4 selection-sd at WT k=14 vs −0.3 at k=7), but
+  **WT's room does NOT fall monotonically** (0.046 → 0.027 → 0.040 → 0.007).
+  Use the chamber-general sentence — "the payoff peaks mid-range because that
+  is where agents exploit the room best" — not the LT-only "room falls while
+  skill rises".
+- **Most of our MDE is PC noise, not arm variability.** If two arms selected
+  identically, noise alone would give MDE 0.031 (LT k=30, n=30) and 0.029
+  (WT k=21, n=50) — at or above several observed MDEs. **WT's nine Phase 2
+  ties are partly a power result**: WT noise doubles across the budget range
+  (0.033 → 0.067). Resolving a 0.02 gap needs **n≈110 (WT k=21)** or **n≈75
+  (LT k=30)**. Quote this beside every "below MDE" so it reads as power, not
+  as a null. No agent design closes a floor set by the inference procedure.
 
 Paper readiness, the ranked open threats, and the per-dataset index are in
 that document's final section. Harness defects stay in

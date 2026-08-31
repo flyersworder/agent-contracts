@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import random as _random
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -41,6 +42,11 @@ from agent_contracts.integrations.causalchamber import (
 )
 
 from .inference import pc_call_defaults, pool_experiment_data, run_pc
+from .orchestrator import (
+    _PcCollinearHandler,
+    _PcDegeneracyHandler,
+    _PcZeroVarianceHandler,
+)
 from .scoring import f1_edges, shd
 
 
@@ -57,6 +63,13 @@ class ProbeRecord:
     shd: float
     n_rows_pooled: int
     chosen_experiments: str
+    # PC's three degradation paths, counted per run. Recorded because a
+    # degradation rate that varies with the budget would show up in this
+    # probe as between-selection variance and be misread as the choice
+    # mattering more -- the register's recurring failure, one axis over.
+    n_collinear_dropped: int
+    n_zero_variance_dropped: int
+    n_pc_degeneracies: int
 
 
 def run_probe(
@@ -102,13 +115,26 @@ def run_probe(
             )
             truth = adapter.ground_truth()
             for pc_seed in range(n_pc_seeds):
-                predicted = run_pc(
-                    pooled,
-                    nodes,
-                    alpha=pc_alpha,
-                    seed=pc_seed,
-                    max_rows=effective_max_rows,
-                )
+                # Serial by construction: these handlers attach to the
+                # module-global inference logger, so concurrent runs in one
+                # process would cross-contaminate the counts.
+                inference_logger = logging.getLogger("evaluation.chamber_pipeline.inference")
+                collinear = _PcCollinearHandler()
+                zero_var = _PcZeroVarianceHandler()
+                degenerate = _PcDegeneracyHandler()
+                for handler in (collinear, zero_var, degenerate):
+                    inference_logger.addHandler(handler)
+                try:
+                    predicted = run_pc(
+                        pooled,
+                        nodes,
+                        alpha=pc_alpha,
+                        seed=pc_seed,
+                        max_rows=effective_max_rows,
+                    )
+                finally:
+                    for handler in (collinear, zero_var, degenerate):
+                        inference_logger.removeHandler(handler)
                 records.append(
                     ProbeRecord(
                         chamber=chamber,
@@ -120,6 +146,9 @@ def run_probe(
                         shd=float(shd(predicted, truth)),
                         n_rows_pooled=len(pooled),
                         chosen_experiments=json.dumps(sorted(chosen)),
+                        n_collinear_dropped=collinear.count,
+                        n_zero_variance_dropped=zero_var.count,
+                        n_pc_degeneracies=degenerate.count,
                     )
                 )
     return records
