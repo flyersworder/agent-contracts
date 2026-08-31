@@ -1081,63 +1081,73 @@ limitation of those files, not a defect in the contrasts.
 consequence for inference, not just for variance), §23 (a variance whose
 components must be separated before it can be read).
 
-## 25. GLM's endpoints differ 130x in reasoning, not in precision (2026-08-31)
+## 25. Endpoint defaults diverge 130x — but we already pin past them (2026-08-31)
 
-**Caught before the sweep, by probing.** `glm-5.3-flash` was pinned as the
-cross-vendor candidate with the comment "GLM's endpoints are uniformly fp8 ...
-so unlike the deepseek family there is no precision decision to get wrong
-here." Both halves of that sentence are wrong.
+**Recorded as a corrected investigation, because the first version of this
+entry was wrong and the correction is the useful part.**
 
-**The precision half.** The live endpoints API reports **Relace as fp4**, at
-$0.071/$0.237 per M — the *cheapest* of the 21 endpoints, so any price-first
-routing selects it. It was not in `PROVIDER_PRECISION` at all, and the pinned
-order happens to exclude it, so nothing routed there. That is luck, not
-control. Exactly the shape of the AtlasCloud error already recorded in §"the
-provider and the WT dataset were both moderators".
+**What was measured.** Probing `glm-5.3-flash` as the cross-vendor candidate,
+one identical worst-case selection prompt across four pinned endpoints gave a
+**130x spread in reasoning tokens**: Z.AI 6,889 / GMICloud 2,600 / DeepInfra 52,
+all returning a valid on-menu name so nothing failed loudly. Reproduced with
+raw `curl` — no litellm — and the response's `provider` field confirms the pin
+was honoured, so it is neither a client bug nor a routing failure.
 
-**The half that matters more.** One identical worst-case selection prompt (25
-experiments spent, 59-entry menu, ~566 tokens), one model id, four pinned
-endpoints:
+**The wrong conclusion, drawn first.** That "we send no `reasoning` parameter,
+so each endpoint applies its own default." **False for the pipeline.** Every
+production call sets it explicitly: `_SELECTION_REASONING_EFFORT = "low"` and
+`_COORDINATION_REASONING_EFFORT = "high"`, and every recorded sweep carries
+`reasoning_effort` of `"low"` or `"high,low"`. The 130x belongs to the *probe*,
+which sent no parameter; it is not what a sweep does.
 
-| endpoint | wall | reasoning tokens | content |
+**With effort pinned, the endpoints converge** — the same prompt again:
+
+| endpoint | no parameter | `effort=high` | `effort=low` |
 |---|---|---|---|
-| Z.AI | 154.2 s | **6,889** | on-menu name |
-| GMICloud | 74.8 s | 2,600 | on-menu name |
-| DeepInfra | 14.3 s | **52** | on-menu name |
-| Novita | — | rate-limited | — |
+| Z.AI | 4,134 | 2,450 | 163 |
+| GMICloud | 2,600 | — | **0** |
+| DeepInfra | **78** | 1,605 | 29 |
+| Novita | — | — | 28 |
 
-**A 130x spread in reasoning tokens on the same prompt.** All three returned a
-valid name, so nothing fails loudly; the endpoints simply ran three different
-amounts of computation. A sweep that rotates across this order would mix three
-effective models and attribute the difference to whatever the sweep was varying.
+At `low`, where every selection call runs: 0–163 tokens across four endpoints.
+At `high`: 2,450 vs 1,605, single draws. **The pipeline was already using the
+API correctly on this axis.** `reasoning: {enabled: false}` is rejected
+outright — reasoning is mandatory for this model.
 
-This is a **larger** endpoint effect than the fp4/fp8 issue, and it is invisible
-to the existing homogeneity test, which checks declared *precision* only.
+**What the probe did legitimately establish:**
 
-**Consequences, before any GLM cell is run:**
+1. **Relace is fp4 on BOTH models**, and at $0.071/$0.237 (GLM) and $0.180
+   (deepseek) it is among the cheapest endpoints, so price-first routing
+   selects it. It was absent from `PROVIDER_PRECISION`; now declared fp4.
+2. **`PROVIDER_PRECISION`'s provider-only keying is unsound in principle.**
+   `Reka` is **fp4 for deepseek-v4-flash-0731 and fp8 for glm-5.3-flash** — the
+   same fact `_provider_order_for`'s own docstring states ("quantization is a
+   property of the (provider, model) pair") but the table cannot express. Not
+   currently biting: Reka appears in no pinned order. Fix it before adding a
+   third model, not after.
+3. **A stray-provider audit, previously never enumerated.** 17 of 750 cells in
+   `m6-wt-ladder-final` were served by endpoints in no pinned order — Relace
+   (8, fp4), OpenInference (10, fp8), DigitalOcean (4, unknown) — because those
+   runs predate `allow_fallbacks: False` (§8). Residualised on arm x budget:
+   **+0.005 vs −0.000, Welch p = 0.76**, and 13 of the 17 sit in
+   `planner_reasoner` k=14, an arm that resolves in neither direction anywhere.
+   Not distorting; recorded so the count exists.
+4. **One CoreWeave draw burned 30,573 of a 32,768 cap on reasoning and returned
+   EMPTY content** — the Together failure mode (§"the provider and the WT
+   dataset were both moderators") appearing in a *pinned* provider. That draw
+   sent no effort parameter, so it is not the production path; CoreWeave's 900
+   recorded cells show `n_selection_fallbacks` of 0.06, identical to every
+   other endpoint. Watch it rather than act on it.
 
-1. **Precision homogeneity is not sufficient.** The pin must also be
-   homogeneous in *reasoning behaviour*, which is a property of the
-   (provider, model) pair and is only observable by measurement.
-2. **Prefer a single pinned endpoint for GLM**, or an explicit
-   `reasoning` setting verified to equalise the endpoints. Sending no
-   reasoning parameter means each endpoint applies its own default, and the
-   defaults are not close.
-3. The cross-vendor comparison does not require GLM to match DeepSeek's
-   reasoning budget — only that GLM be internally consistent across cells.
-   One endpoint achieves that; four do not.
-4. `PROVIDER_PRECISION` gains `Relace: fp4`, and the "uniformly fp8" comment
-   is corrected.
+**The lesson, which is not the one the first draft drew.** A probe that omits a
+parameter the pipeline sets does not measure the pipeline — it measures a
+configuration nobody runs, and its most dramatic number is an artifact of the
+omission. **Probe the production call path, or state loudly that you did not.**
+The genuine defects here were found in the *endpoint metadata* (precision,
+pricing, who actually served past cells), not in the reasoning behaviour.
 
-**Method note.** The probe cost four API calls and caught a confound that
-would have been indistinguishable from a vendor effect in the finished sweep —
-the exact claim the cross-vendor replication exists to make. Probe endpoints,
-not just models, and probe them at the worst-case prompt in the loop rather
-than the first (§"DeepSeek reasoning tokens").
-
-**Related:** §"the provider and the WT dataset were both moderators" (price and
-precision across endpoints), §21 (temperature unpinned — the same class of
-defect, an unspecified inference parameter left to a default).
+**Related:** §21 (temperature IS unpinned — the real instance of this class),
+§8 (`allow_fallbacks`), §"the provider and the WT dataset were both moderators".
 
 ## Standing scope limits (not defects)
 

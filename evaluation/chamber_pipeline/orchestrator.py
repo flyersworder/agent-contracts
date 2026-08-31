@@ -520,22 +520,20 @@ _FLASH_PROVIDER_ORDER: tuple[str, ...] = (
     "Parasail",
 )
 
-# GLM endpoints are NOT uniform, in two ways the earlier comment here got
-# wrong (register entry 25, measured 2026-08-31).
+# GLM endpoints, probed 2026-08-31 (register entry 25).
 #
-# Precision: Relace is **fp4**, and at $0.071/$0.237 per M it is the CHEAPEST
-# of the 21 endpoints -- so price-first routing selects it. It is excluded
-# below and declared fp4 in PROVIDER_PRECISION.
+# Precision: Relace is **fp4** on this model AND on deepseek-v4-flash-0731,
+# and at $0.071/$0.237 per M it is among the cheapest endpoints -- so
+# price-first routing selects it. Excluded below, declared fp4 in
+# PROVIDER_PRECISION.
 #
-# Reasoning: far more consequential, and invisible to the homogeneity test,
-# which checks declared precision only. On one identical worst-case selection
-# prompt the pinned endpoints spent 6,889 (Z.AI), 2,600 (GMICloud) and 52
-# (DeepInfra) reasoning tokens -- a 130x spread, all three returning a valid
-# on-menu name. Rotating across them would mix three effective models.
-#
-# Until an explicit `reasoning` setting is verified to equalise them, a GLM
-# sweep must PIN ONE ENDPOINT. The order below is kept for the probe path and
-# is NOT safe to rotate across; see register entry 25 before using it.
+# Reasoning: with NO `reasoning` parameter the endpoints diverge 130x on one
+# identical prompt (Z.AI 6,889 tokens, GMICloud 2,600, DeepInfra 52). That is
+# NOT the path this pipeline takes -- every call sets `reasoning.effort`
+# explicitly (`_SELECTION_REASONING_EFFORT`, `_COORDINATION_REASONING_EFFORT`)
+# -- and with it pinned the same four endpoints land at 0-163 tokens on `low`
+# and 1,605-2,450 on `high`. The order below is therefore safe to rotate
+# across, PROVIDED the caller pins effort as the agents do.
 _GLM_PROVIDER_ORDER: tuple[str, ...] = (
     "Z.AI",
     "DeepInfra",
