@@ -520,10 +520,22 @@ _FLASH_PROVIDER_ORDER: tuple[str, ...] = (
     "Parasail",
 )
 
-# GLM's endpoints are uniformly fp8 -- Relace, Z.AI, Novita, DeepInfra and
-# GMICloud all quote $0.250/M out at fp8 -- so unlike the deepseek family
-# there is no precision decision to get wrong here. Ordered by vendor-first
-# then the endpoints we already exercise for other models.
+# GLM endpoints are NOT uniform, in two ways the earlier comment here got
+# wrong (register entry 25, measured 2026-08-31).
+#
+# Precision: Relace is **fp4**, and at $0.071/$0.237 per M it is the CHEAPEST
+# of the 21 endpoints -- so price-first routing selects it. It is excluded
+# below and declared fp4 in PROVIDER_PRECISION.
+#
+# Reasoning: far more consequential, and invisible to the homogeneity test,
+# which checks declared precision only. On one identical worst-case selection
+# prompt the pinned endpoints spent 6,889 (Z.AI), 2,600 (GMICloud) and 52
+# (DeepInfra) reasoning tokens -- a 130x spread, all three returning a valid
+# on-menu name. Rotating across them would mix three effective models.
+#
+# Until an explicit `reasoning` setting is verified to equalise them, a GLM
+# sweep must PIN ONE ENDPOINT. The order below is kept for the probe path and
+# is NOT safe to rotate across; see register entry 25 before using it.
 _GLM_PROVIDER_ORDER: tuple[str, ...] = (
     "Z.AI",
     "DeepInfra",
@@ -628,6 +640,9 @@ class _CountingLLM:
         # fp4 — INELIGIBLE, different numerics
         "AtlasCloud": "fp4",
         "Reka": "fp4",
+        # Cheapest glm-5.3-flash endpoint, hence the one price-first routing
+        # picks. Declared here so it can never enter an order by accident.
+        "Relace": "fp4",
         # unquantised/undeclared — INELIGIBLE, precision class unknown
         "Together": "unknown",
         "DeepSeek": "unknown",

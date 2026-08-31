@@ -1081,6 +1081,64 @@ limitation of those files, not a defect in the contrasts.
 consequence for inference, not just for variance), §23 (a variance whose
 components must be separated before it can be read).
 
+## 25. GLM's endpoints differ 130x in reasoning, not in precision (2026-08-31)
+
+**Caught before the sweep, by probing.** `glm-5.3-flash` was pinned as the
+cross-vendor candidate with the comment "GLM's endpoints are uniformly fp8 ...
+so unlike the deepseek family there is no precision decision to get wrong
+here." Both halves of that sentence are wrong.
+
+**The precision half.** The live endpoints API reports **Relace as fp4**, at
+$0.071/$0.237 per M — the *cheapest* of the 21 endpoints, so any price-first
+routing selects it. It was not in `PROVIDER_PRECISION` at all, and the pinned
+order happens to exclude it, so nothing routed there. That is luck, not
+control. Exactly the shape of the AtlasCloud error already recorded in §"the
+provider and the WT dataset were both moderators".
+
+**The half that matters more.** One identical worst-case selection prompt (25
+experiments spent, 59-entry menu, ~566 tokens), one model id, four pinned
+endpoints:
+
+| endpoint | wall | reasoning tokens | content |
+|---|---|---|---|
+| Z.AI | 154.2 s | **6,889** | on-menu name |
+| GMICloud | 74.8 s | 2,600 | on-menu name |
+| DeepInfra | 14.3 s | **52** | on-menu name |
+| Novita | — | rate-limited | — |
+
+**A 130x spread in reasoning tokens on the same prompt.** All three returned a
+valid name, so nothing fails loudly; the endpoints simply ran three different
+amounts of computation. A sweep that rotates across this order would mix three
+effective models and attribute the difference to whatever the sweep was varying.
+
+This is a **larger** endpoint effect than the fp4/fp8 issue, and it is invisible
+to the existing homogeneity test, which checks declared *precision* only.
+
+**Consequences, before any GLM cell is run:**
+
+1. **Precision homogeneity is not sufficient.** The pin must also be
+   homogeneous in *reasoning behaviour*, which is a property of the
+   (provider, model) pair and is only observable by measurement.
+2. **Prefer a single pinned endpoint for GLM**, or an explicit
+   `reasoning` setting verified to equalise the endpoints. Sending no
+   reasoning parameter means each endpoint applies its own default, and the
+   defaults are not close.
+3. The cross-vendor comparison does not require GLM to match DeepSeek's
+   reasoning budget — only that GLM be internally consistent across cells.
+   One endpoint achieves that; four do not.
+4. `PROVIDER_PRECISION` gains `Relace: fp4`, and the "uniformly fp8" comment
+   is corrected.
+
+**Method note.** The probe cost four API calls and caught a confound that
+would have been indistinguishable from a vendor effect in the finished sweep —
+the exact claim the cross-vendor replication exists to make. Probe endpoints,
+not just models, and probe them at the worst-case prompt in the loop rather
+than the first (§"DeepSeek reasoning tokens").
+
+**Related:** §"the provider and the WT dataset were both moderators" (price and
+precision across endpoints), §21 (temperature unpinned — the same class of
+defect, an unspecified inference parameter left to a default).
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there

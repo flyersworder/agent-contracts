@@ -632,6 +632,15 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
 
 ## Operational notes (chamber pillar)
 
+- **GLM endpoints are NOT interchangeable** (probed 2026-08-31, register §25).
+  One identical prompt, one model id `z-ai/glm-5.3-flash`, four pinned
+  endpoints: **6,889 reasoning tokens on Z.AI, 2,600 on GMICloud, 52 on
+  DeepInfra** — a 130x spread, all returning valid on-menu names, so nothing
+  fails loudly. **Pin ONE endpoint for any GLM sweep**; rotating mixes three
+  effective models. Also `Relace` is **fp4** and the cheapest of the 21
+  endpoints, so price-first routing picks it — now declared ineligible.
+  Precision homogeneity is not sufficient; reasoning behaviour is a property
+  of the (provider, model) pair and only measurement reveals it.
 - **OpenRouter rate limits**: `deepseek-v4-flash` is hosted by 8 providers; the orchestrator pins providers in order `(Novita, AtlasCloud, Parasail, SiliconFlow)` because per-provider throughput drifts day-to-day (May 9: Parasail was fastest; May 15: Novita was 7× faster). See `evaluation/chamber_pipeline/orchestrator.py:_CountingLLM.DEFAULT_PROVIDER_ORDER` and re-probe before any multi-hour sweep.
 - **Socket timeout**: `socket.setdefaulttimeout(30)` is set at `run_experiment.py` module load — without this, `litellm.completion(timeout=N)` doesn't propagate to the SSL socket and stuck calls hang the process forever.
 - **Max tokens**: `_llm_select_loop` caps output at 200 tokens (selection step) and `llm_only_agent` at **32768** (adjacency emission, was 4096 pre-M4b-fix). DeepSeek v4 Flash is a *reasoning model* — `reasoning_tokens` typically 95% of `completion_tokens`. At 38-node adjacency prompts the 4096 cap was entirely consumed by hidden reasoning before any `content` was emitted (verified via `usage.completion_tokens_details.reasoning_tokens` on a 2-node diagnostic, 2026-05-14).
