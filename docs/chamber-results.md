@@ -4,16 +4,17 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-two
+**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-three
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-08-31**: 3,441 cells, **$108.39**, **zero errored cells**,
+**Corpus as of 2026-08-31**: 6,741 cells, **$108.39**, **zero errored cells**,
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
-it predated the seven M7 files, which add 1,220 cells and $14.34. The table
-below is the arithmetic of record.)
+it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
+LLM-free variance probes, which add 3,300 cells at no cost. The table below is
+the arithmetic of record.)
 
 | dataset | cells | cost | what it establishes |
 |---|---|---|---|
@@ -35,6 +36,8 @@ below is the arithmetic of record.)
 | `runs/m7-p2-lt.parquet` | 270 | $3.72 | Phase 2 LT: `one_shot`, `critique`, `shared_blackboard` |
 | `runs/m7-p2-ref.parquet` | 90 | $2.29 | same-era LT `llm_pc` reference for the Phase 2 panel |
 | `runs/m7-p2-wt.parquet` | 600 | $5.56 | Phase 2 WT, all four arms including the loop, in one sweep |
+| `runs/variance-probe.parquet` | 3,150 | $0.00 | selection vs measurement variance, 7 LT budgets, no LLM |
+| `runs/variance-probe-1500.parquet` | 150 | $0.00 | max-rows control; refutes the subsample-thinning mechanism |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -164,6 +167,129 @@ record effect, not a collinearity artifact.
 
 ---
 
+## WHY THE MIDDLE BUDGET (2026-08-31): room falls, skill rises, the payoff peaks where they cross
+
+Phase 2 left an interpretive gap: three separate results — the loop-vs-random
+gap, the axis test, and `one_shot`'s collapse at LT k=6 — all pointed at the
+middle of the budget range without a shared account of why. This section
+supplies one, and it is measured rather than argued.
+
+**Dataset**: `runs/variance-probe.parquet`, 3,150 PC runs, **no LLM**, ~5 min.
+`runs/variance-probe-1500.parquet` (150) is the max-rows control.
+
+### The probe: untie the two things the seed controls
+
+Every cell's `seed` sets both WHICH experiments a selection-free agent buys and
+WHICH 300 rows `run_pc` subsamples. So the spread of `random` at any budget is
+`selection variance + measurement noise` with no way to separate them, and the
+corpus's noise-floor claim ("at k=M selection freedom is zero, so the spread is
+pure PC noise") was an argument from construction, not a measurement.
+
+`evaluation/chamber_pipeline/variance_probe.py` crosses the two seeds instead
+of tying them: 30 independent random buys per budget, each scored under 15
+different subsample seeds. That is a one-way ANOVA layout — between-group
+variance is what the CHOICE is worth, within-group is what the MEASUREMENT
+costs. Group means over m draws still carry `sigma_within^2 / m`, so the
+between-estimate is bias-corrected; without that, pure noise reads as a
+selection effect.
+
+**The method validates itself on the bottom row.** At k=M=59 every "selection"
+buys the whole menu, so all 30 are literally identical and the true selection
+variance is zero by construction. The decomposition recovers **sd 0.005**
+without being told.
+
+### What the choice is worth, by budget
+
+| k | k/M | mean F1 | sd total | sd **PC noise** | sd **selection** | loop−random | gap in selection-sd |
+|---|---|---|---|---|---|---|---|
+| 6 | 0.10 | 0.170 | 0.048 | 0.032 | **0.036** | +0.047 | 1.3 |
+| 12 | 0.20 | 0.256 | 0.055 | 0.037 | **0.042** | +0.014 | 0.3 |
+| 20 | 0.34 | 0.326 | 0.052 | 0.036 | **0.038** | +0.042 | 1.1 |
+| 30 | 0.51 | 0.368 | 0.050 | 0.043 | 0.026 | +0.055 | **2.1** |
+| 40 | 0.68 | 0.393 | 0.045 | 0.041 | 0.018 | +0.036 | **2.0** |
+| 50 | 0.85 | 0.412 | 0.046 | 0.043 | 0.015 | +0.000 | 0.0 |
+| 59 | 1.00 | 0.416 | 0.042 | 0.041 | 0.005 | +0.008 | — |
+
+`loop−random` is from `runs/m6-lt-loop-curve.parquet` (same chamber, same
+backend, post-fix). The last column expresses it in units of the room that
+actually exists at that budget.
+
+### Three findings
+
+**1. Total spread is flat because two opposing trends cancel.** `sd_total`
+sits at 0.042–0.055 at every budget, which invites the reading that nothing
+changes with k. The decomposition shows the opposite: **selection variance
+falls by 8x (0.042 → 0.005) while measurement noise rises slightly (0.032 →
+0.041)**, and the sum happens to stay put. Any inference from the flat total —
+including one made in this project on 2026-08-31 and corrected here — is
+reading a coincidence.
+
+**2. Room to differ collapses with budget; this is the honest form of "fewer
+choices matter more."** Which experiments you buy is worth sd 0.036–0.042 at
+k/M <= 0.34, sd 0.015–0.026 above it, and sd 0.005 at k=M. Note the shape:
+below k/M = 0.34 it is a **plateau, not a rise**. Selection does not become
+progressively more decisive as the budget shrinks; it hits a ceiling and stays
+there. The decisive change is the collapse above k/M = 0.5.
+
+**3. Skill at exploiting the room moves the other way.** The loop captures
+**2.1 and 2.0 selection-sd** at k=30 and k=40 against **1.3** at k=6 — it
+lands near the top of the achievable distribution at middle budgets and only
+partway up at the smallest. So:
+
+> **The room to differ falls with budget while the ability to exploit it
+> rises. The absolute payoff to good selection peaks where the two curves
+> cross — the middle of the range.**
+
+That single sentence accounts for all three Phase 2 observations: the
+inverted-U in loop-vs-random on both chambers (LT peak +0.055 at k/M=0.51, WT
+peak +0.039 at k/M=0.50); the axis test resolving only at the middle budget on
+both; and every arm converging at the top, where there is nothing left to
+exploit.
+
+It also explains **`one_shot`'s split personality**. At LT k=6 it captures
+**0.0** of the 0.036 available — it sits exactly on random (0.160 vs 0.163) —
+while at k=30 it captures +0.079 over random, matching the loop. The room at
+k=6 is real; a single call simply cannot find any of it, and sequential
+deliberation can find some. Picking a *reasonable half* of a menu needs little
+discrimination; picking the best six of 59 needs a lot.
+
+### A mechanism proposed, tested, and refuted
+
+Measurement noise rises with k, and the obvious explanation is that a
+fixed 300-row subsample thins per-experiment coverage linearly: at k=6 those
+300 rows cover 6 experiments (~50 rows each), at k=59 they cover 59 (~5 each).
+Tested at 5x the rows on **identical selections**:
+
+| | within-sd @ 300 | @ 1500 | mean F1 @ 300 | @ 1500 |
+|---|---|---|---|---|
+| k=6 | 0.0345 | 0.0346 | 0.212 | 0.236 |
+| k=59 | 0.0390 | 0.0369 | 0.418 | 0.442 |
+
+**Noise does not move** (−5% at k=59, 0% at k=6). The subsample is not what
+makes PC noisy; the noise is intrinsic to the accept/reject cascade at alpha,
+consistent with register §10's account of why a 1e-10 numerical perturbation
+forks the conditioning-set search. The proposed mechanism is refuted and
+recorded as such.
+
+**Side finding with a cost attached**: 5x the rows buys **+0.025 F1 at both
+budgets** — uniform, not budget-dependent. Free accuracy for runtime. It
+cannot be retrofitted: `max_rows=300` is the configuration of record for all
+3,441 corpus cells, and changing it would fork the pooling boundary the way
+the collinear fix did. Worth stating as a known headroom, not a change.
+
+### What this does and does not license
+
+It **does** support scoping every coordination claim in this pillar to the
+middle of the budget range, with a mechanism rather than an apology: at the top
+no topology can differ, and at the bottom the room exists but agents cannot
+find it.
+
+It **does not** transfer to WT without re-measurement — the probe is LT-only,
+and WT's menu is 28 wide with a 0.786 recall ceiling from the dropped barometer
+sinks. Running it there is ~5 minutes and no LLM cost; do it before the WT
+scoping sentence relies on this mechanism.
+
+---
 ## STATUS 2026-08-30: WT `team` re-run COMPLETE — every verdict unchanged
 
 The parser defect that fired **only on WT and only on rung 4** is retired.

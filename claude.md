@@ -974,6 +974,18 @@ two models. Headlines, with the detail and the caveats in the results doc:
 - **`critique` is a clean pre-registered negative**: a reviewer pass over the
   selection costs 3 flat calls and resolves *worse* at LT k=30/45. Nine
   contrasts, none positive beyond noise.
+- **Why the middle budget** (variance probe, 2026-08-31, 3,150 LLM-free PC
+  runs). Untying the two things `seed` controls — the buy and PC's 300-row
+  subsample — decomposes the spread: **selection variance falls 8x with budget
+  (sd 0.036 -> 0.005) while PC noise rises (0.032 -> 0.041)**, so the flat
+  total sd hides an inversion. Meanwhile the loop captures 2.1 selection-sd at
+  k=30 against 1.3 at k=6. **Room to differ falls with budget; skill at
+  exploiting it rises; the payoff peaks where they cross.** That accounts for
+  the inverted-U on both chambers, the axis test resolving only mid-range, and
+  `one_shot` sitting exactly on random at LT k=6 (0.160 vs 0.163) yet matching
+  the loop at k=30. Probe is LT-only — **re-run it on WT (5 min, no LLM)
+  before any WT claim leans on this mechanism.**
+  `uv run python -m evaluation.chamber_pipeline.variance_probe --chamber wt --budgets 7,14,21,28`
 
 Paper readiness, the ranked open threats, and the per-dataset index are in
 that document's final section. Harness defects stay in

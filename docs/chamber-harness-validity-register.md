@@ -973,6 +973,59 @@ every path where the harness silently substitutes different behaviour.
 **Related:** §1 (rate varying with the x-axis), §13 (the collinear fix and the
 pre/post-fix pooling boundary).
 
+## 23. A flat total variance hid two opposing trends (2026-08-31)
+
+**The misreading.** The spread of `random` cells is nearly constant across LT
+budgets — sd 0.048 at k=6, 0.042 at k=59 — and on 2026-08-31 that flatness was
+read, in-session, as evidence that *which* experiments you buy contributes
+little variance at small budgets. The reasoning was: k=M has zero selection
+freedom by construction, so its sd is pure PC noise; a similar sd at k=6 must
+therefore be mostly noise too.
+
+The premise is right and the inference is wrong, because it assumes PC noise is
+budget-independent. `runs/variance-probe.parquet` (3,150 LLM-free PC runs)
+crosses the selection seed against the subsample seed and separates them:
+
+| k | sd total | sd PC noise | sd selection |
+|---|---|---|---|
+| 6 | 0.048 | 0.032 | **0.036** |
+| 30 | 0.050 | 0.043 | 0.026 |
+| 59 | 0.042 | 0.041 | **0.005** |
+
+Selection variance falls **8x** while measurement noise **rises**, and the sum
+happens to stay flat. The choice is worth *more* at k=6 than the flat total
+suggested, not less — the error pointed away from a real effect.
+
+**Why this is a register entry and not just a corrected number.** It is the
+same failure as §1 one level up: a quantity that looks stable across the
+experiment's x-axis, taken as evidence that nothing varies with it, when in
+fact two components vary and cancel. A single aggregate statistic cannot
+license a claim about its components. The general rule: **before reading a
+flat curve as "no effect", check whether the flatness is a sum.**
+
+**How it was caught.** By building the instrument rather than arguing. The
+probe cost five minutes and no LLM spend, and it validates itself on a row
+whose answer is known by construction: at k=M all 30 "selections" buy the
+identical whole menu, and the decomposition returns sd 0.005 without being
+told. A method that could not recover that would not be trusted on the rows
+where the answer is unknown.
+
+**A second claim killed in the same probe.** The obvious explanation for
+rising noise — a fixed 300-row subsample thinning per-experiment coverage as k
+grows — was tested at 5x the rows on identical selections and **refuted**:
+within-sd moved −5% at k=59 and 0% at k=6. The noise is intrinsic to the
+accept/reject cascade (§10), not to the row cap. Recorded because the
+mechanism was plausible enough to have been asserted without testing.
+
+**Standing headroom, deliberately not taken**: those same runs show
+`max_rows=1500` buys **+0.025 F1 at both budgets**. It is real accuracy for
+runtime, but `max_rows=300` is the configuration of record for all 3,441
+LLM-bearing corpus cells, so adopting it would fork the pooling boundary the
+way the collinear fix did (§13). Stated as known headroom, not applied.
+
+**Related:** §1 (a harness quantity varying with the x-axis), §10 (why PC
+converts numerical noise into structural noise), §13 (pooling boundaries).
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
