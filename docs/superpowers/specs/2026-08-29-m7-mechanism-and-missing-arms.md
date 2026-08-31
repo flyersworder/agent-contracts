@@ -1,10 +1,11 @@
 # M7: the mechanism, the missing arms, and the two reviewer objections
 
-**Status**: Phases 1 and 2 complete (2026-08-30 / 2026-08-31). Phase 3 next.
+**Status**: Phases 1-2 complete. **Plan revised 2026-08-31 — see §8**, which
+reprioritises Phase 3 around what stands between this and an accept.
 **Opened**: 2026-08-29
-**Last revised**: 2026-08-31 — Phase 2 results folded in; the record axis is
-unsupported at 5 of 6 budgets, and §1/§3 must no longer argue from it except
-at the middle budget
+**Last revised**: 2026-08-31 — Phase 2 folded in (the record axis is
+unsupported at 5 of 6 budgets), and §8 added: revised framing, the four ranked
+threats, and a reprioritised Phase 3 led by cross-vendor replication
 **Predecessor**: M6 coordination ladder (`2026-08-22-m6-coordination-ladder-design.md`)
 **Results of record**: `docs/chamber-results.md`
 **Harness defects**: `docs/chamber-harness-validity-register.md` (19 entries — read first)
@@ -567,6 +568,148 @@ collision from *seeing* it.
 
 Still true, and worth repeating because it keeps being the thing that saves
 results: look between phases rather than queueing them.
+
+## 8. Revised plan (2026-08-31): what turns this into a strong submission
+
+Phases 1 and 2 are done and the corpus is large. The remaining question is no
+longer "what else can we measure" but **"what is between this and an accept"**.
+The honest assessment: a solid submission exists today; a strong one needs the
+generality gap closed, and needs the framing rebuilt because Phase 2 falsified
+the one the ladder was designed around.
+
+### 8.1 The framing that survived
+
+Not "a coordination ladder ordered by surviving record" — `one_shot` ties the
+loop at 5 of 6 budgets, so that ordering is not what produces the M6 effect.
+The framing that the data does support:
+
+> Multi-agent evaluations almost always give more agents more budget. We hold
+> the budget fixed — enforced by delegation contracts — and compare topologies
+> on two real physical causal-discovery testbeds. Under matched budgets no
+> fan-in topology beats a single sequential loop; the deficit is mostly
+> duplicated coverage rather than coordination overhead; and changing *what*
+> is partitioned (the variable space, not the task) recovers it.
+
+Three loads this carries that the old framing did not:
+
+1. **The matched-budget control is the field's missing measurement.** The
+   motivating citation concedes the point in its own numbers (§1): a 12.7%
+   multi-agent win on 4.2x the tokens, which the authors reduce to "comparable"
+   once scope is matched.
+2. **Contracts are the instrument, not decoration.** You cannot credibly assert
+   "matched budget" across a fan-in topology without conservation-enforcing
+   delegation. That is why this benchmark did not already exist, and it is what
+   ties `core/delegation_graph.py`'s telescoping bound to the empirical work.
+3. **There is a positive, quantitative, actionable result**: +0.0073 F1 per
+   distinct variable, measured LLM-free by direct manipulation, predicting
+   two-thirds of `team`'s deficit — and `team_varsplit` then recovers +0.036 as
+   a pre-registered prediction. "More agents don't help; more coverage does, at
+   this exchange rate, and here is the one-line change" beats any negative.
+
+### 8.2 The four threats, ranked by what they cost to close
+
+| # | threat | cost to close | closes it? |
+|---|---|---|---|
+| 1 | **One task family.** Two chambers, but both are "buy experiments, run PC". The loop-vs-graph discourse is about software and research agents. | very high (new domain) | **No — scope instead** |
+| 2 | **One model family.** flash + pro is DeepSeek twice. Second question every reviewer asks. | **~$20–30** | **Yes** |
+| 3 | **Equivalence claims at modest power.** The MDE is ~80% PC noise (§"WHY THE MIDDLE BUDGET"), and `one_shot`'s LT k=30 bound is ±0.051 after the pseudo-replication correction (register §24). | ~$5 + compute | **Mostly** |
+| 4 | **Post-hoc assembly.** Two of three Phase 2 pre-registrations failed; the surviving story was assembled after. | $0 | **Yes, by disclosure** |
+
+Threat 1 is not closable at this budget and must be **scoped in the title and
+abstract**, not deferred to §7. Threat 4 is closable for free and the defence is
+unusually strong: predictions are timestamped in git, both failures are
+reported, and three earlier conclusions were publicly retracted (the walks
+external-validity claim, "team's cost is not redundancy", and the flat-variance
+reading). Lead with that rather than burying it.
+
+### 8.3 Phase 3, reprioritised
+
+**3a. Cross-vendor replication — PROMOTED to the highest-value remaining
+work.** This was previously filed under non-goals as "not a cross-vendor
+sweep", which conflated two different things: a *sweep* across many vendors
+(still a non-goal, a different paper) and a *replication* of the key contrasts
+on one second family (the thing that answers threat 2).
+
+Scope it to the contrasts the paper actually leads with, not the full grid:
+
+| contrast | budgets | why it must replicate |
+|---|---|---|
+| loop vs `team` | mid only | the headline topology negative |
+| loop vs `team_varsplit` | mid only | the positive result and the fix |
+| loop vs `one_shot` | mid + high | the record claim |
+| loop vs random | mid only | proves the instrument discriminates |
+
+One chamber (LT), n=30, mid budget = k=30, plus k=45 for `one_shot`. ~$20–30.
+**Probe first** — availability, price, provider endpoints and quantization per
+candidate — as `PROVIDER_ORDER_BY_MODEL` raises on unpinned models by design.
+
+A replication that holds is worth more to this paper than any additional
+topology. If it does NOT hold, that is also publishable and reframes the
+contribution as model-dependence of coordination benefit — but we need to know
+before the rewrite, not after.
+
+**3b. Selection diversity for single-call arms — NEW, small, blocking for the
+record claim.** `one_shot` re-picks the same design (6 distinct at LT k=30), so
+its equivalence bound cannot be tightened by seeds. Shuffle the menu order per
+seed inside the single call, re-run `one_shot` on both chambers (~180 cells,
+~$4), and report distinct-selection counts for every arm as a standard column.
+Without this, the LT k=30 half of the record claim stays at ±0.051.
+
+**3c. Bound tightening by multi-seed scoring — NEW, no LLM cost.** Averaging a
+cell over m PC subsample seeds shrinks its noise by sqrt(m); the probe shows
+noise is most of our per-cell spread. **Only valid after clustering by
+selection** (register §24 records the near-miss where it was not). Applies to
+M7 files only — the M6 ladders predate `chosen_experiments`.
+
+**3d. Adaptive feedback — DEMOTED to optional.** Still the right design (loop +
+current adjacency estimate, LT, one budget, as a bound rather than a branch),
+and its direction is pre-registered by the bagging/boosting framing. But it
+answers a reviewer objection about scope, while 3a answers one about validity.
+Run it only if 3a lands early.
+
+**3e. Mixed-model team — DEMOTED to optional.** A genuinely different pair of
+architectures inside one team is interesting, but it adds an arm to a benchmark
+whose problem is generality, not coverage. `fan_in_spec` already shows prompted
+divergence is real (overlap 0.79 -> 0.32) and still loses.
+
+### 8.4 Phase 4 rewrite — three changes Phase 2 forces
+
+1. **The old scoping sentence is falsified and must not be reused.** It read:
+   "partitioning strictly loses, and it loses in proportion to how much of the
+   record it destroys." `one_shot` destroys the entire record and loses nothing
+   at 5 of 6 budgets. Replacement, which the data does carry:
+
+   > Under matched budgets, partitioning the *task* between agents loses;
+   > partitioning the *variable space* does not. The loss tracks duplicated
+   > coverage, not how much of the record survives.
+
+2. **Add a discrimination table, early, before the negatives.** The compressed
+   reviewer objection is "nothing you tried mattered — your task doesn't
+   discriminate." The answer is a table of what *does* resolve: loop vs random
+   (+0.047 to +0.055, 4 of 7 LT budgets), `team_varsplit` vs `team` (+0.036),
+   shared vs split record (+0.053 LT / +0.046 WT), contracted vs uncontracted
+   (+0.058 WT), coverage (+0.0073/variable). The instrument discriminates; the
+   topologies genuinely do not differ.
+
+3. **Report power, not just significance.** State the noise-only MDE floor
+   beside every equivalence (0.031 at LT k=30, 0.029 at WT k=21) and the seeds
+   a 0.02 effect would need (n≈75 LT, n≈110 WT). An equivalence without a bound
+   reads as a null; with one it is a result.
+
+### 8.5 Sequencing
+
+1. **Probe the second model family** (availability, price, endpoints,
+   quantization). Half a day, no sweep.
+2. **3a cross-vendor replication**, ~$20–30. Highest value remaining.
+3. **3b selection diversity** re-run of `one_shot`, ~$4. Can run alongside 3a.
+4. **3c bound tightening**, no LLM cost, after 3b so it clusters correctly.
+5. **Phase 4 rewrite** with 8.4's three changes.
+6. Optional, only if time: 3d feedback, 3e mixed-model team.
+
+**Not on this list, deliberately**: more topologies, more budgets, >2 agents,
+bagged scoring, the hidden-profile analogue, the rationale-passing blackboard.
+All are recorded in §7 with reasons; none of them moves an accept/reject
+threat.
 
 ## 7. Non-goals
 

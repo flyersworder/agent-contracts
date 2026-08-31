@@ -971,6 +971,12 @@ two models. Headlines, with the detail and the caveats in the results doc:
   (WT k=14), both resolved, nothing at the small or large budget. Sharing a
   record with yourself (the loop) is worth nothing. Cross-run; WT sits on the
   MDE boundary after drift adjustment.
+- **Report equivalences with their bound and their power**, never as nulls.
+  `one_shot`'s cells are NOT independent draws (register §24): a single call
+  re-picks the same design, 6 distinct across 30 cells at LT k=30. Every Phase
+  2 verdict survives selection-level re-analysis, but that bound widens to
+  ±0.051. **Any single-call arm must be analysed at the selection level, and
+  distinct-selection counts belong in every results table.**
 - **`critique` is a clean pre-registered negative**: a reviewer pass over the
   selection costs 3 flat calls and resolves *worse* at LT k=30/45. Nine
   contrasts, none positive beyond noise.
@@ -1015,7 +1021,7 @@ that document's final section. Harness defects stay in
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`
 - **Causal Chamber Plan**: `docs/causal_chamber_validation_plan.md` (full M4/M5/M6 spec for AAMAS 2027 / ECAI 2027)
-- **M7 plan + paper positioning**: `docs/superpowers/specs/2026-08-29-m7-mechanism-and-missing-arms.md` — §1 holds the loop-vs-graph positioning (what we contribute, the confound we remove, the objection that can sink it and the scoping answer); §5 the four phases
+- **M7 plan + paper positioning**: `docs/superpowers/specs/2026-08-29-m7-mechanism-and-missing-arms.md` — **§8 is the current plan (revised 2026-08-31)**: the framing that survived Phase 2, the four ranked accept/reject threats, and a Phase 3 led by **cross-vendor replication (~$20-30, the highest-value remaining work)**. §1 holds the loop-vs-graph positioning; §5's phase list is superseded by §8's sequencing
 - **OR/Optimization Ideas**: `docs/or_optimization_research_ideas.md` (backlog of 3 OR-inspired directions)
 - **Repository**: https://github.com/flyersworder/agent-contracts
 

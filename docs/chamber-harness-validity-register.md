@@ -1026,6 +1026,61 @@ way the collinear fix did (§13). Stated as known headroom, not applied.
 **Related:** §1 (a harness quantity varying with the x-axis), §10 (why PC
 converts numerical noise into structural noise), §13 (pooling boundaries).
 
+## 24. `one_shot`'s cells were not independent draws (2026-08-31)
+
+**Found while measuring something else.** A single LLM call with a fixed prompt
+re-picks nearly the same design every time — the seed reaches only the fallback
+RNG and PC's subsample, not the model. At **LT k=30, `one_shot` produced 6
+distinct selections across its 30 cells, one covering 17 of them.** Those 30
+rows are ~6 draws of the strategy, not 30, and treating them as 30 independent
+observations is pseudo-replication: the cell-level sd is dominated by PC noise
+on repeated *identical* buys, so it understates how uncertain the arm's mean is.
+
+The exposure is asymmetric and lands on the claim that can least afford it.
+Phase 2's headline is an EQUIVALENCE ("one call matches the loop"), and an
+equivalence is only as strong as its bound.
+
+**Re-analysed at the selection level** — one row per distinct buy, so the unit
+of independent variation is the design rather than the scoring:
+
+| | cells | selections | effect on the claim |
+|---|---|---|---|
+| LT k=6, `one_shot` | 30 | 30 | none |
+| **LT k=30, `one_shot`** | 30 | **6** | **MDE 0.029 -> 0.051**, delta +0.012 -> −0.000 |
+| LT k=45, `one_shot` | 30 | 24 | MDE 0.031 -> 0.033 |
+| WT, all budgets | 50 | 30–34 | MDE +0.002 to +0.005 |
+| every other arm, both chambers | 30/50 | 29–50 | negligible |
+
+**Every verdict is unchanged.** No contrast flips in either direction, on
+either chamber, at any budget. What changes is one bound, and it is the
+important one: the LT k=30 equivalence must be reported as **±0.051, not
+±0.029**. Against a loop-vs-random gap of +0.055 that bound cannot exclude
+"the record is worth nearly as much as selecting at all", so the LT half of the
+"record is not load-bearing" claim rests on k=45 and on WT, where the arm's
+designs do vary.
+
+**Why the bound cannot be tightened with seeds.** More seeds buy more
+*scorings* of the same six designs, not more designs. The fix is selection
+diversity — menu-order shuffling per seed, or a pinned non-zero temperature —
+and it requires re-running the arm, not re-analysing it.
+
+**A near-miss worth recording.** Averaging each cell over 9 PC subsample seeds
+shrinks `one_shot`'s cell sd by **6.6x** (against 1.8x for the loop) and makes
+the k=30 contrast read "RESOLVED, `one_shot` better by +0.011". That is the
+pseudo-replication amplified, not a discovery: the variance being averaged away
+is measurement noise on 6 repeated designs. **Multi-seed averaging is only
+sound after clustering by selection**, never as a substitute for it.
+
+**Standing rule.** Any arm that does not draw a fresh design per seed must be
+analysed at the selection level, and every arm's distinct-selection count
+belongs in the results table. `chosen_experiments` is recorded from M7 onward;
+the M6 ladders predate it, so their diversity cannot be audited — noted as a
+limitation of those files, not a defect in the contrasts.
+
+**Related:** §21 (the seed does not control the LLM — this is that fact's
+consequence for inference, not just for variance), §23 (a variance whose
+components must be separated before it can be read).
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there

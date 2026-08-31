@@ -4,7 +4,7 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-three
+**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-four
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
@@ -124,6 +124,25 @@ the record axis; at the large budget everything converges (LT 0.398–0.436, WT
 0.252–0.261, both narrower than a single arm's sd). The mid-budget cell is the
 only place a coordination difference both exists and is detectable — consistent
 with the loop saturating at F1 ≈ 0.42 by k=30 (see the LT loop curve section).
+
+### Robustness: re-analysed at the selection level (2026-08-31)
+
+A single LLM call re-picks nearly the same design each seed, so `one_shot`'s
+cells are not 30 independent draws — at LT k=30 they are **6 distinct
+selections, one covering 17 cells**. Re-running every Phase 2 contrast with one
+row per distinct buy (register §24):
+
+**Every verdict above is unchanged**, on both chambers, at every budget. One
+bound moves, and it is the one the headline rests on: the LT k=30 equivalence
+is **±0.051, not ±0.029**. Since the loop-vs-random gap there is +0.055, that
+bound cannot exclude "the record is worth nearly as much as selecting at all",
+so **the LT half of the record claim rests on k=45** (24 distinct selections,
+±0.033) **and on WT** (30–34 of 50 distinct, bounds widening by ≤0.005). Every
+other arm draws 29–50 distinct designs and is unaffected.
+
+More seeds cannot tighten it — they buy more scorings of the same six designs.
+The fix is selection diversity (menu-order shuffling per seed, or a pinned
+non-zero temperature) and it requires re-running the arm.
 
 ### The axis test: sharing a record beats splitting it, at one budget
 
