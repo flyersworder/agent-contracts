@@ -12,6 +12,7 @@ import pandas as pd
 import pytest
 
 from evaluation.chamber_pipeline.rescore import (
+    LT_CASE_STUDY_NODES,
     SELECTION_KEY_COLUMN,
     attach_rescored,
     parse_selection,
@@ -96,6 +97,8 @@ def test_attach_rescored_averages_over_pc_seeds_not_over_cells() -> None:
             SELECTION_KEY_COLUMN: [key_ab, key_ab, key_ac, key_ac],
             "pc_seed": [0, 1, 0, 1],
             "f1": [0.10, 0.30, 0.50, 0.70],
+            "f1_skeleton": [0.15, 0.35, 0.55, 0.75],
+            "f1_core": [0.20, 0.40, 0.60, 0.80],
         }
     )
     out = attach_rescored(cells, rescored)
@@ -104,6 +107,10 @@ def test_attach_rescored_averages_over_pc_seeds_not_over_cells() -> None:
     assert out.loc[1, "f1_rescored"] == pytest.approx(0.20)
     assert out.loc[2, "f1_rescored"] == pytest.approx(0.60)
     assert list(out["n_pc_seeds"]) == [2, 2, 2]
+    # The undirected companion must be averaged the same way, per DESIGN.
+    assert out.loc[0, "f1_skeleton_rescored"] == pytest.approx(0.25)
+    assert out.loc[2, "f1_skeleton_rescored"] == pytest.approx(0.65)
+    assert out.loc[0, "f1_core_rescored"] == pytest.approx(0.30)
     # The original column must survive untouched for comparison.
     assert list(out["f1"]) == [0.10, 0.20, 0.30]
 
@@ -119,6 +126,49 @@ def test_attach_rescored_leaves_unscorable_cells_null() -> None:
             "f1": [0.4],
         }
     )
-    out = attach_rescored(cells, pd.DataFrame({SELECTION_KEY_COLUMN: [], "pc_seed": [], "f1": []}))
+    out = attach_rescored(
+        cells,
+        pd.DataFrame({SELECTION_KEY_COLUMN: [], "pc_seed": [], "f1": [], "f1_skeleton": []}),
+    )
     assert out[SELECTION_KEY_COLUMN].isna().all()
     assert out["f1_rescored"].isna().all()
+
+
+def test_lt_case_study_nodes_are_the_published_twenty() -> None:
+    """Pinned against the chambers' own notebook, not re-derived.
+
+    The list is a citation, so it must not drift with our node set. A test
+    that recomputed it from the ground truth would pass whatever we changed
+    it to, which is the failure mode the register keeps recording.
+    """
+    assert len(LT_CASE_STUDY_NODES) == 20
+    assert len(set(LT_CASE_STUDY_NODES)) == 20
+    # The three families the case study keeps, and the ones it drops.
+    assert "current" in LT_CASE_STUDY_NODES
+    assert "angle_1" in LT_CASE_STUDY_NODES
+    for dropped in ("t_ir_1", "osr_c", "v_angle_1", "diode_ir_1"):
+        assert dropped not in LT_CASE_STUDY_NODES
+
+
+def test_attach_rescored_tolerates_a_missing_optional_metric() -> None:
+    """A frame written before `f1_skeleton` existed must still join.
+
+    `DataFrame.agg` raises `KeyError` on a named column it cannot find, so
+    hard-coding every metric would make the joiner refuse older outputs —
+    exactly the incompatibility this project keeps hitting when a column is
+    added mid-milestone.
+    """
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["a,b"],
+            "f1": [0.4],
+        }
+    )
+    key = selection_key("lt", "standard", ["a", "b"])
+    legacy = pd.DataFrame({SELECTION_KEY_COLUMN: [key, key], "pc_seed": [0, 1], "f1": [0.2, 0.4]})
+    out = attach_rescored(cells, legacy)
+    assert out.loc[0, "f1_rescored"] == pytest.approx(0.3)
+    assert "f1_skeleton_rescored" not in out.columns

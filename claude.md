@@ -1020,6 +1020,16 @@ two models. Headlines, with the detail and the caveats in the results doc:
   re-scoring): a reviewer pass costs 3 extra flat calls and moves accuracy by
   |Δ| < 0.022 on either chamber at any budget. The earlier "resolved worse at
   LT k=30/45" rested on a single favourable PC draw and is **retracted**.
+- **Our node set is 38; the chambers' own case study uses 20** (register §28).
+  The 18 extra are ALL pure sources (out-degree 1, in-degree 0) — apparatus
+  settings (`t_*`, `osr_*`, `v_*`, `diode_*`) each driving one sensor — and
+  they carry 18 of 57 true edges. **78% of the LT loop's budget response sits
+  on those edges** (full F1 0.206→0.421 vs core-20 0.176→0.223). Comparisons
+  are unaffected (all arms share the node set; Phase 2 verdicts hold under
+  directed, skeleton AND core-20 scoring) but **never quote an absolute F1
+  without the core-20 figure beside it**. The authors also use GES/UT-IGSP not
+  PC, grid-search alpha, score the whole CPDAG, and do not subsample — state
+  each as a deviation.
 - **Re-score offline before believing a contrast** (`rescore.py`, register
   §27). `chosen_experiments` lets any M7 cell be rebuilt and scored at m PC
   seeds for **$0**; 9 seeds cut MDEs ~35% (LT k=30 0.031→0.019) because the

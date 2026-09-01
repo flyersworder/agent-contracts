@@ -4,7 +4,7 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-seven
+**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-eight
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
@@ -190,6 +190,88 @@ stay at cell-level MDEs**, and must not be quoted alongside these tighter ones
 as though they were measured the same way. Re-running M6 to obtain the column
 would cost ~$12 at current provider prices and would tighten those contrasts
 by roughly the same 35%.
+
+### Robustness across three metrics, and what the node set is doing (2026-09-01)
+
+Prompted by reading the chambers' own causal-discovery case study
+(`causal-chamber-paper/case_studies/causal_discovery_iid.ipynb`), which differs
+from our setup on two axes worth testing rather than defending.
+
+**Axis 1 — orientation.** They compute precision/recall for *every DAG in the
+estimated CPDAG*, because orientation inside a Markov equivalence class is not
+identifiable. We score one directed graph, and
+`cpdag_to_directed_adjacency` encodes an undirected CPDAG edge as **both**
+directions — so a correctly-found but unoriented edge scores one true positive
+AND one false positive. The cheap equivalent of their protocol is to score the
+skeleton, where the whole equivalence class agrees.
+
+**Axis 2 — the node set.** Their case study uses **20** light-tunnel variables;
+we use **38**. The 18 extra are not a superset chosen for coverage — measured
+against the ground truth, **every one is a pure source: out-degree 1,
+in-degree 0**. They are apparatus settings (`t_*` exposure time, `osr_*`
+oversampling rate, `v_*` reference voltage, `diode_*` select), each driving
+exactly one sensor, and they carry **18 of the 57 true edges (32%)**.
+
+Both were re-scored offline over the same 908 designs x 9 subsample seeds, $0.
+
+| | | directed F1 | skeleton F1 | core-20 F1 |
+|---|---|---|---|---|
+| **LT k=6** | `one_shot` | **−0.047 worse** | −0.022 ties | **−0.028 worse** |
+| | `critique` | −0.010 ties | −0.009 ties | +0.015 ties |
+| | `shared_blackboard` | **−0.057 worse** | **−0.037 worse** | −0.023 ties |
+| **LT k=30** | all three | ties | ties | ties |
+| **LT k=45** | all three | ties | ties | ties |
+| **WT, all budgets** | all three | ties | ties | (LT only) |
+
+**The headline survives all three.** "The running record is not load-bearing
+above the smallest budget" rests on the ties at LT k=30/45 and all of WT, and
+**every one of those holds under every metric**. Nothing that was a tie becomes
+a difference.
+
+**The one resolved finding is metric-sensitive.** At LT k=6 both arms are
+negative under all three metrics — `one_shot` −0.047 / −0.022 / −0.028,
+`shared_blackboard` −0.057 / −0.037 / −0.023 — but neither clears MDE under all
+three. **The sign is robust; the resolution is marginal.** Report the k=6 result
+that way rather than as a clean effect.
+
+### What the node set is doing to the headline numbers
+
+The core-20 subgraph is the more uncomfortable finding, and it is about
+absolute values rather than comparisons:
+
+| LT loop | k=6 | k=30 | k=45 |
+|---|---|---|---|
+| full 38-node F1 | 0.206 | **0.421** | 0.420 |
+| core 20-node F1 | 0.176 | **0.223** | 0.226 |
+
+**78% of the loop's budget response sits on the 18 setting→sensor edges**
+(k=6→k=30: full +0.215, core +0.047). Those edges are real, but they are
+trivially structured — a pure source with one child — and they are recoverable
+if and only if an experiment makes that setting vary. So a third of the
+recoverable structure, and most of the measured improvement with budget, is
+**"did you buy the experiment that activates this setting"** rather than "did
+you infer non-obvious structure".
+
+Three consequences, stated rather than fixed:
+
+1. **Comparative claims are unaffected.** Every arm faces the identical node
+   set and menu, so the topology, record and coverage contrasts are unchanged —
+   as the table above confirms across all three metrics.
+2. **Absolute F1 values must not be read as "recovered the light tunnel".**
+   Quote the core-20 figures beside the headline ones, or a reader will compare
+   0.42 against numbers from the case study's 20-variable setting.
+3. **It reframes the coverage result rather than voiding it.** The
+   +0.0073 F1 per distinct variable is partly the price of activating settings.
+   That is still a real and actionable mechanism for an experiment-selection
+   agent — but it is a statement about *coverage of manipulable variables*, not
+   about discovering physics, and §"M7 PHASE 1"'s wording should say so.
+
+**Why not simply switch to 20 nodes.** The menu is built from the dataset's
+experiments, and it *contains* interventions on those settings
+(`uniform_t_ir_1_strong`, `uniform_v_c_strong`, …). Dropping the nodes while
+keeping the buys would score an informative purchase as wasted budget. Changing
+both is a different experiment, and it forks all 18,000 recorded cells. The
+honest move is to report both scorings, which now costs nothing.
 
 ### Robustness: re-analysed at the selection level (2026-08-31)
 

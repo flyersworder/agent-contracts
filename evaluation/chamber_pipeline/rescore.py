@@ -41,9 +41,43 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
 from .inference import pool_experiment_data, run_pc
-from .scoring import f1_edges, shd
+from .scoring import f1_edges, f1_skeleton, shd
 
 SELECTION_KEY_COLUMN = "selection_key"
+
+#: The 20 light-tunnel variables used by the chambers' own causal-discovery
+#: case study (`causal-chamber-paper/case_studies/causal_discovery_iid.ipynb`).
+#: Our node set adds 18 more, and every one of them is a PURE SOURCE in the
+#: ground truth -- out-degree 1, in-degree 0 -- because they are apparatus
+#: settings (exposure time, oversampling rate, reference voltage, diode
+#: select) that each drive exactly one sensor. They carry 18 of the 57 true
+#: edges, so a third of the recoverable structure is "did you buy the
+#: experiment that makes this setting vary" rather than "did you infer
+#: non-obvious structure". Scoring the induced subgraph on these 20 is the
+#: robustness check for that, NOT a redefinition of the metric.
+#: No published equivalent exists for the wind tunnel, so this is LT-only.
+LT_CASE_STUDY_NODES: tuple[str, ...] = (
+    "red",
+    "green",
+    "blue",
+    "current",
+    "ir_1",
+    "ir_2",
+    "ir_3",
+    "vis_1",
+    "vis_2",
+    "vis_3",
+    "pol_1",
+    "pol_2",
+    "angle_1",
+    "angle_2",
+    "l_11",
+    "l_12",
+    "l_21",
+    "l_22",
+    "l_31",
+    "l_32",
+)
 
 #: Columns a source frame must carry to be re-scorable.
 REQUIRED_COLUMNS = ("chamber", "configuration", "chosen_experiments", "status")
@@ -127,6 +161,19 @@ def rescore_selections(
                     "n_experiments": len(names),
                     "pc_seed": pc_seed,
                     "f1": float(f1_edges(predicted, truth)),
+                    # Undirected companion, for the robustness check: the
+                    # chambers' own case study scores the equivalence class
+                    # rather than one orientation. NOT a replacement -- see
+                    # `f1_skeleton`, the two are different metrics.
+                    "f1_skeleton": float(f1_skeleton(predicted, truth)),
+                    # Induced subgraph on the case study's 20 variables,
+                    # excluding the pure-source settings. LT only.
+                    "f1_core": (
+                        float(f1_edges(predicted.loc[core, core], truth.loc[core, core]))
+                        if (core := [n for n in LT_CASE_STUDY_NODES if n in nodes])
+                        and len(core) == len(LT_CASE_STUDY_NODES)
+                        else float("nan")
+                    ),
                     "shd": float(shd(predicted, truth)),
                 }
             )
@@ -141,10 +188,22 @@ def attach_rescored(frame: pd.DataFrame, rescored: pd.DataFrame) -> pd.DataFrame
     Adds `selection_key`, `f1_rescored` (mean over PC seeds) and `n_pc_seeds`.
     The original `f1` is left untouched so the two can be compared.
     """
+    # Aggregate whatever metric columns are present. The optional ones
+    # (`f1_skeleton`, `f1_core`) were added after the first re-scoring run,
+    # and a frame written before that must still join rather than raise --
+    # pandas' `agg` fails hard on a named column it cannot find.
+    aggregations: dict[str, tuple[str, str]] = {
+        "f1_rescored": ("f1", "mean"),
+        "n_pc_seeds": ("f1", "size"),
+    }
+    for column, alias in (
+        ("f1_skeleton", "f1_skeleton_rescored"),
+        ("f1_core", "f1_core_rescored"),
+    ):
+        if column in rescored.columns:
+            aggregations[alias] = (column, "mean")
     per_key = (
-        rescored.groupby(SELECTION_KEY_COLUMN)
-        .agg(f1_rescored=("f1", "mean"), n_pc_seeds=("f1", "size"))
-        .reset_index()
+        rescored.groupby(SELECTION_KEY_COLUMN).agg(**aggregations).reset_index()  # type: ignore[call-overload]
     )
     out = frame.copy()
     out[SELECTION_KEY_COLUMN] = [

@@ -1300,6 +1300,73 @@ measurement where averaging is free, and report the bound.
 **Related:** §23 (the decomposition that showed inference noise dominates),
 §24 (clustering), §26 (why the buy varies at all).
 
+## 28. Our node set was never checked against the chambers' own case study (2026-09-01)
+
+Found by reading the source the pillar is built on, which had not been done:
+`causal-chamber-paper/case_studies/causal_discovery_iid.ipynb`.
+
+**Two deliberate differences, neither previously stated as a deviation.**
+
+| | chamber authors | this pillar |
+|---|---|---|
+| variables | **20** | **38** |
+| algorithm | GES (observational), **UT-IGSP** (interventional) | PC on POOLED interventional data |
+| metric | precision/recall for **every DAG in the CPDAG** | F1 on one directed graph |
+| alpha | grid-searched 1e-4 … 1e-2 | fixed 0.05 |
+| subsampling | none | 300 rows |
+
+**The node set is the one that changes how a number reads.** Our 38 contain
+their 20 plus 18 more, and measured against the ground truth **every one of the
+18 is a pure source — out-degree 1, in-degree 0**. They are apparatus settings
+(`t_*` exposure, `osr_*` oversampling, `v_*` reference voltage, `diode_*`
+select), each driving exactly one sensor, and they carry **18 of 57 true
+edges**. A setting is constant unless an experiment perturbs it, so its edge is
+a guaranteed false negative until bought and close to free once bought.
+
+Measured consequence (LT loop, design-level, 9 subsample seeds):
+
+| | k=6 | k=30 | k=45 |
+|---|---|---|---|
+| full 38-node F1 | 0.206 | 0.421 | 0.420 |
+| core 20-node F1 | 0.176 | 0.223 | 0.226 |
+
+**78% of the budget response lives on those 18 edges.** The headline "accuracy
+improves with budget" is mostly "the agent activated more settings".
+
+**Not a defect in any comparison.** Every arm faces the identical node set and
+menu, and the Phase 2 verdicts are unchanged under directed, skeleton and
+core-20 scoring alike. It is a defect in how an ABSOLUTE number reads: 0.42 is
+not comparable to a figure from the case study's 20-variable setting.
+
+**The orientation axis, measured too.** `cpdag_to_directed_adjacency` encodes
+an undirected CPDAG edge as both directions, so a correctly-found but
+unoriented edge scores one TP *and* one FP — we charge for a coin flip the data
+cannot settle, and one that flips on numerical noise. Scoring the skeleton
+instead cuts within-design noise from sd 0.041 to 0.031 while *raising*
+between-design signal from 0.0091 to 0.0114, a ~1.7x better signal-to-noise
+ratio.
+
+**A wrong invariant, caught by testing it.** "Ignoring direction can only help"
+is FALSE and was briefly asserted in a test. Symmetrising MERGES a mutual pair
+into one edge while EXPANDING each single arrow into two cells, so a prediction
+with many one-way edges can lose more to inflated false positives than it gains
+(counterexample pinned in `test_skeleton_is_not_uniformly_higher_than_directed`:
+directed 0.571, skeleton 0.400). **Skeleton F1 is a different metric, not a
+relaxation**, and the two must not be quoted as if one bounded the other.
+
+**Also corroborating, from their code**:
+`np.random.seed(42) # This doesn't fix the output of UT-IGSP below; I don't
+know how they manage the random state`. The chamber authors hit unfixable
+nondeterminism in their own discovery algorithm — the same class of problem as
+§21 and §26.
+
+**Standing rule.** Read the primary source for the testbed you build on, and
+state every deviation as a deviation. Three of these five differences are
+defensible design choices; none of them was written down until a reader asked.
+
+**Related:** §23, §26 (noise decomposition), §27 (the offline machinery that
+made all of this free).
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
