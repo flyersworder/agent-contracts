@@ -1020,15 +1020,22 @@ two models. Headlines, with the detail and the caveats in the results doc:
   re-scoring): a reviewer pass costs 3 extra flat calls and moves accuracy by
   |Δ| < 0.022 on either chamber at any budget. The earlier "resolved worse at
   LT k=30/45" rested on a single favourable PC draw and is **retracted**.
-- **BOTH ground-truth graphs are bipartite, max path length 1, ZERO mediators**
-  (register §29, verified against `causalchamber.ground_truth.graph` directly).
-  lt/standard 29 sources + 9 sinks; wt/standard 21 + 11; lt/camera the same
-  shape. There are no causal chains to discover — the task is assignment of
-  manipulable sources to observed sinks, and PC's conditioning-set search is
-  exploring structure that is not there. **`wt/pressure-control` is the only
-  configuration with depth (3 mediators)** and needs `wt_pc_validate_v1` wired
-  before it can run. **Describe a benchmark's ground-truth graph before drawing
-  conclusions from its difficulty** — we ran 18,000 cells first.
+- **The CONTEMPORANEOUS ground truth is bipartite, depth 1, ZERO mediators**
+  (register §29). lt/standard 29 sources + 9 sinks; wt/standard 21 + 11. But
+  it is **not degenerate** — 172 unshielded colliders on LT, 66 on WT, so
+  skeleton recovery and collider orientation are real work; what is absent is
+  mediation and high-order conditioning. **The chamber's depth is TEMPORAL**
+  (`load_in(t)→rpm_in(t+1)→pressure(t+2)`) and our pooled-i.i.d. reduction
+  discards the dimension it lives in. `wt/pressure-control` is the only config
+  with contemporaneous depth (3 mediators); it needs `wt_pc_validate_v1` wired.
+- **We only ever ran `standard`** — 10,104 LT and 11,086 WT cells, zero on any
+  other configuration. It was the CLI default, never a considered choice.
+- **The authors' own WT case study uses PCMCI+ on `wt_walks_v1`**
+  (`causal_discovery_time.ipynb`, tau_max=10, alpha=1e-2, 16 variables). We
+  rejected walks for autocorrelation — correct GIVEN PC, but their answer to
+  the same autocorrelation is a different METHOD, not a different dataset.
+  State our switch as an estimator-forced deviation. **Read every case study a
+  testbed ships with, not just the one matching your method.**
 - **WT is the worse chamber, not the safer one**: 17 trivial sources carrying
   **40%** of its 42 edges (LT: 18 / 32%), core 15 nodes / 25 edges, plus 9
   in-edges on the collinear-dropped barometers (6 from real drivers).

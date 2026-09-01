@@ -1390,10 +1390,16 @@ had never been checked.
 
 **Consequences.**
 
-1. **PC's conditioning-set search is exploring structure that does not exist.**
-   The part of constraint-based discovery that makes it interesting — and, per
-   §10 and §26, the part that amplifies numerical noise into structural
-   differences — is doing work against a depth-1 truth.
+1. **The graph is shallow but NOT degenerate — an earlier draft of this entry
+   overstated it.** "PC's conditioning-set search is exploring structure that
+   does not exist" is wrong: a bipartite graph whose sinks have many parents is
+   *rich* in v-structures, and every unshielded pair of parents is orientable.
+   Counted: **172 unshielded colliders on lt/standard, 66 on wt/standard**
+   (sink in-degrees up to 9). Skeleton recovery — which source feeds which sink
+   — is genuine work, and collider orientation is genuine work. What is absent
+   is **mediation and high-order conditioning**: the independence tests that
+   matter are mostly low-order, so the search is shallower than PC's worst
+   case, not vacuous.
 2. **It sharpens the "this is set cover" objection.** Combined with §28's
    trivial-source edges (LT 32%, **WT 40%**), a large share of the recoverable
    structure is "did an experiment make this source vary".
@@ -1428,9 +1434,47 @@ configuration with actual causal depth — the servo-driven hatch makes
 answer the set-cover objection with data rather than argument. It needs the
 matching dataset wired and a fresh sweep; it is not a re-scoring.
 
+### What the chambers' own WT case study does (read 2026-09-01)
+
+`case_studies/causal_discovery_time.ipynb`, quoted from source:
+
+- **16 variables**, not 32: `hatch, load_in, load_out, pot_1, pot_2,
+  current_in, current_out, pressure_downwind, pressure_upwind, rpm_in, rpm_out,
+  mic, pressure_intake, pressure_ambient, signal_1, signal_2`.
+- Dataset **`wt_walks_v1`** — the random-walk release *we rejected*.
+- Method **PCMCI+** (tigramite) with `tau_max=10`, `pc_alpha=1e-2`, on
+  min-max-normalised data; they extract a **contemporaneous CPDAG** and a
+  **lagged-effects DAG** separately.
+
+**Their 16 is exactly our 32 minus the 16 measurement-apparatus settings**
+(`osr_*`, `v_*`, `res_*`) — verified as a set equality against our trivial
+out-degree-1 sources, the only difference being `pot_2`, a real actuator they
+keep. Their semantic criterion and our structural one coincide. The same held
+on LT (their 20 = our 38 minus 18). **Two independent confirmations that the
+apparatus settings are the part to drop.**
+
+**The consequence for our WT dataset decision.** We switched
+`wt_walks_v1 -> wt_validate_v1` because Fisher-Z is invalid under lag-1
+autocorrelation of 0.9999. That reasoning is correct *given PC*. But the
+authors face the same autocorrelation and answer it with a **different method**
+— PCMCI+ is built for it — rather than a different dataset. So our switch is a
+deviation forced by our choice of estimator, and must be stated as one.
+
+**And it explains the bipartite finding.** The induced subgraph on their own 16
+WT variables is *also* depth-1 with 0 mediators, so the flatness is not our
+node set. It is a property of the **contemporaneous** graph, which is what any
+i.i.d. pooled analysis targets. The chamber's causal depth is **temporal**
+(`load_in(t) -> rpm_in(t+1) -> pressure(t+2)`), and PCMCI+ with `tau_max=10` is
+how the authors reach it. **Our reduction to pooled i.i.d. interventional data
+discards the dimension the depth lives in.** That is a defensible choice for a
+budgeted experiment-selection task, and it is a scope limit to state, not a
+defect to hide.
+
 **Standing rule.** Before drawing conclusions from a benchmark's difficulty,
 **describe its ground-truth graph** — depth, degree distribution, how many
-edges are trivially structured. We ran 18,000 cells before doing this.
+edges are trivially structured — and **read every case study the testbed ships
+with**, not just the one matching your method. We ran 18,000 cells before
+doing either.
 
 **Related:** §28 (the node set), §13 (WT collinearity), §26.
 
