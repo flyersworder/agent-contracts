@@ -1428,11 +1428,27 @@ Never reached (every recorded run used `standard`), but it was one argument
 away. Now keyed by the pair, and an unwired combination **raises**;
 `wt_pc_validate_v1` is the release to wire when that arm is run.
 
-**The opportunity this creates.** `wt/pressure-control` is the only
-configuration with actual causal depth — the servo-driven hatch makes
-`load_in`, `load_out` and `pressure_downwind` mediators. Running there would
-answer the set-cover objection with data rather than argument. It needs the
-matching dataset wired and a fresh sweep; it is not a re-scoring.
+**The opportunity, examined and CLOSED (2026-09-01).**
+`wt/pressure-control` is the only configuration with real causal depth, and the
+depth is substantial rather than cosmetic: **24 length-2 directed paths, with
+20 of its 44 edges (45%) on one**, against **0 of 42 (0%)** in `standard`. The
+servo-driven hatch makes `load_in`, `load_out` and `pressure_downwind`
+mediators, so `pressure_downwind -> load_* -> rpm/current/pressures` is a real
+indirect effect to separate. Running there looked like the strongest available
+answer to the "this reduces to set cover" objection.
+
+**It is not runnable.** Both pressure-control releases ship **exactly one
+experiment**: `wt_pc_validate_v1` has `validate_pressure_downwind_loads`,
+`wt_pressure_control_v1` has `hatch_0`. A budgeted experiment-SELECTION task
+needs a menu; there is none. The mediators exist in the ground truth and the
+interventions that would reveal them are not purchasable.
+
+**Which retroactively justifies `standard`.** It was chosen by CLI default and
+never examined — a real oversight — but it is the only wind-tunnel
+configuration with a menu at all. The oversight was in not checking, not in the
+outcome. **The only route to mediation in these chambers is the time-series
+direction** (walks data + PCMCI+, as the authors' own WT case study does),
+which is a different task shape and not a budgeted selection problem.
 
 ### What the chambers' own WT case study does (read 2026-09-01)
 
