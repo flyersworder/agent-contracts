@@ -1063,9 +1063,20 @@ two models. Headlines, with the detail and the caveats in the results doc:
   other configuration. It was the CLI default, never a considered choice — but
   it is also the only WT config with a menu, so the oversight was in not
   checking, not in the outcome.
-- **`team_varsplit` has run on LT k=30 ONLY, n=30.** The paper's single
-  positive result rests on 90 cells at one budget on one chamber. The WT run
-  people remember is `m6-wt-team-rerun` — that is `team`, not `team_varsplit`.
+- **`team_varsplit` DOES NOT REPLICATE ON WT** (2026-09-02, 300 cells, n=50,
+  both budgets, re-scored at 9 PC seeds). LT k=30 strengthens to **+0.043
+  RESOLVED**; WT k=14 is **−0.000** and k=21 **+0.017 below MDE (0.024)**.
+  The mechanism fires on both — varsplit buys +0.9 / +1.3 more distinct
+  variables, `overlap_frac` 0.000 — but WT's menu (28 entries / 21 variables,
+  18 of them singletons) leaves almost no cross-scout duplication to remove,
+  against LT's 59/30. **The paper's positive result is one chamber at one
+  budget; say so.** Also: the arm is **infeasible at k/M = 0.75** — 2 of 50
+  k=21 cells raise because a variable partition cannot leave both scouts a
+  pool above budget. Partition-granularity needs menu slack.
+- **The cell-level version of that contrast said the opposite** (+0.0155 at
+  k=14, +0.0160 at k=21, "stable across budgets"). Nine-seed re-scoring took
+  k=14 to zero. §27's failure mode, recurring: **never read a WT contrast off
+  single-draw scores.**
 - **The authors' own WT case study uses PCMCI+ on `wt_walks_v1`**
   (`causal_discovery_time.ipynb`, tau_max=10, alpha=1e-2, 16 variables). We
   rejected walks for autocorrelation — correct GIVEN PC, but their answer to
@@ -1086,7 +1097,13 @@ two models. Headlines, with the detail and the caveats in the results doc:
   PC, grid-search alpha, score the whole CPDAG, and do not subsample — state
   each as a deviation.
 - **Re-score offline before believing a contrast** (`rescore.py`, register
-  §27). `chosen_experiments` lets any M7 cell be rebuilt and scored at m PC
+  §27, §30). **Key the work by the ORDERED buy** — pooling concatenates in
+  sequence and PC subsamples 300 rows, so `[a,b]` and `[b,a]` score
+  differently (0.133 vs 0.105 on LT). `design_key` joins; `selection_key`
+  clusters. A frame without `design_key` predates the fix and is refused.
+  `--max-workers N` is process-parallel (**3.13x on 4 vCPU**, output
+  byte-identical at every setting; BLAS thread count verified not to change
+  PC's output — re-probe on a new machine). `chosen_experiments` lets any M7 cell be rebuilt and scored at m PC
   seeds for **$0**; 9 seeds cut MDEs ~35% (LT k=30 0.031→0.019) because the
   averaged-away half is inference noise, not arm. **Cluster by distinct design
   first** (§24). Validated 191/191 exact against production. Only M7-era files
