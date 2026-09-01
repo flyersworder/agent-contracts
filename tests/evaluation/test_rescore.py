@@ -261,3 +261,42 @@ def test_rescore_stamps_the_executing_machine_not_the_source() -> None:
     out = rescore_selections(cells, n_pc_seeds=1, progress_every=0)
     assert set(out["blas_backend"]) == {expected["blas"]}
     assert set(out["platform_tag"]) == {expected["platform"]}
+
+
+def test_rescore_output_is_identical_serial_and_parallel() -> None:
+    """`--max-workers` must change wall time and nothing else.
+
+    Two ways a worker pool could corrupt this, both guarded in the
+    implementation and both checked here: rows reassembled in completion
+    order rather than submission order, and a per-worker difference in the
+    numbers themselves. The second is why the flag was probed against BLAS
+    thread count before it shipped — a reassociated threaded reduction would
+    fork PC's accept/reject cascade, which is the documented failure mode
+    behind the `blas_backend` column.
+    """
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt", "lt", "lt"],
+            "configuration": ["standard"] * 3,
+            "status": ["ok"] * 3,
+            "chosen_experiments": [
+                "uniform_reference,uniform_red_strong",
+                "uniform_reference,uniform_green_strong",
+                "uniform_blue_strong,uniform_pol_1_strong",
+            ],
+        }
+    )
+    serial = rescore_selections(cells, n_pc_seeds=2, progress_every=0, max_workers=1)
+    parallel = rescore_selections(cells, n_pc_seeds=2, progress_every=0, max_workers=3)
+    pd.testing.assert_frame_equal(serial, parallel)
+    # Order is the submission order, so the two frames agreeing is not
+    # vacuous: it pins the sequence as well as the values.
+    assert list(serial[SELECTION_KEY_COLUMN]) == [
+        k
+        for k in (
+            selection_key("lt", "standard", ["uniform_reference", "uniform_red_strong"]),
+            selection_key("lt", "standard", ["uniform_reference", "uniform_green_strong"]),
+            selection_key("lt", "standard", ["uniform_blue_strong", "uniform_pol_1_strong"]),
+        )
+        for _ in range(2)
+    ]

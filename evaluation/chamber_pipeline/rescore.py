@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -79,6 +80,11 @@ LT_CASE_STUDY_NODES: tuple[str, ...] = (
     "l_32",
 )
 
+#: One unit of re-scoring work: everything a worker process needs, as plain
+#: picklable data. A tuple rather than a dataclass so it crosses the process
+#: boundary without the worker importing anything this module owns.
+_DesignTask = tuple[str, str, str, list[str], int, float]
+
 #: Columns a source frame must carry to be re-scorable.
 REQUIRED_COLUMNS = ("chamber", "configuration", "chosen_experiments", "status")
 
@@ -110,18 +116,92 @@ def parse_selection(raw: object) -> list[str]:
     return [part.strip() for part in text.split(",") if part.strip()]
 
 
+def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
+    """Score ONE purchased design at every PC seed.
+
+    Module-level and taking a single plain-data argument so it can be sent to
+    a worker process: `ProcessPoolExecutor` pickles the callable by qualified
+    name and the argument by value, and a closure over the enclosing frame
+    would fail both counts.
+
+    Rebuilds the adapter per design rather than sharing one. A worker cannot
+    inherit the parent's adapter anyway, and the chamber datasets are read
+    from a local cache, so the cost is a parquet read that the OS page cache
+    absorbs after the first design.
+    """
+    key, chamber, configuration, names, n_pc_seeds, pc_alpha = task
+    adapter = create_contracted_chamber_agent(
+        chamber=chamber,  # type: ignore[arg-type]
+        configuration=configuration,  # type: ignore[arg-type]
+        intervention_budget=len(names),
+    )
+    nodes = list(adapter.ground_truth().index)
+    truth = adapter.ground_truth()
+    pooled = pool_experiment_data([adapter.query_intervention(name) for name in names], nodes)
+    records: list[dict[str, Any]] = []
+    for pc_seed in range(n_pc_seeds):
+        predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed)
+        records.append(
+            {
+                SELECTION_KEY_COLUMN: key,
+                "chamber": chamber,
+                "configuration": configuration,
+                "n_experiments": len(names),
+                "pc_seed": pc_seed,
+                "f1": float(f1_edges(predicted, truth)),
+                # Undirected companion, for the robustness check: the
+                # chambers' own case study scores the equivalence class
+                # rather than one orientation. NOT a replacement -- see
+                # `f1_skeleton`, the two are different metrics.
+                "f1_skeleton": float(f1_skeleton(predicted, truth)),
+                # Induced subgraph on the case study's 20 variables,
+                # excluding the pure-source settings. LT only.
+                "f1_core": (
+                    float(f1_edges(predicted.loc[core, core], truth.loc[core, core]))
+                    if (core := [n for n in LT_CASE_STUDY_NODES if n in nodes])
+                    and len(core) == len(LT_CASE_STUDY_NODES)
+                    else float("nan")
+                ),
+                "shd": float(shd(predicted, truth)),
+            }
+        )
+    return records
+
+
 def rescore_selections(
     frame: pd.DataFrame,
     *,
     n_pc_seeds: int = 9,
     pc_alpha: float = 0.05,
     progress_every: int = 50,
+    max_workers: int = 1,
 ) -> pd.DataFrame:
     """Score every DISTINCT recorded buy in `frame` under `n_pc_seeds` seeds.
 
     Pools once per distinct buy rather than once per cell — a single-call arm
     can repeat one design dozens of times, and rebuilding its data each time
     would dominate the runtime while changing nothing.
+
+    `max_workers` > 1 fans the designs out over processes. **The output does
+    not depend on it**, and that is a load-bearing property rather than a
+    hope, for two measured reasons:
+
+    * Results are reassembled in `seen` order, not completion order, so a
+      race between workers cannot reorder rows.
+    * BLAS thread count does not change PC's output here. Probed on the VPS
+      before this flag was added: 9 designs x 3 PC seeds, byte-identical F1
+      at `OPENBLAS_NUM_THREADS` 1 and 4. That check was not optional —
+      a threaded reduction can reassociate its sums, and PC amplifies a
+      ~1e-10 difference into a different graph (the whole reason
+      `blas_backend` is recorded). Re-run that probe before trusting this
+      flag on a new machine or a new numpy build.
+
+    Processes, not threads: `run_pc` attaches a handler to a *global* logger
+    to count degeneracies, so two designs sharing an interpreter would
+    cross-contaminate — the same reason `run_sweep` is process-parallel. The
+    `ThreadPoolExecutor.__exit__` trap that once wedged the sweep does not
+    apply here: this work is pure CPU with no uncancellable syscall for a
+    worker to hang in.
 
     Returns one row per (selection_key, pc_seed).
     """
@@ -151,46 +231,34 @@ def rescore_selections(
     # column exists to prevent.
     runtime = runtime_fingerprint()
 
-    records: list[dict[str, Any]] = []
-    for index, (key, (chamber, configuration, names)) in enumerate(seen.items()):
-        adapter = create_contracted_chamber_agent(
-            chamber=chamber,  # type: ignore[arg-type]
-            configuration=configuration,  # type: ignore[arg-type]
-            intervention_budget=len(names),
-        )
-        nodes = list(adapter.ground_truth().index)
-        truth = adapter.ground_truth()
-        pooled = pool_experiment_data([adapter.query_intervention(name) for name in names], nodes)
-        for pc_seed in range(n_pc_seeds):
-            predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed)
-            records.append(
-                {
-                    SELECTION_KEY_COLUMN: key,
-                    "chamber": chamber,
-                    "configuration": configuration,
-                    "n_experiments": len(names),
-                    "pc_seed": pc_seed,
-                    "f1": float(f1_edges(predicted, truth)),
-                    # Undirected companion, for the robustness check: the
-                    # chambers' own case study scores the equivalence class
-                    # rather than one orientation. NOT a replacement -- see
-                    # `f1_skeleton`, the two are different metrics.
-                    "f1_skeleton": float(f1_skeleton(predicted, truth)),
-                    # Induced subgraph on the case study's 20 variables,
-                    # excluding the pure-source settings. LT only.
-                    "f1_core": (
-                        float(f1_edges(predicted.loc[core, core], truth.loc[core, core]))
-                        if (core := [n for n in LT_CASE_STUDY_NODES if n in nodes])
-                        and len(core) == len(LT_CASE_STUDY_NODES)
-                        else float("nan")
-                    ),
-                    "shd": float(shd(predicted, truth)),
-                    "blas_backend": runtime["blas"],
-                    "platform_tag": runtime["platform"],
-                }
-            )
-        if progress_every and (index + 1) % progress_every == 0:
-            print(f"  [{index + 1}/{len(seen)}] designs re-scored", flush=True)
+    tasks: list[_DesignTask] = [
+        (key, chamber, configuration, names, n_pc_seeds, pc_alpha)
+        for key, (chamber, configuration, names) in seen.items()
+    ]
+
+    def _note(done: int) -> None:
+        if progress_every and done % progress_every == 0:
+            print(f"  [{done}/{len(tasks)}] designs re-scored", flush=True)
+
+    by_key: dict[str, list[dict[str, Any]]] = {}
+    if max_workers > 1 and len(tasks) > 1:
+        with ProcessPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_rescore_one_design, task): task[0] for task in tasks}
+            for done, future in enumerate(as_completed(futures), start=1):
+                by_key[futures[future]] = future.result()
+                _note(done)
+    else:
+        for done, task in enumerate(tasks, start=1):
+            by_key[task[0]] = _rescore_one_design(task)
+            _note(done)
+
+    # Emit in submission order, never completion order, so `--max-workers`
+    # changes only the wall time.
+    records = [
+        record | {"blas_backend": runtime["blas"], "platform_tag": runtime["platform"]}
+        for task in tasks
+        for record in by_key[task[0]]
+    ]
     return pd.DataFrame(records)
 
 
@@ -273,6 +341,17 @@ def main(argv: Iterable[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("sources", nargs="+", help="Parquet files to re-score")
     parser.add_argument("--n-pc-seeds", type=int, default=9)
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=1,
+        help=(
+            "re-score designs in parallel processes. Pure CPU, so past the "
+            "core count there is nothing to gain; each worker holds its own "
+            "pooled dataset, which is what caps the 8 GB VPS well below any "
+            "CPU limit. Output is identical at every setting."
+        ),
+    )
     parser.add_argument("--out", default="runs/rescored.parquet")
     parser.add_argument(
         "--allow-backend-mismatch",
@@ -293,7 +372,9 @@ def main(argv: Iterable[str] | None = None) -> None:
     combined = pd.concat(frames, ignore_index=True)
     print(f"{len(combined)} rows from {len(args.sources)} files", flush=True)
 
-    rescored = rescore_selections(combined, n_pc_seeds=args.n_pc_seeds)
+    rescored = rescore_selections(
+        combined, n_pc_seeds=args.n_pc_seeds, max_workers=args.max_workers
+    )
     joined = attach_rescored(combined, rescored, allow_backend_mismatch=args.allow_backend_mismatch)
 
     out = Path(args.out)
