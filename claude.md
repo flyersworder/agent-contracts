@@ -1051,10 +1051,21 @@ two models. Headlines, with the detail and the caveats in the results doc:
   skeleton recovery and collider orientation are real work; what is absent is
   mediation and high-order conditioning. **The chamber's depth is TEMPORAL**
   (`load_in(t)→rpm_in(t+1)→pressure(t+2)`) and our pooled-i.i.d. reduction
-  discards the dimension it lives in. `wt/pressure-control` is the only config
-  with contemporaneous depth (3 mediators); it needs `wt_pc_validate_v1` wired.
+  discards the dimension it lives in.
+- **`wt/pressure-control` has real depth but NO MENU — checked and closed
+  2026-09-01.** 24 length-2 paths, 45% of its 44 edges on one, against 0% in
+  standard. But both its releases ship exactly ONE experiment
+  (`wt_pc_validate_v1`: `validate_pressure_downwind_loads`;
+  `wt_pressure_control_v1`: `hatch_0`), so a budgeted selection task is
+  impossible there. The mediators exist; the interventions revealing them are
+  not purchasable.
 - **We only ever ran `standard`** — 10,104 LT and 11,086 WT cells, zero on any
-  other configuration. It was the CLI default, never a considered choice.
+  other configuration. It was the CLI default, never a considered choice — but
+  it is also the only WT config with a menu, so the oversight was in not
+  checking, not in the outcome.
+- **`team_varsplit` has run on LT k=30 ONLY, n=30.** The paper's single
+  positive result rests on 90 cells at one budget on one chamber. The WT run
+  people remember is `m6-wt-team-rerun` — that is `team`, not `team_varsplit`.
 - **The authors' own WT case study uses PCMCI+ on `wt_walks_v1`**
   (`causal_discovery_time.ipynb`, tau_max=10, alpha=1e-2, 16 variables). We
   rejected walks for autocorrelation — correct GIVEN PC, but their answer to
