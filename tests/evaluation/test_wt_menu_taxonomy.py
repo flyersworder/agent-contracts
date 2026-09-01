@@ -7,12 +7,15 @@ changes the number the arm exists to manipulate.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from evaluation.chamber_pipeline.wt_menu_taxonomy import (
     coverage_ordered,
     experiment_variable,
     group_by_variable,
+    partition_pools_by_variable,
 )
 
 # A faithful miniature of the real menu: single-entry settings, multi-entry
@@ -134,3 +137,72 @@ def test_budget_above_menu_size_returns_the_whole_menu() -> None:
     menu = ["validate_hatch_mic", "validate_osr_1"]
     chosen = coverage_ordered(menu, 10, seed=0, node_names=NODES, maximize=True)
     assert sorted(chosen) == sorted(menu)
+
+
+class TestWtPartitionPools:
+    """The variable partition on the wind-tunnel menu."""
+
+    MENU: ClassVar[list[str]] = [
+        "validate_hatch_mic",
+        "validate_hatch_rpms",
+        "validate_hatch_pressures",
+        "validate_load_in",
+        "validate_load_in_current_out",
+        "validate_osr_1",
+        "validate_osr_in",
+        "validate_osr_intake",
+    ]
+
+    def test_pools_partition_the_menu_exactly(self) -> None:
+        a, b = partition_pools_by_variable(self.MENU, NODES, [], [], budget_a=1, budget_b=1, seed=0)
+        assert a | b == set(self.MENU)
+        assert not (a & b)
+
+    def test_every_entry_of_a_variable_lands_on_one_side(self) -> None:
+        """The whole point: no variable may straddle the two pools.
+
+        A straddling variable is exactly the failure `team` has — pools
+        disjoint as sets of experiments while both scouts buy the same
+        variable — so this is the property the arm exists to guarantee.
+        """
+        a, b = partition_pools_by_variable(self.MENU, NODES, [], [], budget_a=1, budget_b=1, seed=3)
+        for side in (a, b):
+            variables = {experiment_variable(n, NODES) for n in side}
+            other = b if side is a else a
+            assert not (variables & {experiment_variable(n, NODES) for n in other})
+
+    def test_claims_are_honoured_and_ties_go_to_a(self) -> None:
+        a, b = partition_pools_by_variable(
+            self.MENU,
+            NODES,
+            claim_a=["validate_hatch_mic"],
+            claim_b=["validate_hatch_rpms"],
+            budget_a=1,
+            budget_b=1,
+            seed=0,
+        )
+        assert "validate_hatch_pressures" in a, "a variable claimed by both goes to A"
+        assert not any(experiment_variable(n, NODES) == "hatch" for n in b)
+
+    def test_infeasible_split_raises_rather_than_running_inert(self) -> None:
+        """A pool at or below budget makes that scout's selection loop inert."""
+        with pytest.raises(ValueError, match="selection loop is inert"):
+            partition_pools_by_variable(self.MENU, NODES, [], [], budget_a=99, budget_b=1, seed=0)
+
+    def test_deal_balances_entries_not_variable_count(self) -> None:
+        """Variables carry 1-4 entries, so an alternating deal unbalances picks.
+
+        Constructed so the two strategies visibly differ: one fat variable of
+        three entries against three singles. Balancing entries gives 3 vs 3;
+        alternating variables gives 4 vs 2.
+        """
+        menu = [
+            "validate_hatch_mic",
+            "validate_hatch_rpms",
+            "validate_hatch_pressures",
+            "validate_osr_1",
+            "validate_osr_in",
+            "validate_osr_intake",
+        ]
+        a, b = partition_pools_by_variable(menu, NODES, [], [], budget_a=1, budget_b=1, seed=1)
+        assert abs(len(a) - len(b)) <= 1, f"entries unbalanced: {len(a)} vs {len(b)}"

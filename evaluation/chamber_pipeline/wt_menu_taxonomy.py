@@ -122,3 +122,59 @@ def coverage_ordered(
             if len(chosen) == budget:
                 return chosen
     return chosen
+
+
+def partition_pools_by_variable(
+    menu: list[str],
+    node_names: list[str],
+    claim_a: list[str],
+    claim_b: list[str],
+    budget_a: int,
+    budget_b: int,
+    seed: int,
+) -> tuple[set[str], set[str]]:
+    """WT twin of `menu_taxonomy.partition_pools_by_variable`.
+
+    Same three-step assignment — claims first, free variables dealt greedily
+    to whichever pool holds fewer ENTRIES, feasibility asserted — differing
+    only in taking `node_names` because the WT parse needs them.
+
+    **WT's feasibility margin is tighter than LT's and the assert is not
+    ceremonial here.** The menu is 28 entries over 21 variables, so a balanced
+    deal gives pools near 14 each against scout budgets of 7 (k=14) and 10-11
+    (k=21). But the size distribution is lopsided — `load_out` carries 4
+    entries, `hatch` and `load_in` 3, and the other 18 variables carry 1 — so
+    an unlucky deal that hands all three fat variables to one side leaves the
+    other with 18 singles and the first with 10 entries, still above 7 but
+    close at k=21. Raising beats silently running a scout whose every menu
+    entry gets queried, which makes its selection loop inert and its LLM
+    irrelevant.
+    """
+    groups = group_by_variable(menu, node_names)
+    owner: dict[str, str] = {}
+    for name in claim_a:
+        owner[experiment_variable(name, node_names)] = "a"
+    for name in claim_b:
+        owner.setdefault(experiment_variable(name, node_names), "b")
+
+    free = [v for v in groups if v not in owner]
+    _random.Random(f"wtvarsplit:{seed}").shuffle(free)
+    size = {
+        "a": sum(len(groups[v]) for v, o in owner.items() if o == "a"),
+        "b": sum(len(groups[v]) for v, o in owner.items() if o == "b"),
+    }
+    for variable in free:
+        side = "a" if size["a"] <= size["b"] else "b"
+        owner[variable] = side
+        size[side] += len(groups[variable])
+
+    pool_a = {n for v, o in owner.items() if o == "a" for n in groups[v]}
+    pool_b = {n for v, o in owner.items() if o == "b" for n in groups[v]}
+    for label, pool, budget in (("a", pool_a, budget_a), ("b", pool_b, budget_b)):
+        if len(pool) <= budget:
+            raise ValueError(
+                f"variable partition left scout_{label} a pool of {len(pool)} "
+                f"entries against a budget of {budget}; at or below budget the "
+                "selection loop is inert because every name gets queried"
+            )
+    return pool_a, pool_b

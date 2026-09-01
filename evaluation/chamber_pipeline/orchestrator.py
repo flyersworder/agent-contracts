@@ -347,9 +347,13 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
     AgentSpec(
         name="team_varsplit",
         run=team_varsplit_agents,
-        # LT only: the variable partition reads the LT menu taxonomy, which
-        # WT names do not follow.
-        chambers=("lt",),
+        # Both chambers as of 2026-09-01. The variable partition dispatches on
+        # `adapter.chamber` to the matching menu parse (`menu_taxonomy` for LT's
+        # strength suffix, `wt_menu_taxonomy` for WT's longest node-name
+        # prefix). Was LT-only while the WT parse did not exist, which would
+        # have SKIPPED every WT cell rather than failing -- the arm's absence
+        # from the WT ladder was silent.
+        chambers=("lt", "wt"),
         accepts_llm=True,
         kind="llm_multi",
         extra_kwargs=("scout_a_budget", "scout_b_budget"),

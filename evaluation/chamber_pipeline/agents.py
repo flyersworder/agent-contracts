@@ -51,7 +51,12 @@ from .llm_planner import (
     summarize_experiments,
 )
 from .menu_taxonomy import coverage_ordered, partition_pools_by_variable
-from .wt_menu_taxonomy import coverage_ordered as wt_coverage_ordered
+from .wt_menu_taxonomy import (
+    coverage_ordered as wt_coverage_ordered,
+)
+from .wt_menu_taxonomy import (
+    partition_pools_by_variable as wt_partition_pools_by_variable,
+)
 
 if TYPE_CHECKING:
     from agent_contracts.integrations.causalchamber import ContractedChamberAgent
@@ -1833,9 +1838,27 @@ def team_agents(
         # GRANULARITY of the split changes. See
         # `partition_pools_by_variable` for why, and `menu_taxonomy` for the
         # null model that says the name-level split protects nothing.
-        pool_a, pool_b = partition_pools_by_variable(
-            menu, claim_a, claim_b, scout_a_budget, scout_b_budget, seed
-        )
+        #
+        # Dispatched on the CHAMBER, not on a name heuristic: the two menus
+        # need different parses (LT splits a strength suffix, WT resolves a
+        # longest node-name prefix) and the WT one additionally needs the node
+        # list. Reading `adapter.chamber` keeps the choice explicit rather than
+        # sniffing an entry's prefix, which would silently mis-parse the first
+        # chamber whose names happen to look like the other's.
+        if getattr(adapter, "chamber", "lt") == "wt":
+            pool_a, pool_b = wt_partition_pools_by_variable(
+                menu,
+                _node_names(adapter),
+                claim_a,
+                claim_b,
+                scout_a_budget,
+                scout_b_budget,
+                seed,
+            )
+        else:
+            pool_a, pool_b = partition_pools_by_variable(
+                menu, claim_a, claim_b, scout_a_budget, scout_b_budget, seed
+            )
     elif partition == "experiment":
         rest = [m for m in menu if m not in set(claim_a) | set(claim_b)]
         _random.Random(seed).shuffle(rest)
