@@ -650,10 +650,19 @@ before the rewrite, not after.
 
 **3b. Selection diversity for single-call arms — NEW, small, blocking for the
 record claim.** `one_shot` re-picks the same design (6 distinct at LT k=30), so
-its equivalence bound cannot be tightened by seeds. Shuffle the menu order per
-seed inside the single call, re-run `one_shot` on both chambers (~180 cells,
-~$4), and report distinct-selection counts for every arm as a standard column.
-Without this, the LT k=30 half of the record claim stays at ±0.051.
+its equivalence bound cannot be tightened by seeds. **Shuffle the menu order
+per seed** inside the single call, re-run `one_shot` on both chambers (~180
+cells, ~$4), and report distinct-selection counts for every arm as a standard
+column. Without this, the LT k=30 half of the record claim stays at ±0.051.
+
+**Menu-order shuffling is the only lever — corrected 2026-09-01.** An earlier
+version of this item offered "a pinned non-zero temperature" as the
+alternative. Measurement (register §21) removes it: **temperature 0.0 is
+already nondeterministic on this endpoint** — six distinct picks in nine draws
+— and unset, 1.0 and 0.0 show indistinguishable diversity. Temperature is not
+the knob. The reconciliation with §24 is that a single *pick* is variable while
+a 30-pick *set* is nearly canonical, so the diversity has to be injected into
+the prompt the set is chosen from, not into the sampler.
 
 **3c. Bound tightening by multi-seed scoring — NEW, no LLM cost.** Averaging a
 cell over m PC subsample seeds shrinks its noise by sqrt(m); the probe shows
@@ -691,7 +700,15 @@ divergence is real (overlap 0.79 -> 0.32) and still loses.
    (+0.058 WT), coverage (+0.0073/variable). The instrument discriminates; the
    topologies genuinely do not differ.
 
-3. **Report power, not just significance.** State the noise-only MDE floor
+3. **State the reproducibility claim at the level it holds.** Neither the
+   seed, nor temperature, nor a pinned provider makes a *cell* reproducible
+   (register §10 for BLAS, §21 for sampling). Reproducibility in this pillar
+   lives at the level of **arm means over n seeds** — claim that, archive the
+   resolved environment including the linear-algebra backend, and run every arm
+   of a comparison on one machine. Stated positively this is a methods
+   contribution; left implicit it reads as a hole.
+
+4. **Report power, not just significance.** State the noise-only MDE floor
    beside every equivalence (0.031 at LT k=30, 0.029 at WT k=21) and the seeds
    a 0.02 effect would need (n≈75 LT, n≈110 WT). An equivalence without a bound
    reads as a null; with one it is a result.

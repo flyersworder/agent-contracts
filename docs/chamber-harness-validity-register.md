@@ -880,53 +880,77 @@ structure's correlations. Before trusting one, tabulate every recorded
 attribute of the picks across the arms — not only the attribute being
 manipulated. Here one `groupby` over strength counts was the whole diagnosis.
 
-## 21. The seed does not control the LLM, and it moves ARM MEANS (2026-08-30)
+## 21. The seed does not control the LLM — and pinning temperature will not fix it (2026-08-30, corrected 2026-09-01)
 
-Known since 2026-08-26 as a note ("the seed does not control the LLM";
-`llm_pc_agent` passes no temperature, so the provider default applies and the
-same seed gave F1 0.330 and 0.482). It was recorded as *cell* variance and left
-unfixed. The M7 `team_varsplit` run shows it reaches further than that.
+**The original finding stands.** `llm_pc_agent` calls `_llm_select_loop(...)`
+with no temperature, so the provider default applies. Same seed, same config,
+two runs: **F1 0.330 and 0.482**. The seed governs only the fallback RNG and
+PC's subsample. Every cell is an independent draw, so seed pairing carries no
+information (cross-arm r = −0.03) and unpaired MDEs are the correct ones.
 
-**Three independent estimates of one contrast, `team` − `llm_pc` at LT k=30:**
+It reaches **arm means**, not only cells: three independent n>=10 estimates of
+the same `team` − `llm_pc` contrast span **−0.023 to −0.048**.
 
-| run | n per arm | delta |
+**Audit of what was actually pinned (2026-09-01).** Temperature was never
+pinned in any DeepSeek run, and the arms are not even mutually consistent:
+
+| arms | temperature |
+|---|---|
+| `llm_pc`, `one_shot`, `critique`, `planner_reasoner`, `shared_blackboard`, `llm_only` | **unpinned** (no field sent) |
+| scouts inside `fan_in_homog`, `fan_in_spec`, `team`, `team_varsplit` | **1.0** (`_SCOUT_TEMPERATURE`) |
+
+Confirmed in the data: M6 ladders, curves, `pro-*`, `uncontracted`,
+`agg-ablation` and `m4-pilot` carry **no `temperature` column**; the Phase 2
+files carry it and it is **null in all 960 rows**, the encoding for "no field
+sent". So the headline loop-vs-fan-in contrast differs in topology *and* in
+whether a temperature was specified.
+
+**The correction: pinning temperature would not buy determinism.** OpenRouter
+declares no default temperature anywhere in its model or endpoint metadata, so
+it was measured — identical prompt, production config (`effort=low`, Parasail
+pinned), one selection decision per draw:
+
+| temperature | draws | distinct outputs |
 |---|---|---|
-| M6 ladder, 24 Aug | 30 | −0.046 |
-| M7 Phase 1, 30 Aug | 10 | −0.048 |
-| M7 varsplit, 30 Aug | 30 | **−0.023** |
-| pooled Phase 1 + varsplit | 40 | −0.0296 (MDE 0.0298) |
+| unset | 14 | 6 |
+| 1.0 | 11 | 6 |
+| **0.0** | **9** | **6** |
 
-Same chamber, same budget, same model snapshot, same provider order, same BLAS.
-A contrast that resolves in one n=30 sample and not in another is a contrast
-whose point estimate carries provider sampling variance, not just cell noise.
+**Temperature 0.0 is not deterministic on this endpoint** — six different
+experiments chosen in nine draws. That claim needs only two differing draws and
+has six distinct in nine, so it is not a power question. The nondeterminism
+comes from somewhere else (MoE routing, batching, or the reasoning trace), not
+from sampling temperature.
 
-**What is NOT affected**, and this is the reassuring half: the mechanism
-variables are near-deterministic across the same runs — distinct variables
-`team` 22.7 / 23.4 and loop 27.5 / 27.9; shared variables 6.5 / 5.6. Whatever
-the sampler is doing, it is not changing what the arms buy. Every mechanism
-claim in `docs/chamber-results.md` stands; the F1 point estimates are the
-fragile part.
+Two consequences, pointing in opposite directions:
 
-**Fix shipped, deliberately inert by default.** `--temperature` pins it,
-`RunRecord.temperature` records what a cell actually ran under, and the default
-stays unset so no new cell silently becomes incomparable with the 2,000+
-recorded ones. Routed only to arms that declare the parameter: the fan-in rungs
-keep `_SCOUT_TEMPERATURE`, which exists to stop two identically-prompted scouts
-returning one claim list — pinning them to a shared value would reintroduce
-that degeneracy while looking like a tightening.
+1. **Good for the corpus.** If temperature does not drive the variance, the
+   loop-vs-scout mismatch above is a difference on paper rather than in
+   behaviour, and the confound it threatened is small. It was never a *bias* in
+   any case — unpinned sampling inflates variance symmetrically, and the MDEs
+   already absorb it.
+2. **Bad for the fix.** "Pin temperature so the seed controls the model" — the
+   remedy this entry originally implied — **does not work**, and planning around
+   it would waste a re-run. Where design *diversity* is needed (register §24's
+   `one_shot`, which produced 6 distinct designs in 30 cells), the lever must be
+   the prompt — shuffling menu order per seed — not the temperature.
 
-Mutation-checked, because the pin is silent in both directions: a truthiness
-guard (`if temperature:`) drops a pinned **0.0** and restores provider sampling
-with every column still looking right; an unrouted pin logs as pinned and
-changes nothing.
+**Power limit, stated because the two claims differ in strength.** "temp=0 is
+nondeterministic" is established. "temperature does not change the diversity
+level" is NOT — n is 9–14 per condition on a single prompt, enough to rule out
+determinism, not enough to bound a modest effect.
 
-**Standing rule**: never pool rows whose `temperature` differs, alongside the
-same rule for `blas_backend` (entry 10) and `model_id`.
+**Note the reconciliation with §24.** A single *pick* is highly variable (6
+distinct in 9 draws) while a 30-pick *set* is nearly canonical (6 distinct in 30
+cells). Both are true: choosing one of 59 is underdetermined, while choosing a
+sensible 30 of 59 converges. Diversity at the call level does not imply
+diversity at the design level, and it is the design level that governs an arm's
+effective sample size.
 
-**Still open**: whether to pin, and to what. Temperature 0 is not obviously
-right — it makes the loop deterministic given the prompt, which removes the
-seed-to-seed variation the MDE is computed over, and every arm would need a
-replication check before its old rows could be compared with new ones.
+**For the paper's reproducibility statement**, this joins §10 (BLAS): neither
+the seed, nor temperature, nor a pinned provider makes a *cell* reproducible.
+Reproducibility in this pillar lives at the level of **arm means over n seeds**,
+and that is what should be claimed.
 
 ## 22. The collinear-drop rate correlates with the ARM — checked, inert (2026-08-31)
 

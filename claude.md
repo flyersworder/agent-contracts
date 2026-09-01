@@ -632,6 +632,18 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
 
 ## Operational notes (chamber pillar)
 
+- **Temperature was NEVER pinned, and pinning it would not help** (measured
+  2026-09-01, register §21). No DeepSeek run sent a `temperature` field —
+  pre-Aug-30 files have no column, Phase 2 files have it null in all 960 rows.
+  The arms are also inconsistent: scouts in `fan_in_*`/`team*` run at
+  `_SCOUT_TEMPERATURE = 1.0` while the loop, `one_shot`, `critique`,
+  `planner_reasoner` and `shared_blackboard` run unpinned. **But temperature
+  0.0 is itself nondeterministic here** — six distinct picks in nine draws, and
+  unset/1.0/0.0 are indistinguishable in diversity. So the mismatch is not a
+  meaningful confound, and "pin temperature for reproducibility" is a dead end;
+  where design diversity is needed, **shuffle the menu order per seed**.
+  Reproducibility in this pillar exists at the level of ARM MEANS over n seeds,
+  never at the cell — same conclusion as the BLAS finding.
 - **Endpoint reasoning DEFAULTS diverge 130x — and we already pin past them**
   (probed 2026-08-31, register §25). With no `reasoning` parameter, one prompt
   gives Z.AI 6,889 tokens / GMICloud 2,600 / DeepInfra 52 on `glm-5.3-flash`.
