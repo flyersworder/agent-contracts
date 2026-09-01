@@ -851,6 +851,94 @@ that were previously cross-platform.
 (90, confounded, retained for reproducibility), `runs/m7-coverage-ms.parquet`
 (60, deconfounded).
 
+## WT `team_varsplit` REPLICATION (2026-09-02): the mechanism does NOT transfer at feasible n
+
+`runs/m7-wt-varsplit.parquet` — **300 cells, 298 ok, 2 errors**, WT
+`standard`, k ∈ {14, 21}, n=50 per arm, `deepseek-v4-flash-0731`, VPS
+(`scipy-openblas`), 3 h 32 m on 6 workers. All three arms in ONE run.
+Scored at **9 PC seeds, clustered by distinct design** (`rescored-vps`).
+
+The LT result below rests on 90 cells at one budget on one chamber, so this
+was the replication that mattered. **It does not replicate.**
+
+| contrast | LT k=30 | WT k=14 | WT k=21 |
+|---|---|---|---|
+| `team_varsplit` − `team` | **+0.0428** | **−0.0000** | +0.0172 |
+| MDE | 0.0189 | 0.0232 | 0.0242 |
+| verdict | **RESOLVED** | **flat** | below MDE |
+
+Arm means (re-scored, design-clustered):
+
+| arm | WT k=14 | WT k=21 |
+|---|---|---|
+| `llm_pc` (loop) | 0.2445 | 0.2727 |
+| `team_varsplit` | 0.2240 | 0.2603 |
+| `team` | 0.2241 | 0.2431 |
+
+`team` − `llm_pc` is **−0.0296 RESOLVED** at k=21 and −0.0205 (below MDE) at
+k=14, so the *deficit* the mechanism is supposed to close is present on WT.
+What is absent is the closing of it.
+
+### The mechanism fires; the accuracy does not follow
+
+The manipulation works exactly as designed — this is not an implementation
+failure:
+
+| distinct variables bought | k=14 | k=21 |
+|---|---|---|
+| `team` | 11.52 | 16.06 |
+| `team_varsplit` | **12.40** | **17.40** |
+| loop | 11.64 | 17.14 |
+
++0.88 and +1.34 variables, `overlap_frac` 0.000 in both arms by construction.
+At k=21 `team_varsplit` buys **more** distinct variables than the loop (17.40
+vs 17.14) and still scores 0.012 lower. On LT the same +5.5 variables bought
++0.036 F1; on WT +1.34 buys nothing that resolves.
+
+**The most likely reading is that WT gives the manipulation almost no room.**
+LT's menu is 59 entries over 30 variables; WT's is 28 over 21, and 18 of those
+carry exactly one entry. There is little cross-scout variable duplication left
+to remove, so the intervention that was worth 5.5 variables on LT is worth 1.3
+here. That is a statement about menu structure, not about topology.
+
+### The arm is INFEASIBLE at k/M = 0.75, by construction
+
+Both errors are `partition_pools_by_variable` raising, at k=21 seeds 7 and 49
+(**2 of 50, 4%**): a variable partition left scout B a pool of 10 entries
+against a budget of 10, where the selection loop is inert because every name
+gets queried.
+
+This is a real limit of partition-granularity interventions, worth stating in
+the paper rather than hiding: **the trick needs menu slack, and slack vanishes
+as the budget approaches the menu size.** At WT k=21 the scout budgets are 11
+and 10, so a feasible split needs 23 of 28 entries — five to spare — and claims
+are assigned before balancing, so a scout claiming all three fat variables
+(`load_out` 4, `load_in` 3, `hatch` 3) plus eight singletons takes 18 and
+starves its peer. LT k=30 had 59 entries over 30 variables and could not hit it.
+
+At 4% the surviving cells are close to an unbiased sample, but the selection
+is on claim structure, which is the mechanism variable — so quote k=21 with
+the exclusion stated.
+
+### What this does to the paper's positive result
+
+> The partition-granularity manipulation is demonstrated on LT k=30
+> (+0.043, resolved, and a pre-registered slope predicting +0.040), and
+> **does not reproduce on WT at either budget with n=50**. The mechanism
+> variable moves on both chambers; the accuracy gain follows only where the
+> menu leaves enough duplication to remove.
+
+Resolving WT k=21's +0.017 would need **n ≈ 250 per arm**. That is not a null —
+it is an equivalence bound at ±0.024 — but it is not the two-chamber
+manipulation the earlier draft assumed.
+
+**A correction to what was reported mid-run.** At cell level the two WT
+budgets gave +0.0155 and +0.0160, and the stability across independent budgets
+looked like a weak but real replication. Re-scored at 9 PC seeds, k=14 is
+**−0.0000**. The apparent stability was single-draw PC noise — the exact
+failure mode register §27 documents, arriving a second time in the same
+quantity it was written about.
+
 ## M7 `team_varsplit` (2026-08-30): the deficit was redundancy, and a one-line change to WHAT is partitioned recovers it
 
 `runs/m7-varsplit.parquet` — **90/90 cells, 90 ok, 0 errors, 0 PC

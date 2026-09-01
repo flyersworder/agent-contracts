@@ -1494,6 +1494,69 @@ doing either.
 
 **Related:** §28 (the node set), §13 (WT collinearity), §26.
 
+## 30. The re-scorer collapsed distinct pools onto one design (2026-09-02)
+
+**`rescore_selections` keyed its unit of work by `selection_key`, which
+ignores order — but `pool_experiment_data` concatenates in sequence and PC
+subsamples 300 rows under a seed, so the order of the buy changes which rows
+PC sees.** Two cells that bought the same experiments in a different sequence
+scored differently in production; the re-scorer computed one of them and
+handed its value to the other.
+
+Measured on real LT data: `[uniform_reference, uniform_red_strong,
+uniform_green_strong]` scores **0.133** and its reverse **0.105** at the same
+PC seed.
+
+**How it was caught, and how it was nearly mis-explained.** Joining production
+`f1` to the re-scored value at the SAME (design, pc_seed) gave 230/243 exact
+with 13 forks up to 0.127 F1, concentrated in WT. The first diagnosis was a
+BLAS mismatch — the re-scoring had been run on macOS/Accelerate while the
+sweeps ran on the VPS — which was plausible, matched §"BLAS" exactly, and was
+**wrong**. Re-running the whole corpus on the VPS did not fix it (278/296),
+and the old and new re-scorings agreed on **8,170 of 8,172** shared rows,
+which shows backend was never the separator.
+
+Splitting the cells on the actual candidate settled it in one table:
+
+| design recorded in | cells | exact | fork rate |
+|---|---|---|---|
+| ONE name order | 256 | 256 | **0%** |
+| more than one order | 40 | 22 | **45%** |
+
+Every fork was in the multi-order group. After keying by the ordered buy:
+**296/296 exact, every source file.**
+
+**The fix.** `design_key` (order-sensitive) is the unit of work and the join
+key; `SELECTION_KEY_COLUMN` stays order-insensitive and is still emitted,
+because clustering for analysis is a claim about what was bought, not the
+sequence (§24). Cost: 85 extra designs out of 1,254 — only 4.9% of buys were
+recorded in more than one order. `attach_rescored` now REFUSES a frame with no
+`design_key` rather than falling back to the set, since such a frame came from
+the broken keying and is wrong for exactly the cells a fallback would hide.
+
+**A test asserted the defect as intended behaviour.** `test_attach_rescored_
+averages_over_pc_seeds_not_over_cells` contained the line "cells 0 and 1
+bought the same set in different order -> same design mean". It passed
+throughout. A test written from the implementation's model of the world
+cannot catch that model being wrong; only a measurement against production
+could, and did.
+
+**What it did NOT change.** All nine Phase 2 verdicts survive the corrected
+re-scoring, and `one_shot` − loop at LT k=6 stays resolved (−0.047 against a
+documented −0.059). The defect touched 3% of cells and moved no conclusion —
+but that was luck, not design: the WT `team_varsplit` k=14 contrast moved from
++0.0155 to −0.0000 under correct scoring, and had the ordering error landed
+there instead it would have been the paper's replication.
+
+**Standing rule.** **Validate a derived scorer against the production number
+it claims to reproduce, on every file, and split the residual on a candidate
+cause before naming one.** The exactness check existed (§27, "191 of 191") but
+had only ever been run on LT-heavy data where multi-order designs are rare.
+A validation that never sees the failing regime is not a validation.
+
+**Related:** §24 (clustering by design), §27 (the re-scoring this corrects),
+§"BLAS" (the explanation that did not survive).
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
