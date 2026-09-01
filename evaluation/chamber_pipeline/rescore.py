@@ -45,6 +45,8 @@ from .inference import pool_experiment_data, run_pc, runtime_fingerprint
 from .scoring import f1_edges, f1_skeleton, shd
 
 SELECTION_KEY_COLUMN = "selection_key"
+#: The ordered buy — the unit of re-scoring work, and the join key.
+DESIGN_KEY_COLUMN = "design_key"
 
 #: The 20 light-tunnel variables used by the chambers' own causal-discovery
 #: case study (`causal-chamber-paper/case_studies/causal_discovery_iid.ipynb`).
@@ -101,6 +103,19 @@ def selection_key(chamber: str, configuration: str, names: Sequence[str]) -> str
     return hashlib.sha1(payload.encode()).hexdigest()[:16]
 
 
+def design_key(chamber: str, configuration: str, names: Sequence[str]) -> str:
+    """Stable id for one purchased design AS ORDERED.
+
+    The unit of re-scoring work. `selection_key` is the unit of ANALYSIS and
+    deliberately ignores order; this one must not, because pooling
+    concatenates in sequence and PC's seeded subsample then draws different
+    rows. Two cells buying `[a, b]` and `[b, a]` scored differently in
+    production and have to be re-scored separately to reproduce it.
+    """
+    payload = "|".join([chamber, configuration, "\x00".join(names)])
+    return hashlib.sha1(payload.encode()).hexdigest()[:16]
+
+
 def parse_selection(raw: object) -> list[str]:
     """Split a recorded `chosen_experiments` value into names.
 
@@ -143,7 +158,8 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
         predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed)
         records.append(
             {
-                SELECTION_KEY_COLUMN: key,
+                DESIGN_KEY_COLUMN: key,
+                SELECTION_KEY_COLUMN: selection_key(chamber, configuration, names),
                 "chamber": chamber,
                 "configuration": configuration,
                 "n_experiments": len(names),
@@ -212,14 +228,29 @@ def rescore_selections(
             "`chosen_experiments` and can be re-scored"
         )
 
+    # Keyed by the ORDERED buy, not by the set. `pool_experiment_data`
+    # concatenates in the order given, and PC subsamples 300 rows from the
+    # result under a seed -- so two cells that bought the same experiments in
+    # a different sequence drew different rows and legitimately scored
+    # differently. Collapsing them onto whichever cell was seen first
+    # re-scores the others against a pool they never built.
+    #
+    # Measured, which is how this was caught: of 296 cells re-scorable at
+    # their production seed, the 256 whose design was recorded in ONE order
+    # reproduced production 256/256, while the 40 in multi-order designs
+    # forked at 45%. Ordering is 4.9% of sets here and costs 85 extra designs
+    # out of 1,254 -- a rounding error against being wrong on 3% of cells.
+    #
+    # `selection_key` stays order-INSENSITIVE and is still emitted, because
+    # clustering for analysis is a statement about what was bought (§24), not
+    # about the sequence it was bought in.
     ok = frame[frame["status"] == "ok"]
-    seen: dict[str, tuple[str, str, list[str]]] = {}
+    seen: dict[tuple[str, str, tuple[str, ...]], list[str]] = {}
     for _, row in ok.iterrows():
         names = parse_selection(row["chosen_experiments"])
         if not names:
             continue
-        key = selection_key(row["chamber"], row["configuration"], names)
-        seen.setdefault(key, (row["chamber"], row["configuration"], names))
+        seen.setdefault((row["chamber"], row["configuration"], tuple(names)), names)
 
     # Which machine is doing the RE-scoring, not which machine produced the
     # source rows. These are routinely different -- the sweeps run on the VPS
@@ -232,8 +263,15 @@ def rescore_selections(
     runtime = runtime_fingerprint()
 
     tasks: list[_DesignTask] = [
-        (key, chamber, configuration, names, n_pc_seeds, pc_alpha)
-        for key, (chamber, configuration, names) in seen.items()
+        (
+            design_key(chamber, configuration, names),
+            chamber,
+            configuration,
+            names,
+            n_pc_seeds,
+            pc_alpha,
+        )
+        for (chamber, configuration, _), names in seen.items()
     ]
 
     def _note(done: int) -> None:
@@ -292,6 +330,16 @@ def attach_rescored(
     Raises:
         ValueError: If the re-scoring backend differs from the source rows'.
     """
+    if DESIGN_KEY_COLUMN not in rescored.columns:
+        raise ValueError(
+            f"re-scored frame has no `{DESIGN_KEY_COLUMN}`; it was produced "
+            "before ordering was respected, when the unit of work was the SET "
+            "of experiments. Such a frame re-scored one ordering of each buy "
+            "and would hand its value to cells that pooled a different one "
+            "(measured: 45% of those cells disagreed with production). "
+            "Re-run `rescore_selections` rather than joining it."
+        )
+
     # Aggregate whatever metric columns are present. The optional ones
     # (`f1_skeleton`, `f1_core`) were added after the first re-scoring run,
     # and a frame written before that must still join rather than raise --
@@ -313,7 +361,7 @@ def attach_rescored(
         if column in rescored.columns:
             aggregations[alias] = (column, "first")
     per_key = (
-        rescored.groupby(SELECTION_KEY_COLUMN).agg(**aggregations).reset_index()  # type: ignore[call-overload]
+        rescored.groupby(DESIGN_KEY_COLUMN).agg(**aggregations).reset_index()  # type: ignore[call-overload]
     )
     if not allow_backend_mismatch and "blas_backend" in rescored.columns:
         source = set(frame.get("blas_backend", pd.Series(dtype=object)).dropna().unique())
@@ -328,13 +376,23 @@ def attach_rescored(
                 "comparison uses `f1_rescored`."
             )
     out = frame.copy()
+    # Both keys travel with every cell: `design_key` joins the re-scored
+    # value (order-sensitive, so a cell gets the pool it actually built),
+    # `selection_key` clusters for analysis (order-insensitive, because a
+    # buy is a set).
     out[SELECTION_KEY_COLUMN] = [
         selection_key(r["chamber"], r["configuration"], parse_selection(r["chosen_experiments"]))
         if parse_selection(r["chosen_experiments"])
         else None
         for _, r in out.iterrows()
     ]
-    return out.merge(per_key, on=SELECTION_KEY_COLUMN, how="left")
+    out[DESIGN_KEY_COLUMN] = [
+        design_key(r["chamber"], r["configuration"], parse_selection(r["chosen_experiments"]))
+        if parse_selection(r["chosen_experiments"])
+        else None
+        for _, r in out.iterrows()
+    ]
+    return out.merge(per_key, on=DESIGN_KEY_COLUMN, how="left")
 
 
 def main(argv: Iterable[str] | None = None) -> None:

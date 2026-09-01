@@ -12,9 +12,11 @@ import pandas as pd
 import pytest
 
 from evaluation.chamber_pipeline.rescore import (
+    DESIGN_KEY_COLUMN,
     LT_CASE_STUDY_NODES,
     SELECTION_KEY_COLUMN,
     attach_rescored,
+    design_key,
     parse_selection,
     rescore_selections,
     selection_key,
@@ -81,39 +83,52 @@ def test_attach_rescored_averages_over_pc_seeds_not_over_cells() -> None:
     design, so the averaged value must be a property of the DESIGN. If the
     join instead averaged per cell, repeated cells would each look like an
     independent draw.
+
+    "Same design" means the same buy in the same ORDER. An earlier version of
+    this test asserted that `a,b` and `b,a` share a mean, which encoded the
+    ordering defect as intended behaviour — pooling concatenates in sequence,
+    so those two cells handed PC different rows and really did score
+    differently.
     """
     cells = pd.DataFrame(
         {
-            "chamber": ["lt"] * 3,
-            "configuration": ["standard"] * 3,
-            "status": ["ok"] * 3,
-            "chosen_experiments": ["a,b", "b,a", "a,c"],
-            "f1": [0.10, 0.20, 0.30],
+            "chamber": ["lt"] * 4,
+            "configuration": ["standard"] * 4,
+            "status": ["ok"] * 4,
+            "chosen_experiments": ["a,b", "a,b", "b,a", "a,c"],
+            "f1": [0.10, 0.20, 0.25, 0.30],
         }
     )
-    key_ab = selection_key("lt", "standard", ["a", "b"])
-    key_ac = selection_key("lt", "standard", ["a", "c"])
+    d_ab = design_key("lt", "standard", ["a", "b"])
+    d_ba = design_key("lt", "standard", ["b", "a"])
+    d_ac = design_key("lt", "standard", ["a", "c"])
     rescored = pd.DataFrame(
         {
-            SELECTION_KEY_COLUMN: [key_ab, key_ab, key_ac, key_ac],
-            "pc_seed": [0, 1, 0, 1],
-            "f1": [0.10, 0.30, 0.50, 0.70],
-            "f1_skeleton": [0.15, 0.35, 0.55, 0.75],
-            "f1_core": [0.20, 0.40, 0.60, 0.80],
+            DESIGN_KEY_COLUMN: [d_ab, d_ab, d_ba, d_ba, d_ac, d_ac],
+            SELECTION_KEY_COLUMN: [selection_key("lt", "standard", ["a", "b"])] * 4
+            + [selection_key("lt", "standard", ["a", "c"])] * 2,
+            "pc_seed": [0, 1, 0, 1, 0, 1],
+            "f1": [0.10, 0.30, 0.90, 0.94, 0.50, 0.70],
+            "f1_skeleton": [0.15, 0.35, 0.95, 0.99, 0.55, 0.75],
+            "f1_core": [0.20, 0.40, 0.10, 0.14, 0.60, 0.80],
         }
     )
     out = attach_rescored(cells, rescored)
-    # Cells 0 and 1 bought the same set in different order -> same design mean.
+    # Cells 0 and 1 are the same ordered buy -> one shared design mean.
     assert out.loc[0, "f1_rescored"] == pytest.approx(0.20)
     assert out.loc[1, "f1_rescored"] == pytest.approx(0.20)
-    assert out.loc[2, "f1_rescored"] == pytest.approx(0.60)
-    assert list(out["n_pc_seeds"]) == [2, 2, 2]
+    # Cell 2 is the same SET in the other order -> its own mean.
+    assert out.loc[2, "f1_rescored"] == pytest.approx(0.92)
+    assert out.loc[3, "f1_rescored"] == pytest.approx(0.60)
+    assert list(out["n_pc_seeds"]) == [2, 2, 2, 2]
+    # ...while still clustering as one buy for analysis.
+    assert out.loc[0, SELECTION_KEY_COLUMN] == out.loc[2, SELECTION_KEY_COLUMN]
     # The undirected companion must be averaged the same way, per DESIGN.
     assert out.loc[0, "f1_skeleton_rescored"] == pytest.approx(0.25)
-    assert out.loc[2, "f1_skeleton_rescored"] == pytest.approx(0.65)
+    assert out.loc[3, "f1_skeleton_rescored"] == pytest.approx(0.65)
     assert out.loc[0, "f1_core_rescored"] == pytest.approx(0.30)
     # The original column must survive untouched for comparison.
-    assert list(out["f1"]) == [0.10, 0.20, 0.30]
+    assert list(out["f1"]) == [0.10, 0.20, 0.25, 0.30]
 
 
 def test_attach_rescored_leaves_unscorable_cells_null() -> None:
@@ -129,7 +144,15 @@ def test_attach_rescored_leaves_unscorable_cells_null() -> None:
     )
     out = attach_rescored(
         cells,
-        pd.DataFrame({SELECTION_KEY_COLUMN: [], "pc_seed": [], "f1": [], "f1_skeleton": []}),
+        pd.DataFrame(
+            {
+                DESIGN_KEY_COLUMN: [],
+                SELECTION_KEY_COLUMN: [],
+                "pc_seed": [],
+                "f1": [],
+                "f1_skeleton": [],
+            }
+        ),
     )
     assert out[SELECTION_KEY_COLUMN].isna().all()
     assert out["f1_rescored"].isna().all()
@@ -169,7 +192,14 @@ def test_attach_rescored_tolerates_a_missing_optional_metric() -> None:
         }
     )
     key = selection_key("lt", "standard", ["a", "b"])
-    legacy = pd.DataFrame({SELECTION_KEY_COLUMN: [key, key], "pc_seed": [0, 1], "f1": [0.2, 0.4]})
+    legacy = pd.DataFrame(
+        {
+            DESIGN_KEY_COLUMN: [design_key("lt", "standard", ["a", "b"])] * 2,
+            SELECTION_KEY_COLUMN: [key, key],
+            "pc_seed": [0, 1],
+            "f1": [0.2, 0.4],
+        }
+    )
     out = attach_rescored(cells, legacy)
     assert out.loc[0, "f1_rescored"] == pytest.approx(0.3)
     assert "f1_skeleton_rescored" not in out.columns
@@ -190,8 +220,10 @@ def _cells_and_rescored(
         }
     )
     key = selection_key("lt", "standard", ["a", "b"])
+    dkey = design_key("lt", "standard", ["a", "b"])
     rescored = pd.DataFrame(
         {
+            DESIGN_KEY_COLUMN: [dkey, dkey],
             SELECTION_KEY_COLUMN: [key, key],
             "pc_seed": [0, 1],
             "f1": [0.2, 0.4],
@@ -300,3 +332,44 @@ def test_rescore_output_is_identical_serial_and_parallel() -> None:
         )
         for _ in range(2)
     ]
+
+
+def test_the_same_buy_in_two_orders_is_scored_twice() -> None:
+    """Order changes the pool, so it must not be collapsed away.
+
+    `pool_experiment_data` concatenates in sequence and PC subsamples 300
+    rows under a seed, so `[a, b, c]` and `[c, b, a]` hand PC different rows
+    and score differently — measured on real LT data, 0.133 against 0.105 at
+    the same seed. Keying the WORK by the set (as this module first did)
+    re-scores one ordering and silently hands its value to the other cell.
+    Caught by measurement, not review: of 296 cells checkable against their
+    production score, the 256 whose design was recorded in one order matched
+    256/256, while the 40 in multi-order designs forked at 45%.
+
+    `selection_key` stays order-insensitive on purpose — clustering for
+    analysis is about what was bought, not the sequence — so both keys are
+    asserted here to keep them from drifting into each other.
+    """
+    names = ["uniform_reference", "uniform_red_strong", "uniform_green_strong"]
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt", "lt"],
+            "configuration": ["standard", "standard"],
+            "status": ["ok", "ok"],
+            "chosen_experiments": [",".join(names), ",".join(reversed(names))],
+        }
+    )
+    rescored = rescore_selections(cells, n_pc_seeds=2, progress_every=0)
+
+    assert rescored[DESIGN_KEY_COLUMN].nunique() == 2, "each ordering is its own unit of work"
+    assert rescored[SELECTION_KEY_COLUMN].nunique() == 1, "but both are the same buy"
+
+    joined = attach_rescored(cells, rescored)
+    forward, backward = joined.loc[0, "f1_rescored"], joined.loc[1, "f1_rescored"]
+    # Each cell gets the mean over ITS OWN ordering. Were the join keyed by
+    # the set, both would receive the pooled mean of all four scorings and
+    # these two numbers would be equal.
+    assert forward != backward
+    for row, key in ((0, names), (1, list(reversed(names)))):
+        own = rescored[rescored[DESIGN_KEY_COLUMN] == design_key("lt", "standard", key)]
+        assert joined.loc[row, "f1_rescored"] == pytest.approx(own["f1"].mean())
