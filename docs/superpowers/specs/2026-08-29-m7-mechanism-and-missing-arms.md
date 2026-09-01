@@ -414,7 +414,7 @@ COMPLETE". Scorecard against what was pre-registered below:
 | prediction | outcome |
 |---|---|
 | `one_shot` < loop | **FALSE at 5 of 6 budgets.** Holds only at LT k=6 (−0.059). Ties at LT k=30/45 and all three WT budgets. |
-| `critique` ≈ loop | **FALSE.** Resolved *worse* at LT k=30 (−0.032) and k=45 (−0.038); WT's largest delta (−0.030 at k=14) agrees in sign. Never above zero by more than noise. |
+| `critique` ≈ loop | **TRUE** (corrected 2026-09-01). Cell-level scoring read it as resolved worse at LT k=30/45; averaged over 9 PC subsample seeds those deficits are −0.013 and −0.015, inside a tighter MDE. |Δ| < 0.022 on both chambers at every budget. |
 | `shared_blackboard` ≈ loop | **TRUE except at LT k=6** (−0.079 there; ties at the other five). |
 
 The spec anticipated the `one_shot` outcome and named its consequence:
@@ -429,8 +429,13 @@ softened. Two things keep it from being a pure null:
    a record beats *splitting* one; sharing one with yourself (the loop) is
    worth nothing. Caveats in the results doc: cross-run, and WT sits on the
    MDE boundary after drift adjustment.
-2. **`critique` is a clean pre-registered negative** — the one positive result
-   this phase could have produced, tested properly and refused.
+2. **The record claim now has a bound worth quoting.** Design-level re-scoring
+   (no LLM cost) puts LT k=30's equivalence at **±0.021** against a
+   loop-vs-random gap of +0.055, so it excludes "the record is worth nearly as
+   much as selecting at all". `critique`'s status changed in the same pass: it
+   ties the loop rather than losing to it, which is a weaker but defensible
+   negative — a reviewer pass costs three flat calls and moves accuracy by
+   less than 0.02 either way.
 
 **Consequence for §1 and §3.** The ladder's rungs are ordered by
 record-survival, and Phase 2 shows that ordering is not what produces the M6

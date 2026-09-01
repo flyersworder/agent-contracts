@@ -1016,9 +1016,17 @@ two models. Headlines, with the detail and the caveats in the results doc:
   2 verdict survives selection-level re-analysis, but that bound widens to
   ±0.051. **Any single-call arm must be analysed at the selection level, and
   distinct-selection counts belong in every results table.**
-- **`critique` is a clean pre-registered negative**: a reviewer pass over the
-  selection costs 3 flat calls and resolves *worse* at LT k=30/45. Nine
-  contrasts, none positive beyond noise.
+- **`critique` TIES the loop** (corrected 2026-09-01 by design-level
+  re-scoring): a reviewer pass costs 3 extra flat calls and moves accuracy by
+  |Δ| < 0.022 on either chamber at any budget. The earlier "resolved worse at
+  LT k=30/45" rested on a single favourable PC draw and is **retracted**.
+- **Re-score offline before believing a contrast** (`rescore.py`, register
+  §27). `chosen_experiments` lets any M7 cell be rebuilt and scored at m PC
+  seeds for **$0**; 9 seeds cut MDEs ~35% (LT k=30 0.031→0.019) because the
+  averaged-away half is inference noise, not arm. **Cluster by distinct design
+  first** (§24). Validated 191/191 exact against production. Only M7-era files
+  have the column — M6 ladders and the axis test stay at cell-level MDEs and
+  must not be quoted beside the tighter ones.
 - **Why the middle budget** (variance probe, 2026-08-31, 3,150 LLM-free PC
   runs). Untying the two things `seed` controls — the buy and PC's 300-row
   subsample — decomposes the spread: **selection variance falls 8x with budget

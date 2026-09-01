@@ -4,16 +4,16 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-six
+**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-seven
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-08-31**: 9,891 cells, **$108.39**, **zero errored cells**,
+**Corpus as of 2026-09-01**: 18,063 cells, **$108.39**, **zero errored cells**,
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
-LLM-free variance probes, which add 6,450 cells at no cost. The table below is
+LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The table below is
 the arithmetic of record.)
 
 | dataset | cells | cost | what it establishes |
@@ -39,6 +39,7 @@ the arithmetic of record.)
 | `runs/variance-probe.parquet` | 3,150 | $0.00 | selection vs measurement variance, 7 LT budgets, no LLM |
 | `runs/variance-probe-1500.parquet` | 150 | $0.00 | max-rows control; refutes the subsample-thinning mechanism |
 | `runs/variance-probe-wt.parquet` | 3,150 | $0.00 | the same decomposition on WT, 7 budgets, no LLM |
+| `runs/rescored.parquet` (+`-bykey`) | 8,172 | $0.00 | every M7 design re-scored at 9 PC seeds; validated 191/191 against production |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -124,6 +125,71 @@ the record axis; at the large budget everything converges (LT 0.398–0.436, WT
 0.252–0.261, both narrower than a single arm's sd). The mid-budget cell is the
 only place a coordination difference both exists and is detectable — consistent
 with the loop saturating at F1 ≈ 0.42 by k=30 (see the LT loop curve section).
+
+### Design-level re-scoring (2026-09-01): tighter bounds, and one verdict withdrawn
+
+The panel above scores each cell once, with PC's subsample seeded by the cell
+seed. That single draw carries the inference noise §"WHY THE MIDDLE BUDGET"
+measured, and it is the larger half of the spread. Since
+`chosen_experiments` is recorded, both problems are fixable **offline with no
+LLM calls**: rebuild each purchased design, score it under 9 subsample seeds,
+average, and cluster by distinct design so a repeated buy counts once
+(register §24).
+
+`evaluation/chamber_pipeline/rescore.py`; 908 distinct designs from 1,050
+cells, 8,172 (design x seed) scores, ~15 min of CPU, **$0**.
+
+**Validated before use.** Production scored each cell at `pc_seed = cell seed`,
+so for every cell with seed < 9 the re-scoring computed that exact pair.
+**191 of 191 match to the bit** (max abs diff 0.00e+00) — the rebuilt pooling
+and inference are the production ones, not an approximation.
+
+| | k | loop | `one_shot` | `critique` | `shared_blackboard` |
+|---|---|---|---|---|---|
+| **LT** | 6 | 0.206 | **−0.047 worse** | −0.010 | **−0.057 worse** |
+| | 30 | 0.421 | +0.004 | −0.013 | −0.018 |
+| | 45 | 0.420 | −0.007 | −0.015 | −0.002 |
+| **WT** | 7 | 0.176 | −0.000 | −0.005 | −0.004 |
+| | 14 | 0.244 | −0.004 | −0.022 | −0.005 |
+| | 21 | 0.253 | −0.002 | +0.001 | +0.007 |
+
+**MDEs fall about 35%** — LT k=30 from 0.031 to **0.019**, WT k=21 from 0.036
+to **0.028** — because the averaged-away component was inference noise, which
+is most of the per-cell spread and none of the arm.
+
+**What improves.** The record claim's bound, which register §24 had widened to
+±0.051 at LT k=30, is now **±0.021**. Against a loop-vs-random gap of +0.055
+that bound *does* exclude "the record is worth nearly as much as selecting at
+all" — the objection the cell-level analysis could not answer. The equivalence
+is now a result rather than a shrug.
+
+**What is withdrawn.** `critique` was reported as **resolved worse** at LT k=30
+(−0.032) and k=45 (−0.038). Averaged over 9 subsample draws those deficits are
+**−0.013 and −0.015, both inside a tighter MDE**. The original verdicts rested
+on a favourable single PC draw — a ~1.8 standard-error shift, entirely
+ordinary. **`critique`'s pre-registration ("≈ loop on accuracy") is therefore
+SUPPORTED, not refuted**, and the "clean pre-registered negative" claim made on
+2026-08-31 is retracted.
+
+The honest statement is an equivalence with a bound: a reviewer pass over the
+selection costs three extra flat calls and changes accuracy by less than 0.02
+on either chamber at any budget. It does not help; it also does not hurt. That
+is a weaker but more defensible negative than "it hurts".
+
+**Corrected Phase 2 scorecard:**
+
+| pre-registration | verdict |
+|---|---|
+| `one_shot` < loop | **FALSE at 5 of 6 budgets** (holds only at LT k=6, −0.047) |
+| `critique` ≈ loop | **TRUE** — |Δ| < 0.022 everywhere (was reported false) |
+| `shared_blackboard` ≈ loop | **TRUE except LT k=6** (−0.057 there) |
+
+**Scope of the method.** Only M7-era files record `chosen_experiments`, so the
+M6 ladders cannot be re-scored. **The axis test and every topology contrast
+stay at cell-level MDEs**, and must not be quoted alongside these tighter ones
+as though they were measured the same way. Re-running M6 to obtain the column
+would cost ~$12 at current provider prices and would tighten those contrasts
+by roughly the same 35%.
 
 ### Robustness: re-analysed at the selection level (2026-08-31)
 

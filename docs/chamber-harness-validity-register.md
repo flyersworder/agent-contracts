@@ -1253,6 +1253,53 @@ PC), §24 (why a single *pick* is variable while a 30-pick *set* is nearly
 canonical — the set constrains the trajectory that the fork would otherwise
 scatter).
 
+## 27. A resolved verdict that was one PC draw wide (2026-09-01)
+
+**`critique` was reported as resolved worse than the loop at LT k=30 (−0.032)
+and k=45 (−0.038) on 2026-08-31. Re-scored, it ties.** Averaged over 9 PC
+subsample seeds the deficits are −0.013 and −0.015, both inside a tighter MDE.
+The original verdicts rested on a favourable single subsample draw — a shift of
+about 1.8 standard errors, entirely ordinary.
+
+**Why it happened.** Each cell was scored once, with PC's 300-row subsample
+seeded by the cell seed. §"WHY THE MIDDLE BUDGET" had already measured that
+this inference noise is the *larger* half of per-cell spread (sd ≈ 0.041 at LT
+k=30 against ≈ 0.026 for the buy). A verdict computed from single draws
+therefore sits on a component that has nothing to do with the arm — and with
+30 cells per arm, a 0.02 wobble in a difference of means is routine.
+
+**The fix costs nothing.** `chosen_experiments` records the purchased design,
+so any M7-era cell can be rebuilt and re-scored offline: 908 designs x 9 seeds,
+15 minutes of CPU, no API calls. MDEs fall ~35% (LT k=30 0.031 → 0.019).
+
+**Validated rather than assumed.** Production scored each cell at
+`pc_seed = cell seed`, so for every cell with seed < 9 the re-scoring recomputes
+that exact pair. **191 of 191 matched to the bit.** A re-scoring that did not
+reproduce production on the overlap would be measuring a different pipeline.
+
+**Two guards this must carry.**
+
+1. **Cluster by distinct design before averaging** (§24). `one_shot` re-picks
+   the same buy, so without clustering 30 re-scorings of 6 designs read as 30
+   independent draws. Earlier the same day this exact mistake made `one_shot`
+   look RESOLVED better at LT k=30.
+2. **Do not mix scales.** Only M7 files carry `chosen_experiments`; the M6
+   ladders do not. Every topology contrast and the axis test remain at
+   cell-level MDEs, and quoting them beside the re-scored ones implies a
+   precision they do not have. Re-running M6 for the column would cost ~$12.
+
+**What it improved, not only what it retracted.** The record claim's bound —
+widened to ±0.051 by §24 — is now **±0.021**, which against a loop-vs-random
+gap of +0.055 excludes "the record is worth nearly as much as selecting at
+all". The equivalence became quotable in the same pass that cost us a negative.
+
+**Standing rule.** In a pipeline whose measurement noise exceeds its treatment
+variance, **a verdict from single draws is a draw, not a verdict**. Average the
+measurement where averaging is free, and report the bound.
+
+**Related:** §23 (the decomposition that showed inference noise dominates),
+§24 (clustering), §26 (why the buy varies at all).
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
