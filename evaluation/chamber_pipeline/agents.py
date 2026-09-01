@@ -51,6 +51,7 @@ from .llm_planner import (
     summarize_experiments,
 )
 from .menu_taxonomy import coverage_ordered, partition_pools_by_variable
+from .wt_menu_taxonomy import coverage_ordered as wt_coverage_ordered
 
 if TYPE_CHECKING:
     from agent_contracts.integrations.causalchamber import ContractedChamberAgent
@@ -349,6 +350,86 @@ def _coverage_agent(
     )
     dfs = [adapter.query_intervention(name) for name in chosen]
     return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+def _wt_coverage_agent(
+    adapter: ContractedChamberAgent,
+    seed: int,
+    pc_alpha: float,
+    *,
+    maximize: bool,
+) -> pd.DataFrame:
+    """WT twin of :func:`_coverage_agent`, using the wind-tunnel parse.
+
+    Separate function rather than a branch inside `_coverage_agent` because
+    the two parses need different inputs: LT splits on a strength suffix and
+    needs only the name, WT resolves a longest node-name prefix and needs the
+    node list. Folding them together would mean passing an unused argument on
+    one path and silently doing nothing on the other.
+
+    There is no `_ms` variant here: WT entries carry no intervention strength,
+    so the strength confound the LT pair was built to close does not exist.
+    """
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = adapter.available_experiments()
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+    chosen = wt_coverage_ordered(
+        list(menu),
+        min(budget, len(menu)),
+        seed,
+        nodes,
+        maximize=maximize,
+    )
+    dfs = [adapter.query_intervention(name) for name in chosen]
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+def wt_coverage_max_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Spend `k` on as many DISTINCT WT variables as `k` allows.
+
+    **Not the same portfolio as its LT namesake.** WT's 28 entries cover 21
+    variables, and the only multi-entry ones are `hatch` (3), `load_in` (3)
+    and `load_out` (4) -- exactly the three highest out-degree drivers in the
+    ground truth (6, 8, 8 edges). Every other entry is a single-entry
+    apparatus setting with out-degree 1. So maximising breadth here spends the
+    budget on trivial settings and away from the real drivers, where on LT it
+    traded intervention strength for breadth. Same rule, opposite portfolio.
+    """
+    return _wt_coverage_agent(adapter, seed, pc_alpha, maximize=True)
+
+
+def wt_coverage_min_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Spend `k` on as FEW distinct WT variables as `k` allows.
+
+    Fattest-first, which on WT means `load_out`, `load_in` and `hatch` -- the
+    three real drivers.
+
+    **The prediction written here before the run was WRONG and is kept as a
+    failed pre-registration.** It read: "expected to do WELL, the reverse of
+    the LT case", reasoning that concentrating budget on out-degree 6/8/8
+    drivers should beat spreading it over out-degree-1 settings. Measured
+    (n=50): 0.124 / 0.165 / 0.229 at k=7/14/21, against `wt_coverage_max`'s
+    0.188 / 0.232 / 0.282. Breadth wins on WT too, and by a wide margin.
+
+    The reason is that buying a driver's several menu entries makes that ONE
+    variable vary several times -- redundant, in exactly the sense the M7
+    mechanism result measures -- while breadth activates a new source each
+    time. Out-degree is not what the budget buys; a distinct varying variable
+    is. That the same conclusion survives a menu whose fat entries are the
+    real drivers, rather than LT's intervention strengths, is the stronger
+    form of the coverage finding.
+    """
+    return _wt_coverage_agent(adapter, seed, pc_alpha, maximize=False)
 
 
 def coverage_max_agent(

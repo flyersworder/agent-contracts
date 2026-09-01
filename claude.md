@@ -1028,9 +1028,18 @@ two models. Headlines, with the detail and the caveats in the results doc:
   +0.056 and the rule by +0.034. So the LLM's contribution is confined to the
   tight-budget regime; above k/M≈0.5 every arm converges on the coverage
   optimum. Treat the rule as a **computable near-oracle** — rare in agent
-  benchmarks — and report every arm as distance-from-optimum. **LT only**:
-  `spec.chambers=('lt',)` because the strength taxonomy is an LT menu property;
-  the WT comparison is OPEN.
+  benchmarks — and report every arm as distance-from-optimum. **BOTH CHAMBERS**
+  as of 2026-09-01: `wt_coverage_max` (`wt_menu_taxonomy.py`, 28 entries / 21
+  variables) ties the best LLM at WT k=7/14/21 too, and at k=21 sits 0.021
+  ABOVE it. Six budgets, two chambers, no LLM arm resolves above the rule.
+  Same small-budget escape on both (rule − random is +0.002 at WT k=7, +0.007
+  at LT k=6, rising to +0.045 / +0.073 at the large budgets).
+- **Breadth beats depth even where the fat menu entries ARE the real drivers.**
+  `wt_coverage_min` was pre-registered to WIN (its variables `hatch`/`load_in`/
+  `load_out` have out-degree 6/8/8) and lost badly (0.124/0.165/0.229 vs
+  0.188/0.232/0.282). Buying a driver's several entries makes ONE variable vary
+  repeatedly; breadth activates a new source each time. **Out-degree is not
+  what the budget buys — a distinct varying variable is.**
 - **All 9 case studies read** (2026-09-01). Only two are causal discovery:
   `causal_discovery_iid` (LT, GES/UT-IGSP, 20 vars) and `causal_discovery_time`
   (WT, PCMCI+ on `wt_walks_v1`, 16 vars). The others are ICA, changepoints,

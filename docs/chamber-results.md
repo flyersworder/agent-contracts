@@ -41,7 +41,8 @@ the arithmetic of record.)
 | `runs/variance-probe-wt.parquet` | 3,150 | $0.00 | the same decomposition on WT, 7 budgets, no LLM |
 | `runs/rescored.parquet` (+`-bykey`) | 8,172 | $0.00 | every M7 design re-scored at 9 PC seeds; validated 191/191 against production |
 | `runs/m7-coverage-lt-ends.parquet` | 180 | $0.00 | the coverage rule at LT k=6 and k=45, LLM-free |
-| `runs/m7-coverage-wt.parquet` | 300 | $0.00 | WT random at 3 budgets; the coverage arm is LT-only and correctly skipped |
+| `runs/m7-coverage-wt.parquet` | 300 | $0.00 | WT random at 3 budgets; the LT-only coverage arm correctly skipped |
+| `runs/m7-coverage-wt2.parquet` | 300 | $0.00 | the WT coverage arms, breadth and depth, 3 budgets x 50 seeds |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -134,11 +135,41 @@ The +0.0073 F1 per distinct variable slope is the exchange rate that makes all
 of this quantitative, and the rule is what makes it a *ceiling* rather than a
 trend.
 
-**Scope.** LT only: `coverage_max_ms` declares `spec.chambers = ('lt',)`
-because the weak/mid/strong strength taxonomy is a property of the LT menu; the
-WT menu has no strength suffixes. 150 WT cells were correctly skipped. A WT
-coverage arm needs its own variable parse and is not yet built — **the WT
-comparison against the rule is open, and no claim here extends to it.**
+### WT replicates it, on a structurally opposite menu (2026-09-01)
+
+`wt_coverage_max` / `wt_coverage_min` built the same day
+(`wt_menu_taxonomy.py`: strip `validate_`, take the longest node-name prefix;
+28 entries over **21 variables**). n=50 per cell, same platform and era:
+
+| WT k | rule (max) | rule (min) | random | loop | best LLM | best LLM − rule | MDE | verdict |
+|---|---|---|---|---|---|---|---|---|
+| 7 | **0.1881** | 0.1242 | 0.1860 | 0.1703 | 0.1748 | −0.0132 | 0.0258 | ties |
+| 14 | 0.2319 | 0.1647 | 0.2220 | **0.2469** | 0.2469 | +0.0150 | 0.0347 | ties |
+| 21 | **0.2817** | 0.2292 | 0.2370 | 0.2538 | 0.2608 | −0.0209 | 0.0355 | ties |
+
+**No LLM arm resolves above the rule on either chamber, at any budget** — six
+budgets, two chambers, every arm. At WT k=21 the rule is 0.021 *above* the best
+LLM, still within MDE but pointing the rule's way.
+
+The same small-budget escape holds: at WT k=7 the rule beats random by only
++0.002 (LT k=6: +0.007), and the gap widens with budget to +0.045 at k=21
+(LT k=30: +0.073). **Coverage is the binding constraint at middling and large
+budgets on both chambers, and at neither small one.**
+
+**A failed pre-registration worth reporting.** `wt_coverage_min` was predicted
+in its own docstring, before the run, to do *well* — WT's only multi-entry
+variables are `hatch`, `load_in` and `load_out`, precisely the highest
+out-degree drivers (6, 8, 8), so concentrating there should have beaten
+spreading across out-degree-1 settings. It lost badly: 0.124 / 0.165 / 0.229
+against breadth's 0.188 / 0.232 / 0.282.
+
+Buying a driver's several menu entries makes that *one* variable vary several
+times — redundant in exactly the sense the M7 mechanism result measures — while
+breadth activates a new source each time. **Out-degree is not what the budget
+buys; a distinct varying variable is.** That this survives a menu whose fat
+entries are the real drivers, rather than LT's intervention strengths, is the
+stronger form of the coverage finding: the two chambers' menus are structurally
+opposite and the conclusion is identical.
 
 ---
 

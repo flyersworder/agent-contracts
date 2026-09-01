@@ -70,6 +70,8 @@ from .agents import (
     team_agents,
     team_varsplit_agents,
     uncontracted_agent,
+    wt_coverage_max_agent,
+    wt_coverage_min_agent,
 )
 from .inference import pc_call_defaults, runtime_fingerprint
 from .results import RunRecord, now_iso
@@ -182,6 +184,26 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         name="coverage_min",
         run=coverage_min_agent,
         chambers=("lt",),
+        accepts_llm=False,
+        kind="non_llm",
+    ),
+    AgentSpec(
+        # WT twin of the LT coverage pair. Registered `chambers=("wt",)` and
+        # named distinctly rather than widening `coverage_max`: the two use
+        # different menu parses AND buy structurally opposite portfolios (on
+        # WT, breadth spends the budget on out-degree-1 apparatus settings and
+        # away from `hatch`/`load_in`/`load_out`). Sharing a name would invite
+        # pooling two arms that are not the same manipulation.
+        name="wt_coverage_max",
+        run=wt_coverage_max_agent,
+        chambers=("wt",),
+        accepts_llm=False,
+        kind="non_llm",
+    ),
+    AgentSpec(
+        name="wt_coverage_min",
+        run=wt_coverage_min_agent,
+        chambers=("wt",),
         accepts_llm=False,
         kind="non_llm",
     ),

@@ -104,10 +104,10 @@ class FakeLLM:
 class TestAgentRegistry:
     """Inventory of the registered agents, plus AgentSpec.is_compatible."""
 
-    def test_registry_has_eighteen_agents(self) -> None:
+    def test_registry_has_twenty_agents(self) -> None:
         """Five M4b variants, three ladder arms, one ablation, one control,
         the two shared-record arms, and the two coverage-manipulation arms."""
-        assert len(AGENT_REGISTRY) == 18
+        assert len(AGENT_REGISTRY) == 20
 
     def test_registry_names_are_unique(self) -> None:
         names = [s.name for s in AGENT_REGISTRY]
@@ -136,6 +136,8 @@ class TestAgentRegistry:
                 "coverage_max",
                 "coverage_min",
                 "coverage_max_ms",
+                "wt_coverage_max",
+                "wt_coverage_min",
                 "coverage_min_ms",
                 "team_varsplit",
                 "shared_blackboard",
