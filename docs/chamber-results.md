@@ -40,6 +40,8 @@ the arithmetic of record.)
 | `runs/variance-probe-1500.parquet` | 150 | $0.00 | max-rows control; refutes the subsample-thinning mechanism |
 | `runs/variance-probe-wt.parquet` | 3,150 | $0.00 | the same decomposition on WT, 7 budgets, no LLM |
 | `runs/rescored.parquet` (+`-bykey`) | 8,172 | $0.00 | every M7 design re-scored at 9 PC seeds; validated 191/191 against production |
+| `runs/m7-coverage-lt-ends.parquet` | 180 | $0.00 | the coverage rule at LT k=6 and k=45, LLM-free |
+| `runs/m7-coverage-wt.parquet` | 300 | $0.00 | WT random at 3 budgets; the coverage arm is LT-only and correctly skipped |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -61,6 +63,82 @@ cross-backend gap is ΔF1 = 0.055, larger than most effects reported below.
 Chambers: light tunnel (LT) 38 nodes / 57 edges / 59-experiment menu; wind
 tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
+
+---
+
+## THE COVERAGE ORACLE (2026-09-01): an LLM-free rule matches every LLM arm
+
+Prompted by §29's finding that the contemporaneous ground truth is a bipartite
+source→sink assignment with 32-40% trivially-structured edges: if the task is
+coverage-shaped, a coverage rule should be hard to beat. It is.
+
+`coverage_max_ms` is **no LLM at all** — round-robin over distinct variables,
+weak intervention strengths excluded, seeded shuffle for tie-breaks. Same
+platform, same BLAS, same post-collinear-fix era as every arm below.
+
+| LT | coverage rule | loop | `one_shot` | best LLM − rule | MDE | verdict |
+|---|---|---|---|---|---|---|
+| k=6 | 0.1845 | **0.2188** | 0.1596 | +0.0343 | 0.0375 | ties |
+| k=30 | **0.4336** | 0.4276 | 0.4392 | +0.0055 | 0.0293 | ties |
+| k=45 | 0.4276 | 0.4359 | 0.4179 | +0.0083 | 0.0290 | ties |
+
+**No LLM arm resolves above the rule at any budget.** At LT k=30 the full
+ordering, all n=30, same era:
+
+| arm | F1 | vs rule |
+|---|---|---|
+| `one_shot` | 0.4392 | ties |
+| **`coverage_max_ms`** | **0.4336** | — |
+| `llm_pc` (loop) | 0.4276 | ties |
+| `shared_blackboard` | 0.4226 | ties |
+| `critique` | 0.3957 | **worse** |
+| `random` | 0.3604 | worse |
+
+### The nuance that saves the story
+
+The rule is **not** a universal oracle — it is near-optimal only where coverage
+is the binding constraint:
+
+| k | rule | random | rule − random |
+|---|---|---|---|
+| 6 | 0.1845 | 0.1771 | **+0.007** |
+| 45 | 0.4276 | 0.4062 | +0.021 |
+| 30 | 0.4336 | 0.3604 | **+0.073** |
+
+**At k=6 the coverage rule is barely better than random** (+0.007), while the
+loop beats random by **+0.056** and the rule by +0.034 (MDE 0.0375 — the
+closest any LLM arm comes to resolving above it). So:
+
+> **The LLM's contribution is confined to the tight-budget regime where a
+> coverage heuristic does not help. Once the budget is large enough for
+> coverage to bind, a ten-line rule matches every LLM arm we built.**
+
+This dovetails with the variance decomposition — room to differ is largest at
+small k, skill at exploiting it peaks mid-range — and it explains why every
+Phase 2 arm converges above k/M ≈ 0.5: they are all converging on the coverage
+optimum.
+
+### Why this is an asset, not a refutation
+
+Agent benchmarks almost never have a computable near-optimal reference policy.
+This one does, and it turns every result into a distance-from-optimum:
+
+- **loop ≈ rule** at k≥30 — the LLM reaches the coverage optimum and no further.
+- **fan-in < loop** — coordination overhead, now measurable *against a known
+  ceiling* rather than only against each other.
+- **`team_varsplit` ≈ loop** — partitioning by variable restores the arm to the
+  optimum; partitioning by task list does not.
+- **`one_shot` ≈ loop** — no running record is needed to reach the optimum.
+
+The +0.0073 F1 per distinct variable slope is the exchange rate that makes all
+of this quantitative, and the rule is what makes it a *ceiling* rather than a
+trend.
+
+**Scope.** LT only: `coverage_max_ms` declares `spec.chambers = ('lt',)`
+because the weak/mid/strong strength taxonomy is a property of the LT menu; the
+WT menu has no strength suffixes. 150 WT cells were correctly skipped. A WT
+coverage arm needs its own variable parse and is not yet built — **the WT
+comparison against the rule is open, and no claim here extends to it.**
 
 ---
 

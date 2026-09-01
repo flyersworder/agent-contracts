@@ -1020,6 +1020,22 @@ two models. Headlines, with the detail and the caveats in the results doc:
   re-scoring): a reviewer pass costs 3 extra flat calls and moves accuracy by
   |Δ| < 0.022 on either chamber at any budget. The earlier "resolved worse at
   LT k=30/45" rested on a single favourable PC draw and is **retracted**.
+- **AN LLM-FREE COVERAGE RULE MATCHES EVERY LLM ARM** (2026-09-01, see the
+  results doc's "THE COVERAGE ORACLE"). `coverage_max_ms` — round-robin over
+  distinct variables, no model — ties the best LLM arm at LT k=6/30/45; none
+  resolves above it. **But it is only near-optimal where coverage binds**: at
+  k=6 the rule beats random by just +0.007 while the loop beats random by
+  +0.056 and the rule by +0.034. So the LLM's contribution is confined to the
+  tight-budget regime; above k/M≈0.5 every arm converges on the coverage
+  optimum. Treat the rule as a **computable near-oracle** — rare in agent
+  benchmarks — and report every arm as distance-from-optimum. **LT only**:
+  `spec.chambers=('lt',)` because the strength taxonomy is an LT menu property;
+  the WT comparison is OPEN.
+- **All 9 case studies read** (2026-09-01). Only two are causal discovery:
+  `causal_discovery_iid` (LT, GES/UT-IGSP, 20 vars) and `causal_discovery_time`
+  (WT, PCMCI+ on `wt_walks_v1`, 16 vars). The others are ICA, changepoints,
+  symbolic regression, mechanistic models and three OOD tasks — different
+  problems. `lt_interventions_standard_v1` (ours) is also used by `ood_sensors`.
 - **The CONTEMPORANEOUS ground truth is bipartite, depth 1, ZERO mediators**
   (register §29). lt/standard 29 sources + 9 sinks; wt/standard 21 + 11. But
   it is **not degenerate** — 172 unshielded colliders on LT, 66 on WT, so
