@@ -1367,6 +1367,73 @@ defensible design choices; none of them was written down until a reader asked.
 **Related:** §23, §26 (noise decomposition), §27 (the offline machinery that
 made all of this free).
 
+## 29. Both ground-truth graphs are bipartite with no mediators (2026-09-01)
+
+Checked directly against `causalchamber.ground_truth.graph(...)`, not through
+our adapter, after the node-set finding (§28) raised the question:
+
+| chamber / configuration | nodes | edges | sources | **mediators** | sinks |
+|---|---|---|---|---|---|
+| lt / standard | 38 | 57 | 29 | **0** | 9 |
+| lt / camera | 42 | 65 | 32 | **0** | 10 |
+| **wt / standard** | 32 | 42 | 21 | **0** | 11 |
+| wt / pressure-control | 32 | 44 | 19 | **3** | 10 |
+
+**The two configurations this pillar runs on have maximum path length 1.** No
+node has both an incoming and an outgoing edge. There are no chains, no
+mediation, no indirect effects — the entire discovery problem is a bipartite
+assignment of manipulable sources to observed sinks.
+
+This is the chambers' published ground truth, not an artefact of our adapter.
+But it is a strong statement about what our task can and cannot measure, and it
+had never been checked.
+
+**Consequences.**
+
+1. **PC's conditioning-set search is exploring structure that does not exist.**
+   The part of constraint-based discovery that makes it interesting — and, per
+   §10 and §26, the part that amplifies numerical noise into structural
+   differences — is doing work against a depth-1 truth.
+2. **It sharpens the "this is set cover" objection.** Combined with §28's
+   trivial-source edges (LT 32%, **WT 40%**), a large share of the recoverable
+   structure is "did an experiment make this source vary".
+3. **It does not touch any comparison.** Every arm faces the same truth, and
+   the Phase 2 verdicts hold under directed, skeleton and core-20 scoring.
+
+**WT is the worse of the two**, which reverses the usual assumption that the
+second chamber is the safer one:
+
+| | LT | WT |
+|---|---|---|
+| trivial sources (out-degree 1) | 18 → 32% of edges | **17 → 40% of edges** |
+| core after dropping them | 20 nodes, 39 edges | **15 nodes, 25 edges** |
+| plus collinear-dropped sinks | — | 9 in-edges lost, **6 from real drivers** |
+
+**The LT case study's 20 variables are exactly our 38 minus the 18 trivial
+sources.** That is a derivation, not a coincidence — it confirms their node
+choice was principled and gives us the WT analogue for free: 15 nodes, 25
+edges.
+
+**A latent mismatch found while checking, and fixed.** `DATASET_FOR_CHAMBER`
+was keyed by CHAMBER while `configuration` selected the GRAPH, so asking for
+`wt/pressure-control` would have returned `standard` data scored against the
+`pressure-control` truth — plausible numbers, no error, no column revealing it.
+Never reached (every recorded run used `standard`), but it was one argument
+away. Now keyed by the pair, and an unwired combination **raises**;
+`wt_pc_validate_v1` is the release to wire when that arm is run.
+
+**The opportunity this creates.** `wt/pressure-control` is the only
+configuration with actual causal depth — the servo-driven hatch makes
+`load_in`, `load_out` and `pressure_downwind` mediators. Running there would
+answer the set-cover objection with data rather than argument. It needs the
+matching dataset wired and a fresh sweep; it is not a re-scoring.
+
+**Standing rule.** Before drawing conclusions from a benchmark's difficulty,
+**describe its ground-truth graph** — depth, degree distribution, how many
+edges are trivially structured. We ran 18,000 cells before doing this.
+
+**Related:** §28 (the node set), §13 (WT collinearity), §26.
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there

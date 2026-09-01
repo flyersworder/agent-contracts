@@ -4,7 +4,7 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-eight
+**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-nine
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
@@ -265,6 +265,16 @@ Three consequences, stated rather than fixed:
    That is still a real and actionable mechanism for an experiment-selection
    agent — but it is a statement about *coverage of manipulable variables*, not
    about discovering physics, and §"M7 PHASE 1"'s wording should say so.
+
+**WT is worse, and it was never checked** (register §29). Same analysis on the
+wind tunnel: **17 trivial sources carrying 40% of its 42 edges**, leaving a core
+of 15 nodes and 25 edges — and 9 further in-edges sit on the three barometers
+the collinearity fix drops, 6 of them from real drivers. And **both chambers'
+ground truth is bipartite with maximum path length 1**: 0 mediators on
+lt/standard, lt/camera and wt/standard alike. There are no causal chains to
+discover; the task is an assignment of manipulable sources to observed sinks.
+`wt/pressure-control` is the one configuration with actual depth (3 mediators),
+and it needs its own dataset release wired before it can be run.
 
 **Why not simply switch to 20 nodes.** The menu is built from the dataset's
 experiments, and it *contains* interventions on those settings

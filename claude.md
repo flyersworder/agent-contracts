@@ -1020,6 +1020,18 @@ two models. Headlines, with the detail and the caveats in the results doc:
   re-scoring): a reviewer pass costs 3 extra flat calls and moves accuracy by
   |Δ| < 0.022 on either chamber at any budget. The earlier "resolved worse at
   LT k=30/45" rested on a single favourable PC draw and is **retracted**.
+- **BOTH ground-truth graphs are bipartite, max path length 1, ZERO mediators**
+  (register §29, verified against `causalchamber.ground_truth.graph` directly).
+  lt/standard 29 sources + 9 sinks; wt/standard 21 + 11; lt/camera the same
+  shape. There are no causal chains to discover — the task is assignment of
+  manipulable sources to observed sinks, and PC's conditioning-set search is
+  exploring structure that is not there. **`wt/pressure-control` is the only
+  configuration with depth (3 mediators)** and needs `wt_pc_validate_v1` wired
+  before it can run. **Describe a benchmark's ground-truth graph before drawing
+  conclusions from its difficulty** — we ran 18,000 cells first.
+- **WT is the worse chamber, not the safer one**: 17 trivial sources carrying
+  **40%** of its 42 edges (LT: 18 / 32%), core 15 nodes / 25 edges, plus 9
+  in-edges on the collinear-dropped barometers (6 from real drivers).
 - **Our node set is 38; the chambers' own case study uses 20** (register §28).
   The 18 extra are ALL pure sources (out-degree 1, in-degree 0) — apparatus
   settings (`t_*`, `osr_*`, `v_*`, `diode_*`) each driving one sensor — and

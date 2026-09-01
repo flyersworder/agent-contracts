@@ -461,3 +461,44 @@ def test_observe_absent_means_unlimited():
     assert m.can_use_tool("observe") is True  # the side channel
     m2 = ResourceMonitor(ResourceConstraints(per_tool_limits={"intervene": 0, "observe": 0}))
     assert m2.can_use_tool("observe") is False
+
+
+class TestDatasetConfigurationPairing:
+    """The dataset must be chosen by (chamber, configuration), not chamber.
+
+    `configuration` selects the ground-truth GRAPH. The wind tunnel in
+    `pressure-control` is physically a different system — the hatch is
+    servo-driven, which adds mediators `standard` does not have — so pairing
+    its graph with `standard` data scores against the wrong truth and reports
+    a plausible number with no error anywhere.
+    """
+
+    def test_wired_pairs_resolve(self) -> None:
+        from agent_contracts.integrations.causalchamber import dataset_for
+
+        assert dataset_for("lt", "standard") == "lt_interventions_standard_v1"
+        assert dataset_for("wt", "standard") == "wt_validate_v1"
+
+    def test_unwired_configuration_raises_rather_than_falling_back(self) -> None:
+        from agent_contracts.integrations.causalchamber import dataset_for
+
+        with pytest.raises(ValueError, match="no dataset is wired"):
+            dataset_for("wt", "pressure-control")
+
+    def test_error_names_the_wired_pairs(self) -> None:
+        """The message has to be actionable — it is read at 2am mid-sweep."""
+        from agent_contracts.integrations.causalchamber import dataset_for
+
+        with pytest.raises(ValueError) as excinfo:
+            dataset_for("lt", "pressure-control")
+        assert "wired pairs are" in str(excinfo.value)
+        assert "standard" in str(excinfo.value)
+
+    def test_legacy_chamber_view_still_matches_the_standard_pairs(self) -> None:
+        from agent_contracts.integrations.causalchamber import (
+            DATASET_FOR_CHAMBER,
+            dataset_for,
+        )
+
+        for chamber in ("lt", "wt"):
+            assert DATASET_FOR_CHAMBER[chamber] == dataset_for(chamber, "standard")
