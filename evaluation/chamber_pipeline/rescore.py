@@ -40,7 +40,7 @@ from agent_contracts.integrations.causalchamber import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-from .inference import pool_experiment_data, run_pc
+from .inference import pool_experiment_data, run_pc, runtime_fingerprint
 from .scoring import f1_edges, f1_skeleton, shd
 
 SELECTION_KEY_COLUMN = "selection_key"
@@ -141,6 +141,16 @@ def rescore_selections(
         key = selection_key(row["chamber"], row["configuration"], names)
         seen.setdefault(key, (row["chamber"], row["configuration"], names))
 
+    # Which machine is doing the RE-scoring, not which machine produced the
+    # source rows. These are routinely different -- the sweeps run on the VPS
+    # and re-scoring is cheap enough to run anywhere -- and PC turns a
+    # backend difference into a structurally different graph (register entry
+    # on the BLAS finding). A rescored frame that inherited only the source
+    # row's `blas_backend` would claim OpenBLAS provenance for numbers
+    # computed under Accelerate, which is precisely the mispooling the
+    # column exists to prevent.
+    runtime = runtime_fingerprint()
+
     records: list[dict[str, Any]] = []
     for index, (key, (chamber, configuration, names)) in enumerate(seen.items()):
         adapter = create_contracted_chamber_agent(
@@ -175,6 +185,8 @@ def rescore_selections(
                         else float("nan")
                     ),
                     "shd": float(shd(predicted, truth)),
+                    "blas_backend": runtime["blas"],
+                    "platform_tag": runtime["platform"],
                 }
             )
         if progress_every and (index + 1) % progress_every == 0:
@@ -182,11 +194,35 @@ def rescore_selections(
     return pd.DataFrame(records)
 
 
-def attach_rescored(frame: pd.DataFrame, rescored: pd.DataFrame) -> pd.DataFrame:
+def attach_rescored(
+    frame: pd.DataFrame,
+    rescored: pd.DataFrame,
+    *,
+    allow_backend_mismatch: bool = False,
+) -> pd.DataFrame:
     """Join averaged scores back onto the original cells.
 
-    Adds `selection_key`, `f1_rescored` (mean over PC seeds) and `n_pc_seeds`.
-    The original `f1` is left untouched so the two can be compared.
+    Adds `selection_key`, `f1_rescored` (mean over PC seeds), `n_pc_seeds` and
+    `rescore_blas_backend` / `rescore_platform_tag`. The original `f1` and
+    `blas_backend` are left untouched so the two can be compared.
+
+    **Raises on a backend mismatch by default.** `f1_rescored` is a
+    replacement for `f1` in every downstream contrast, so a frame whose rows
+    say `scipy-openblas` while the re-scoring ran under Accelerate is a
+    mispooling waiting to happen -- and one that no existing check would
+    catch, because the only backend column would be the source's. Measured
+    on the M7 corpus: 230 of 243 (design, pc_seed) pairs reproduce production
+    exactly across the two backends and 13 fork, up to 0.127 F1. That 5% is
+    small enough to hide in a mean and large enough to move a contrast, which
+    is exactly why this is an error rather than a warning.
+
+    Pass `allow_backend_mismatch=True` only when the analysis uses
+    `f1_rescored` for EVERY arm it compares -- a cross-backend re-scoring is
+    internally consistent, so contrasts survive even though absolute values
+    are not comparable to the source file's.
+
+    Raises:
+        ValueError: If the re-scoring backend differs from the source rows'.
     """
     # Aggregate whatever metric columns are present. The optional ones
     # (`f1_skeleton`, `f1_core`) were added after the first re-scoring run,
@@ -202,9 +238,27 @@ def attach_rescored(frame: pd.DataFrame, rescored: pd.DataFrame) -> pd.DataFrame
     ):
         if column in rescored.columns:
             aggregations[alias] = (column, "mean")
+    for column, alias in (
+        ("blas_backend", "rescore_blas_backend"),
+        ("platform_tag", "rescore_platform_tag"),
+    ):
+        if column in rescored.columns:
+            aggregations[alias] = (column, "first")
     per_key = (
         rescored.groupby(SELECTION_KEY_COLUMN).agg(**aggregations).reset_index()  # type: ignore[call-overload]
     )
+    if not allow_backend_mismatch and "blas_backend" in rescored.columns:
+        source = set(frame.get("blas_backend", pd.Series(dtype=object)).dropna().unique())
+        here = set(rescored["blas_backend"].dropna().unique())
+        if source and here and source != here:
+            raise ValueError(
+                f"re-scoring ran under {sorted(here)} but the source rows were "
+                f"produced under {sorted(source)}; PC forks structurally on a "
+                "~1e-10 linear-algebra difference, so `f1_rescored` and `f1` "
+                "are not comparable. Re-score on the producing machine, or "
+                "pass allow_backend_mismatch=True if every arm in the "
+                "comparison uses `f1_rescored`."
+            )
     out = frame.copy()
     out[SELECTION_KEY_COLUMN] = [
         selection_key(r["chamber"], r["configuration"], parse_selection(r["chosen_experiments"]))
@@ -220,6 +274,15 @@ def main(argv: Iterable[str] | None = None) -> None:
     parser.add_argument("sources", nargs="+", help="Parquet files to re-score")
     parser.add_argument("--n-pc-seeds", type=int, default=9)
     parser.add_argument("--out", default="runs/rescored.parquet")
+    parser.add_argument(
+        "--allow-backend-mismatch",
+        action="store_true",
+        help=(
+            "re-score even though this machine's BLAS differs from the one "
+            "that produced the source rows; only valid when every arm being "
+            "compared is read from `f1_rescored`"
+        ),
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     frames = []
@@ -231,7 +294,7 @@ def main(argv: Iterable[str] | None = None) -> None:
     print(f"{len(combined)} rows from {len(args.sources)} files", flush=True)
 
     rescored = rescore_selections(combined, n_pc_seeds=args.n_pc_seeds)
-    joined = attach_rescored(combined, rescored)
+    joined = attach_rescored(combined, rescored, allow_backend_mismatch=args.allow_backend_mismatch)
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -16,6 +16,7 @@ from evaluation.chamber_pipeline.rescore import (
     SELECTION_KEY_COLUMN,
     attach_rescored,
     parse_selection,
+    rescore_selections,
     selection_key,
 )
 
@@ -172,3 +173,91 @@ def test_attach_rescored_tolerates_a_missing_optional_metric() -> None:
     out = attach_rescored(cells, legacy)
     assert out.loc[0, "f1_rescored"] == pytest.approx(0.3)
     assert "f1_skeleton_rescored" not in out.columns
+
+
+def _cells_and_rescored(
+    source_backend: str | None, rescore_backend: str
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """One ok cell plus its two-seed re-scoring, backends set independently."""
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["a,b"],
+            "f1": [0.4],
+            "blas_backend": [source_backend],
+        }
+    )
+    key = selection_key("lt", "standard", ["a", "b"])
+    rescored = pd.DataFrame(
+        {
+            SELECTION_KEY_COLUMN: [key, key],
+            "pc_seed": [0, 1],
+            "f1": [0.2, 0.4],
+            "blas_backend": [rescore_backend, rescore_backend],
+            "platform_tag": ["Darwin-arm64", "Darwin-arm64"],
+        }
+    )
+    return cells, rescored
+
+
+def test_attach_rescored_refuses_a_cross_backend_join() -> None:
+    """A backend mismatch is an error, not a warning.
+
+    `f1_rescored` substitutes for `f1` downstream, and PC forks structurally
+    on a ~1e-10 linear-algebra difference, so the joined frame would carry
+    Accelerate numbers under an OpenBLAS provenance stamp — the one column
+    that exists to prevent exactly this mispooling.
+    """
+    cells, rescored = _cells_and_rescored("scipy-openblas", "accelerate")
+    with pytest.raises(ValueError, match="not comparable"):
+        attach_rescored(cells, rescored)
+
+
+def test_attach_rescored_allows_a_declared_cross_backend_join() -> None:
+    """The escape hatch is explicit, and records which backend scored."""
+    cells, rescored = _cells_and_rescored("scipy-openblas", "accelerate")
+    out = attach_rescored(cells, rescored, allow_backend_mismatch=True)
+    assert out.loc[0, "f1_rescored"] == pytest.approx(0.3)
+    assert out.loc[0, "blas_backend"] == "scipy-openblas"
+    assert out.loc[0, "rescore_blas_backend"] == "accelerate"
+    assert out.loc[0, "rescore_platform_tag"] == "Darwin-arm64"
+
+
+def test_attach_rescored_joins_when_backends_agree() -> None:
+    cells, rescored = _cells_and_rescored("scipy-openblas", "scipy-openblas")
+    out = attach_rescored(cells, rescored)
+    assert out.loc[0, "f1_rescored"] == pytest.approx(0.3)
+    assert out.loc[0, "rescore_blas_backend"] == "scipy-openblas"
+
+
+def test_attach_rescored_joins_when_the_source_declares_no_backend() -> None:
+    """Pre-provenance files have no `blas_backend`; they must still join.
+
+    The guard can only fire on evidence of a mismatch. A null column is
+    ignorance, not disagreement, and raising on it would lock out every file
+    written before the provenance columns existed.
+    """
+    cells, rescored = _cells_and_rescored(None, "accelerate")
+    out = attach_rescored(cells, rescored)
+    assert out.loc[0, "f1_rescored"] == pytest.approx(0.3)
+
+
+def test_rescore_stamps_the_executing_machine_not_the_source() -> None:
+    """`rescore_selections` must report the backend it actually ran under."""
+    from evaluation.chamber_pipeline.inference import runtime_fingerprint
+
+    expected = runtime_fingerprint()
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_reference"],
+            "blas_backend": ["a-backend-that-cannot-be-this-machine"],
+        }
+    )
+    out = rescore_selections(cells, n_pc_seeds=1, progress_every=0)
+    assert set(out["blas_backend"]) == {expected["blas"]}
+    assert set(out["platform_tag"]) == {expected["platform"]}
