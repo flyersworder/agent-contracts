@@ -644,6 +644,20 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   where design diversity is needed, **shuffle the menu order per seed**.
   Reproducibility in this pillar exists at the level of ARM MEANS over n seeds,
   never at the cell — same conclusion as the BLAS finding.
+- **ROOT CAUSE of that nondeterminism** (register §26, 2026-09-01): a chaotic
+  branch point early in the reasoning trace. temperature=0 IS honoured — "17×3"
+  returns `51` byte-identically 6/6 with the same reasoning-token count, and the
+  long menu prompt with an unambiguous answer demanded returns `APPLE` 3/3 at
+  reasoning=51. But on the real task, four draws share only **20-114 characters**
+  of reasoning before forking at a semantically empty choice ("name" vs
+  "experiment name"), then run 20k-54k chars to four different answers.
+  Greedy decoding is deterministic given identical logits; fp8 MoE logits vary
+  with batch composition, a near-tie flips the argmax, and a long trace
+  amplifies it. **Isomorphic to the BLAS/PC finding** — a discrete decision on
+  top of a continuous computation reproducible only to kernel noise.
+  **Practical:** reasoning length is a variance multiplier, so **do not reuse
+  DeepSeek MDEs for another vendor** — measure each arm's sd in the replication
+  or a power difference will read as a failure to replicate.
 - **Endpoint reasoning DEFAULTS diverge 130x — and we already pin past them**
   (probed 2026-08-31, register §25). With no `reasoning` parameter, one prompt
   gives Z.AI 6,889 tokens / GMICloud 2,600 / DeepInfra 52 on `glm-5.3-flash`.

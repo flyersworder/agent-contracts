@@ -642,6 +642,16 @@ Scope it to the contrasts the paper actually leads with, not the full grid:
 One chamber (LT), n=30, mid budget = k=30, plus k=45 for `one_shot`. ~$20–30.
 **Probe first** — availability, price, provider endpoints and quantization per
 candidate — as `PROVIDER_ORDER_BY_MODEL` raises on unpinned models by design.
+Done for `glm-5.3-flash` on 2026-08-31 (register §25): endpoints are usable
+once `reasoning.effort` is pinned, which the agents already do; `Relace` is fp4
+and excluded.
+
+**Do NOT reuse the DeepSeek MDEs — added 2026-09-01, register §26.** Per-cell
+variance is driven by a chaotic fork early in the reasoning trace, so an arm
+that reasons longer has larger spread from that mechanism alone. If GLM's
+traces differ in length, its MDEs differ. Compute each arm's sd from the
+replication's own cells; otherwise a power difference will read as a failure to
+replicate, which is the one outcome this phase must not get wrong.
 
 A replication that holds is worth more to this paper than any additional
 topology. If it does NOT hold, that is also publishable and reframes the
