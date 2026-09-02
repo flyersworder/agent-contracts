@@ -576,6 +576,14 @@ results: look between phases rather than queueing them.
 
 ## 8. Revised plan (2026-08-31): what turns this into a strong submission
 
+> **REVISED AGAIN 2026-09-02.** Two results landed after this section was
+> written and both hit its framing: the **coverage oracle** (2026-09-01) and
+> the **WT `team_varsplit` non-replication** (2026-09-02). §8.1's third load
+> and §8.4's change 1 both lean on `team_varsplit` as *the* positive result;
+> that is now one chamber at one budget. And §8 nowhere mentions the oracle,
+> which is the single most consequential thing in the corpus. §8.6 below
+> supersedes §8.1 and §8.4's item 1; the rest of §8 stands.
+
 Phases 1 and 2 are done and the corpus is large. The remaining question is no
 longer "what else can we measure" but **"what is between this and an accept"**.
 The honest assessment: a solid submission exists today; a strong one needs the
@@ -742,6 +750,77 @@ divergence is real (overlap 0.79 -> 0.32) and still loses.
 bagged scoring, the hidden-profile analogue, the rationale-passing blackboard.
 All are recorded in §7 with reasons; none of them moves an accept/reject
 threat.
+
+### 8.6 The framing after the oracle (2026-09-02) — supersedes 8.1
+
+**Lead with the reference policy, not with topology.** `coverage_max` is a
+ten-line LLM-free rule (round-robin over distinct variables). Re-scored on one
+BLAS backend at 9 PC seeds — the earlier table was cross-backend, register §31
+— it **ties every LLM arm at four of six budgets, loses at LT k=6, and BEATS
+every LLM arm at WT k=21**. Under core-20 scoring it ties at every LT budget,
+including k=6.
+
+> On a task with a computable near-optimum, we measure agent topologies as
+> distance-from-optimum under contract-enforced matched budgets. LLM selection
+> beats a ten-line coverage rule only where the budget is too tight for
+> coverage to bind — and on the non-trivial subgraph, not even there. Above
+> that, no topology we built beats the rule and several lose to it. No fan-in
+> ever beats a single sequential loop.
+
+Why this is the right lead:
+
+1. **A computable near-optimal reference policy is rare in agent benchmarks.**
+   It converts every arm from "better or worse than another arm" into
+   "distance from a known ceiling", which is what makes the negatives
+   interpretable rather than merely disappointing.
+2. **It keeps a scoped positive.** The LLM's contribution is real and located:
+   tight budget, where a coverage heuristic does not help. That is a finding
+   with an actionable shape.
+3. **It absorbs the `one_shot` result instead of being embarrassed by it.**
+   Every arm converging above k/M ≈ 0.5 is them converging on the coverage
+   optimum; that is the explanation Phase 2 was missing.
+
+**The positive result is now the two-factor model, not `team_varsplit` itself.**
+`team_varsplit` gains +0.043 on LT k=30 (resolved) and nothing detectable on
+WT — but the non-replication is **predicted** by LLM-free measurements:
+
+> predicted gain = coverage exchange rate × variables recovered by partitioning
+
+3/3 on the verdict, and WT k=21 nearly exact (+0.015 predicted, +0.017
+measured). The exchange rate is **higher** on WT (0.0111 vs 0.0061), so the
+moderator is not "WT is a worse chamber" — it is **headroom in the action
+space** (menu entries per variable: LT 1.97, WT 1.33). This is the version
+that transfers to the loop-vs-graph discourse: partitioning by role pays in
+proportion to the duplication the action space affords, and both terms are
+measurable before running a model. `analyze_headroom.py`.
+
+**Replacement for §8.4 item 1's scoping sentence:**
+
+> Under matched budgets, partitioning the task between agents loses;
+> partitioning the variable space recovers it, in proportion to how much
+> duplication the action space affords — which is why the effect resolves on
+> the redundant menu and is predicted to be undetectable on the sparse one.
+
+**The threat this framing creates, and the only honest response.** "Your task
+is coverage-shaped, so a coverage rule winning is a benchmark artifact." It is
+correct: §29's ground truth is bipartite, depth 1, zero mediators, and §28
+notes 18 of 38 nodes are pure apparatus sources. **Scope it in the title and
+abstract.** The closable version is that the chambers' depth is TEMPORAL and
+our pooled-i.i.d. reduction discards it; the authors' own WT case study meets
+the same autocorrelation with PCMCI+ rather than a different dataset.
+
+### 8.7 Sequencing, revised 2026-09-02
+
+Reprioritised because the oracle changed what the marginal dollar buys.
+
+| # | work | cost | why now |
+|---|---|---|---|
+| 1 | **Re-score the whole corpus on one backend**, quote `f1_rescored` throughout | $0 | register §31 moved two verdicts; until this is done "no LLM arm beats the rule" is not established |
+| 2 | **Core-20 as a standard reported column** | $0 | pre-empts the coverage-shape objection instead of conceding it |
+| 3 | **WT k=21 varsplit at n≈132** | ~250 WT cells | the model's own pre-registered confirmatory test; converts a non-replication into a law or falsifies it |
+| 4 | **3b `one_shot` menu-order shuffle** | ~$4 | unchanged; still blocking the record claim's bound |
+| 5 | **3a cross-vendor replication** | ~$20–30 | **value DOWNGRADED**: if an LLM-free rule ties every LLM arm, a second vendor mostly confirms that a second vendor also ties the rule. Still answers a reviewer reflex, no longer the central threat |
+| 6 | **Lagged-estimator variant** (coverage does not bind) | engineering, $0 API | the only work that answers the top-ranked threat; the difference between a solid paper and one that is hard to reject |
 
 ## 7. Non-goals
 

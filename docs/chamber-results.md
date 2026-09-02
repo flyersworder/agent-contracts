@@ -69,6 +69,50 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ## THE COVERAGE ORACLE (2026-09-01): an LLM-free rule matches every LLM arm
 
+> **CORRECTED 2026-09-02 — the tables below crossed BLAS backends, and two
+> verdicts move.** The coverage arms ran locally on Accelerate; every LLM arm
+> they are compared against came off the VPS on OpenBLAS (register §31). Only
+> LT k=30 was clean. Re-scored on one backend at 9 PC seeds and clustered by
+> selection, the headline "no LLM arm resolves above the rule at any budget"
+> is **false at both ends**:
+>
+> | | best LLM − rule | MDE | verdict |
+> |---|---|---|---|
+> | LT k=6 | **+0.036** | 0.030 | **the LLM wins** |
+> | LT k=30 | +0.001 | 0.029 | ties |
+> | LT k=45 | −0.001 | 0.013 | ties |
+> | WT k=7 | −0.015 | 0.020 | ties |
+> | WT k=14 | +0.002 | 0.022 | ties |
+> | WT k=21 | **−0.030** | 0.024 | **the rule wins** |
+>
+> **This is a better result than the one it replaces.** A flat row of ties
+> reads as a task that cannot discriminate; a crossing is a finding — the
+> model beats the heuristic when budget is scarce and loses to it when budget
+> is ample, on two chambers. The "nuance that saves the story" below was
+> therefore under-stated rather than over-stated: the tight-budget escape is
+> not a near-miss, it resolves.
+>
+> **But it does not survive core-20 scoring, and that matters more.** Register
+> §28 records that 18 of our 38 nodes are pure apparatus sources carrying 18
+> of 57 edges. Scoring only the 20 variables the chambers' own case study uses:
+>
+> | LT | best LLM − rule (core-20) | MDE | verdict |
+> |---|---|---|---|
+> | k=6 | +0.029 | 0.030 | ties |
+> | k=30 | +0.005 | 0.014 | ties |
+> | k=45 | −0.000 | 0.016 | ties |
+>
+> `llm_pc`'s k=6 margin falls from +0.036 to **+0.014**. So the LLM's one
+> resolved advantage over a ten-line rule lives substantially in the
+> apparatus edges — "did you buy the experiment that makes this setting vary"
+> — and **on the non-trivial subgraph no LLM arm we built beats round-robin
+> coverage at any budget**. State it that way; a reviewer who checks will
+> find it otherwise.
+>
+> Absolute values in the corrected tables are Accelerate re-scorings and are
+> not comparable to the numbers below; the contrasts are, because every arm in
+> them is read from `f1_rescored` on one machine.
+
 Prompted by §29's finding that the contemporaneous ground truth is a bipartite
 source→sink assignment with 32-40% trivially-structured edges: if the task is
 coverage-shaped, a coverage rule should be hard to beat. It is.
@@ -851,7 +895,7 @@ that were previously cross-platform.
 (90, confounded, retained for reproducibility), `runs/m7-coverage-ms.parquet`
 (60, deconfounded).
 
-## WT `team_varsplit` REPLICATION (2026-09-02): the mechanism does NOT transfer at feasible n
+## WT `team_varsplit` (2026-09-02): the non-replication is PREDICTED, not a failure
 
 `runs/m7-wt-varsplit.parquet` — **300 cells, 298 ok, 2 errors**, WT
 `standard`, k ∈ {14, 21}, n=50 per arm, `deepseek-v4-flash-0731`, VPS
@@ -895,11 +939,94 @@ At k=21 `team_varsplit` buys **more** distinct variables than the loop (17.40
 vs 17.14) and still scores 0.012 lower. On LT the same +5.5 variables bought
 +0.036 F1; on WT +1.34 buys nothing that resolves.
 
-**The most likely reading is that WT gives the manipulation almost no room.**
-LT's menu is 59 entries over 30 variables; WT's is 28 over 21, and 18 of those
-carry exactly one entry. There is little cross-scout variable duplication left
-to remove, so the intervention that was worth 5.5 variables on LT is worth 1.3
-here. That is a statement about menu structure, not about topology.
+### A two-factor model predicts all three verdicts (added 2026-09-02)
+
+An earlier version of this section stopped at "WT's menu gives the
+manipulation almost no room" — true, but a post-hoc rationalisation with no
+prediction in it. It is now a quantity, and it predicts the outcome:
+
+> predicted gain  =  **coverage exchange rate**  ×  **variables recovered**
+
+Both factors are measured **without any LLM**. The exchange rate is F1 per
+additional distinct variable, regressed on the LLM-free arms alone
+(`coverage_max` / `coverage_min` / `random`) with budget as a fixed effect —
+a property of the *chamber's inference problem*. Variables recovered is what
+partitioning actually buys — a property of the *menu*.
+(`evaluation/chamber_pipeline/analyze_headroom.py`.)
+
+| chamber | exchange rate | n cells |
+|---|---|---|
+| LT | **0.0061 ± 0.0005** | 240 |
+| WT | **0.0111 ± 0.0006** | 450 |
+
+**The two factors move in opposite directions, which is why neither alone
+explains the non-replication.** WT's exchange rate is nearly **twice** LT's —
+a distinct variable is worth *more* there, not less. What WT lacks is
+headroom: 28 entries over 21 variables (1.33 each) against LT's 59 over 30
+(1.97), and 18 of WT's entries are singletons.
+
+| chamber | k | rate | variables recovered | **predicted** | **measured** | MDE | predicted verdict | actual |
+|---|---|---|---|---|---|---|---|---|
+| LT | 30 | 0.0061 | 5.47 | **+0.033** | **+0.043** | 0.019 | resolves | **RESOLVED** ✓ |
+| WT | 14 | 0.0111 | 0.88 | **+0.010** | −0.000 | 0.023 | below MDE | below MDE ✓ |
+| WT | 21 | 0.0111 | 1.34 | **+0.015** | +0.017 | 0.024 | below MDE | below MDE ✓ |
+
+**Three for three on the verdict, and WT k=21 is nearly exact** (+0.015
+predicted, +0.017 measured). Using instead the LT exchange rate from the
+direct 15-vs-30-variable manipulation (0.0073, `M7 PHASE 1`) rather than this
+regression puts LT at +0.040 against +0.043 measured — a 7% error from an
+independent measurement of the same quantity.
+
+**So the mechanism does not fail on WT; it is predicted to be undetectable
+there.** That is a different and much stronger claim than non-replication:
+the model says *in advance* which action spaces reward partitioning by
+variable, and it correctly called the one where our own pre-registered
+prediction would not resolve at n=50.
+
+### The moderator is the ACTION SPACE, not the chamber
+
+The user-facing form of this — the thing that transfers off our benchmark —
+is that partitioning by role pays exactly to the extent that the action space
+affords duplication. That quantity is computable **before running any agent**:
+split the menu into two disjoint halves, have each side buy k/2 uniformly at
+random, count the variables both touch (`a_priori_headroom`).
+
+| chamber | menu | entries/variable | k | a-priori shared | observed `team` shared |
+|---|---|---|---|---|---|
+| LT | 59/30 | 1.97 | 30 | 4.14 | 6.50 |
+| WT | 28/21 | 1.33 | 14 | 1.06 | 1.90 |
+| WT | 28/21 | 1.33 | 21 | 1.85 | 2.42 |
+
+The uniform model **under-predicts by ~1.5×** on both chambers, and for a
+reason worth stating rather than tuning away: real scouts concentrate on the
+variables that look informative, so they collide more often than random draws
+do. Treat it as a **lower bound that ranks action spaces correctly** — the
+LT:WT ratio is 3.9 predicted against 3.4 observed — not as a point estimate.
+
+This is the sentence that reaches the loop-vs-graph discourse: two sub-agents
+handed disjoint *task lists* still work the same modules; partition the
+*module space* and the duplication goes away. How much that is worth is
+`exchange rate × headroom`, and both terms are measurable in any benchmark
+without running a model.
+
+### The confirmatory test this makes available
+
+The model's WT prediction is a real number, not a null: **+0.015 at k=21**.
+At the observed spread that needs **n ≈ 132** per arm to clear its own MDE
+(`50 × (0.0242/0.0149)²`), against the n=50 we ran. So the pre-registerable
+follow-up is: *run WT k=21 varsplit vs team at n≈132 and the effect should
+resolve at +0.015*. It is ~250 additional WT cells. **If it resolves there,
+the non-replication converts into a confirmed quantitative law across two
+chambers; if it does not, the model is falsified on the chamber where it
+predicts hardest.** Either way it is a result, which is more than the current
+"below MDE" delivers.
+
+**Caveats, so this is not over-sold.** The exchange rate is measured on
+LLM-free arms and applied to LLM arms, which assumes the coverage curve is
+arm-independent — supported by the coverage oracle tying every LLM arm, but
+an assumption. "Variables recovered" is measured from the runs, not predicted
+from the menu; the fully a-priori version is the weaker lower bound above.
+And three points is a model that fits, not a law that has been tested.
 
 ### The arm is INFEASIBLE at k/M = 0.75, by construction
 
@@ -1460,7 +1587,44 @@ per-model order, no strays. Single BLAS, single platform, single model tag.
 
 ---
 
-## Paper readiness (assessed 2026-08-28; Phase 2 amendment 2026-08-31)
+## Paper readiness (assessed 2026-08-28; amended 2026-08-31, 2026-09-02)
+
+> **2026-09-02 amendment — the two lead sentences below both need restating,
+> and the corpus now supports a better pair.**
+>
+> **1. "Topology is at least as large a lever as model choice" oversells.**
+> It is true that fan-in *costs* 0.075–0.090, but the coverage oracle shows
+> there is no topology *gain* available above small k — nothing we built beats
+> a ten-line rule, and at WT k=21 the rule beats everything. The honest form
+> is **topology can only cost you here**: you can lose 0.09 by choosing a
+> fan-in and you cannot buy anything back by choosing a cleverer one.
+>
+> **2. "The contract is a floor on effort" is unchanged and is now the
+> strongest positive in the corpus.** It should be co-headline, not §5.
+>
+> **The new lead, which the data does carry:**
+>
+> > On a task with a computable near-optimum, we measure agent topologies as
+> > distance-from-optimum under contract-enforced matched budgets. LLM
+> > selection beats a ten-line coverage rule only where the budget is too
+> > tight for coverage to bind — and on the non-trivial subgraph, not even
+> > there. Above that, no topology we built beats the rule and several lose to
+> > it. No fan-in ever beats a single sequential loop.
+>
+> **What this buys:** a computable near-optimal reference policy is rare in
+> agent benchmarks, and it converts three negatives into one measured claim
+> with a ceiling. **What it costs:** it hands a reviewer the objection "your
+> task is coverage-shaped." That objection is correct — §29's bipartite,
+> depth-1 ground truth says so — and the answer is to scope it in the title,
+> not to argue it. See threat 5 below.
+>
+> **The `team_varsplit` claim is no longer a single-chamber positive.** The
+> non-replication on WT is *predicted* by an LLM-free two-factor model
+> (`exchange rate × variables recovered`, 3/3 on the verdict) whose moderator
+> is the ACTION SPACE, not the chamber. That is a stronger contribution than
+> the original result, and it comes with a pre-registerable confirmatory test
+> at WT k=21, n≈132. See the varsplit section.
+
 
 > **Phase 2 amendment.** The two lead sentences below both survive Phase 2 —
 > neither depends on the record axis. What Phase 2 changes is the *explanation*
@@ -1539,6 +1703,19 @@ nothing measured what governance costs.
    restatement as claim, inflating rung 4's headline metric. `overlap_frac`
    is structurally 0.0 for rung 4. Removing the budget necessarily changes
    the prompt, so the governance contrast is contract-plus-prompt.
+6. **The task is coverage-shaped, and we now have the evidence for it**
+   (new 2026-09-02, and the top-ranked threat). A ten-line LLM-free rule
+   ties every LLM arm at 5 of 6 budgets and beats them all at WT k=21; on
+   core-20 scoring it ties at every LT budget. §29 explains why — the
+   contemporaneous ground truth is bipartite, depth 1, zero mediators — and
+   §28 adds that 18 of 38 nodes are pure apparatus sources. The compressed
+   objection is **"you flattened the structure that would make coordination
+   pay, then reported that coordination doesn't pay."** It cannot be argued
+   away and must be scoped in the title and abstract. The one closable
+   version: the chamber's depth is TEMPORAL, and the authors' own WT case
+   study answers the same autocorrelation problem with PCMCI+ rather than a
+   different dataset — a lagged-estimator variant is the experiment that
+   would answer it, at engineering cost and no API cost.
 
 ### Method as a contribution
 

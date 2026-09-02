@@ -1029,9 +1029,17 @@ two models. Headlines, with the detail and the caveats in the results doc:
   tight-budget regime; above k/M≈0.5 every arm converges on the coverage
   optimum. Treat the rule as a **computable near-oracle** — rare in agent
   benchmarks — and report every arm as distance-from-optimum. **BOTH CHAMBERS**
-  as of 2026-09-01: `wt_coverage_max` (`wt_menu_taxonomy.py`, 28 entries / 21
-  variables) ties the best LLM at WT k=7/14/21 too, and at k=21 sits 0.021
-  ABOVE it. Six budgets, two chambers, no LLM arm resolves above the rule.
+  (`wt_coverage_max`, `wt_menu_taxonomy.py`, 28 entries / 21 variables).
+  **CORRECTED 2026-09-02 — five of the six contrasts crossed BLAS backends**
+  (coverage arms local/Accelerate, LLM arms VPS/OpenBLAS; register §31; only
+  LT k=30 was clean). Re-scored on one backend at 9 seeds, **two verdicts
+  move and they move in OPPOSITE directions**: the loop RESOLVES above the
+  rule at LT k=6 (+0.036, MDE 0.030) and the rule RESOLVES above every LLM
+  arm at WT k=21 (+0.030, MDE 0.024). A crossing is a better result than a
+  flat row of ties. **But the LT k=6 win does NOT survive core-20 scoring**
+  (+0.036 → +0.014, below MDE): the LLM's one advantage over a ten-line rule
+  lives largely in the 18 apparatus edges. On the non-trivial subgraph no LLM
+  arm beats round-robin coverage at any budget — state it that way.
   Same small-budget escape on both (rule − random is +0.002 at WT k=7, +0.007
   at LT k=6, rising to +0.045 / +0.073 at the large budgets).
 - **Breadth beats depth even where the fat menu entries ARE the real drivers.**
@@ -1063,16 +1071,22 @@ two models. Headlines, with the detail and the caveats in the results doc:
   other configuration. It was the CLI default, never a considered choice — but
   it is also the only WT config with a menu, so the oversight was in not
   checking, not in the outcome.
-- **`team_varsplit` DOES NOT REPLICATE ON WT** (2026-09-02, 300 cells, n=50,
-  both budgets, re-scored at 9 PC seeds). LT k=30 strengthens to **+0.043
-  RESOLVED**; WT k=14 is **−0.000** and k=21 **+0.017 below MDE (0.024)**.
-  The mechanism fires on both — varsplit buys +0.9 / +1.3 more distinct
-  variables, `overlap_frac` 0.000 — but WT's menu (28 entries / 21 variables,
-  18 of them singletons) leaves almost no cross-scout duplication to remove,
-  against LT's 59/30. **The paper's positive result is one chamber at one
-  budget; say so.** Also: the arm is **infeasible at k/M = 0.75** — 2 of 50
-  k=21 cells raise because a variable partition cannot leave both scouts a
-  pool above budget. Partition-granularity needs menu slack.
+- **`team_varsplit`'s WT non-replication is PREDICTED, not a failure**
+  (2026-09-02, 300 cells, n=50, re-scored at 9 PC seeds). LT k=30 **+0.043
+  RESOLVED**; WT k=14 **−0.000**, k=21 **+0.017 below MDE (0.024)**. An
+  LLM-free two-factor model gets **3/3 on the verdict**:
+  `predicted gain = coverage exchange rate × variables recovered`
+  (`analyze_headroom.py`). Rates regressed on LLM-free arms with budget as a
+  fixed effect: **LT 0.0061 ± 0.0005, WT 0.0111 ± 0.0006**. Predicted /
+  measured: LT k=30 +0.033 / +0.043, WT k=14 +0.010 / −0.000, WT k=21
+  **+0.015 / +0.017**. **WT's exchange rate is nearly DOUBLE LT's** — the
+  moderator is not "WT is worse" but **headroom in the ACTION SPACE** (menu
+  entries per variable: LT 1.97, WT 1.33). Headroom is computable before any
+  run (`a_priori_headroom`, a ~1.5× under-predicting lower bound that ranks
+  the chambers right). **Pre-registerable confirmatory test: WT k=21 at
+  n≈132 should resolve at +0.015** (~250 cells). Also: the arm is
+  **infeasible at k/M = 0.75** — 2 of 50 k=21 cells raise because a variable
+  partition cannot leave both scouts a pool above budget.
 - **The cell-level version of that contrast said the opposite** (+0.0155 at
   k=14, +0.0160 at k=21, "stable across budgets"). Nine-seed re-scoring took
   k=14 to zero. §27's failure mode, recurring: **never read a WT contrast off

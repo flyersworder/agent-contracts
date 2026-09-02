@@ -1698,6 +1698,61 @@ Two side findings from the same measurement:
   know fires 3 columns on WT. A counter that reads zero because nothing is
   listening looks exactly like a clean run.
 
+## 31. The coverage-oracle table crossed BLAS backends (2026-09-02)
+
+**Five of the six "no LLM arm beats the rule" contrasts compared an
+Accelerate-scored rule against OpenBLAS-scored LLM arms.** The coverage arms
+were built and run locally on 2026-09-01; every arm they were compared against
+came off the VPS. Entry 10 established that PC forks structurally on a ~1e-10
+linear-algebra difference, so this is exactly the mispooling that entry
+forbids — in the newest headline result, four days after the rule was written.
+
+| file | arms | backend |
+|---|---|---|
+| `m7-coverage-ms.parquet` | LT rule, k=30 | `scipy-openblas` |
+| `m7-coverage-lt-ends.parquet` | LT rule + random, k=6/45 | **`accelerate`** |
+| `m7-coverage-wt2.parquet` | WT rule, k=7/14/21 | **`accelerate`** |
+| `m7-p2-lt` / `m7-p2-wt` | every LLM arm | `scipy-openblas` |
+
+Only **LT k=30** was clean. The results doc nonetheless asserted "same
+platform, same BLAS, same post-collinear-fix era as every arm below" — a
+claim written from intent rather than read off the column that records it,
+which is the same failure mode as the five tests in entries 3-4, 7, 8, 10
+and 12 that certified our request rather than what ran.
+
+**The `rule − random` contrasts were never affected** (both arms sit in the
+same file, so both are Accelerate), which is why the "small-budget escape"
+finding survives untouched. It is specifically `best LLM − rule` that was
+cross-backend.
+
+### What it cost, once corrected
+
+Re-scored on one backend at 9 PC seeds, clustered by selection
+(`rescored-coverage-core.parquet`, `rescored-coverage-wt.parquet`):
+
+| | best LLM − rule | MDE | verdict | previously reported |
+|---|---|---|---|---|
+| LT k=6 | **+0.036** | 0.030 | **LLM RESOLVES ABOVE** | ties |
+| LT k=30 | +0.001 | 0.029 | ties | ties |
+| LT k=45 | −0.001 | 0.013 | ties | ties |
+| WT k=7 | −0.015 | 0.020 | ties | ties |
+| WT k=14 | +0.002 | 0.022 | ties | ties |
+| WT k=21 | **−0.030** | 0.024 | **RULE RESOLVES ABOVE** | ties |
+
+**Two of six verdicts moved, in opposite directions**, and the corrected table
+is a better result than the contaminated one: the flat "everything ties" reads
+as a task that does not discriminate, while a crossing is a finding. Note that
+the backend fix and the 9-seed re-scoring landed together — re-scoring alone
+cut the LT k=45 MDE from 0.029 to 0.013 — so this entry is not evidence about
+the size of the backend effect on its own.
+
+**The rule that follows.** A backend column that exists is not a backend
+column that was read. `attach_rescored` already raises on a cross-backend
+join; nothing raised here because the contamination was between two *source*
+files, before any re-scoring. **Assert single-backend provenance when the
+contrast is assembled, not only when scores are joined** — and never write
+"same BLAS" into a results table without grouping on the column first.
+
 ## How to add an entry
 
 1. Measure the effect on the result — do not assert it. Residualise on
