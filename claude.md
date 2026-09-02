@@ -1106,10 +1106,34 @@ two models. Headlines, with the detail and the caveats in the results doc:
   moderator is not "WT is worse" but **headroom in the ACTION SPACE** (menu
   entries per variable: LT 1.97, WT 1.33). Headroom is computable before any
   run (`a_priori_headroom`, a ~1.5× under-predicting lower bound that ranks
-  the chambers right). **Pre-registerable confirmatory test: WT k=21 at
-  n≈132 should resolve at +0.015** (~250 cells). Also: the arm is
-  **infeasible at k/M = 0.75** — 2 of 50 k=21 cells raise because a variable
-  partition cannot leave both scouts a pool above budget.
+  the chambers right).
+- **THE WT k=21 CONFIRMATION LANDED: predicted +0.0149, measured +0.0139**
+  (2026-09-02, n=132 pooled, 95% CI [+0.0032, +0.0246], p=0.0117; bootstrap
+  100k agrees at p=0.0103). Pre-registered before launch (`c673121`). Error
+  −0.0010. **But 2.53σ does NOT clear the pillar's 2.8σ bar** (needs n≈154):
+  significant at conventional levels, not at ours — **say both, and do not
+  switch bars to the one that pays**. Model record is **2 close, 1 miss**
+  (LT k=30 +0.033→+0.043; WT k=14 +0.010→−0.000 MISS; WT k=21
+  +0.0149→+0.0139); quoting "3/3" counts verdicts, not predictions.
+- **A threshold decision rule cannot evaluate a point prediction.** The
+  pre-registration said "below MDE → FALSIFIED"; that branch fired while the
+  estimate matched the prediction to 0.001. Key such rules on the INTERVAL
+  (contains prediction / excludes zero), never on a significance threshold.
+- **Neither bootstrapping nor more PC seeds buys power** (both measured, not
+  assumed). Bootstrap reproduces the t-interval to 4 decimals — it estimates
+  the same sampling distribution. Inference noise is only **18%** of the
+  remaining variance at m=9, so m→∞ moves σ 2.53→2.80, i.e. exactly onto the
+  bar; a verdict turning on that is an analytic choice. **Only more data adds
+  power, and it must be an INDEPENDENT replication at pre-specified n, never
+  an extension of a sample already seen.**
+- **Arm means ignored a 2.4× reasoning shift** (pre-registered pooling check):
+  `team` +0.0049, `team_varsplit` +0.0001 across the regime change. Second
+  such measurement (see `shared_blackboard`). Report as robustness, not caveat.
+- The varsplit arm is **infeasible at k/M = 0.75** — **8 of 132 (6.1%)** k=21
+  cells raise because a variable partition cannot leave both scouts a pool
+  above budget. The guard fires before anything is bought or scored, so
+  selection is on partition structure, not outcome. Quote 6.1%, not the 4%
+  seen at n=50.
 - **The cell-level version of that contrast said the opposite** (+0.0155 at
   k=14, +0.0160 at k=21, "stable across budgets"). Nine-seed re-scoring took
   k=14 to zero. §27's failure mode, recurring: **never read a WT contrast off

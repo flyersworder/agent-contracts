@@ -799,8 +799,18 @@ WT — but the non-replication is **predicted** by LLM-free measurements:
 
 > predicted gain = coverage exchange rate × variables recovered by partitioning
 
-3/3 on the verdict, and WT k=21 nearly exact (+0.015 predicted, +0.017
-measured). The exchange rate is **higher** on WT (0.0111 vs 0.0061), so the
+**Confirmed out of sample (2026-09-02).** The model's WT k=21 prediction of
++0.0149 was registered before the data existed (`c673121`) and measured
+**+0.0139** at n=132, 95% CI [+0.0032, +0.0246], p=0.0117, bootstrap
+concurring — error −0.0010. Report it with its bar: **2.53σ does not clear the
+pillar's 2.8σ convention** (n≈154 would), so it is significant at conventional
+levels and not at ours, and the write-up says so rather than switching bars.
+
+State the record as **2 close, 1 miss**, not 3/3: LT k=30 predicted +0.033 and
+measured +0.043; WT k=21 predicted +0.0149 and measured +0.0139; **WT k=14
+predicted +0.010 and measured −0.000**. The verdicts all agree with the
+bounds, but one point estimate does not, and counting verdicts would overstate
+the model. The exchange rate is **higher** on WT (0.0111 vs 0.0061), so the
 moderator is not "WT is a worse chamber" — it is **headroom in the action
 space** (menu entries per variable: LT 1.97, WT 1.33). This is the version
 that transfers to the loop-vs-graph discourse: partitioning by role pays in

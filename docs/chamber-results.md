@@ -949,6 +949,116 @@ per cell is what makes the question answerable at all.
 
 ---
 
+## WT k=21 CONFIRMATION AT n=132 (2026-09-02): the prediction lands, the house bar does not clear
+
+`runs/m7-wt-varsplit-n132.parquet` — **464 cells, 456 ok, 8 errors**, WT
+`standard` k=21, `deepseek-v4-flash-0731`, VPS (`scipy-openblas`), arms
+INTERLEAVED. Pre-registered before launch in
+`docs/superpowers/specs/2026-09-02-wt-varsplit-confirmation.md` (commit
+`c673121`), which fixed the predicted value, the sample size and the decision
+rule while no new data existed.
+
+**Predicted +0.0149. Measured +0.0139.**
+
+| analysis | Δ | 95% CI | p | σ | n |
+|---|---|---|---|---|---|
+| **pooled (primary)** | **+0.0139** | **[+0.0032, +0.0246]** | 0.0117 | 2.53 | 121 / 131 |
+| bootstrap, 100k resamples | +0.0139 | [+0.0032, +0.0245] | 0.0103 | — | — |
+| new seeds only | +0.0118 | [−0.0020, +0.0256] | 0.096 | 1.68 | 73 / 81 |
+
+Scored as pre-registered: `f1_rescored` at 9 PC seeds, clustered by distinct
+design, Welch on cluster means. Zero is **outside** the interval; the predicted
+value is **inside** it. The two-factor model's error is **−0.0010**.
+
+### It does not clear the pillar's own 2.8σ bar, and that is the honest headline
+
+2.53σ against a 2.8σ convention (≈ p<0.005). Resolving it needs **n≈154**; we
+ran 132 and lost 8 to the feasibility guard. So:
+
+> **The effect is significant at conventional levels and not at ours.** State
+> both. The 2.8σ bar exists to control false positives while scanning dozens
+> of exploratory contrasts; this is a single confirmatory test of a point
+> prediction registered in advance, where that multiplicity argument does not
+> apply the same way. We report the number, the bar, and let the reader choose
+> — we do not quietly switch bars to the one that pays.
+
+**No analytic technique closes the gap, and both were checked rather than
+assumed:**
+
+* **More PC seeds cannot.** At m=9, inference noise is only **18%** of the
+  remaining variance; the rest is design variance (which experiments the LLM
+  bought), which never averages away. m→∞ moves σ from 2.53 to **exactly
+  2.80**. A verdict that turns on raising `m` after seeing the shortfall is
+  decided by an analytic choice, not by evidence.
+* **Bootstrapping cannot.** It estimates the same sampling distribution; it
+  does not manufacture precision. Agreement was near-exact (SE 0.0055 both),
+  which is expected since the cluster means are near-normal (Shapiro p=0.077 /
+  0.220, skew 0.25 / 0.27). Its value here is corroboration by an assumption-
+  free route, and it was committed to being reported whatever it said.
+
+The clean route to the house bar is an **independent replication at
+pre-specified n≈180**, never an extension of this sample — that would be
+optional stopping on a result already seen.
+
+### The decision rule was mis-specified, and the correction is ours to own
+
+The pre-registration said: *"still below MDE at n=132 → MODEL FALSIFIED where
+it predicts hardest."* Applied literally that is the verdict, and the analysis
+script printed it.
+
+**The label was wrong.** It conflated two questions — *did the effect clear our
+threshold* and *was the prediction accurate*. Falsification requires the point
+estimate to disagree with the prediction; it agrees to 0.001. What happened is
+the test was under-powered: n=132 came from the n=50 MDE, the realised spread
+was larger, and 8 cells went to the guard.
+
+Recorded plainly because the failure mode is instructive: **a decision rule
+keyed on a significance threshold cannot evaluate a point prediction.** The
+rule should have keyed on whether the interval contains the prediction versus
+contains zero. Had the estimate come back at +0.002 the original rule would
+have been right and we would have reported falsification — the rule caught the
+wrong thing, not the wrong answer.
+
+### The model's record, stated with its miss
+
+| chamber | k | predicted | measured | agreement |
+|---|---|---|---|---|
+| LT | 30 | +0.033 | +0.043 (resolved) | 1.30x |
+| WT | 14 | +0.010 | −0.000 (below MDE) | **miss** |
+| WT | 21 | +0.0149 | **+0.0139** (p=0.012) | **0.93x** |
+
+Two close, one miss. WT k=14 predicted a small positive and measured zero;
+both sit inside their bounds, so the two are not inconsistent, but the point
+estimate does not match and saying "3/3" would be counting verdicts rather
+than predictions.
+
+### Free robustness result: the arm means ignored a 2.4x reasoning shift
+
+The pre-registered pooling check compared seeds 0-49 (2026-09-01) against
+50-131 (2026-09-02), across a provider regime change that took cells from
+415 s / 67k output tokens to ~1,500 s / ~165k under an unchanged model id
+(register §32):
+
+| arm | old (n=50) | new (n=81/73) | diff | bound |
+|---|---|---|---|---|
+| `team` | 0.2431 | 0.2480 | +0.0049 | 0.0242 |
+| `team_varsplit` | 0.2598 | 0.2598 | **+0.0001** | 0.0242 |
+
+Both agree, so pooling is permitted by the rule set in advance. **This is the
+second independent measurement that accuracy is nearly insensitive to large
+reasoning shifts** — the first being `shared_blackboard` WT k=14, where
+reasoning per call halved and F1 moved 0.004. Together they are a reportable
+robustness claim, not merely a caveat.
+
+### Feasibility guard
+
+`team_varsplit` raised on **8 of 132 (6.1%)**; `team` on 0 of 132. Higher than
+the 4% seen at n=50 — same code, so the earlier figure was a small sample.
+The guard fires before any experiment is bought or scored, so the surviving
+cells are selected on partition structure, not on outcome. Quote 6.1%.
+
+---
+
 ## WT `team_varsplit` (2026-09-02): the non-replication is PREDICTED, not a failure
 
 `runs/m7-wt-varsplit.parquet` — **300 cells, 298 ok, 2 errors**, WT

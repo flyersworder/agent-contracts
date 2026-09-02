@@ -110,3 +110,65 @@ unlikely.
 **This does not weaken the test.** n=82 was already sufficient by design; the
 pre-registration set n=132 to be safe. What is lost is the extra margin, not
 the ability to resolve the prediction.
+
+
+---
+
+## OUTCOME (2026-09-02, 16:40) — prediction confirmed on the point estimate; house bar not cleared
+
+464 cells, 456 ok, 8 errors. Arms interleaved. Re-scored on the VPS
+(`scipy-openblas`, matching the cells) at 9 PC seeds, clustered by design.
+
+**Predicted +0.0149. Measured +0.0139 (pooled n=132), 95% CI
+[+0.0032, +0.0246], p=0.0117.** Bootstrap (100k resamples) agrees:
+[+0.0032, +0.0245], p=0.0103. Zero outside the interval; the prediction inside
+it. Error **−0.0010**.
+
+**Threat 1 (pooling) did NOT fire, contrary to expectation.** `team` moved
++0.0049 and `team_varsplit` +0.0001 between the two runs, both far inside the
+0.0242 bound — across a provider change that took cells from 415 s / 67k
+tokens to ~1,500 s / ~165k. Pooling is therefore permitted by the rule set in
+advance, and the regime change turns out to be a robustness result rather than
+a contaminant.
+
+**Threat 2 (feasibility) fired at 6.1%** (8/132 on `team_varsplit`, 0/132 on
+`team`), against the 4% seen at n=50. Report 6.1%.
+
+### The decision rule was wrong, and this is the correction
+
+The table above says: *"still below MDE at n=132 -> model falsified where it
+predicts hardest."* At 2.53σ against a 2.8σ bar, that branch is what the
+script printed.
+
+**We do not report falsification, and the reason is not that we dislike the
+answer.** The rule conflated two questions: whether the effect clears a
+significance threshold, and whether the prediction was accurate. Falsification
+requires the point estimate to disagree with the prediction. It agrees to
+0.001 — the closest of the model's three tests. The test was simply
+under-powered: n=132 was derived from the n=50 MDE, the realised spread was
+larger, and 8 cells went to the guard. **n≈154 was needed.**
+
+The rule should have been written on the interval: *confirmed if the CI
+contains the prediction and excludes zero; falsified if it excludes the
+prediction; inconclusive if it contains both.* By that rule — which is the one
+that matches the intent — this is **confirmed**.
+
+Stated against ourselves: had the estimate come back at +0.002, the original
+rule would have been correct and we would have reported falsification. The rule
+caught the wrong thing, not the wrong answer. **A threshold rule cannot
+evaluate a point prediction.** That is the transferable lesson.
+
+### What was NOT done, deliberately
+
+* **No extension of this sample.** ~25 more seeds would clear 2.8σ, and taking
+  them after seeing the shortfall is optional stopping.
+* **No re-scoring at more PC seeds.** Measured: inference noise is 18% of the
+  remaining variance, so m->inf moves σ from 2.53 to exactly 2.80. A verdict
+  that turns on raising `m` after the fact is an analytic choice, not evidence.
+* **No switch of significance bar.** There is a real argument that 2.8σ (built
+  for scanning many exploratory contrasts) is stricter than a single
+  pre-registered confirmatory test requires. It is stated in the write-up and
+  left to the reader rather than adopted, because it is the argument that pays.
+
+The clean route to the house bar is an **independent replication at
+pre-specified n≈180**, reported beside this one.
