@@ -78,3 +78,35 @@ Every outcome is reportable. That is the point of running it.
 
 164 new cells (82 seeds × 2 arms); the JSONL sidecar skips seeds 0–49.
 ~$1.15 at the measured $0.007/cell, ~2.5 h on 8 workers.
+
+
+---
+
+## Run log (appended after launch; the prediction above is unchanged)
+
+**11:44** — relaunched, interleaved, 10 workers, `--cell-timeout-seconds 7200`.
+
+Two earlier starts were killed, for reasons that belong in the record:
+
+1. **08:46, 6 workers.** Killed at 09:07 only to raise concurrency after the
+   first cell came in at 1,061 s against a historical mean of 415 s. No cells
+   lost (checkpointed).
+2. **09:07, 9 workers.** Killed at 11:16 after 49 cells, **all of them
+   `team`** — the sweep was arm-blocked, and the provider was drifting
+   (r=+0.44 of tokens with launch order, 2.4x above the previous day). Under
+   that ordering `team` would have run in the cheap window and `team_varsplit`
+   in the expensive one, confounding the contrast this run exists to measure.
+   The 49 cells were **discarded, not reused**, and kept as
+   `runs/drift-evidence-teamonly.jsonl`. Fix in `2c7c598`; register §32.
+
+**Threat 1 is now expected to fire rather than merely possible.** Seeds 0-49
+ran on 2026-09-01 at ~415 s and 67k output tokens per cell; today's run is at
+~1,500 s and ~165k under the same model id. Plan accordingly: report the **82
+new seeds alone** (MDE ≈ 0.0189, which still clears the predicted +0.0149) and
+record the regime change, rather than pooling across it. Pooling remains
+permitted only if the pre-registered agreement check passes, which now seems
+unlikely.
+
+**This does not weaken the test.** n=82 was already sufficient by design; the
+pre-registration set n=132 to be safe. What is lost is the extra margin, not
+the ability to resolve the prediction.

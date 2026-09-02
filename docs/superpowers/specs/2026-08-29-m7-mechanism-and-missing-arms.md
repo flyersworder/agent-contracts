@@ -731,6 +731,19 @@ divergence is real (overlap 0.79 -> 0.32) and still loses.
    of a comparison on one machine. Stated positively this is a methods
    contribution; left implicit it reads as a hole.
 
+   **Add: a pinned model id does not pin the computation** (register §32,
+   added 2026-09-02). Twice now, DeepSeek has changed how much it reasons per
+   call under an unchanged model string — 4.35x tokens on 2026-08-13, 2.4x on
+   2026-09-02 — with `n_llm_calls` fixed by the arm and our code byte-identical.
+   Three obligations follow, and all three are cheap: **record `n_llm_calls`
+   and `tokens_out` per cell** so the question is answerable after the fact;
+   **never schedule arms in blocks of time**, or provider drift lands on one
+   arm (this is what forced the interleaving fix mid-run); and **run every arm
+   of a contrast concurrently** wherever the schedule allows. Stated
+   positively, this is the second half of the methods contribution: the paper
+   can show that a 1.7x swing in reasoning moved F1 by 0.004, which is a
+   measured robustness bound rather than a hope.
+
 4. **Report power, not just significance.** State the noise-only MDE floor
    beside every equivalence (0.031 at LT k=30, 0.029 at WT k=21) and the seeds
    a 0.02 effect would need (n≈75 LT, n≈110 WT). An equivalence without a bound

@@ -1753,6 +1753,95 @@ files, before any re-scoring. **Assert single-backend provenance when the
 contrast is assembled, not only when scores are joined** — and never write
 "same BLAS" into a results table without grouping on the column first.
 
+## 32. Arms were blocked in time, and the provider moved (2026-09-02)
+
+**`iter_sweep_cells` ran `for spec: for seed:` — every seed of one arm before
+the next arm started — so each arm occupied its own window of wall-clock
+time.** Harmless while provider behaviour holds still. It did not.
+
+Caught by looking at a progress notification: 41 cells into the WT varsplit
+confirmation, **all 41 were `team` and none were `team_varsplit`**. Over those
+cells, in launch order:
+
+| cells | wall | tokens_out |
+|---|---|---|
+| 0-10 | 1,184 s | 134,147 |
+| 10-20 | 1,402 s | 154,776 |
+| 20-30 | 1,745 s | 189,977 |
+| 30-41 | 1,610 s | 181,687 |
+| **historical (n=98, 2026-09-01)** | **418 s (max 623)** | **67,852 (max 101,157)** |
+
+r(order, tokens) = **+0.44**, and every new cell outside the previous day's
+support. `n_llm_calls` stayed pinned at 26 and the sweep code was
+byte-identical, so this is the model reasoning more per call, not the harness
+doing more work. A production-shaped probe returned in 5-12 s on the pinned
+endpoint while six workers ran, so it was not throttling on our side.
+
+Blocked, `team` would have taken the cheap window and `team_varsplit` the
+expensive one. **The contrast the run exists to measure would have carried the
+drift**, and no post-hoc analysis recovers it: under blocked ordering arm and
+window are perfectly confounded. The 49 completed cells were discarded
+(`runs/drift-evidence-teamonly.jsonl`) and the sweep relaunched.
+
+**Fix (`2c7c598`)**: swap the loops to `for seed: for spec:`. Interleaving is
+exact blocking on time rather than randomisation over it — consecutive cells
+share provider conditions as closely as the schedule allows, and under
+`--max-workers` the in-flight set spans every arm. Ordering cannot change a
+cell's result, so it costs nothing.
+
+### The archive was then audited rather than assumed clean
+
+`analyze_drift.py` (`eb9577d`). **10 of 11 files CLEAN**; residual trend — the
+part of tokens-per-call arm composition does not explain — is within ±0.032 of
+zero in every file, M4 pilot through M7. **No result is retracted.**
+
+One block flags: `shared_blackboard` WT k=14, where reasoning per call HALVED
+mid-block (5,520 → 3,210, r=−0.730 over 50 cells in 74 minutes) while **F1
+moved −0.004 against an MDE of ~0.023**. The same arm is flat at k=7 and k=21.
+The provider does move on hour timescales, and on this evidence accuracy
+barely notices — a robustness datum worth reporting, and one that bounds how
+much the larger 2.4x shift can plausibly matter.
+
+**Scope this honestly: `window_overlap` is 0.00-0.15 in every archived file.**
+The arms really did run in near-disjoint windows, so the audit shows no drift
+was detectable *within* blocks, not that between-block drift is impossible.
+That gap cannot be closed in the archive; it is why the ordering fix matters
+going forward rather than retroactively.
+
+### Three probes, two of them wrong
+
+Recorded because both wrong versions produced confident-looking tables:
+
+1. **raw `tokens_out`** is arm-dependent — a two-scout cell emits several times
+   a loop cell — so its trend measures which arm ran first: r=+0.71 on one run,
+   **+0.001** once residualised on arm × budget.
+2. **throughput (`tokens_out / wall_time`)** is worse: it tracks OUR OWN
+   concurrency, dipping while many workers hammer one endpoint and rising as a
+   block drains. It flagged **10 of 11** files — the signature of an artefact,
+   not ten defects.
+3. **`tokens_out / n_llm_calls`** is immune to both. Call count is fixed by arm
+   and budget, so what remains is how much the MODEL chose to reason.
+
+Two further corrections that moved numbers: **order by `started_at`, never
+`finished_at`** (under `--max-workers` a slow cell finishes later *by
+definition*, so completion order manufactures trends — this alone reported |r|
+up to 0.80); and **the flag threshold must scale with block size** (a sweep has
+9-15 blocks and reports the largest |r| among them, whose null expectation is
+~2 sd; a flat 0.30 flagged nearly everything, while 3/√(n−3) keeps the real one
+and clears `one_shot` k=45 at +0.525, n=30).
+
+A `between-block spread` statistic was computed and then **deleted rather than
+fixed**: it compares arms, which differ in cost by construction. Reporting it
+would have repeated the original error in a new form.
+
+### The generalisable lesson
+
+**A pinned model id does not pin the computation.** This is the second recorded
+instance (see the 2026-08-13 event: 4.35x tokens x 1.55x throughput under
+unchanged weights). Two consequences: never schedule arms in blocks, and record
+`n_llm_calls` and `tokens_out` per cell so the question can be asked at all —
+this audit is only possible because they were there.
+
 ## How to add an entry
 
 1. Measure the effect on the result — do not assert it. Residualise on

@@ -895,6 +895,60 @@ that were previously cross-platform.
 (90, confounded, retained for reproducibility), `runs/m7-coverage-ms.parquet`
 (60, deconfounded).
 
+## PROVIDER DRIFT AND THE DRIFT AUDIT (2026-09-02)
+
+While running the WT k=21 confirmation, DeepSeek's reasoning per call rose
+**2.4x** under an unchanged model id, unchanged code and a pinned
+`n_llm_calls` of 26 — and it was still climbing (r=+0.44 with launch order
+over two hours). Full detail in register §32; two things belong in the results
+record.
+
+### 1. No archived result is affected
+
+Sweeps ran with arms blocked in time (fixed 2026-09-02), so drift during a
+sweep could have landed on one arm. Audited rather than assumed
+(`analyze_drift.py`, probe = tokens per LLM call, launch order, residualised
+on arm x budget):
+
+| file | n | hours | blocks | residual trend | worst block | verdict |
+|---|---|---|---|---|---|---|
+| m4-pilot | 262 | 35.6 | 9 | −0.006 | 0.378 | CLEAN |
+| m6-ladder | 450 | 16.9 | 15 | −0.001 | 0.330 | CLEAN |
+| m6-wt-ladder | 750 | 21.4 | 15 | +0.002 | 0.384 | CLEAN |
+| m6-wt-ladder-final | 750 | 98.3 | 15 | +0.001 | 0.384 | CLEAN |
+| m6-wt-team-rerun | 150 | 5.0 | 3 | −0.007 | 0.246 | CLEAN |
+| m6-lt-loop-curve | 210 | 13.1 | 7 | +0.008 | 0.353 | CLEAN |
+| m7-p2-lt | 270 | 5.3 | 9 | +0.016 | 0.525 | CLEAN |
+| **m7-p2-wt** | 600 | 7.9 | 12 | −0.007 | **0.730** | **FLAG 1/12** |
+| m7-p2-ref | 90 | 3.7 | 3 | −0.032 | 0.430 | CLEAN |
+| m7-varsplit | 90 | 3.8 | 3 | +0.004 | 0.105 | CLEAN |
+| m7-wt-varsplit | 298 | 4.3 | 6 | −0.007 | 0.287 | CLEAN |
+
+Residual trend is within **±0.032 of zero in every file**. Scope:
+`window_overlap` is 0.00-0.15 throughout, so this establishes that no drift
+was detectable *within* blocks, not that between-block drift is impossible —
+arm and window are confounded by construction under the old ordering, and that
+gap cannot be closed retroactively.
+
+### 2. A 1.7x swing in reasoning moved F1 by 0.004
+
+The single flagged block is the useful one. `shared_blackboard` WT k=14:
+reasoning per call **halved** across the block (5,520 -> 3,210, r=−0.730 over
+50 cells in 74 minutes), and **F1 moved −0.004 against an MDE of ~0.023**. The
+same arm is flat at k=7 (1.00x) and k=21 (0.98x).
+
+So the provider genuinely moves on hour timescales and accuracy barely
+notices. **This is a robustness result the paper should state**, not merely a
+caveat: it bounds how much any given reasoning shift can plausibly matter, and
+it is measured rather than argued.
+
+**For the reproducibility section: a pinned model id does not pin the
+computation.** Second recorded instance — 2026-08-13 was 4.35x tokens x 1.55x
+throughput under unchanged weights. Recording `n_llm_calls` and `tokens_out`
+per cell is what makes the question answerable at all.
+
+---
+
 ## WT `team_varsplit` (2026-09-02): the non-replication is PREDICTED, not a failure
 
 `runs/m7-wt-varsplit.parquet` — **300 cells, 298 ok, 2 errors**, WT

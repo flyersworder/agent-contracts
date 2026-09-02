@@ -671,6 +671,29 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   `Reka` is fp4 for deepseek but fp8 for GLM, so `PROVIDER_PRECISION`'s
   provider-only keying is unsound in principle — fix before adding a third
   model.
+- **A PINNED MODEL ID DOES NOT PIN THE COMPUTATION** (register §32,
+  2026-09-02; second instance after 2026-08-13). DeepSeek changed reasoning
+  per call **2.4x** mid-sweep under an unchanged model string, unchanged code
+  and `n_llm_calls` fixed at 26 — and it was still climbing (r=+0.44 with
+  launch order). Cells went 415s/67k tokens to ~1,500s/165k **overnight**.
+  Three standing rules: **never schedule arms in blocks of time**
+  (`iter_sweep_cells` now interleaves, `2c7c598` — the old `for spec: for
+  seed:` put each arm in its own window, so drift landed on one arm and no
+  post-hoc analysis recovers it); **re-measure cell cost before estimating any
+  sweep's wall time**, never reuse yesterday's; and **never pool across a
+  regime change** without checking arm means agree.
+- **The archive was audited, not assumed** (`analyze_drift.py`). 10 of 11
+  files CLEAN, residual trend within ±0.032 of zero, M4 pilot through M7 —
+  **no result retracted**. One block flags: `shared_blackboard` WT k=14, where
+  reasoning per call HALVED (5,520→3,210) while **F1 moved −0.004 vs MDE
+  0.023** — report that as a robustness bound. Scope: `window_overlap` is
+  0.00-0.15 everywhere, so the audit shows no drift *within* blocks, not that
+  between-block drift is impossible. **Probe = `tokens_out / n_llm_calls`, in
+  `started_at` order.** Two rejected probes, both of which produced
+  confident-looking tables: raw `tokens_out` is arm-dependent (r=+0.71 vs
+  +0.001 residualised), and throughput tracks OUR OWN concurrency (flagged 10
+  of 11 files). Threshold must scale as 3/√(n−3) — a flat cutoff over-flags
+  because a sweep reports the max |r| over 9-15 blocks.
 - **OpenRouter rate limits**: `deepseek-v4-flash` is hosted by 8 providers; the orchestrator pins providers in order `(Novita, AtlasCloud, Parasail, SiliconFlow)` because per-provider throughput drifts day-to-day (May 9: Parasail was fastest; May 15: Novita was 7× faster). See `evaluation/chamber_pipeline/orchestrator.py:_CountingLLM.DEFAULT_PROVIDER_ORDER` and re-probe before any multi-hour sweep.
 - **Socket timeout**: `socket.setdefaulttimeout(30)` is set at `run_experiment.py` module load — without this, `litellm.completion(timeout=N)` doesn't propagate to the SSL socket and stuck calls hang the process forever.
 - **Max tokens**: `_llm_select_loop` caps output at 200 tokens (selection step) and `llm_only_agent` at **32768** (adjacency emission, was 4096 pre-M4b-fix). DeepSeek v4 Flash is a *reasoning model* — `reasoning_tokens` typically 95% of `completion_tokens`. At 38-node adjacency prompts the 4096 cap was entirely consumed by hidden reasoning before any `content` was emitted (verified via `usage.completion_tokens_details.reasoning_tokens` on a 2-node diagnostic, 2026-05-14).
