@@ -2607,3 +2607,43 @@ class TestTemperatureIsRecordedAndRouted:
 
         assert "temperature" in RunRecord.__dataclass_fields__
         assert RunRecord.__dataclass_fields__["temperature"].default is None
+
+
+def test_arms_are_adjacent_in_time_not_blocked_by_arm() -> None:
+    """Cells must interleave arms, so a time-varying provider hits both equally.
+
+    The iteration used to run every seed of arm A before starting arm B. That
+    is a confound whenever provider behaviour drifts during a sweep, which is
+    a measured phenomenon in this pillar, not a hypothetical: on 2026-09-02 a
+    WT k=21 run saw output tokens rise from 134k to 190k over two hours
+    (r=+0.44 with completion order) while `n_llm_calls` stayed pinned at 26.
+    Under arm-blocked ordering the whole of `team` would have run in the cheap
+    window and the whole of `team_varsplit` in the expensive one, so the arm
+    contrast would carry the drift.
+
+    Interleaving is exact blocking on time, which beats randomisation here:
+    consecutive cells share provider conditions as closely as the schedule
+    allows.
+    """
+    from evaluation.chamber_pipeline.orchestrator import SweepSpec, iter_sweep_cells
+
+    sweep = SweepSpec(
+        chambers=("wt",),
+        budget_fractions=(0.75,),
+        agent_names=("team", "team_varsplit"),
+        seeds=tuple(range(5)),
+    )
+    order = [spec.name for spec, *_ in iter_sweep_cells(sweep)]
+    assert len(order) == 10
+
+    # The defect's signature: one arm entirely before the other.
+    first_half, second_half = set(order[:5]), set(order[5:])
+    assert not (len(first_half) == 1 and len(second_half) == 1), (
+        f"arms are blocked, not interleaved: {order}"
+    )
+    # Every adjacent pair spans both arms, so no arm can occupy a time window
+    # the other does not.
+    assert all(order[i] != order[i + 1] for i in range(0, len(order) - 1, 2)), order
+    # Seeds still advance in order within each arm, so resume keys are stable.
+    seeds = [seed for spec, *_rest, seed in iter_sweep_cells(sweep) if spec.name == "team"]
+    assert seeds == list(range(5))

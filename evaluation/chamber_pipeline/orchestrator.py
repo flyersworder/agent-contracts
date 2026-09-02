@@ -1782,13 +1782,28 @@ def iter_sweep_cells(
     Pure: doesn't load chambers or invoke agents. Useful for sizing
     a sweep ("how many cells will I run?") and for the CLI's dry-run
     mode.
+
+    **Seed is the outer loop and arm the inner one, so arms interleave.**
+    The reverse (every seed of arm A, then arm B) blocks each arm into its own
+    time window, which confounds the arm contrast with anything that drifts
+    during the sweep. That is not hypothetical here: on 2026-09-02 a WT k=21
+    run saw output tokens climb 134k -> 190k over two hours (r=+0.44 with
+    completion order) under an unchanged model id and a pinned `n_llm_calls`
+    of 26. Blocked, `team` would have run entirely in the cheap window and
+    `team_varsplit` entirely in the expensive one.
+
+    Interleaving is exact blocking on time rather than randomisation over it:
+    consecutive cells share provider conditions as closely as the schedule
+    allows, and under `--max-workers` the in-flight set spans every arm.
+    Ordering never changes a cell's result -- cells are independent and
+    resume is keyed, not positional -- so this is free.
     """
     specs = sweep.selected_specs()
     for chamber in sweep.chambers:
         for fraction in sweep.budget_fractions:
             budget_k = _budget_k_for(chamber, fraction)
-            for spec in specs:
-                for seed in sweep.seeds:
+            for seed in sweep.seeds:
+                for spec in specs:
                     yield spec, chamber, budget_k, fraction, seed
 
 
