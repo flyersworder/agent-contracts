@@ -1751,6 +1751,69 @@ per-model order, no strays. Single BLAS, single platform, single model tag.
 
 ---
 
+## SINGLE-BACKEND RE-SCORE (2026-09-05): every headline verdict holds
+
+`runs/rescored-single-backend.parquet` — the twelve M7 source files re-scored
+together on one machine at 9 PC seeds: **2,604 cells, 19,854 design x seed
+scorings, `rescore_blas_backend` uniformly `accelerate`**, folding in sources
+that were originally `accelerate` AND `scipy-openblas`. Cost $0.
+
+Register §31 found five of six coverage-oracle contrasts crossing BLAS
+backends, and two verdicts moved when they were re-scored on one machine. The
+open question since was whether the rest of the corpus hid more of the same.
+**It does not.**
+
+- **The coverage-oracle table (six contrasts): all six verdicts reproduce.**
+  LT k=6 the loop wins (+0.036, MDE 0.030); WT k=21 the rule wins (−0.026,
+  MDE 0.024, previously quoted −0.030); the other four tie.
+- **Phase 2 (eighteen contrasts): seventeen reproduce exactly**, including
+  every `one_shot` tie that carries the "record is not load-bearing" claim.
+- **`team_varsplit` reproduces**: LT k=30 +0.041 resolved (was +0.043); WT
+  k=14 +0.000; WT k=21 +0.014 below MDE — consistent with the confirmation's
+  2.53σ not clearing the pillar's bar.
+
+### The one contrast that is not stably resolvable: `critique` at LT k=30
+
+It lands on either side of its own MDE depending on an analysis choice that
+has nothing to do with the backend:
+
+| basis for `llm_pc` | n | delta | MDE | verdict |
+|---|---|---|---|---|
+| reference file only (`m7-p2-ref`) | 30 | −0.013 | 0.020 | below MDE |
+| pooled over three files | 68 | −0.015 | 0.014 | RESOLVED |
+
+Pooling is defensible — the three sources' means are 0.4211 / 0.4230 / 0.4259,
+agreeing far inside the MDE, which is the check CLAUDE.md requires before
+pooling across a possible regime change. It buys real power. But a verdict that
+turns on it is not a finding.
+
+**This is the SECOND flip for this exact cell** — it was reported resolved-worse
+on 31 Aug, retracted on 1 Sep after design-level re-scoring, and now sits on
+the boundary again. Report `critique` as **tying the loop with the LT k=30
+contrast on its MDE boundary**, permanently, and stop re-adjudicating it.
+
+### An MDE convention that nearly flipped a verdict on its own
+
+The house formula `2.8 * sd * sqrt(2/n)` assumes equal arms. Clustering by
+distinct design breaks that badly here — `wt_coverage_max` yields **27 distinct
+designs from 50 cells** against `llm_pc`'s 84 — and substituting `min(n_a, n_b)`
+inflates the MDE by `sqrt(2/27) / sqrt(1/27 + 1/84)` = **1.23x**, which alone
+turned WT k=21 from resolved to below MDE. The unequal-n form
+`2.8 * pooled_sd * sqrt(1/n_a + 1/n_b)` is the correct one and is what the
+numbers above use. **Any contrast between arms with different distinct-design
+counts must use it**, and the coverage arms always will, because a
+near-deterministic rule re-picks designs.
+
+### Core-20 is now a standard column, and it is LT-only
+
+`f1_core_rescored` is populated on **800/800 LT cells and 0/1,804 WT** —
+`LT_CASE_STUDY_NODES` names the chambers' LT case study, and no WT equivalent
+has been defined. So "no LLM arm beats round-robin coverage on the non-trivial
+subgraph" is an **LT-only** statement; on WT it rests on full-node scoring.
+State the scope. Like-for-like on LT, loop minus rule: **+0.014 / +0.008 /
+−0.000** at k=6/30/45, none resolved — the earlier finding that the loop's
+tight-budget win does not survive core-20 scoring, reproduced on one backend.
+
 ## Paper readiness (assessed 2026-08-28; amended 2026-08-31, 2026-09-02)
 
 > **2026-09-02 amendment — the two lead sentences below both need restating,

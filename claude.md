@@ -729,6 +729,26 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   matches each input, and that no marker is a substring of another. Third
   version of this classifier; the first keyed on `max_tokens` (ambiguous once
   two caps shared a value), the second on menu size (zero margin).
+- **THE SINGLE-BACKEND RE-SCORE IS DONE AND NOTHING MOVED** (2026-09-05,
+  `runs/rescored-single-backend.parquet`, 2,604 cells / 19,854 design×seed
+  scorings / $0). All six coverage-oracle verdicts and 17 of 18 Phase 2
+  verdicts reproduce on one `accelerate` stamp, folding in sources that were
+  originally OpenBLAS. Register §31's cross-backend contamination was
+  confined to the coverage table; the rest of the corpus was clean.
+- **`critique` at LT k=30 is on its MDE boundary and should stop being
+  re-adjudicated.** −0.013/MDE 0.020 (reference file, n=30) vs −0.015/MDE
+  0.014 (pooled over three files, n=68). Pooling is legitimate — the three
+  means agree at 0.4211/0.4230/0.4259 — but a verdict that turns on it is not
+  a finding. Second flip for this same cell.
+- **The MDE formula must use the UNEQUAL-n form once you cluster by design.**
+  `2.8·sd·√(2/n)` assumes equal arms; clustering breaks that
+  (`wt_coverage_max` gives 27 distinct designs from 50 cells vs `llm_pc`'s 84).
+  Substituting `min(n_a,n_b)` inflates the MDE **1.23×** and flips WT k=21 on
+  its own. Use `2.8·pooled_sd·√(1/n_a + 1/n_b)`. Coverage arms will always hit
+  this, because a near-deterministic rule re-picks designs.
+- **Core-20 is LT-only.** `f1_core_rescored` is 800/800 on LT and 0/1804 on WT
+  — `LT_CASE_STUDY_NODES` has no WT counterpart. "No LLM arm beats round-robin
+  coverage on the non-trivial subgraph" is an LT-only claim.
 - **OpenRouter rate limits**: `deepseek-v4-flash` is hosted by 8 providers; the orchestrator pins providers in order `(Novita, AtlasCloud, Parasail, SiliconFlow)` because per-provider throughput drifts day-to-day (May 9: Parasail was fastest; May 15: Novita was 7× faster). See `evaluation/chamber_pipeline/orchestrator.py:_CountingLLM.DEFAULT_PROVIDER_ORDER` and re-probe before any multi-hour sweep.
 - **Socket timeout**: `socket.setdefaulttimeout(30)` is set at `run_experiment.py` module load — without this, `litellm.completion(timeout=N)` doesn't propagate to the SSL socket and stuck calls hang the process forever.
 - **Max tokens**: `_llm_select_loop` caps output at 200 tokens (selection step) and `llm_only_agent` at **32768** (adjacency emission, was 4096 pre-M4b-fix). DeepSeek v4 Flash is a *reasoning model* — `reasoning_tokens` typically 95% of `completion_tokens`. At 38-node adjacency prompts the 4096 cap was entirely consumed by hidden reasoning before any `content` was emitted (verified via `usage.completion_tokens_details.reasoning_tokens` on a 2-node diagnostic, 2026-05-14).
