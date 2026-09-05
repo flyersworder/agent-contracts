@@ -855,8 +855,18 @@ def call_kind(messages: list[dict[str, str]]) -> str:
     defect: it is spend that exists in the cell total but in none of the
     calibration inputs, so every constant derived from those inputs reads
     lower than the truth.
+
+    **Never raises.** It runs on the production hot path inside
+    `_CountingLLM._attribute`, which fires AFTER the response has been
+    accumulated -- so an exception here would discard a completion the sweep
+    has already been billed for and fail a cell that otherwise succeeded.
+    Malformed or missing content is routed to "unknown", which is the bucket
+    that already exists for prompts no marker matches, so the anomaly stays
+    visible in the per-kind attribution instead of surfacing as a traceback.
     """
-    body = " ".join(m["content"] for m in messages)
+    body = " ".join(
+        m["content"] for m in messages if isinstance(m, dict) and isinstance(m.get("content"), str)
+    )
     for kind, marker in CALL_KIND_MARKERS:
         if marker in body:
             return kind

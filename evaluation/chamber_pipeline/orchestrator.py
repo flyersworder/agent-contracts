@@ -638,6 +638,8 @@ class _CountingLLM:
         # provisioned at only its successful attempt's cost would underrun.
         self.tokens_by_kind: dict[str, int] = {}
         self.calls_by_kind: dict[str, int] = {}
+        # Calls that returned no parseable usage. See `_attribute`.
+        self.n_unmetered_calls: int = 0
         # Provenance: what actually served this cell. Recorded because a
         # pinned model snapshot does NOT pin behaviour -- DeepSeek raised the
         # default reasoning effort under unchanged 0423 weights on 2026-08-13,
@@ -957,6 +959,15 @@ class _CountingLLM:
         spent = (self.total_input_tokens + self.total_output_tokens) - before
         self.tokens_by_kind[kind] = self.tokens_by_kind.get(kind, 0) + spent
         self.calls_by_kind[kind] = self.calls_by_kind.get(kind, 0) + 1
+        # A response whose usage could not be parsed adds 0 tokens but still
+        # increments the call count, so a per-call median computed from these
+        # buckets reads LOW -- and a low calibration constant under-provisions,
+        # which surfaces as conservation failures that read as mechanism
+        # failures rather than forecast misses. `_accumulate_usage` is
+        # best-effort by design and will not raise, so the only way a
+        # contaminated calibration becomes visible is to count these.
+        if spent == 0:
+            self.n_unmetered_calls += 1
 
     def _note_request(self, kwargs: dict[str, Any]) -> None:
         """Record the model and reasoning effort this request asked for."""
@@ -1216,6 +1227,15 @@ _PROVISIONAL_CALIBRATION: frozenset[tuple[str, int]] = frozenset()
 # not recoverable from a finished cell at all, since a scout's node total is
 # selection PLUS negotiation.
 #
+# SCOPE: all 27 calibration cells were served by a SINGLE endpoint (Baidu,
+# the current first choice in `_FLASH_PROVIDER_ORDER`), while production
+# rotates over four -- the WT k=21 confirmation ran 422 Baidu / 158 CoreWeave
+# / 6 DeepInfra / 2 Parasail. Negotiate cost is driven by reasoning length,
+# and endpoints differ there (register §25), so this figure is representative
+# of current routing rather than of the pinned set as a whole. It is a scope
+# limit and not a defect: the sweep it provisions runs on the same routing.
+# Re-measure if the provider order changes.
+#
 # UNMEASURED CHAMBERS ARE NOT EXTRAPOLATED. `_ladder_calibration` raises, and
 # `is_provisional_calibration` voids the arm until a measurement lands. A
 # wrong calibration figure does not fail loudly; it yields plausible
@@ -1225,15 +1245,25 @@ _C95_NEGOTIATE_BY_CHAMBER: dict[str, int] = {
     "wt": 6102,
 }
 
-# Chambers where the negotiate cost has been MEASURED. Derived from the dict
-# below rather than maintained beside it: the previous design held the
-# constant in one place and this set in another, and the neighbouring
-# `_PROVISIONAL_CALIBRATION` block carries a comment warning that an entry
-# left behind after its measurement lands "silently voids conservation for the
-# whole sweep". Deriving the set removes that possibility instead of
-# documenting it. Guarded by
-# `test_calibrated_set_is_derived_from_the_measurements`.
-_NEGOTIATE_CALIBRATED_CHAMBERS: frozenset[str] = frozenset(_C95_NEGOTIATE_BY_CHAMBER)
+
+def negotiate_calibrated_chambers() -> frozenset[str]:
+    """Chambers whose negotiate cost has been MEASURED.
+
+    A FUNCTION, not a module-level frozenset, and the difference is the whole
+    point. The previous design held the constant in one place and this set in
+    another, and the neighbouring `_PROVISIONAL_CALIBRATION` block carries a
+    comment warning that an entry left behind after its measurement lands
+    "silently voids conservation for the whole sweep".
+
+    Replacing that with `frozenset(_C95_NEGOTIATE_BY_CHAMBER)` at import time
+    looked like a derivation and was a SNAPSHOT: `_ladder_calibration` read
+    the live dict while `is_provisional_calibration` read the frozen copy, so
+    any runtime change desynchronised them -- the first raising "not
+    calibrated" for a chamber the second reported calibrated. Recomputing on
+    each call makes the dict the only source of truth in fact and not just in
+    the comment.
+    """
+    return frozenset(_C95_NEGOTIATE_BY_CHAMBER)
 
 
 def is_provisional_calibration(chamber: str, budget_k: int, *, negotiates: bool = False) -> bool:
@@ -1245,7 +1275,7 @@ def is_provisional_calibration(chamber: str, budget_k: int, *, negotiates: bool 
     """
     if (chamber, budget_k) in _PROVISIONAL_CALIBRATION:
         return True
-    return negotiates and chamber not in _NEGOTIATE_CALIBRATED_CHAMBERS
+    return negotiates and chamber not in negotiate_calibrated_chambers()
 
 
 # 75th percentile of measured aggregator spend, NOT the median -- and the
@@ -1793,6 +1823,22 @@ def run_cell(
                 # for every other arm, which is why they live in `extra`
                 # rather than becoming columns that are null 8 times in 9.
                 **{k: v for k, v in coord.items() if k.startswith("agg_")},
+                # Full per-call-kind token attribution, so the promise made by
+                # `tokens_by_kind` -- that a non-empty "unknown" bucket is a
+                # defect -- is checkable AFTER a sweep. It was not: the
+                # buckets lived only on the meter. Rides in `extra` rather
+                # than becoming columns, since the kind set is open and null
+                # for every non-LLM arm. `n_unmetered_calls` travels with it
+                # because a contaminated calibration is invisible without it.
+                **(
+                    {
+                        "tokens_by_kind": dict(counting_llm.tokens_by_kind),
+                        "calls_by_kind": dict(counting_llm.calls_by_kind),
+                        "n_unmetered_calls": counting_llm.n_unmetered_calls,
+                    }
+                    if counting_llm is not None
+                    else {}
+                ),
             },
         )
     except NotImplementedError as exc:

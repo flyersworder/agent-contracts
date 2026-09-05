@@ -15,12 +15,12 @@ import pytest
 from evaluation.chamber_pipeline import orchestrator
 from evaluation.chamber_pipeline.orchestrator import (
     _C95_NEGOTIATE_BY_CHAMBER,
-    _NEGOTIATE_CALIBRATED_CHAMBERS,
     _PROVISION_MULTIPLE,
     SweepConfigurationError,
     _ladder_calibration,
     get_spec,
     is_provisional_calibration,
+    negotiate_calibrated_chambers,
 )
 
 
@@ -30,10 +30,14 @@ def test_calibrated_set_is_derived_from_the_measurements():
     The previous design held the constant in one place and the
     "which chambers are calibrated" set in another, with a comment warning
     that an entry left behind after measurement "silently voids conservation
-    for the whole sweep". Deriving the set removes the possibility rather
-    than documenting it.
+    for the whole sweep".
+
+    NOT sufficient on its own, and it did not catch the review finding: a
+    frozenset bound once at import satisfies this while still desynchronising
+    the moment the dict changes.
+    `test_calibrated_set_tracks_the_dict_at_runtime` holds the real property.
     """
-    assert frozenset(_C95_NEGOTIATE_BY_CHAMBER) == _NEGOTIATE_CALIBRATED_CHAMBERS
+    assert negotiate_calibrated_chambers() == frozenset(_C95_NEGOTIATE_BY_CHAMBER)
 
 
 def test_wt_negotiation_is_measured_and_differs_from_lt():
