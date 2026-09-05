@@ -1862,11 +1862,33 @@ nothing measured what governance costs.
    figure. So WT's H-C is currently missing its most-coordinated rung, which
    is the rung a reader will most want to see. **Unblocked 2026-09-05**
    (register §33): the constant is measured (6,102 per call, 27 cells,
-   $0.13, drift audit clean) and WT `team` cells now certify True/False. The
-   300 archived cells cannot be retro-certified — the grant they ran under
-   was the LT-provisioned one — so recovering the number means **re-running
-   WT `team`**, roughly 300 cells at the arm's measured $0.011-0.027 per
-   cell. Cheap, and it should be done before H-C is reported for WT.
+   $0.13, drift audit clean) and WT `team` cells now certify True/False.
+
+   **RECOVERED FOR $0, no re-run (2026-09-05, `recertify.py`).** The claim in
+   the previous sentence of this entry — that the archived cells "cannot be
+   retro-certified" because they ran under the wrong grant — was wrong, and
+   checking it took three measurements. (a) `verify()`'s verdict is a pure
+   function of state the cells already record, so the graph can be rebuilt,
+   charged with the recorded per-node spend, and **the real `verify()`
+   called** — not reimplemented, which matters because it carries a per-tool
+   clause a scalar comparison drops. (b) The replay reproduces the recorded
+   verdict on **300 of 300** cells of the two fan-in arms, where `verify()`
+   did run. (c) The old grant never shaped the spend: **98 of 300 cells
+   overspend by up to 13,833 tokens and complete normally**, and no node lands
+   exactly on its ceiling (0 of 900) — a monitor that records rather than
+   truncates.
+
+   **WT `team` conservation: 202/300 = 67.3%** (90/100 at k=7, 56/100 at
+   k=14, 56/100 at k=21). The corrected constant changes **no** verdict —
+   identical under 4138 and 6102, because the correction only enlarges a grant
+   and no cell sits in the band it moves. So WT H-C over all three graph arms
+   is **395/600 = 65.8%**, against the 64.3% previously reported over two.
+   Including the missing arm barely moves it.
+
+   Scope: this worked because the correction enlarged the grant. A correction
+   that SHRANK one, or an archive with cells sitting on their ceilings, would
+   need the re-run — `recertify_frame` raises rather than return a number in
+   that case.
 3. **Chain vs loop cannot resolve at n=30.** At the observed spread,
    separating a ~0.03 gap needs n≈55. Reportable as an equivalence bound —
    the analyzer prints the MDE beside every delta so it cannot be read as a

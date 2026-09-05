@@ -710,9 +710,18 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   length. Not budget-keyed, and that is measured: medians 6,679/4,159/6,692,
   flat, 1.61x, inside the 4x multiple. **Mid-run at n=1 those read
   6,679/4,159/2,580 and looked cleanly monotone** — §27's failure mode again:
-  never read a shape off a partial sweep. Re-run WT `team` (~300 cells,
-  $0.011-0.027 each) before reporting WT H-C; archived cells cannot be
-  retro-certified.
+  never read a shape off a partial sweep. **A VOIDED VERDICT MAY STILL BE
+  RECOVERABLE — CHECK BEFORE BUYING A RE-RUN.** "They ran under the wrong
+  grant, so re-run them" was wrong: `verify()` is a pure function of recorded
+  per-node spend, so `recertify.py` rebuilds the graph and calls the REAL
+  `verify()` (never a reimplementation — it carries a per-tool clause a scalar
+  comparison drops), validated **300/300** against the arms whose verdict was
+  recorded. **WT `team` = 202/300 = 67.3%, for $0**; WT H-C over all three
+  graph arms is 395/600 = 65.8% vs the 64.3% reported over two. The
+  precondition is that the old grant did not SHAPE the spend, and the
+  conservation failures prove it: 98 cells overspend by up to 13,833 tokens
+  and complete, 0 of 900 nodes sit on a ceiling. Valid here only because the
+  correction ENLARGED the grant.
 - **Classifier guards must test EXCLUSIVITY, not correctness.** A first-match
   classifier passes a "does each input classify right?" test whenever rule
   order happens to favour the right answer — which is how a bare `"designer"`
