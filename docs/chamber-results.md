@@ -1881,6 +1881,27 @@ nothing measured what governance costs.
    different dataset — a lagged-estimator variant is the experiment that
    would answer it, at engineering cost and no API cost.
 
+   **The scoping sentence now has a named foil** (added 2026-09-05, from
+   `docs/related-work/2026-08-27-google-antigravity-teamwork.md`). Google's
+   Teamwork post reports seven solved open problems, a cycle-accurate CPU
+   simulator and two merged library optimisations — and **every one of them
+   sits on a cheap automatic per-candidate verifier**: Lean checks the proof,
+   an air-gapped Spike simulator checks the cycle counts in "continuous
+   lockstep co-simulation", a benchmark checks the hash table. Their Long
+   Proof pattern is built on exactly that — "Many candidate strategies are
+   generated in parallel, each paired with a falsifier whose sole job is to
+   break it" — and they give the reason: "the flaw stays invisible until deep
+   into the attempt."
+
+   So the boundary is statable in one sentence instead of conceded:
+   **partitioning pays when the action space has headroom — which we measure
+   and predict — or when a cheap verifier makes parallel generate-and-falsify
+   affordable, which is their regime and not ours.** That converts the
+   objection from a hole into a scope condition the paper states in its own
+   voice, and it costs nothing to add. It does not remove the threat; it
+   stops the threat from being the only thing a reader can say about the
+   result.
+
 ### Method as a contribution
 
 Twelve harness defects are recorded in the register, several worth reporting

@@ -1204,9 +1204,24 @@ that document's final section. Harness defects stay in
 - **Related work notes**: `docs/related-work/` — verified reading notes on external
   papers/posts. `2026-08-13-anthropic-multiagent-patterns.md` supplies M7 §1's
   motivating citation (a 12.7x multiagent 'win' on 4.2x the tokens that the authors
-  themselves reduce to 'comparable' once scope is matched). **Each file quarantines
+  themselves reduce to 'comparable' once scope is matched).
+  `2026-08-27-google-antigravity-teamwork.md` supplies the **sharper second
+  instance**: Google's Teamwork post attributes +3.3 points on TCSBench to
+  orchestration *across a change of model* (3.6→3.7 Flash), and its agent count
+  is decided at runtime ("Agent count and team structure can shift mid-run"), so
+  **no per-condition budget can be quoted even in principle** — Anthropic's were
+  unmatched but stated. It also supplies the **verifier foil** that scopes our
+  top threat: every Antigravity headline sits on a cheap automatic verifier
+  (Lean, lockstep Spike co-simulation, a benchmark) and ours has none, so
+  "partitioning pays with headroom OR with a cheap verifier" is a stated scope
+  condition rather than a concession. **Each file quarantines
   figures that could not be confirmed against source text** — a summarising fetch
-  invents plausible numbers for quantities that exist only as chart axes.
+  invents plausible numbers for quantities that exist only as chart axes. On the
+  Antigravity page the summariser's numbers were all correct and it dropped a
+  *scope qualifier* instead (attributing the seven problems to Flash when they
+  are 3.1 Pro results of which three reproduce) — the failure is not
+  deterministic, so being right once is not grounds for trusting it. That page
+  is also gzip served under an `.html` name: `gunzip -c` before parsing.
 - **Harness validity register**: `docs/chamber-harness-validity-register.md`
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`

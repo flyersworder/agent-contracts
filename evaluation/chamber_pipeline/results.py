@@ -113,6 +113,20 @@ class RunRecord:
         scout_b_tokens: Same for scout_b.
         aggregator_tokens: Tokens the aggregator spent on its single
             indivisible reconciliation call.
+        negotiate_tokens: Tokens spent on negotiation-round prompts, pooled
+            over both scouts and both rounds, from
+            `_CountingLLM.tokens_by_kind`. The numerator of
+            `_C95_NEGOTIATE`. Recorded from 2026-09-05: a node monitor gives
+            a scout's TOTAL, but that total is selection plus negotiation,
+            and the constant provisions only the second. Because the two were
+            inseparable after the fact, WT's negotiate cost was never
+            isolated, so every WT `team` cell ran on LT's figure with its
+            conservation voided -- 300 cells at
+            `conservation_certified = None`. Pooled, not per-scout: the
+            constant is applied identically to both, and the meter does not
+            see node identity at call time.
+        n_negotiate_calls: Its denominator -- negotiation ATTEMPTS, counting
+            provider rotations, since a rotated call bills real tokens.
         max_tree_fragment: The largest single parent grant into the
             aggregator -- the biggest indivisible call any tree encoding of
             the same grants could fund.
@@ -235,6 +249,8 @@ class RunRecord:
     aggregator_tokens: int | None = None
     scout_a_tokens: int | None = None
     scout_b_tokens: int | None = None
+    negotiate_tokens: int | None = None
+    n_negotiate_calls: int | None = None
     max_tree_fragment: int | None = None
     tree_would_refuse: bool | None = None
     model_id: str | None = None

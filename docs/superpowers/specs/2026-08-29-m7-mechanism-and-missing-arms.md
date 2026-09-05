@@ -56,6 +56,87 @@ spend, because nothing in the setup holds spend constant. That is the gap, and
 it is an enforcement problem before it is an experimental-design problem (see
 "Contracts are the instrument" below).
 
+### A second, sharper instance: Google Antigravity, 2026-08-27
+
+Ten weeks later, the same confound in a stronger form
+(`docs/related-work/2026-08-27-google-antigravity-teamwork.md`, quotes verified
+against the raw page). Google's Antigravity team announced **Teamwork**, a
+multi-agent orchestration framework, with one comparative number in the whole
+post:
+
+> "Using Gemini 3.7 Flash together with 3.1 Pro, the Long Proof pattern
+> achieves 71% on TCSBench — up from the 67.7% reported in the TCSBench paper
+> with Gemini 3.6 Flash and 3.1 Pro"
+
+**+3.3 points, attributed to orchestration, across a change of model.** This is
+the confound our own ladder had and removed: M6 spec §10.3 dropped `llm_only`
+in favour of `llm_pc` precisely because comparing arms that differ in inference
+procedure measures inference, not topology. We paid a headline for that
+correction; here it is uncorrected, in public, from a major lab.
+
+The compute disclosure is where it goes further than Anthropic's:
+
+> "Critically, patterns are adaptive at runtime. The framework dynamically
+> decides how many agents to spawn based on task requirements, not a preset
+> number. Agent count and team structure can shift mid-run as the problem
+> reveals itself"
+
+> "Some of these results used higher parallelism than the default."
+
+Anthropic's budgets were **unmatched but stated** — 27M against 6.5M tokens, so
+a reader can divide. Here the agent count is *endogenous to the topology and
+varies within a run*, so **no per-condition budget can be quoted even in
+principle**, and the reported results are explicitly not the shipped
+configuration. Topology and spend are not merely unseparated; they are
+inseparable by any post-hoc analysis.
+
+That is the argument for why an enforcement mechanism belongs in this
+evaluation, in one sentence: **if the topology chooses its own budget, the
+comparison does not exist until something holds the budget still.**
+
+Two further uses, developed in the notes file:
+
+- **They state our thesis as a design principle and never test it.** "Teamwork
+  Long Proof is designed to get the most out of Flash models by coordinating
+  many agents rather than relying on a single, larger model." The missing arm
+  is the obvious one — 3.7 Flash in one long loop at equal compute. Quote this
+  as the hypothesis; our two-chamber, two-model grid is the answer.
+- **They condition topology on decomposability and offer no predictor.**
+  "Iterative Coding for non-decomposable problems ...; Distributed Coding for
+  decomposable engineering tasks." That is our headroom result in qualitative
+  form. The field has the taxonomy; what it lacks — and what we have — is a
+  quantity computable *before* the run that says which case you are in, and by
+  how much (§8, `analyze_headroom.py`; predicted +0.0149 / measured +0.0139 at
+  WT k=21).
+
+**Cite both instances politely.** Neither is a paper; both are careful about
+what they claim. The argument is about what announcements of this shape can
+establish, and it lands harder without accusation.
+
+### Scope condition: our task has no verifier, and theirs all do
+
+Recorded here rather than only in the threat list, because it is the honest
+boundary on everything above.
+
+Every Antigravity headline sits on a cheap automatic per-candidate verifier:
+Lean checks the 40-page proof, an air-gapped Spike simulator checks the cycle
+counts in "continuous lockstep co-simulation", a benchmark checks the hash
+table. Their Long Proof pattern is built on that — "Many candidate strategies
+are generated in parallel, **each paired with a falsifier whose sole job is to
+break it**" — and they say why: "the flaw stays invisible until deep into the
+attempt."
+
+Our chamber has none. A selection's quality has no hidden depth to be
+discovered late by a falsifier, and the coverage oracle says the task is
+largely coverage-shaped.
+
+This should be stated as a **scope condition with a named foil**, not conceded
+under pressure: partitioning pays when the action space has headroom — which we
+measure and predict — **or** when a cheap verifier makes parallel
+generate-and-falsify affordable, which is their regime and not ours. Framed
+that way the reviewer objection "your task is coverage-shaped" has already been
+answered in the paper's own voice.
+
 ### What we can claim, and what backs it
 
 Four properties, each of which a reviewer can check:
@@ -93,9 +174,24 @@ just do not let its nodes go blind. It is also falsifiable — it predicts a
 shared-blackboard topology collapses onto the loop, and that a blind fan-out
 loses in proportion to how much it partitions.
 
-**Status: hypothesis, not finding.** The axis was recognised *after* seeing the
-grid and both its endpoints are unrun. This is exactly why Phase 2 is
-load-bearing rather than optional.
+**Status (2026-08-31): TESTED AND NOT SUPPORTED. Do not draft from this
+axis.** Phase 2 ran the endpoints and the axis did not survive them: `one_shot`
+— a single call choosing all *k* experiments, with no running record at all —
+**ties** the loop at LT k=30/45 and at all three WT budgets, losing only at
+LT k=6 (-0.059). If record survival were what the ladder measures, the arm with
+no record could not tie the arm with a complete one. The M6 *ordering*
+replicates; the explanation above does not account for it.
+
+What the axis does buy, on both chambers and at the middle budget only:
+**sharing** a record beats **splitting** one. `shared_blackboard` against
+`fan_in_spec` — identical role prompts — gives +0.053 (LT k=30) and +0.046
+(WT k=14), both resolved, with nothing at the small or large budget. Sharing a
+record with yourself (the loop) is worth nothing.
+
+The paragraph above is kept rather than deleted because the pre-registration
+and the ladder design both argued from it, and a reader tracing why the rungs
+are what they are needs to see the hypothesis that motivated them. **§8 holds
+the framing that survived Phase 2.**
 
 ### The axis has a name already: bagging vs boosting
 

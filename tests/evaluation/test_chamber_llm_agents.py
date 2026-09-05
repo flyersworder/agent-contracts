@@ -949,34 +949,18 @@ class TestSelectionCapIsSizedForLateLoopReasoning:
 
 
 def test_call_kind_markers_are_unambiguous():
-    """Each prompt builder must map to exactly one kind.
+    """Superseded by `tests/evaluation/test_call_kind.py`, kept as a pointer.
 
-    The classifier replaced a `max_tokens` discriminator that became ambiguous
-    the moment two caps were set to the same value, and before that a menu-size
-    threshold with zero margin. This guard is what keeps the third version from
-    degrading the same way: if a prompt's wording changes so two markers match,
-    or none do, this fails instead of six tests quietly measuring the wrong
-    calls.
+    That file walks EVERY builder in `llm_planner` rather than four, and
+    asserts each prompt matches exactly one marker instead of relying on
+    first-match order. This version also called
+    `build_negotiate_propose_prompt("A", 2, menu)` against a
+    `(menu, budget, role)` signature -- it passed while rendering the role as
+    the menu, which is the kind of accidental pass the replacement removes.
     """
     from evaluation.chamber_pipeline.llm_planner import (
         build_negotiate_propose_prompt,
-        build_negotiate_revise_prompt,
-        build_reconcile_prompt,
-        build_select_prompt,
+        call_kind,
     )
-    from tests.evaluation.conftest import call_kind
 
-    menu = ["uniform_a", "uniform_b", "uniform_c"]
-    expected = {
-        "select": (build_select_prompt(menu, 3, ["uniform_a"]), "select"),
-        "reconcile": (build_reconcile_prompt(["uniform_a"], ["uniform_b"]), "reconcile"),
-        "propose": (build_negotiate_propose_prompt("A", 2, menu), "negotiate_propose"),
-        "revise": (
-            build_negotiate_revise_prompt(menu, 2, ["uniform_a"], ["uniform_b"]),
-            "negotiate_revise",
-        ),
-    }
-    for label, (msgs, want) in expected.items():
-        assert call_kind(msgs) == want, f"{label} classified as {call_kind(msgs)!r}"
-    # And no kind is "unknown", which would silently empty a test's filter.
-    assert "unknown" not in {call_kind(m) for m, _ in expected.values()}
+    assert call_kind(build_negotiate_propose_prompt(["uniform_a"], 2, "A")) == ("negotiate_propose")

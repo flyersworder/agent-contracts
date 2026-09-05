@@ -780,11 +780,108 @@ def _response_text(response: Any) -> str:
         return ""
 
 
+# ---------------------------------------------------------------------------
+# Call classification
+#
+# Attributes one LLM call to the prompt builder that produced it, so token
+# spend can be summed per KIND. This is what makes a calibration constant
+# measurable: `_C95_NEGOTIATE` provisions the scouts' negotiation rounds and
+# `_A95_RECONCILE_BY_K` the aggregator's reconcile call, but a cell only
+# records node totals -- and a scout's total is selection PLUS negotiation.
+# Without per-kind attribution the two cannot be separated after the fact,
+# which is why WT's negotiate cost was never isolated and all 300 WT `team`
+# cells carry `conservation_certified = None`.
+#
+# Markers are matched against the concatenated system+user content. Two
+# properties are enforced by `tests/evaluation/test_call_kind.py`, and both
+# matter:
+#
+#   1. Every builder matches EXACTLY ONE marker -- not merely "the right one
+#      first". A first-match classifier hides ambiguity whenever rule order
+#      happens to favour the correct answer, which is precisely how the
+#      earlier test-only version counted reconcile calls as negotiation: the
+#      reconcile system message says "You are one of two designers" and the
+#      bare marker "designer" matched it.
+#   2. No marker is a substring of another, so the rules are independent of
+#      their order in this list.
+#
+# Two predecessors of this classifier both degraded silently. Keying on
+# `max_tokens` became ambiguous the moment two caps were raised to 32768;
+# keying on menu size (`len(names) > 30`) had zero margin against the largest
+# real selection pool. Prompt markers are the third attempt and live HERE,
+# next to the strings they match, so a reworded prompt and its classifier
+# rule cannot drift apart across the src/tests boundary.
+# ---------------------------------------------------------------------------
+
+CALL_KIND_MARKERS: tuple[tuple[str, str], ...] = (
+    # Aggregator: `build_reconcile_prompt` ("Designer A selected:").
+    ("reconcile", "selected:"),
+    # Scout negotiation round 1: `build_negotiate_propose_prompt`. The
+    # trailing space is load-bearing -- without it this also matches the
+    # negotiation SYSTEM message ("You are one of two designers"), which
+    # round 2 shares, and every revise call would be filed as a propose.
+    ("negotiate_propose", "You are designer "),
+    # Scout negotiation round 2: `build_negotiate_revise_prompt`. Narrower
+    # than "designer proposed", which `build_critique_prompt` also matches
+    # ("A designer proposed these N experiment(s)").
+    ("negotiate_revise", "other designer proposed"),
+    # Executor-evaluator: the critic's review request, and the proposer's
+    # final list having read it.
+    ("critique", "Critique this set."),
+    ("revise_after_critique", "A reviewer responded:"),
+    # One call for the whole budget (`build_batch_select_prompt`). "in
+    # total" separates it from the negotiation prompts, which open with the
+    # same "You may run N experiment(s)" clause.
+    ("batch_select", "experiment(s) in total"),
+    # The graph-emission call (`build_adjacency_prompt`, both paths).
+    ("adjacency", "directed causal graph"),
+    # The UNGOVERNED arm's selection call. Checked before "select" because
+    # it deliberately omits the budget line; its own marker is the stop
+    # token, which no other prompt offers.
+    ("select_uncontracted", f"{UNCONTRACTED_STOP_TOKEN} on its own line"),
+    # One-experiment selection. Covers `build_select_prompt` and the four
+    # role variants that override only its system message -- planner,
+    # reasoner, scout_broad, scout_targeted. They are one kind on purpose:
+    # cost attribution is about the call, not the persona wearing it.
+    ("select", "Remaining budget"),
+)
+
+
+def call_kind(messages: list[dict[str, str]]) -> str:
+    """Classify one LLM call by its PROMPT.
+
+    Returns the kind, or `"unknown"` for a prompt no marker matches. Callers
+    summing tokens per kind should treat a non-zero "unknown" bucket as a
+    defect: it is spend that exists in the cell total but in none of the
+    calibration inputs, so every constant derived from those inputs reads
+    lower than the truth.
+    """
+    body = " ".join(m["content"] for m in messages)
+    for kind, marker in CALL_KIND_MARKERS:
+        if marker in body:
+            return kind
+    return "unknown"
+
+
+def is_negotiation(messages: list[dict[str, str]]) -> bool:
+    """Either negotiation round, and never reconciliation.
+
+    The distinction `_C95_NEGOTIATE` is measured across: negotiation is the
+    SCOUTS' spend and is provisioned per scout, while reconcile is the
+    AGGREGATOR's and is provisioned by `a95`. Folding them together would
+    charge aggregator cost to the scouts' constant.
+    """
+    return call_kind(messages).startswith("negotiate")
+
+
 __all__ = [
+    "CALL_KIND_MARKERS",
     "build_adjacency_prompt",
     "build_planner_select_prompt",
     "build_reasoner_select_prompt",
     "build_select_prompt",
+    "call_kind",
+    "is_negotiation",
     "parse_adjacency_response",
     "parse_selection_response",
 ]

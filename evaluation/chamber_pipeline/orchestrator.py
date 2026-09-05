@@ -618,6 +618,26 @@ class _CountingLLM:
         # per cell so a degraded run is visible in the results rather than
         # indistinguishable from a healthy one.
         self.selection_fallbacks: int = 0
+        # Token spend split by the KIND of prompt that produced it, so a
+        # calibration constant can be measured from a live run. A node
+        # monitor gives a scout's TOTAL, but that total is selection plus
+        # negotiation, and `_C95_NEGOTIATE` provisions only the second. With
+        # no split the two are inseparable after the fact -- which is exactly
+        # why WT's negotiate cost was never isolated, leaving every WT `team`
+        # cell with `conservation_certified = None`.
+        #
+        # Input + output, matching the basis `_ROLE_C95` and
+        # `_A95_RECONCILE_BY_K` are stated in. Keyed by
+        # `llm_planner.call_kind`; an "unknown" bucket is a defect, not a
+        # rounding error -- it is spend present in the cell total and absent
+        # from every calibration input, so any constant derived from those
+        # inputs provisions low.
+        #
+        # Counted per ATTEMPT, like `calls` and unlike `fallback_rate`:
+        # rotation bills real tokens, and a rotated negotiation call
+        # provisioned at only its successful attempt's cost would underrun.
+        self.tokens_by_kind: dict[str, int] = {}
+        self.calls_by_kind: dict[str, int] = {}
         # Provenance: what actually served this cell. Recorded because a
         # pinned model snapshot does NOT pin behaviour -- DeepSeek raised the
         # default reasoning effort under unchanged 0423 weights on 2026-08-13,
@@ -837,8 +857,10 @@ class _CountingLLM:
         if caller_supplied_provider:
             # Single attempt with caller's config; preserve call accounting.
             self.calls.append({"model": kwargs.get("model"), "idx": len(self.calls)})
+            before = self.total_input_tokens + self.total_output_tokens
             response = self._target(**kwargs)
             self._accumulate_usage(response)
+            self._attribute(kwargs, before)
             return response
 
         # Provider rotation loop.
@@ -903,8 +925,10 @@ class _CountingLLM:
                 }
             )
 
+            before = self.total_input_tokens + self.total_output_tokens
             response = self._target(**kwargs)
             self._accumulate_usage(response)
+            self._attribute(kwargs, before)
 
             if not _response_has_finish_reason_error(response):
                 return response
@@ -916,6 +940,23 @@ class _CountingLLM:
         # All providers exhausted with body-encoded errors. Return the
         # last (still-bad) response; the caller's parser will fall back.
         return response
+
+    def _attribute(self, kwargs: dict[str, Any], before: int) -> None:
+        """Charge the tokens this attempt just added to its prompt's kind.
+
+        Measured as a DELTA around `_accumulate_usage` rather than re-parsing
+        the response, so the per-kind buckets and the cell totals cannot
+        disagree about what a response contained -- one extraction, one set of
+        tolerated shapes. `test_per_kind_totals_sum_to_the_cell_total` pins
+        the identity.
+        """
+        from evaluation.chamber_pipeline.llm_planner import call_kind
+
+        messages = kwargs.get("messages")
+        kind = call_kind(messages) if isinstance(messages, list) else "unknown"
+        spent = (self.total_input_tokens + self.total_output_tokens) - before
+        self.tokens_by_kind[kind] = self.tokens_by_kind.get(kind, 0) + spent
+        self.calls_by_kind[kind] = self.calls_by_kind.get(kind, 0) + 1
 
     def _note_request(self, kwargs: dict[str, Any]) -> None:
         """Record the model and reasoning effort this request asked for."""
@@ -941,6 +982,23 @@ class _CountingLLM:
             return
         if isinstance(provider, str) and provider:
             self.observed_providers.add(provider)
+
+    @property
+    def negotiate_tokens(self) -> int:
+        """Scout spend on negotiation rounds, pooled over both scouts.
+
+        The numerator of `_C95_NEGOTIATE`. Pooled rather than per-scout
+        because the constant is applied identically to both -- one figure
+        multiplied into each scout's `fixed_overhead`. Per-scout attribution
+        would need the node identity at call time, which the meter does not
+        see; stated as a scope limit rather than approximated.
+        """
+        return sum(v for k, v in self.tokens_by_kind.items() if k.startswith("negotiate"))
+
+    @property
+    def n_negotiate_calls(self) -> int:
+        """Its denominator: negotiation attempts, both rounds, both scouts."""
+        return sum(v for k, v in self.calls_by_kind.items() if k.startswith("negotiate"))
 
     def record_selection_fallback(self) -> None:
         """Note that one selection call degraded to a random pick."""
@@ -1108,13 +1166,74 @@ _A95_RECONCILE_BY_K: dict[tuple[str, int], int] = {
 # measurement silently voids conservation for the whole sweep.
 _PROVISIONAL_CALIBRATION: frozenset[tuple[str, int]] = frozenset()
 
-# Chambers where `_C95_NEGOTIATE` has been measured. It enters only through
-# `spec.negotiation_rounds`, so it affects the `team` arm and nothing else --
-# which is why it is tracked separately rather than voiding a whole chamber.
-# WT's negotiate cost was never isolated by the gate, so WT `team` cells run
-# on LT's figure and have their conservation voided; the fan-in arms, whose
-# c95 and a95 ARE measured on WT, report conservation normally.
-_NEGOTIATE_CALIBRATED_CHAMBERS: frozenset[str] = frozenset({"lt"})
+# Per-scout, per-CALL cost of one negotiation round, in input+output tokens,
+# KEYED BY CHAMBER. It enters only through `spec.negotiation_rounds`, so it
+# affects the `team` arm and nothing else -- which is why an unmeasured
+# chamber voids that arm's conservation rather than the whole sweep.
+#
+# Keyed by chamber for the same reason `_A95_RECONCILE_BY_K` is: a single
+# constant lends LT's number to every other chamber, which is exactly what
+# happened -- WT `team` ran on 4138 for 300 cells, all with
+# `conservation_certified = None`, because the figure had never been isolated
+# there.
+#
+# Measured, WT's is **1.47x LT's**, not a fraction of it -- and the direction
+# is worth recording because the obvious prediction was backwards. WT's menu
+# is 28 experiments against LT's 59 and the negotiation prompts render the
+# menu, so a prompt-size argument says WT should be CHEAPER; `_ROLE_C95` does
+# behave that way (wt/targeted 2868 against lt/targeted 10379). Negotiation
+# does not, because its cost is dominated by reasoning length rather than
+# prompt length -- the same regime `_A95_RECONCILE_BY_K` documents at its
+# lowest budget, where a 3+3-name prompt still produced a 48.8x spread. Do not
+# extrapolate a negotiate figure from a menu size.
+#
+# NOT keyed by budget, and that is a measurement rather than an assumption.
+# Per-call medians across k in {7, 14, 21} are 6679 / 4159 / 6692 -- flat, not
+# monotone, varying 1.61x, which sits inside `_ROLE_C95`'s stated rule that
+# budget-invariance holds while variation stays under the 4x multiple (its own
+# WT figures vary 1.29-1.71x). `_A95_RECONCILE_BY_K` needed budget keying
+# because the aggregator's prompt lists both scouts' selections and so grows
+# with k; a negotiation prompt lists one scout's claim and does not.
+#
+# The within-budget spread is another matter and is the honest caveat here:
+# 13.4x at k=7, 8.1x at k=14, 4.5x at k=21. Same shape as the aggregator's --
+# least predictable at the smallest budget -- and for the same reason. The 4x
+# multiple does not cover the tail, so `team` conservation failures at k=7
+# should be read as forecast misses, not mechanism failures (see the H-C
+# note below).
+#
+# MEDIAN, not the p75 used for `_A95_RECONCILE_BY_K`, and the difference is
+# not a preference: the aggregator gets `1.5 * a95` with NO multiplier, so
+# importing a median there would overrun ~50% of executions by construction.
+# The negotiate figure is multiplied by `_PROVISION_MULTIPLE` (4x) before it
+# reaches a grant, exactly like `_ROLE_C95`, so a median basis already carries
+# that headroom and the two scout-side constants stay on one stated rule.
+#
+# Measured 2026-09-05 on `runs/calib-wt-negotiate.parquet` (WT, `team`, 9
+# seeds x k in {7, 14, 21}), untruncated post-32768-cap, production provider
+# order, deepseek-v4-flash-0731. Attribution is per-call via
+# `_CountingLLM.tokens_by_kind`; before that field existed the quantity was
+# not recoverable from a finished cell at all, since a scout's node total is
+# selection PLUS negotiation.
+#
+# UNMEASURED CHAMBERS ARE NOT EXTRAPOLATED. `_ladder_calibration` raises, and
+# `is_provisional_calibration` voids the arm until a measurement lands. A
+# wrong calibration figure does not fail loudly; it yields plausible
+# conservation numbers that are really statements about provisioning.
+_C95_NEGOTIATE_BY_CHAMBER: dict[str, int] = {
+    "lt": 4138,
+    "wt": 6102,
+}
+
+# Chambers where the negotiate cost has been MEASURED. Derived from the dict
+# below rather than maintained beside it: the previous design held the
+# constant in one place and this set in another, and the neighbouring
+# `_PROVISIONAL_CALIBRATION` block carries a comment warning that an entry
+# left behind after its measurement lands "silently voids conservation for the
+# whole sweep". Deriving the set removes that possibility instead of
+# documenting it. Guarded by
+# `test_calibrated_set_is_derived_from_the_measurements`.
+_NEGOTIATE_CALIBRATED_CHAMBERS: frozenset[str] = frozenset(_C95_NEGOTIATE_BY_CHAMBER)
 
 
 def is_provisional_calibration(chamber: str, budget_k: int, *, negotiates: bool = False) -> bool:
@@ -1165,8 +1284,6 @@ def is_provisional_calibration(chamber: str, budget_k: int, *, negotiates: bool 
 # time. Reporting a bare compliance rate conflates "the framework enforces
 # conservation" (it does, 100%) with "our provisioning predicted cost" (at k=6
 # it cannot). Report the two separately.
-_C95_NEGOTIATE = 4138
-
 _LADDER_NODES = ("scout_a", "scout_b", "aggregator")
 
 
@@ -1208,7 +1325,17 @@ def _ladder_calibration(
             "statements about provisioning."
         )
     role_a, role_b = spec.scout_roles
-    overhead = spec.negotiation_rounds * (_PROVISION_MULTIPLE * _C95_NEGOTIATE)
+    if spec.negotiation_rounds and chamber not in _C95_NEGOTIATE_BY_CHAMBER:
+        raise SweepConfigurationError(
+            f"negotiation cost is not calibrated for chamber={chamber!r}; "
+            f"measured chambers are {sorted(_C95_NEGOTIATE_BY_CHAMBER)}. Same "
+            "policy as `_A95_RECONCILE_BY_K`: measure it rather than borrowing "
+            "a neighbouring chamber's figure, which does not fail loudly but "
+            "reports provisioning as conservation."
+        )
+    overhead = spec.negotiation_rounds * (
+        _PROVISION_MULTIPLE * _C95_NEGOTIATE_BY_CHAMBER.get(chamber, 0)
+    )
     for role in (role_a, role_b):
         if (chamber, role) not in _ROLE_C95:
             raise ValueError(
@@ -1645,6 +1772,12 @@ def run_cell(
             aggregator_tokens=agg_tokens,
             scout_a_tokens=scout_a_tokens,
             scout_b_tokens=scout_b_tokens,
+            # None, not 0, for a cell that issued no LLM call: an unrecorded
+            # measurement must not average in as a cheap one. A cell that DID
+            # call the model but never negotiated correctly records 0 -- that
+            # is a measurement.
+            negotiate_tokens=(counting_llm.negotiate_tokens if counting_llm else None),
+            n_negotiate_calls=(counting_llm.n_negotiate_calls if counting_llm else None),
             max_tree_fragment=frag,
             tree_would_refuse=refuse,
             n_pc_degeneracies=n_pc_degen,
