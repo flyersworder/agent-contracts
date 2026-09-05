@@ -21,6 +21,7 @@ This catches the classic silent bug where two equal-up-to-permutation
 graphs score as completely different.
 """
 
+import numpy as np
 import pandas as pd
 
 
@@ -206,3 +207,39 @@ def ci_coverage(
 
     n = len(intervals)
     return covered / n, total_width / n
+
+
+def skeletonize(adjacency: pd.DataFrame) -> pd.DataFrame:
+    """Undirected view of a graph: symmetrize and clear the diagonal.
+
+    `a[i][j] = 1` iff the input has an edge in EITHER direction. The
+    diagonal is zeroed because a self-loop is not an adjacency and would
+    otherwise be double-counted as a true positive against a reference that
+    also carries one.
+    """
+    values = adjacency.to_numpy().copy()
+    np.fill_diagonal(values, 0)
+    symmetric = ((values != 0) | (values.T != 0)).astype(int)
+    return pd.DataFrame(symmetric, index=adjacency.index, columns=adjacency.columns)
+
+
+def f1_skeleton(predicted: pd.DataFrame, reference: pd.DataFrame) -> float:
+    """F1 on edge PRESENCE, ignoring orientation.
+
+    Orientation inside a Markov equivalence class is not identifiable from
+    the data, so `f1_edges` charges a method for a coin flip the observations
+    cannot settle — and, worse, one that flips on tiny numerical
+    perturbations, which converts unidentifiability into measurement noise.
+    The chambers' own causal-discovery case study sidesteps this by scoring
+    precision/recall over every DAG in the estimated CPDAG.
+
+    This is the cheaper equivalent: score the skeleton, where the whole
+    equivalence class agrees by construction. Reported alongside `f1_edges`
+    as a robustness check, never as a replacement — swapping the headline
+    metric would move every recorded number.
+
+    Note both sides are symmetrized. Scoring a symmetrized prediction against
+    a DIRECTED reference would count each recovered edge once and each true
+    edge twice, deflating recall by construction.
+    """
+    return f1_edges(skeletonize(predicted), skeletonize(reference))

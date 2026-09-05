@@ -21,6 +21,8 @@ import pytest
 
 from agent_contracts.integrations import CAUSAL_CHAMBER_AVAILABLE
 from agent_contracts.integrations.causalchamber import create_contracted_chamber_agent
+from evaluation.chamber_pipeline.llm_planner import call_kind as _call_kind
+from evaluation.chamber_pipeline.llm_planner import is_negotiation as _is_negotiation
 
 requires_causalchamber = pytest.mark.skipif(
     not CAUSAL_CHAMBER_AVAILABLE, reason="causalchamber not installed"
@@ -58,36 +60,13 @@ class RecordingLLM:
         return {"choices": [{"message": {"content": self._responder(idx, messages)}}]}
 
 
-def call_kind(messages: list[dict[str, str]]) -> str:
-    """Classify an LLM call by its PROMPT, not by its max_tokens.
-
-    Tests used to discriminate on `max_tokens == _NEGOTIATE_MAX_TOKENS`. That
-    broke the moment the selection and negotiate caps were both raised to
-    32768 -- the discriminator silently became ambiguous and six tests started
-    measuring the wrong calls. An earlier version keyed on menu size (`> 30`)
-    and had exactly zero margin against the largest selection pool.
-
-    Markers verified pairwise-exclusive across all four prompt builders by
-    `test_call_kind_markers_are_unambiguous`. A bare "designer" test is NOT
-    sufficient: the reconcile prompt's system message says "You are one of two
-    designers", so it matched too and reconcile calls were counted as
-    negotiation.
-    """
-    body = " ".join(m["content"] for m in messages)
-    if "selected:" in body:
-        return "reconcile"
-    if "You are designer" in body:
-        return "negotiate_propose"
-    if "other designer proposed" in body:
-        return "negotiate_revise"
-    if "Remaining budget" in body:
-        return "select"
-    return "unknown"
-
-
-def is_negotiation(messages: list[dict[str, str]]) -> bool:
-    """Either negotiation round, but never reconciliation."""
-    return call_kind(messages).startswith("negotiate")
+# Re-exported from production so a reworded prompt and its classifier rule
+# cannot drift apart across the src/tests boundary. The markers, the
+# exclusivity proof and the history of two silently-degraded predecessors
+# live in `llm_planner.CALL_KIND_MARKERS`; the guards are in
+# `tests/evaluation/test_call_kind.py`.
+call_kind = _call_kind
+is_negotiation = _is_negotiation
 
 
 def _menu_from(messages: list[dict[str, str]]) -> list[str]:

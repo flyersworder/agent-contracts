@@ -91,10 +91,51 @@ ConfigId = Literal["standard", "pressure-control"]
 # This is a scientific choice and must be stated in the paper, not buried
 # here: we use the near-i.i.d. WT release because PC's independence test is
 # invalid on the random-walk release.
-DATASET_FOR_CHAMBER: dict[str, str] = {
-    "lt": "lt_interventions_standard_v1",
-    "wt": "wt_validate_v1",
+# Keyed by (chamber, configuration), NOT by chamber alone. `configuration`
+# selects the ground-truth graph via `causalchamber.ground_truth.graph(...)`,
+# and the chamber is physically different in each mode -- in
+# `pressure-control` the hatch is servo-driven, which introduces the mediators
+# `standard` does not have (wt/standard: 21 sources, 0 mediators, 11 sinks;
+# wt/pressure-control: 19 / 3 / 10). Keying the dataset by chamber alone meant
+# asking for `pressure-control` returned the `standard` DATA scored against the
+# `pressure-control` GRAPH -- a silent mismatch that no column would reveal.
+# Not previously reached: every recorded run used `standard`. Unpaired
+# combinations raise rather than guess; `wt_pc_validate_v1` is the release to
+# wire when the pressure-control arm is actually run.
+DATASET_FOR_CHAMBER_CONFIGURATION: dict[tuple[str, str], str] = {
+    ("lt", "standard"): "lt_interventions_standard_v1",
+    ("wt", "standard"): "wt_validate_v1",
 }
+
+#: Backwards-compatible view for callers that only know the chamber. Retained
+#: because it is part of the module's published surface; prefer the pair-keyed
+#: table above.
+DATASET_FOR_CHAMBER: dict[str, str] = {
+    chamber: name
+    for (chamber, configuration), name in DATASET_FOR_CHAMBER_CONFIGURATION.items()
+    if configuration == "standard"
+}
+
+
+def dataset_for(chamber: str, configuration: str) -> str:
+    """Dataset release backing one (chamber, configuration) pair.
+
+    Raises:
+        ValueError: If the pair has no wired dataset. Raising is the point:
+            the alternative is scoring one configuration's data against
+            another's ground-truth graph, which produces plausible numbers
+            and no error.
+    """
+    try:
+        return DATASET_FOR_CHAMBER_CONFIGURATION[(chamber, configuration)]
+    except KeyError:
+        raise ValueError(
+            f"no dataset is wired for chamber={chamber!r} "
+            f"configuration={configuration!r}; wired pairs are "
+            f"{sorted(DATASET_FOR_CHAMBER_CONFIGURATION)}. The configuration "
+            "selects the ground-truth GRAPH, so pairing it with another "
+            "configuration's data scores against the wrong truth silently."
+        ) from None
 
 
 class ContractedChamberAgent:
@@ -224,7 +265,7 @@ class ContractedChamberAgent:
         """
         if self._dataset is None:
             self._dataset = Dataset(
-                name=DATASET_FOR_CHAMBER[self.chamber],
+                name=dataset_for(self.chamber, self.configuration),
                 root=self.data_root,
                 download=True,
             )

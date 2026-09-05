@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 from .checkpoint import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
     append_record_jsonl,
     done_cell_keys,
+    filter_done_cells,
     latest_per_cell,
     read_records_jsonl,
 )
@@ -257,6 +258,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Output file path. Extension determines format: .parquet (default if "
             "no extension given), .csv. Required unless --dry-run."
+        ),
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help=(
+            "Sampling temperature for LLM selection. Default: unset, meaning "
+            "the field is omitted and the provider's default applies -- which "
+            "is how every cell recorded before 2026-08-30 was produced. "
+            "Unpinned, the seed governs only the fallback RNG and PC, so every "
+            "cell is an independent draw and arm MEANS carry provider variance: "
+            "three n>=10 estimates of one `team`-`llm_pc` contrast span -0.023 "
+            "to -0.048. Recorded per cell as `temperature`; never pool rows "
+            "whose value differs. Does not affect scout roles, whose distinct "
+            "temperature exists to stop two identical scouts making one claim."
         ),
     )
     parser.add_argument(
@@ -500,10 +517,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     skip_keys = done_cell_keys(prior_records) if prior_records else None
     total_planned = count_cells(sweep)
     if skip_keys:
+        # Count what THIS grid still owes, by intersecting the keyset with the
+        # planned cells. Subtracting `len(skip_keys)` instead was wrong
+        # whenever the sidecar covered cells outside the current grid -- a
+        # resume narrowed to one budget printed "(-34/264 remaining)" because
+        # the sidecar also held the other budget's rows. Filtering was always
+        # correct (`filter_done_cells` tests membership per cell); only this
+        # line lied, and it lied in the direction of "nothing left to do".
+        remaining = sum(
+            1 for _ in filter_done_cells(iter_sweep_cells(sweep), skip_keys, sweep.configuration)
+        )
         print(
             f"[resume] found {len(prior_records)} prior records in "
-            f"{sidecar_path}; skipping those cells "
-            f"({total_planned - len(skip_keys)}/{total_planned} remaining)"
+            f"{sidecar_path}; skipping {total_planned - remaining} of them "
+            f"that are in this grid ({remaining}/{total_planned} remaining)"
         )
 
     # Optional mocked LLM for offline smoke runs.
@@ -575,6 +602,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         on_cell=progress,
         skip_keys=skip_keys,
         model=args.model,
+        temperature=args.temperature,
         max_workers=args.max_workers,
     )
 

@@ -472,3 +472,78 @@ def test_a_prebaked_spec_without_a_timeout_is_untouched(flag: str) -> None:
 
     args = build_arg_parser().parse_args([f"--{flag}", "--out", "x.parquet"])
     assert _build_sweep_from_args(args).cell_timeout_seconds is None
+
+
+# ---------------------------------------------------------------------------
+# Resume accounting
+# ---------------------------------------------------------------------------
+
+
+def test_resume_counts_only_the_cells_this_grid_still_owes() -> None:
+    """A sidecar wider than the grid must not deflate the remaining count.
+
+    The CLI printed `total_planned - len(skip_keys)`, which subtracts the
+    WHOLE keyset rather than its intersection with the planned cells. A resume
+    narrowed to one budget against a sidecar holding two printed
+    `(-34/264 remaining)` — a negative count, reading as "nothing left to do"
+    on a sweep that in fact still owed 166 cells. Filtering was always right;
+    only the report lied, and it lied in the reassuring direction.
+    """
+    from evaluation.chamber_pipeline.checkpoint import filter_done_cells
+    from evaluation.chamber_pipeline.orchestrator import count_cells, iter_sweep_cells
+    from evaluation.chamber_pipeline.run_experiment import (
+        _build_sweep_from_args,
+        build_arg_parser,
+    )
+
+    narrowed = _build_sweep_from_args(
+        build_arg_parser().parse_args(
+            [
+                "--chambers",
+                "wt",
+                "--budgets",
+                "0.75",
+                "--variants",
+                "team,team_varsplit",
+                "--seeds",
+                "10",
+                "--out",
+                "x.parquet",
+            ]
+        )
+    )
+    # A sidecar from a WIDER sweep: the same arms at two budgets, seeds 0-4.
+    wider = _build_sweep_from_args(
+        build_arg_parser().parse_args(
+            [
+                "--chambers",
+                "wt",
+                "--budgets",
+                "0.50,0.75",
+                "--variants",
+                "team,team_varsplit",
+                "--seeds",
+                "5",
+                "--out",
+                "x.parquet",
+            ]
+        )
+    )
+    done = {
+        (chamber, wider.configuration, spec.name, budget_k, seed)
+        for spec, chamber, budget_k, _fraction, seed in iter_sweep_cells(wider)
+    }
+
+    total = count_cells(narrowed)
+    remaining = sum(
+        1 for _ in filter_done_cells(iter_sweep_cells(narrowed), done, narrowed.configuration)
+    )
+
+    assert total == 20, "2 arms x 1 budget x 10 seeds"
+    assert len(done) == 20, "the wider sidecar covers 2 arms x 2 budgets x 5 seeds"
+    # The naive arithmetic gives 20 - 20 = 0 remaining. The truth is 10:
+    # seeds 5-9 of both arms at this budget were never run.
+    assert remaining == 10
+    assert total - len(done) != remaining, (
+        "if these agree the fixture no longer reproduces the defect"
+    )

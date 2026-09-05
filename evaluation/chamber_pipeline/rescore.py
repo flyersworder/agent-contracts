@@ -1,0 +1,447 @@
+"""Re-score recorded cells at many PC subsample seeds, with no LLM calls.
+
+A cell's F1 carries two independent sources of spread (register §21, §26):
+
+* **design variance** — WHICH experiments were bought. For an LLM arm the cell
+  seed does not reach the model (`_llm_select_loop` uses it only for the
+  off-menu fallback), so every across-cell difference in the buy is the
+  model's own chaotic fork.
+* **inference variance** — given an identical buy, which graph PC returns from
+  its 300-row subsample and its accept/reject cascade.
+
+Only the second averages away, and it does so for free: `chosen_experiments`
+is recorded from M7 onward, so the purchased data can be rebuilt and re-scored
+under `m` different subsample seeds without re-running a single LLM call.
+Averaging shrinks the inference component by sqrt(m) and leaves the design
+component untouched, which tightens every contrast the corpus reports.
+
+**Cluster by selection before averaging.** A single-call arm re-picks the same
+design across cells (register §24: `one_shot` produced 6 distinct designs in 30
+LT k=30 cells). Averaging without clustering treats 30 re-scorings of 6 designs
+as 30 independent observations and manufactures precision that is not there —
+the exact error this module exists to avoid, and one this session committed
+before catching it. `selection_key` is emitted on every row so the caller can
+group correctly, and `SELECTION_KEY_COLUMN` names it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+import pandas as pd
+
+from agent_contracts.integrations.causalchamber import (
+    create_contracted_chamber_agent,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+
+from .inference import pool_experiment_data, run_pc, runtime_fingerprint
+from .scoring import f1_edges, f1_skeleton, shd
+
+SELECTION_KEY_COLUMN = "selection_key"
+#: The ordered buy — the unit of re-scoring work, and the join key.
+DESIGN_KEY_COLUMN = "design_key"
+
+#: The 20 light-tunnel variables used by the chambers' own causal-discovery
+#: case study (`causal-chamber-paper/case_studies/causal_discovery_iid.ipynb`).
+#: Our node set adds 18 more, and every one of them is a PURE SOURCE in the
+#: ground truth -- out-degree 1, in-degree 0 -- because they are apparatus
+#: settings (exposure time, oversampling rate, reference voltage, diode
+#: select) that each drive exactly one sensor. They carry 18 of the 57 true
+#: edges, so a third of the recoverable structure is "did you buy the
+#: experiment that makes this setting vary" rather than "did you infer
+#: non-obvious structure". Scoring the induced subgraph on these 20 is the
+#: robustness check for that, NOT a redefinition of the metric.
+#: No published equivalent exists for the wind tunnel, so this is LT-only.
+LT_CASE_STUDY_NODES: tuple[str, ...] = (
+    "red",
+    "green",
+    "blue",
+    "current",
+    "ir_1",
+    "ir_2",
+    "ir_3",
+    "vis_1",
+    "vis_2",
+    "vis_3",
+    "pol_1",
+    "pol_2",
+    "angle_1",
+    "angle_2",
+    "l_11",
+    "l_12",
+    "l_21",
+    "l_22",
+    "l_31",
+    "l_32",
+)
+
+#: One unit of re-scoring work: everything a worker process needs, as plain
+#: picklable data. A tuple rather than a dataclass so it crosses the process
+#: boundary without the worker importing anything this module owns.
+_DesignTask = tuple[str, str, str, list[str], int, float]
+
+#: Columns a source frame must carry to be re-scorable.
+REQUIRED_COLUMNS = ("chamber", "configuration", "chosen_experiments", "status")
+
+
+def selection_key(chamber: str, configuration: str, names: Sequence[str]) -> str:
+    """Stable id for one purchased design.
+
+    Order-insensitive: the buy is a SET, and two cells that bought the same
+    experiments in a different order pooled identical data and must share a
+    key. Hashed rather than joined so the value stays a fixed width whatever
+    the budget.
+    """
+    payload = "|".join([chamber, configuration, *sorted(names)])
+    return hashlib.sha1(payload.encode()).hexdigest()[:16]
+
+
+def design_key(chamber: str, configuration: str, names: Sequence[str]) -> str:
+    """Stable id for one purchased design AS ORDERED.
+
+    The unit of re-scoring work. `selection_key` is the unit of ANALYSIS and
+    deliberately ignores order; this one must not, because pooling
+    concatenates in sequence and PC's seeded subsample then draws different
+    rows. Two cells buying `[a, b]` and `[b, a]` scored differently in
+    production and have to be re-scored separately to reproduce it.
+    """
+    payload = "|".join([chamber, configuration, "\x00".join(names)])
+    return hashlib.sha1(payload.encode()).hexdigest()[:16]
+
+
+def parse_selection(raw: object) -> list[str]:
+    """Split a recorded `chosen_experiments` value into names.
+
+    Recorded as a comma-separated string. Returns [] for null or empty, which
+    the caller must skip: an empty buy has no data to pool and no graph to
+    score.
+    """
+    if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+        return []
+    text = str(raw).strip()
+    if not text:
+        return []
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
+    """Score ONE purchased design at every PC seed.
+
+    Module-level and taking a single plain-data argument so it can be sent to
+    a worker process: `ProcessPoolExecutor` pickles the callable by qualified
+    name and the argument by value, and a closure over the enclosing frame
+    would fail both counts.
+
+    Rebuilds the adapter per design rather than sharing one. A worker cannot
+    inherit the parent's adapter anyway, and the chamber datasets are read
+    from a local cache, so the cost is a parquet read that the OS page cache
+    absorbs after the first design.
+    """
+    key, chamber, configuration, names, n_pc_seeds, pc_alpha = task
+    adapter = create_contracted_chamber_agent(
+        chamber=chamber,  # type: ignore[arg-type]
+        configuration=configuration,  # type: ignore[arg-type]
+        intervention_budget=len(names),
+    )
+    nodes = list(adapter.ground_truth().index)
+    truth = adapter.ground_truth()
+    pooled = pool_experiment_data([adapter.query_intervention(name) for name in names], nodes)
+    records: list[dict[str, Any]] = []
+    for pc_seed in range(n_pc_seeds):
+        predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed)
+        records.append(
+            {
+                DESIGN_KEY_COLUMN: key,
+                SELECTION_KEY_COLUMN: selection_key(chamber, configuration, names),
+                "chamber": chamber,
+                "configuration": configuration,
+                "n_experiments": len(names),
+                "pc_seed": pc_seed,
+                "f1": float(f1_edges(predicted, truth)),
+                # Undirected companion, for the robustness check: the
+                # chambers' own case study scores the equivalence class
+                # rather than one orientation. NOT a replacement -- see
+                # `f1_skeleton`, the two are different metrics.
+                "f1_skeleton": float(f1_skeleton(predicted, truth)),
+                # Induced subgraph on the case study's 20 variables,
+                # excluding the pure-source settings. LT only.
+                "f1_core": (
+                    float(f1_edges(predicted.loc[core, core], truth.loc[core, core]))
+                    if (core := [n for n in LT_CASE_STUDY_NODES if n in nodes])
+                    and len(core) == len(LT_CASE_STUDY_NODES)
+                    else float("nan")
+                ),
+                "shd": float(shd(predicted, truth)),
+            }
+        )
+    return records
+
+
+def rescore_selections(
+    frame: pd.DataFrame,
+    *,
+    n_pc_seeds: int = 9,
+    pc_alpha: float = 0.05,
+    progress_every: int = 50,
+    max_workers: int = 1,
+) -> pd.DataFrame:
+    """Score every DISTINCT recorded buy in `frame` under `n_pc_seeds` seeds.
+
+    Pools once per distinct buy rather than once per cell — a single-call arm
+    can repeat one design dozens of times, and rebuilding its data each time
+    would dominate the runtime while changing nothing.
+
+    `max_workers` > 1 fans the designs out over processes. **The output does
+    not depend on it**, and that is a load-bearing property rather than a
+    hope, for two measured reasons:
+
+    * Results are reassembled in `seen` order, not completion order, so a
+      race between workers cannot reorder rows.
+    * BLAS thread count does not change PC's output here. Probed on the VPS
+      before this flag was added: 9 designs x 3 PC seeds, byte-identical F1
+      at `OPENBLAS_NUM_THREADS` 1 and 4. That check was not optional —
+      a threaded reduction can reassociate its sums, and PC amplifies a
+      ~1e-10 difference into a different graph (the whole reason
+      `blas_backend` is recorded). Re-run that probe before trusting this
+      flag on a new machine or a new numpy build.
+
+    Processes, not threads: `run_pc` attaches a handler to a *global* logger
+    to count degeneracies, so two designs sharing an interpreter would
+    cross-contaminate — the same reason `run_sweep` is process-parallel. The
+    `ThreadPoolExecutor.__exit__` trap that once wedged the sweep does not
+    apply here: this work is pure CPU with no uncancellable syscall for a
+    worker to hang in.
+
+    Returns one row per (selection_key, pc_seed).
+    """
+    missing = [c for c in REQUIRED_COLUMNS if c not in frame.columns]
+    if missing:
+        raise ValueError(
+            f"frame is missing {missing}; only M7-era files record "
+            "`chosen_experiments` and can be re-scored"
+        )
+
+    # Keyed by the ORDERED buy, not by the set. `pool_experiment_data`
+    # concatenates in the order given, and PC subsamples 300 rows from the
+    # result under a seed -- so two cells that bought the same experiments in
+    # a different sequence drew different rows and legitimately scored
+    # differently. Collapsing them onto whichever cell was seen first
+    # re-scores the others against a pool they never built.
+    #
+    # Measured, which is how this was caught: of 296 cells re-scorable at
+    # their production seed, the 256 whose design was recorded in ONE order
+    # reproduced production 256/256, while the 40 in multi-order designs
+    # forked at 45%. Ordering is 4.9% of sets here and costs 85 extra designs
+    # out of 1,254 -- a rounding error against being wrong on 3% of cells.
+    #
+    # `selection_key` stays order-INSENSITIVE and is still emitted, because
+    # clustering for analysis is a statement about what was bought (§24), not
+    # about the sequence it was bought in.
+    ok = frame[frame["status"] == "ok"]
+    seen: dict[tuple[str, str, tuple[str, ...]], list[str]] = {}
+    for _, row in ok.iterrows():
+        names = parse_selection(row["chosen_experiments"])
+        if not names:
+            continue
+        seen.setdefault((row["chamber"], row["configuration"], tuple(names)), names)
+
+    # Which machine is doing the RE-scoring, not which machine produced the
+    # source rows. These are routinely different -- the sweeps run on the VPS
+    # and re-scoring is cheap enough to run anywhere -- and PC turns a
+    # backend difference into a structurally different graph (register entry
+    # on the BLAS finding). A rescored frame that inherited only the source
+    # row's `blas_backend` would claim OpenBLAS provenance for numbers
+    # computed under Accelerate, which is precisely the mispooling the
+    # column exists to prevent.
+    runtime = runtime_fingerprint()
+
+    tasks: list[_DesignTask] = [
+        (
+            design_key(chamber, configuration, names),
+            chamber,
+            configuration,
+            names,
+            n_pc_seeds,
+            pc_alpha,
+        )
+        for (chamber, configuration, _), names in seen.items()
+    ]
+
+    def _note(done: int) -> None:
+        if progress_every and done % progress_every == 0:
+            print(f"  [{done}/{len(tasks)}] designs re-scored", flush=True)
+
+    by_key: dict[str, list[dict[str, Any]]] = {}
+    if max_workers > 1 and len(tasks) > 1:
+        with ProcessPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_rescore_one_design, task): task[0] for task in tasks}
+            for done, future in enumerate(as_completed(futures), start=1):
+                by_key[futures[future]] = future.result()
+                _note(done)
+    else:
+        for done, task in enumerate(tasks, start=1):
+            by_key[task[0]] = _rescore_one_design(task)
+            _note(done)
+
+    # Emit in submission order, never completion order, so `--max-workers`
+    # changes only the wall time.
+    records = [
+        record | {"blas_backend": runtime["blas"], "platform_tag": runtime["platform"]}
+        for task in tasks
+        for record in by_key[task[0]]
+    ]
+    return pd.DataFrame(records)
+
+
+def attach_rescored(
+    frame: pd.DataFrame,
+    rescored: pd.DataFrame,
+    *,
+    allow_backend_mismatch: bool = False,
+) -> pd.DataFrame:
+    """Join averaged scores back onto the original cells.
+
+    Adds `selection_key`, `f1_rescored` (mean over PC seeds), `n_pc_seeds` and
+    `rescore_blas_backend` / `rescore_platform_tag`. The original `f1` and
+    `blas_backend` are left untouched so the two can be compared.
+
+    **Raises on a backend mismatch by default.** `f1_rescored` is a
+    replacement for `f1` in every downstream contrast, so a frame whose rows
+    say `scipy-openblas` while the re-scoring ran under Accelerate is a
+    mispooling waiting to happen -- and one that no existing check would
+    catch, because the only backend column would be the source's. Measured
+    on the M7 corpus: 230 of 243 (design, pc_seed) pairs reproduce production
+    exactly across the two backends and 13 fork, up to 0.127 F1. That 5% is
+    small enough to hide in a mean and large enough to move a contrast, which
+    is exactly why this is an error rather than a warning.
+
+    Pass `allow_backend_mismatch=True` only when the analysis uses
+    `f1_rescored` for EVERY arm it compares -- a cross-backend re-scoring is
+    internally consistent, so contrasts survive even though absolute values
+    are not comparable to the source file's.
+
+    Raises:
+        ValueError: If the re-scoring backend differs from the source rows'.
+    """
+    if DESIGN_KEY_COLUMN not in rescored.columns:
+        raise ValueError(
+            f"re-scored frame has no `{DESIGN_KEY_COLUMN}`; it was produced "
+            "before ordering was respected, when the unit of work was the SET "
+            "of experiments. Such a frame re-scored one ordering of each buy "
+            "and would hand its value to cells that pooled a different one "
+            "(measured: 45% of those cells disagreed with production). "
+            "Re-run `rescore_selections` rather than joining it."
+        )
+
+    # Aggregate whatever metric columns are present. The optional ones
+    # (`f1_skeleton`, `f1_core`) were added after the first re-scoring run,
+    # and a frame written before that must still join rather than raise --
+    # pandas' `agg` fails hard on a named column it cannot find.
+    aggregations: dict[str, tuple[str, str]] = {
+        "f1_rescored": ("f1", "mean"),
+        "n_pc_seeds": ("f1", "size"),
+    }
+    for column, alias in (
+        ("f1_skeleton", "f1_skeleton_rescored"),
+        ("f1_core", "f1_core_rescored"),
+    ):
+        if column in rescored.columns:
+            aggregations[alias] = (column, "mean")
+    for column, alias in (
+        ("blas_backend", "rescore_blas_backend"),
+        ("platform_tag", "rescore_platform_tag"),
+    ):
+        if column in rescored.columns:
+            aggregations[alias] = (column, "first")
+    per_key = (
+        rescored.groupby(DESIGN_KEY_COLUMN).agg(**aggregations).reset_index()  # type: ignore[call-overload]
+    )
+    if not allow_backend_mismatch and "blas_backend" in rescored.columns:
+        source = set(frame.get("blas_backend", pd.Series(dtype=object)).dropna().unique())
+        here = set(rescored["blas_backend"].dropna().unique())
+        if source and here and source != here:
+            raise ValueError(
+                f"re-scoring ran under {sorted(here)} but the source rows were "
+                f"produced under {sorted(source)}; PC forks structurally on a "
+                "~1e-10 linear-algebra difference, so `f1_rescored` and `f1` "
+                "are not comparable. Re-score on the producing machine, or "
+                "pass allow_backend_mismatch=True if every arm in the "
+                "comparison uses `f1_rescored`."
+            )
+    out = frame.copy()
+    # Both keys travel with every cell: `design_key` joins the re-scored
+    # value (order-sensitive, so a cell gets the pool it actually built),
+    # `selection_key` clusters for analysis (order-insensitive, because a
+    # buy is a set).
+    out[SELECTION_KEY_COLUMN] = [
+        selection_key(r["chamber"], r["configuration"], parse_selection(r["chosen_experiments"]))
+        if parse_selection(r["chosen_experiments"])
+        else None
+        for _, r in out.iterrows()
+    ]
+    out[DESIGN_KEY_COLUMN] = [
+        design_key(r["chamber"], r["configuration"], parse_selection(r["chosen_experiments"]))
+        if parse_selection(r["chosen_experiments"])
+        else None
+        for _, r in out.iterrows()
+    ]
+    return out.merge(per_key, on=DESIGN_KEY_COLUMN, how="left")
+
+
+def main(argv: Iterable[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("sources", nargs="+", help="Parquet files to re-score")
+    parser.add_argument("--n-pc-seeds", type=int, default=9)
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=1,
+        help=(
+            "re-score designs in parallel processes. Pure CPU, so past the "
+            "core count there is nothing to gain; each worker holds its own "
+            "pooled dataset, which is what caps the 8 GB VPS well below any "
+            "CPU limit. Output is identical at every setting."
+        ),
+    )
+    parser.add_argument("--out", default="runs/rescored.parquet")
+    parser.add_argument(
+        "--allow-backend-mismatch",
+        action="store_true",
+        help=(
+            "re-score even though this machine's BLAS differs from the one "
+            "that produced the source rows; only valid when every arm being "
+            "compared is read from `f1_rescored`"
+        ),
+    )
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    frames = []
+    for src in args.sources:
+        d = pd.read_parquet(src)
+        d["source_file"] = Path(src).stem
+        frames.append(d)
+    combined = pd.concat(frames, ignore_index=True)
+    print(f"{len(combined)} rows from {len(args.sources)} files", flush=True)
+
+    rescored = rescore_selections(
+        combined, n_pc_seeds=args.n_pc_seeds, max_workers=args.max_workers
+    )
+    joined = attach_rescored(combined, rescored, allow_backend_mismatch=args.allow_backend_mismatch)
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    joined.to_parquet(out, index=False)
+    rescored.to_parquet(out.with_name(out.stem + "-bykey.parquet"), index=False)
+    print(f"wrote {len(joined)} cells to {out}")
+    print(f"wrote {len(rescored)} (design x pc_seed) rows to {out.stem}-bykey.parquet")
+
+
+if __name__ == "__main__":
+    main()

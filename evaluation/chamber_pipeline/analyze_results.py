@@ -71,6 +71,17 @@ VARIANT_COLORS: dict[str, str] = {
     "fan_in_agg": "#17becf",  # cyan — rung-1 ablation, not a rung
     "one_shot": "#bcbd22",  # olive — the no-history control
     "critique": "#393b79",  # indigo — executor-evaluator
+    "shared_blackboard": "#00838f",  # teal — two voices, one record
+    # M7 coverage manipulation. Not agents anyone would deploy: the two ends
+    # of a controlled variable-coverage span, drawn as a matched pair.
+    "coverage_max": "#2b8a3e",  # deep green — widest portfolio
+    "coverage_min": "#c92a2a",  # deep red — narrowest portfolio
+    # Deconfounded pair: same manipulation with `weak` excluded.
+    "coverage_max_ms": "#37b24d",  # light green — widest, mid+strong only
+    "wt_coverage_max": "#0ca678",  # teal — WT breadth (spends on settings)
+    "wt_coverage_min": "#e8590c",  # burnt orange — WT depth (real drivers)
+    "coverage_min_ms": "#f03e3e",  # light red — narrowest, mid+strong only
+    "team_varsplit": "#c2255c",  # deep pink — team, split by variable
 }
 
 VARIANT_LABELS: dict[str, str] = {
@@ -86,6 +97,14 @@ VARIANT_LABELS: dict[str, str] = {
     "fan_in_agg": "Ensemble (aggregator honored)",
     "one_shot": "One-shot (no history)",
     "critique": "Critique (executor-evaluator)",
+    "shared_blackboard": "Shared blackboard (two voices)",
+    "coverage_max": "Coverage-max (30 variables)",
+    "coverage_min": "Coverage-min (11 variables)",
+    "coverage_max_ms": "Coverage-max, no weak (30 variables)",
+    "wt_coverage_max": "WT coverage-max (breadth, 21 variables)",
+    "wt_coverage_min": "WT coverage-min (depth, real drivers)",
+    "coverage_min_ms": "Coverage-min, no weak (15 variables)",
+    "team_varsplit": "Team (variable-wise split)",
 }
 
 # Marker + linestyle per variant so curves stay distinguishable when the
@@ -103,6 +122,14 @@ VARIANT_MARKERS: dict[str, str] = {
     "fan_in_agg": "P",
     "one_shot": "*",
     "critique": "h",
+    "shared_blackboard": "8",
+    "coverage_max": "^",
+    "coverage_min": "v",
+    "coverage_max_ms": "1",
+    "wt_coverage_max": "1",
+    "wt_coverage_min": "2",
+    "coverage_min_ms": "2",
+    "team_varsplit": "p",
 }
 
 VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
@@ -118,6 +145,14 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "fan_in_agg": (0, (3, 1, 1, 1)),
     "one_shot": "dashdot",
     "critique": "dotted",
+    "shared_blackboard": (0, (5, 1, 1, 1)),
+    "coverage_max": (0, (6, 2)),
+    "coverage_min": (0, (2, 2, 6, 2)),
+    "coverage_max_ms": (0, (4, 2)),
+    "wt_coverage_max": (0, (4, 2)),
+    "wt_coverage_min": (0, (1, 1)),
+    "coverage_min_ms": (0, (1, 2, 4, 2)),
+    "team_varsplit": (0, (3, 2, 1, 2)),
 }
 
 # Variant rendering order in legend (matches plan §5.3 description top-to-bottom).
@@ -138,8 +173,17 @@ VARIANT_ORDER: tuple[str, ...] = (
     # `LADDER_ORDER`: it is not a rung, and the ladder table must not list it.
     "fan_in_agg",
     "team",
+    "team_varsplit",
     "one_shot",
     "critique",
+    "shared_blackboard",
+    # M7 coverage manipulation, last: bounds rather than rungs.
+    "coverage_max",
+    "coverage_min",
+    "coverage_max_ms",
+    "wt_coverage_max",
+    "wt_coverage_min",
+    "coverage_min_ms",
 )
 
 
@@ -357,6 +401,7 @@ LADDER_ORDER: tuple[str, ...] = (
     # record rather than dividing it.
     "one_shot",
     "llm_pc",
+    "shared_blackboard",
     "critique",
     "fan_in_homog",
     "fan_in_spec",

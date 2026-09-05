@@ -822,6 +822,741 @@ life of the branch. **CI is the only place the published platform is
 exercised** — which is an argument for pushing early, not for trusting a local
 green.
 
+## 20. The coverage manipulation measured strength, not only breadth (2026-08-30)
+
+The first defect in this register that sits in an arm built *to settle a
+question raised by the register itself*, and it was caught by checking a design
+rather than by a failing test.
+
+**The design.** M7 Phase 1 left open whether distinct-variable coverage
+predicts F1. Two LLM-free arms were built to manipulate it directly at LT
+k=30: `coverage_max` (one entry per variable, attaining 30) and `coverage_min`
+(fattest variables exhausted first, attaining 11). 90 cells, no API spend, and
+it resolved cleanly: **+0.069 F1, MDE 0.036.**
+
+**The defect.** On the LT menu all 9 `weak` entries sit on the 9 three-entry
+variables — exactly the variables `coverage_min` exhausts first. So the two
+arms differ in *two* things at once:
+
+| | variables | weak picks |
+|---|---|---|
+| `coverage_max` | 30 | 3.2 |
+| `coverage_min` | 11 | 9.0 |
+
+Across the 90 cells `n_variables` and `n_weak` correlate at **−0.891**. A weak
+intervention perturbs less and carries less signal, so the two channels were
+inseparable. Pooled, F1-vs-weak (r = −0.407) fitted about as well as
+F1-vs-variables (r = +0.471); and within `random`, where the two partly
+decouple (r = −0.355), a multiple regression put the effect on **weak
+(−0.0032) rather than variables (−0.0018, wrong sign)**. The sweep announced as
+decisive was not.
+
+**The fix and its result.** `coverage_ordered` gained `exclude_strengths`, and
+`coverage_max_ms` / `coverage_min_ms` restrict the menu to mid+strong: **15 to
+30 variables, zero weak at either end.** 60 further cells.
+
+**The correction ran the opposite way to the usual one.** Removing a confound
+normally shrinks an effect. Here it **doubled** it:
+
+| design | span | weak | delta F1 | per variable |
+|---|---|---|---|---|
+| confounded | 11→30 | 9.0→3.2 | +0.069 | +0.0036 |
+| deconfounded | 15→30 | 0→0 | **+0.109** | **+0.0073** |
+
+The confounded design was *understating* breadth, because its narrow arm was
+being handed extra weak picks that hurt it less than the missing breadth helped
+the wide arm — the two channels partly cancelled.
+
+**Residual imbalance, stated rather than waved away.** The `_ms` pair still
+differs in mid/strong mix (18.7/10.3 against 15.0/15.0), so the NARROW arm
+holds more `strong`. Measured within `coverage_max_ms`, where the split varies
+by seed, the strong channel is not measurably different from mid (slope
+−0.002/pick, r = −0.098, n=30). Taking that point estimate at face value would
+move the slope from 0.0073 to ~0.0066 and the attribution below from 68% to
+62%. It does not change any conclusion.
+
+**Lesson.** A manipulation built from a menu's own structure inherits that
+structure's correlations. Before trusting one, tabulate every recorded
+attribute of the picks across the arms — not only the attribute being
+manipulated. Here one `groupby` over strength counts was the whole diagnosis.
+
+## 21. The seed does not control the LLM — and pinning temperature will not fix it (2026-08-30, corrected 2026-09-01)
+
+**The original finding stands.** `llm_pc_agent` calls `_llm_select_loop(...)`
+with no temperature, so the provider default applies. Same seed, same config,
+two runs: **F1 0.330 and 0.482**. The seed governs only the fallback RNG and
+PC's subsample. Every cell is an independent draw, so seed pairing carries no
+information (cross-arm r = −0.03) and unpaired MDEs are the correct ones.
+
+It reaches **arm means**, not only cells: three independent n>=10 estimates of
+the same `team` − `llm_pc` contrast span **−0.023 to −0.048**.
+
+**Audit of what was actually pinned (2026-09-01).** Temperature was never
+pinned in any DeepSeek run, and the arms are not even mutually consistent:
+
+| arms | temperature |
+|---|---|
+| `llm_pc`, `one_shot`, `critique`, `planner_reasoner`, `shared_blackboard`, `llm_only` | **unpinned** (no field sent) |
+| scouts inside `fan_in_homog`, `fan_in_spec`, `team`, `team_varsplit` | **1.0** (`_SCOUT_TEMPERATURE`) |
+
+Confirmed in the data: M6 ladders, curves, `pro-*`, `uncontracted`,
+`agg-ablation` and `m4-pilot` carry **no `temperature` column**; the Phase 2
+files carry it and it is **null in all 960 rows**, the encoding for "no field
+sent". So the headline loop-vs-fan-in contrast differs in topology *and* in
+whether a temperature was specified.
+
+**The correction: pinning temperature would not buy determinism.** OpenRouter
+declares no default temperature anywhere in its model or endpoint metadata, so
+it was measured — identical prompt, production config (`effort=low`, Parasail
+pinned), one selection decision per draw:
+
+| temperature | draws | distinct outputs |
+|---|---|---|
+| unset | 14 | 6 |
+| 1.0 | 11 | 6 |
+| **0.0** | **9** | **6** |
+
+**Temperature 0.0 is not deterministic on this endpoint** — six different
+experiments chosen in nine draws. That claim needs only two differing draws and
+has six distinct in nine, so it is not a power question. The nondeterminism
+comes from somewhere else (MoE routing, batching, or the reasoning trace), not
+from sampling temperature.
+
+Two consequences, pointing in opposite directions:
+
+1. **Good for the corpus.** If temperature does not drive the variance, the
+   loop-vs-scout mismatch above is a difference on paper rather than in
+   behaviour, and the confound it threatened is small. It was never a *bias* in
+   any case — unpinned sampling inflates variance symmetrically, and the MDEs
+   already absorb it.
+2. **Bad for the fix.** "Pin temperature so the seed controls the model" — the
+   remedy this entry originally implied — **does not work**, and planning around
+   it would waste a re-run. Where design *diversity* is needed (register §24's
+   `one_shot`, which produced 6 distinct designs in 30 cells), the lever must be
+   the prompt — shuffling menu order per seed — not the temperature.
+
+**Power limit, stated because the two claims differ in strength.** "temp=0 is
+nondeterministic" is established. "temperature does not change the diversity
+level" is NOT — n is 9–14 per condition on a single prompt, enough to rule out
+determinism, not enough to bound a modest effect.
+
+**Note the reconciliation with §24.** A single *pick* is highly variable (6
+distinct in 9 draws) while a 30-pick *set* is nearly canonical (6 distinct in 30
+cells). Both are true: choosing one of 59 is underdetermined, while choosing a
+sensible 30 of 59 converges. Diversity at the call level does not imply
+diversity at the design level, and it is the design level that governs an arm's
+effective sample size.
+
+**For the paper's reproducibility statement**, this joins §10 (BLAS): neither
+the seed, nor temperature, nor a pinned provider makes a *cell* reproducible.
+Reproducibility in this pillar lives at the level of **arm means over n seeds**,
+and that is what should be claimed.
+
+## 22. The collinear-drop rate correlates with the ARM — checked, inert (2026-08-31)
+
+**Shape of the suspicion.** §1's lesson is that a scaffold failure rate which
+varies with the experiment's x-axis makes the curve measure the harness. M7
+Phase 2 produced a rate that varies with the *arm*, which is the same defect
+one axis over. On LT k=6, the fraction of cells where PC dropped a collinear
+column is:
+
+| arm | k=6 | k=30 | k=45 |
+|---|---|---|---|
+| `one_shot` | **0.90** | 0.00 | 0.00 |
+| `critique` | 0.37 | 0.00 | 0.00 |
+| `shared_blackboard` | 0.30 | 0.03 | 0.00 |
+| `llm_pc` (loop) | 0.20 | 0.00 | 0.00 |
+
+`one_shot` is the arm that *loses* at k=6 (−0.059, resolved) and it is also the
+arm that trips the degenerate path 4.5x as often as its comparator. If dropping
+a column cost accuracy, the entire k=6 result would be an artifact.
+
+**Measured, not argued: the drop costs ~nothing.** Stratifying LT k=6 cells by
+whether the drop fired:
+
+- pooled across arms: fired 0.172 vs not-fired 0.182 (n=53 / n=67)
+- within `critique`: −0.006 · within `shared_blackboard`: −0.002
+- within `llm_pc`: **+0.036** on n=6 — the wrong sign for the confound
+
+A −0.010 pooled penalty cannot produce a −0.059 arm deficit at a 0.90-vs-0.20
+rate differential; the implied contribution is under −0.01. `one_shot`'s loss
+at LT k=6 is a record effect.
+
+**Why the rate is arm-dependent at all** (mechanism, not defect): at k=6 the
+purchased design matrix is tiny, so whether two columns exceed r > 0.999
+depends on which six experiments were bought — and *what gets bought* is the
+independent variable. The rate collapses to zero by k=30 on LT because more
+experiments break the duplication. It stays high on WT at every budget (479 of
+600 Phase 2 cells) for the unrelated barometer reason in §13.
+
+**Standing rule this reinforces.** A degeneracy counter is not decoration —
+`n_collinear_dropped` existed only because §13 added it, and it is what made
+this a five-minute check instead of an unanswerable objection. Keep counting
+every path where the harness silently substitutes different behaviour.
+
+**Related:** §1 (rate varying with the x-axis), §13 (the collinear fix and the
+pre/post-fix pooling boundary).
+
+## 23. A flat total variance hid two opposing trends (2026-08-31)
+
+**The misreading.** The spread of `random` cells is nearly constant across LT
+budgets — sd 0.048 at k=6, 0.042 at k=59 — and on 2026-08-31 that flatness was
+read, in-session, as evidence that *which* experiments you buy contributes
+little variance at small budgets. The reasoning was: k=M has zero selection
+freedom by construction, so its sd is pure PC noise; a similar sd at k=6 must
+therefore be mostly noise too.
+
+The premise is right and the inference is wrong, because it assumes PC noise is
+budget-independent. `runs/variance-probe.parquet` (3,150 LLM-free PC runs)
+crosses the selection seed against the subsample seed and separates them:
+
+| k | sd total | sd PC noise | sd selection |
+|---|---|---|---|
+| 6 | 0.048 | 0.032 | **0.036** |
+| 30 | 0.050 | 0.043 | 0.026 |
+| 59 | 0.042 | 0.041 | **0.005** |
+
+Selection variance falls **8x** while measurement noise **rises**, and the sum
+happens to stay flat. The choice is worth *more* at k=6 than the flat total
+suggested, not less — the error pointed away from a real effect.
+
+**Why this is a register entry and not just a corrected number.** It is the
+same failure as §1 one level up: a quantity that looks stable across the
+experiment's x-axis, taken as evidence that nothing varies with it, when in
+fact two components vary and cancel. A single aggregate statistic cannot
+license a claim about its components. The general rule: **before reading a
+flat curve as "no effect", check whether the flatness is a sum.**
+
+**How it was caught.** By building the instrument rather than arguing. The
+probe cost five minutes and no LLM spend, and it validates itself on a row
+whose answer is known by construction: at k=M all 30 "selections" buy the
+identical whole menu, and the decomposition returns sd 0.005 without being
+told. A method that could not recover that would not be trusted on the rows
+where the answer is unknown.
+
+**A second claim killed in the same probe.** The obvious explanation for
+rising noise — a fixed 300-row subsample thinning per-experiment coverage as k
+grows — was tested at 5x the rows on identical selections and **refuted**:
+within-sd moved −5% at k=59 and 0% at k=6. The noise is intrinsic to the
+accept/reject cascade (§10), not to the row cap. Recorded because the
+mechanism was plausible enough to have been asserted without testing.
+
+**Standing headroom, deliberately not taken**: those same runs show
+`max_rows=1500` buys **+0.025 F1 at both budgets**. It is real accuracy for
+runtime, but `max_rows=300` is the configuration of record for all 3,441
+LLM-bearing corpus cells, so adopting it would fork the pooling boundary the
+way the collinear fix did (§13). Stated as known headroom, not applied.
+
+**Related:** §1 (a harness quantity varying with the x-axis), §10 (why PC
+converts numerical noise into structural noise), §13 (pooling boundaries).
+
+## 24. `one_shot`'s cells were not independent draws (2026-08-31)
+
+**Found while measuring something else.** A single LLM call with a fixed prompt
+re-picks nearly the same design every time — the seed reaches only the fallback
+RNG and PC's subsample, not the model. At **LT k=30, `one_shot` produced 6
+distinct selections across its 30 cells, one covering 17 of them.** Those 30
+rows are ~6 draws of the strategy, not 30, and treating them as 30 independent
+observations is pseudo-replication: the cell-level sd is dominated by PC noise
+on repeated *identical* buys, so it understates how uncertain the arm's mean is.
+
+The exposure is asymmetric and lands on the claim that can least afford it.
+Phase 2's headline is an EQUIVALENCE ("one call matches the loop"), and an
+equivalence is only as strong as its bound.
+
+**Re-analysed at the selection level** — one row per distinct buy, so the unit
+of independent variation is the design rather than the scoring:
+
+| | cells | selections | effect on the claim |
+|---|---|---|---|
+| LT k=6, `one_shot` | 30 | 30 | none |
+| **LT k=30, `one_shot`** | 30 | **6** | **MDE 0.029 -> 0.051**, delta +0.012 -> −0.000 |
+| LT k=45, `one_shot` | 30 | 24 | MDE 0.031 -> 0.033 |
+| WT, all budgets | 50 | 30–34 | MDE +0.002 to +0.005 |
+| every other arm, both chambers | 30/50 | 29–50 | negligible |
+
+**Every verdict is unchanged.** No contrast flips in either direction, on
+either chamber, at any budget. What changes is one bound, and it is the
+important one: the LT k=30 equivalence must be reported as **±0.051, not
+±0.029**. Against a loop-vs-random gap of +0.055 that bound cannot exclude
+"the record is worth nearly as much as selecting at all", so the LT half of the
+"record is not load-bearing" claim rests on k=45 and on WT, where the arm's
+designs do vary.
+
+**Why the bound cannot be tightened with seeds.** More seeds buy more
+*scorings* of the same six designs, not more designs. The fix is selection
+diversity — menu-order shuffling per seed, or a pinned non-zero temperature —
+and it requires re-running the arm, not re-analysing it.
+
+**A near-miss worth recording.** Averaging each cell over 9 PC subsample seeds
+shrinks `one_shot`'s cell sd by **6.6x** (against 1.8x for the loop) and makes
+the k=30 contrast read "RESOLVED, `one_shot` better by +0.011". That is the
+pseudo-replication amplified, not a discovery: the variance being averaged away
+is measurement noise on 6 repeated designs. **Multi-seed averaging is only
+sound after clustering by selection**, never as a substitute for it.
+
+**Standing rule.** Any arm that does not draw a fresh design per seed must be
+analysed at the selection level, and every arm's distinct-selection count
+belongs in the results table. `chosen_experiments` is recorded from M7 onward;
+the M6 ladders predate it, so their diversity cannot be audited — noted as a
+limitation of those files, not a defect in the contrasts.
+
+**Related:** §21 (the seed does not control the LLM — this is that fact's
+consequence for inference, not just for variance), §23 (a variance whose
+components must be separated before it can be read).
+
+## 25. Endpoint defaults diverge 130x — but we already pin past them (2026-08-31)
+
+**Recorded as a corrected investigation, because the first version of this
+entry was wrong and the correction is the useful part.**
+
+**What was measured.** Probing `glm-5.3-flash` as the cross-vendor candidate,
+one identical worst-case selection prompt across four pinned endpoints gave a
+**130x spread in reasoning tokens**: Z.AI 6,889 / GMICloud 2,600 / DeepInfra 52,
+all returning a valid on-menu name so nothing failed loudly. Reproduced with
+raw `curl` — no litellm — and the response's `provider` field confirms the pin
+was honoured, so it is neither a client bug nor a routing failure.
+
+**The wrong conclusion, drawn first.** That "we send no `reasoning` parameter,
+so each endpoint applies its own default." **False for the pipeline.** Every
+production call sets it explicitly: `_SELECTION_REASONING_EFFORT = "low"` and
+`_COORDINATION_REASONING_EFFORT = "high"`, and every recorded sweep carries
+`reasoning_effort` of `"low"` or `"high,low"`. The 130x belongs to the *probe*,
+which sent no parameter; it is not what a sweep does.
+
+**With effort pinned, the endpoints converge** — the same prompt again:
+
+| endpoint | no parameter | `effort=high` | `effort=low` |
+|---|---|---|---|
+| Z.AI | 4,134 | 2,450 | 163 |
+| GMICloud | 2,600 | — | **0** |
+| DeepInfra | **78** | 1,605 | 29 |
+| Novita | — | — | 28 |
+
+At `low`, where every selection call runs: 0–163 tokens across four endpoints.
+At `high`: 2,450 vs 1,605, single draws. **The pipeline was already using the
+API correctly on this axis.** `reasoning: {enabled: false}` is rejected
+outright — reasoning is mandatory for this model.
+
+**What the probe did legitimately establish:**
+
+1. **Relace is fp4 on BOTH models**, and at $0.071/$0.237 (GLM) and $0.180
+   (deepseek) it is among the cheapest endpoints, so price-first routing
+   selects it. It was absent from `PROVIDER_PRECISION`; now declared fp4.
+2. **`PROVIDER_PRECISION`'s provider-only keying is unsound in principle.**
+   `Reka` is **fp4 for deepseek-v4-flash-0731 and fp8 for glm-5.3-flash** — the
+   same fact `_provider_order_for`'s own docstring states ("quantization is a
+   property of the (provider, model) pair") but the table cannot express. Not
+   currently biting: Reka appears in no pinned order. Fix it before adding a
+   third model, not after.
+3. **A stray-provider audit, previously never enumerated.** 17 of 750 cells in
+   `m6-wt-ladder-final` were served by endpoints in no pinned order — Relace
+   (8, fp4), OpenInference (10, fp8), DigitalOcean (4, unknown) — because those
+   runs predate `allow_fallbacks: False` (§8). Residualised on arm x budget:
+   **+0.005 vs −0.000, Welch p = 0.76**, and 13 of the 17 sit in
+   `planner_reasoner` k=14, an arm that resolves in neither direction anywhere.
+   Not distorting; recorded so the count exists.
+4. **One CoreWeave draw burned 30,573 of a 32,768 cap on reasoning and returned
+   EMPTY content** — the Together failure mode (§"the provider and the WT
+   dataset were both moderators") appearing in a *pinned* provider. That draw
+   sent no effort parameter, so it is not the production path; CoreWeave's 900
+   recorded cells show `n_selection_fallbacks` of 0.06, identical to every
+   other endpoint. Watch it rather than act on it.
+
+**The lesson, which is not the one the first draft drew.** A probe that omits a
+parameter the pipeline sets does not measure the pipeline — it measures a
+configuration nobody runs, and its most dramatic number is an artifact of the
+omission. **Probe the production call path, or state loudly that you did not.**
+The genuine defects here were found in the *endpoint metadata* (precision,
+pricing, who actually served past cells), not in the reasoning behaviour.
+
+**Related:** §21 (temperature IS unpinned — the real instance of this class),
+§8 (`allow_fallbacks`), §"the provider and the WT dataset were both moderators".
+
+## 26. Root cause of LLM nondeterminism: a chaotic branch point in the reasoning trace (2026-09-01)
+
+§21 established that temperature 0.0 does not make a cell reproducible but did
+not say why. Four experiments locate it. All use one pinned endpoint
+(Parasail), `deepseek-v4-flash-0731`, `effort=low`, `temperature=0.0`.
+
+**1. temperature=0 IS honoured, and greedy decoding is deterministic.**
+Prompt: *"What is 17 multiplied by 3? Reply with the number only."*
+**6 of 6 draws returned `51` with an identical reasoning-token count (9).**
+Byte-identical. So the provider does not silently ignore temperature, and the
+serving stack is not generically nondeterministic.
+
+**2. Long context alone does not break it.** The same 566-token menu prompt
+with an unambiguous instruction appended ("IGNORE the task above. Reply with
+exactly the word: APPLE") returned **`APPLE` with reasoning=51 tokens, three
+times identically**. The other three draws of that same request ignored the
+override and did the task instead, with reasoning 1,672 / 2,031 / 3,793 — all
+different. **The request bifurcates**, and each branch is internally stable.
+
+**3. The fork happens within the first few tokens, at a semantically empty
+choice.** Four draws of the real selection prompt, compared character by
+character on the returned reasoning trace:
+
+| pair | identical prefix (chars) | trace A | trace B | same answer |
+|---|---|---|---|---|
+| 0-1 | **20** | 26,186 | 32,433 | no |
+| 0-2 | **20** | 26,186 | 53,955 | no |
+| 1-3 | 114 | 32,433 | 20,417 | no |
+| 2-3 | 58 | 53,955 | 20,417 | no |
+
+The divergence itself carries no meaning:
+
+```
+both:  "We need answer only "
+  0:   >>> "name. Need reason. ..."
+  1:   >>> "experiment name. Need reason. ..."
+```
+
+A paraphrase. After it, the traces run 20,000-54,000 characters and land on
+four different experiments.
+
+**The mechanism.** Greedy decoding is deterministic *given identical logits*.
+The logits are not identical run to run: floating-point reduction order varies
+with batch composition, and on an fp8 MoE model expert routing varies with it
+too. At a token where the top-2 candidates are near-tied — "name" versus
+"experiment name" is exactly that — a perturbation of ~1e-6 flips the argmax.
+A reasoning model then amplifies the flip chaotically over thousands of
+tokens of trace.
+
+**This is isomorphic to §10.** There, a 1e-10 difference between Accelerate and
+OpenBLAS flips one borderline conditional-independence test and forks PC's
+conditioning-set search, changing the graph structurally. Here, a ~1e-6
+difference in logits flips one argmax and forks the reasoning trace. **The same
+amplification appears at both ends of our pipeline: a discrete decision sitting
+on top of a continuous computation that is only reproducible to within kernel
+noise.** Neither is a bug, in the LLM or in PC; both are chaotic maps.
+
+**What follows, and what does not.**
+
+- **No configuration makes a cell reproducible.** Not the seed, not
+  temperature, not a pinned provider, not a pinned BLAS — the last fixes only
+  PC's half. Stop looking for one; say so in the paper and claim
+  reproducibility where it exists, at **arm means over n seeds**.
+- **It is variance, not bias.** The fork is symmetric with respect to arms; it
+  widens MDEs and does not move a contrast in a direction.
+- **Reasoning length is a variance multiplier.** The APPLE branch (51 tokens)
+  was perfectly stable; the task branch (20k-54k chars) was not. An arm or a
+  model that reasons longer per call should be expected to have larger cell
+  variance from this mechanism alone.
+- **Consequence for the cross-vendor replication (spec §8.3):** do **not**
+  assume GLM inherits DeepSeek's per-cell spread. If its traces are shorter or
+  longer, its MDEs differ. **Measure each arm's sd in the replication rather
+  than reusing the DeepSeek MDEs**, or a "failure to replicate" may be a power
+  difference.
+
+**Related:** §21 (the observation this explains), §10 (the same mechanism in
+PC), §24 (why a single *pick* is variable while a 30-pick *set* is nearly
+canonical — the set constrains the trajectory that the fork would otherwise
+scatter).
+
+## 27. A resolved verdict that was one PC draw wide (2026-09-01)
+
+**`critique` was reported as resolved worse than the loop at LT k=30 (−0.032)
+and k=45 (−0.038) on 2026-08-31. Re-scored, it ties.** Averaged over 9 PC
+subsample seeds the deficits are −0.013 and −0.015, both inside a tighter MDE.
+The original verdicts rested on a favourable single subsample draw — a shift of
+about 1.8 standard errors, entirely ordinary.
+
+**Why it happened.** Each cell was scored once, with PC's 300-row subsample
+seeded by the cell seed. §"WHY THE MIDDLE BUDGET" had already measured that
+this inference noise is the *larger* half of per-cell spread (sd ≈ 0.041 at LT
+k=30 against ≈ 0.026 for the buy). A verdict computed from single draws
+therefore sits on a component that has nothing to do with the arm — and with
+30 cells per arm, a 0.02 wobble in a difference of means is routine.
+
+**The fix costs nothing.** `chosen_experiments` records the purchased design,
+so any M7-era cell can be rebuilt and re-scored offline: 908 designs x 9 seeds,
+15 minutes of CPU, no API calls. MDEs fall ~35% (LT k=30 0.031 → 0.019).
+
+**Validated rather than assumed.** Production scored each cell at
+`pc_seed = cell seed`, so for every cell with seed < 9 the re-scoring recomputes
+that exact pair. **191 of 191 matched to the bit.** A re-scoring that did not
+reproduce production on the overlap would be measuring a different pipeline.
+
+**Two guards this must carry.**
+
+1. **Cluster by distinct design before averaging** (§24). `one_shot` re-picks
+   the same buy, so without clustering 30 re-scorings of 6 designs read as 30
+   independent draws. Earlier the same day this exact mistake made `one_shot`
+   look RESOLVED better at LT k=30.
+2. **Do not mix scales.** Only M7 files carry `chosen_experiments`; the M6
+   ladders do not. Every topology contrast and the axis test remain at
+   cell-level MDEs, and quoting them beside the re-scored ones implies a
+   precision they do not have. Re-running M6 for the column would cost ~$12.
+
+**What it improved, not only what it retracted.** The record claim's bound —
+widened to ±0.051 by §24 — is now **±0.021**, which against a loop-vs-random
+gap of +0.055 excludes "the record is worth nearly as much as selecting at
+all". The equivalence became quotable in the same pass that cost us a negative.
+
+**Standing rule.** In a pipeline whose measurement noise exceeds its treatment
+variance, **a verdict from single draws is a draw, not a verdict**. Average the
+measurement where averaging is free, and report the bound.
+
+**Related:** §23 (the decomposition that showed inference noise dominates),
+§24 (clustering), §26 (why the buy varies at all).
+
+## 28. Our node set was never checked against the chambers' own case study (2026-09-01)
+
+Found by reading the source the pillar is built on, which had not been done:
+`causal-chamber-paper/case_studies/causal_discovery_iid.ipynb`.
+
+**Two deliberate differences, neither previously stated as a deviation.**
+
+| | chamber authors | this pillar |
+|---|---|---|
+| variables | **20** | **38** |
+| algorithm | GES (observational), **UT-IGSP** (interventional) | PC on POOLED interventional data |
+| metric | precision/recall for **every DAG in the CPDAG** | F1 on one directed graph |
+| alpha | grid-searched 1e-4 … 1e-2 | fixed 0.05 |
+| subsampling | none | 300 rows |
+
+**The node set is the one that changes how a number reads.** Our 38 contain
+their 20 plus 18 more, and measured against the ground truth **every one of the
+18 is a pure source — out-degree 1, in-degree 0**. They are apparatus settings
+(`t_*` exposure, `osr_*` oversampling, `v_*` reference voltage, `diode_*`
+select), each driving exactly one sensor, and they carry **18 of 57 true
+edges**. A setting is constant unless an experiment perturbs it, so its edge is
+a guaranteed false negative until bought and close to free once bought.
+
+Measured consequence (LT loop, design-level, 9 subsample seeds):
+
+| | k=6 | k=30 | k=45 |
+|---|---|---|---|
+| full 38-node F1 | 0.206 | 0.421 | 0.420 |
+| core 20-node F1 | 0.176 | 0.223 | 0.226 |
+
+**78% of the budget response lives on those 18 edges.** The headline "accuracy
+improves with budget" is mostly "the agent activated more settings".
+
+**Not a defect in any comparison.** Every arm faces the identical node set and
+menu, and the Phase 2 verdicts are unchanged under directed, skeleton and
+core-20 scoring alike. It is a defect in how an ABSOLUTE number reads: 0.42 is
+not comparable to a figure from the case study's 20-variable setting.
+
+**The orientation axis, measured too.** `cpdag_to_directed_adjacency` encodes
+an undirected CPDAG edge as both directions, so a correctly-found but
+unoriented edge scores one TP *and* one FP — we charge for a coin flip the data
+cannot settle, and one that flips on numerical noise. Scoring the skeleton
+instead cuts within-design noise from sd 0.041 to 0.031 while *raising*
+between-design signal from 0.0091 to 0.0114, a ~1.7x better signal-to-noise
+ratio.
+
+**A wrong invariant, caught by testing it.** "Ignoring direction can only help"
+is FALSE and was briefly asserted in a test. Symmetrising MERGES a mutual pair
+into one edge while EXPANDING each single arrow into two cells, so a prediction
+with many one-way edges can lose more to inflated false positives than it gains
+(counterexample pinned in `test_skeleton_is_not_uniformly_higher_than_directed`:
+directed 0.571, skeleton 0.400). **Skeleton F1 is a different metric, not a
+relaxation**, and the two must not be quoted as if one bounded the other.
+
+**Also corroborating, from their code**:
+`np.random.seed(42) # This doesn't fix the output of UT-IGSP below; I don't
+know how they manage the random state`. The chamber authors hit unfixable
+nondeterminism in their own discovery algorithm — the same class of problem as
+§21 and §26.
+
+**Standing rule.** Read the primary source for the testbed you build on, and
+state every deviation as a deviation. Three of these five differences are
+defensible design choices; none of them was written down until a reader asked.
+
+**Related:** §23, §26 (noise decomposition), §27 (the offline machinery that
+made all of this free).
+
+## 29. Both ground-truth graphs are bipartite with no mediators (2026-09-01)
+
+Checked directly against `causalchamber.ground_truth.graph(...)`, not through
+our adapter, after the node-set finding (§28) raised the question:
+
+| chamber / configuration | nodes | edges | sources | **mediators** | sinks |
+|---|---|---|---|---|---|
+| lt / standard | 38 | 57 | 29 | **0** | 9 |
+| lt / camera | 42 | 65 | 32 | **0** | 10 |
+| **wt / standard** | 32 | 42 | 21 | **0** | 11 |
+| wt / pressure-control | 32 | 44 | 19 | **3** | 10 |
+
+**The two configurations this pillar runs on have maximum path length 1.** No
+node has both an incoming and an outgoing edge. There are no chains, no
+mediation, no indirect effects — the entire discovery problem is a bipartite
+assignment of manipulable sources to observed sinks.
+
+This is the chambers' published ground truth, not an artefact of our adapter.
+But it is a strong statement about what our task can and cannot measure, and it
+had never been checked.
+
+**Consequences.**
+
+1. **The graph is shallow but NOT degenerate — an earlier draft of this entry
+   overstated it.** "PC's conditioning-set search is exploring structure that
+   does not exist" is wrong: a bipartite graph whose sinks have many parents is
+   *rich* in v-structures, and every unshielded pair of parents is orientable.
+   Counted: **172 unshielded colliders on lt/standard, 66 on wt/standard**
+   (sink in-degrees up to 9). Skeleton recovery — which source feeds which sink
+   — is genuine work, and collider orientation is genuine work. What is absent
+   is **mediation and high-order conditioning**: the independence tests that
+   matter are mostly low-order, so the search is shallower than PC's worst
+   case, not vacuous.
+2. **It sharpens the "this is set cover" objection.** Combined with §28's
+   trivial-source edges (LT 32%, **WT 40%**), a large share of the recoverable
+   structure is "did an experiment make this source vary".
+3. **It does not touch any comparison.** Every arm faces the same truth, and
+   the Phase 2 verdicts hold under directed, skeleton and core-20 scoring.
+
+**WT is the worse of the two**, which reverses the usual assumption that the
+second chamber is the safer one:
+
+| | LT | WT |
+|---|---|---|
+| trivial sources (out-degree 1) | 18 → 32% of edges | **17 → 40% of edges** |
+| core after dropping them | 20 nodes, 39 edges | **15 nodes, 25 edges** |
+| plus collinear-dropped sinks | — | 9 in-edges lost, **6 from real drivers** |
+
+**The LT case study's 20 variables are exactly our 38 minus the 18 trivial
+sources.** That is a derivation, not a coincidence — it confirms their node
+choice was principled and gives us the WT analogue for free: 15 nodes, 25
+edges.
+
+**A latent mismatch found while checking, and fixed.** `DATASET_FOR_CHAMBER`
+was keyed by CHAMBER while `configuration` selected the GRAPH, so asking for
+`wt/pressure-control` would have returned `standard` data scored against the
+`pressure-control` truth — plausible numbers, no error, no column revealing it.
+Never reached (every recorded run used `standard`), but it was one argument
+away. Now keyed by the pair, and an unwired combination **raises**;
+`wt_pc_validate_v1` is the release to wire when that arm is run.
+
+**The opportunity, examined and CLOSED (2026-09-01).**
+`wt/pressure-control` is the only configuration with real causal depth, and the
+depth is substantial rather than cosmetic: **24 length-2 directed paths, with
+20 of its 44 edges (45%) on one**, against **0 of 42 (0%)** in `standard`. The
+servo-driven hatch makes `load_in`, `load_out` and `pressure_downwind`
+mediators, so `pressure_downwind -> load_* -> rpm/current/pressures` is a real
+indirect effect to separate. Running there looked like the strongest available
+answer to the "this reduces to set cover" objection.
+
+**It is not runnable.** Both pressure-control releases ship **exactly one
+experiment**: `wt_pc_validate_v1` has `validate_pressure_downwind_loads`,
+`wt_pressure_control_v1` has `hatch_0`. A budgeted experiment-SELECTION task
+needs a menu; there is none. The mediators exist in the ground truth and the
+interventions that would reveal them are not purchasable.
+
+**Which retroactively justifies `standard`.** It was chosen by CLI default and
+never examined — a real oversight — but it is the only wind-tunnel
+configuration with a menu at all. The oversight was in not checking, not in the
+outcome. **The only route to mediation in these chambers is the time-series
+direction** (walks data + PCMCI+, as the authors' own WT case study does),
+which is a different task shape and not a budgeted selection problem.
+
+### What the chambers' own WT case study does (read 2026-09-01)
+
+`case_studies/causal_discovery_time.ipynb`, quoted from source:
+
+- **16 variables**, not 32: `hatch, load_in, load_out, pot_1, pot_2,
+  current_in, current_out, pressure_downwind, pressure_upwind, rpm_in, rpm_out,
+  mic, pressure_intake, pressure_ambient, signal_1, signal_2`.
+- Dataset **`wt_walks_v1`** — the random-walk release *we rejected*.
+- Method **PCMCI+** (tigramite) with `tau_max=10`, `pc_alpha=1e-2`, on
+  min-max-normalised data; they extract a **contemporaneous CPDAG** and a
+  **lagged-effects DAG** separately.
+
+**Their 16 is exactly our 32 minus the 16 measurement-apparatus settings**
+(`osr_*`, `v_*`, `res_*`) — verified as a set equality against our trivial
+out-degree-1 sources, the only difference being `pot_2`, a real actuator they
+keep. Their semantic criterion and our structural one coincide. The same held
+on LT (their 20 = our 38 minus 18). **Two independent confirmations that the
+apparatus settings are the part to drop.**
+
+**The consequence for our WT dataset decision.** We switched
+`wt_walks_v1 -> wt_validate_v1` because Fisher-Z is invalid under lag-1
+autocorrelation of 0.9999. That reasoning is correct *given PC*. But the
+authors face the same autocorrelation and answer it with a **different method**
+— PCMCI+ is built for it — rather than a different dataset. So our switch is a
+deviation forced by our choice of estimator, and must be stated as one.
+
+**And it explains the bipartite finding.** The induced subgraph on their own 16
+WT variables is *also* depth-1 with 0 mediators, so the flatness is not our
+node set. It is a property of the **contemporaneous** graph, which is what any
+i.i.d. pooled analysis targets. The chamber's causal depth is **temporal**
+(`load_in(t) -> rpm_in(t+1) -> pressure(t+2)`), and PCMCI+ with `tau_max=10` is
+how the authors reach it. **Our reduction to pooled i.i.d. interventional data
+discards the dimension the depth lives in.** That is a defensible choice for a
+budgeted experiment-selection task, and it is a scope limit to state, not a
+defect to hide.
+
+**Standing rule.** Before drawing conclusions from a benchmark's difficulty,
+**describe its ground-truth graph** — depth, degree distribution, how many
+edges are trivially structured — and **read every case study the testbed ships
+with**, not just the one matching your method. We ran 18,000 cells before
+doing either.
+
+**Related:** §28 (the node set), §13 (WT collinearity), §26.
+
+## 30. The re-scorer collapsed distinct pools onto one design (2026-09-02)
+
+**`rescore_selections` keyed its unit of work by `selection_key`, which
+ignores order — but `pool_experiment_data` concatenates in sequence and PC
+subsamples 300 rows under a seed, so the order of the buy changes which rows
+PC sees.** Two cells that bought the same experiments in a different sequence
+scored differently in production; the re-scorer computed one of them and
+handed its value to the other.
+
+Measured on real LT data: `[uniform_reference, uniform_red_strong,
+uniform_green_strong]` scores **0.133** and its reverse **0.105** at the same
+PC seed.
+
+**How it was caught, and how it was nearly mis-explained.** Joining production
+`f1` to the re-scored value at the SAME (design, pc_seed) gave 230/243 exact
+with 13 forks up to 0.127 F1, concentrated in WT. The first diagnosis was a
+BLAS mismatch — the re-scoring had been run on macOS/Accelerate while the
+sweeps ran on the VPS — which was plausible, matched §"BLAS" exactly, and was
+**wrong**. Re-running the whole corpus on the VPS did not fix it (278/296),
+and the old and new re-scorings agreed on **8,170 of 8,172** shared rows,
+which shows backend was never the separator.
+
+Splitting the cells on the actual candidate settled it in one table:
+
+| design recorded in | cells | exact | fork rate |
+|---|---|---|---|
+| ONE name order | 256 | 256 | **0%** |
+| more than one order | 40 | 22 | **45%** |
+
+Every fork was in the multi-order group. After keying by the ordered buy:
+**296/296 exact, every source file.**
+
+**The fix.** `design_key` (order-sensitive) is the unit of work and the join
+key; `SELECTION_KEY_COLUMN` stays order-insensitive and is still emitted,
+because clustering for analysis is a claim about what was bought, not the
+sequence (§24). Cost: 85 extra designs out of 1,254 — only 4.9% of buys were
+recorded in more than one order. `attach_rescored` now REFUSES a frame with no
+`design_key` rather than falling back to the set, since such a frame came from
+the broken keying and is wrong for exactly the cells a fallback would hide.
+
+**A test asserted the defect as intended behaviour.** `test_attach_rescored_
+averages_over_pc_seeds_not_over_cells` contained the line "cells 0 and 1
+bought the same set in different order -> same design mean". It passed
+throughout. A test written from the implementation's model of the world
+cannot catch that model being wrong; only a measurement against production
+could, and did.
+
+**What it did NOT change.** All nine Phase 2 verdicts survive the corrected
+re-scoring, and `one_shot` − loop at LT k=6 stays resolved (−0.047 against a
+documented −0.059). The defect touched 3% of cells and moved no conclusion —
+but that was luck, not design: the WT `team_varsplit` k=14 contrast moved from
++0.0155 to −0.0000 under correct scoring, and had the ordering error landed
+there instead it would have been the paper's replication.
+
+**Standing rule.** **Validate a derived scorer against the production number
+it claims to reproduce, on every file, and split the residual on a candidate
+cause before naming one.** The exactness check existed (§27, "191 of 191") but
+had only ever been run on LT-heavy data where multi-order designs are rare.
+A validation that never sees the failing regime is not a validation.
+
+**Related:** §24 (clustering by design), §27 (the re-scoring this corrects),
+§"BLAS" (the explanation that did not survive).
+
 ## Standing scope limits (not defects)
 
 - **Noise floor** — at k=M there is no selection freedom, so the spread there
@@ -962,6 +1697,255 @@ Two side findings from the same measurement:
   and every counter read 0** — including the collinear one, which we already
   know fires 3 columns on WT. A counter that reads zero because nothing is
   listening looks exactly like a clean run.
+
+## 31. The coverage-oracle table crossed BLAS backends (2026-09-02)
+
+**Five of the six "no LLM arm beats the rule" contrasts compared an
+Accelerate-scored rule against OpenBLAS-scored LLM arms.** The coverage arms
+were built and run locally on 2026-09-01; every arm they were compared against
+came off the VPS. Entry 10 established that PC forks structurally on a ~1e-10
+linear-algebra difference, so this is exactly the mispooling that entry
+forbids — in the newest headline result, four days after the rule was written.
+
+| file | arms | backend |
+|---|---|---|
+| `m7-coverage-ms.parquet` | LT rule, k=30 | `scipy-openblas` |
+| `m7-coverage-lt-ends.parquet` | LT rule + random, k=6/45 | **`accelerate`** |
+| `m7-coverage-wt2.parquet` | WT rule, k=7/14/21 | **`accelerate`** |
+| `m7-p2-lt` / `m7-p2-wt` | every LLM arm | `scipy-openblas` |
+
+Only **LT k=30** was clean. The results doc nonetheless asserted "same
+platform, same BLAS, same post-collinear-fix era as every arm below" — a
+claim written from intent rather than read off the column that records it,
+which is the same failure mode as the five tests in entries 3-4, 7, 8, 10
+and 12 that certified our request rather than what ran.
+
+**The `rule − random` contrasts were never affected** (both arms sit in the
+same file, so both are Accelerate), which is why the "small-budget escape"
+finding survives untouched. It is specifically `best LLM − rule` that was
+cross-backend.
+
+### What it cost, once corrected
+
+Re-scored on one backend at 9 PC seeds, clustered by selection
+(`rescored-coverage-core.parquet`, `rescored-coverage-wt.parquet`):
+
+| | best LLM − rule | MDE | verdict | previously reported |
+|---|---|---|---|---|
+| LT k=6 | **+0.036** | 0.030 | **LLM RESOLVES ABOVE** | ties |
+| LT k=30 | +0.001 | 0.029 | ties | ties |
+| LT k=45 | −0.001 | 0.013 | ties | ties |
+| WT k=7 | −0.015 | 0.020 | ties | ties |
+| WT k=14 | +0.002 | 0.022 | ties | ties |
+| WT k=21 | **−0.030** | 0.024 | **RULE RESOLVES ABOVE** | ties |
+
+**Two of six verdicts moved, in opposite directions**, and the corrected table
+is a better result than the contaminated one: the flat "everything ties" reads
+as a task that does not discriminate, while a crossing is a finding. Note that
+the backend fix and the 9-seed re-scoring landed together — re-scoring alone
+cut the LT k=45 MDE from 0.029 to 0.013 — so this entry is not evidence about
+the size of the backend effect on its own.
+
+**The rule that follows.** A backend column that exists is not a backend
+column that was read. `attach_rescored` already raises on a cross-backend
+join; nothing raised here because the contamination was between two *source*
+files, before any re-scoring. **Assert single-backend provenance when the
+contrast is assembled, not only when scores are joined** — and never write
+"same BLAS" into a results table without grouping on the column first.
+
+## 32. Arms were blocked in time, and the provider moved (2026-09-02)
+
+**`iter_sweep_cells` ran `for spec: for seed:` — every seed of one arm before
+the next arm started — so each arm occupied its own window of wall-clock
+time.** Harmless while provider behaviour holds still. It did not.
+
+Caught by looking at a progress notification: 41 cells into the WT varsplit
+confirmation, **all 41 were `team` and none were `team_varsplit`**. Over those
+cells, in launch order:
+
+| cells | wall | tokens_out |
+|---|---|---|
+| 0-10 | 1,184 s | 134,147 |
+| 10-20 | 1,402 s | 154,776 |
+| 20-30 | 1,745 s | 189,977 |
+| 30-41 | 1,610 s | 181,687 |
+| **historical (n=98, 2026-09-01)** | **418 s (max 623)** | **67,852 (max 101,157)** |
+
+r(order, tokens) = **+0.44**, and every new cell outside the previous day's
+support. `n_llm_calls` stayed pinned at 26 and the sweep code was
+byte-identical, so this is the model reasoning more per call, not the harness
+doing more work. A production-shaped probe returned in 5-12 s on the pinned
+endpoint while six workers ran, so it was not throttling on our side.
+
+Blocked, `team` would have taken the cheap window and `team_varsplit` the
+expensive one. **The contrast the run exists to measure would have carried the
+drift**, and no post-hoc analysis recovers it: under blocked ordering arm and
+window are perfectly confounded. The 49 completed cells were discarded
+(`runs/drift-evidence-teamonly.jsonl`) and the sweep relaunched.
+
+**Fix (`2c7c598`)**: swap the loops to `for seed: for spec:`. Interleaving is
+exact blocking on time rather than randomisation over it — consecutive cells
+share provider conditions as closely as the schedule allows, and under
+`--max-workers` the in-flight set spans every arm. Ordering cannot change a
+cell's result, so it costs nothing.
+
+### The archive was then audited rather than assumed clean
+
+`analyze_drift.py` (`eb9577d`). **10 of 11 files CLEAN**; residual trend — the
+part of tokens-per-call arm composition does not explain — is within ±0.032 of
+zero in every file, M4 pilot through M7. **No result is retracted.**
+
+One block flags: `shared_blackboard` WT k=14, where reasoning per call HALVED
+mid-block (5,520 → 3,210, r=−0.730 over 50 cells in 74 minutes) while **F1
+moved −0.004 against an MDE of ~0.023**. The same arm is flat at k=7 and k=21.
+The provider does move on hour timescales, and on this evidence accuracy
+barely notices — a robustness datum worth reporting, and one that bounds how
+much the larger 2.4x shift can plausibly matter.
+
+**Scope this honestly: `window_overlap` is 0.00-0.15 in every archived file.**
+The arms really did run in near-disjoint windows, so the audit shows no drift
+was detectable *within* blocks, not that between-block drift is impossible.
+That gap cannot be closed in the archive; it is why the ordering fix matters
+going forward rather than retroactively.
+
+### Three probes, two of them wrong
+
+Recorded because both wrong versions produced confident-looking tables:
+
+1. **raw `tokens_out`** is arm-dependent — a two-scout cell emits several times
+   a loop cell — so its trend measures which arm ran first: r=+0.71 on one run,
+   **+0.001** once residualised on arm × budget.
+2. **throughput (`tokens_out / wall_time`)** is worse: it tracks OUR OWN
+   concurrency, dipping while many workers hammer one endpoint and rising as a
+   block drains. It flagged **10 of 11** files — the signature of an artefact,
+   not ten defects.
+3. **`tokens_out / n_llm_calls`** is immune to both. Call count is fixed by arm
+   and budget, so what remains is how much the MODEL chose to reason.
+
+Two further corrections that moved numbers: **order by `started_at`, never
+`finished_at`** (under `--max-workers` a slow cell finishes later *by
+definition*, so completion order manufactures trends — this alone reported |r|
+up to 0.80); and **the flag threshold must scale with block size** (a sweep has
+9-15 blocks and reports the largest |r| among them, whose null expectation is
+~2 sd; a flat 0.30 flagged nearly everything, while 3/√(n−3) keeps the real one
+and clears `one_shot` k=45 at +0.525, n=30).
+
+A `between-block spread` statistic was computed and then **deleted rather than
+fixed**: it compares arms, which differ in cost by construction. Reporting it
+would have repeated the original error in a new form.
+
+### The generalisable lesson
+
+**A pinned model id does not pin the computation.** This is the second recorded
+instance (see the 2026-08-13 event: 4.35x tokens x 1.55x throughput under
+unchanged weights). Two consequences: never schedule arms in blocks, and record
+`n_llm_calls` and `tokens_out` per cell so the question can be asked at all —
+this audit is only possible because they were there.
+
+## 33. A calibration constant was never measurable, so 300 cells reported nothing (2026-09-05)
+
+**WT `team` ran on LT's negotiate constant with its conservation deliberately
+voided — 300 cells at `conservation_certified = None`, across
+`m6-wt-ladder-final` and `m6-wt-team-rerun`.** H-C on WT was missing its
+most-coordinated rung for the whole M6 WT campaign.
+
+This one is unusual for the register: **nothing was wrong, and no number is
+retracted.** `_NEGOTIATE_CALIBRATED_CHAMBERS` held only `"lt"`, and
+`is_provisional_calibration` correctly refused to report conservation for a
+cell provisioned by a borrowed figure. The safety property worked exactly as
+designed. What was defective is that the measurement it waited for **could not
+be taken**.
+
+### Why it could not be recovered offline
+
+A cell records node totals (`scout_a_tokens`, `aggregator_tokens`), but **a
+scout's total is selection PLUS negotiation** and the constant provisions only
+the second. The obvious estimator — `team` scouts minus `fan_in_spec` scouts at
+matched budget and role, both arms using the same two role prompts — gives:
+
+| k | scout_a delta | scout_b delta |
+|---|---|---|
+| 7 | +11,118 | +5,321 |
+| 14 | **−4,059** | — |
+| 21 | **−2,698** | — |
+
+Negative, so the subtraction is not isolating negotiation: the selection loops
+themselves differ between the arms. A confident-looking table from a
+contaminated probe, which is this register's most frequent single pattern (see
+§32's two rejected drift probes). It was not used.
+
+### The fix, and the property that makes it trustworthy
+
+Per-call attribution: `_CountingLLM.tokens_by_kind`, keyed by a prompt
+classifier promoted from `tests/conftest` into `llm_planner` beside the strings
+it matches, and widened from 4 builders to all 13.
+
+The classifier's guard is the part worth copying. The test-only version
+asserted only that each builder classified *correctly*, which a **first-match**
+classifier satisfies whenever rule order happens to favour the right answer —
+and that is precisely how the bare marker `"designer"` counted reconcile calls
+as negotiation for as long as it did (the reconcile system message says "You
+are one of two designers"). The replacement asserts **exactly one marker
+matches each builder**, plus **no marker is a substring of another**, so
+exclusivity no longer depends on rule order at all. Three mutations were run
+against it; each failed the intended test.
+
+### What the measurement said, and the prediction it broke
+
+27 cells, WT `team`, 9 seeds x k in {7,14,21}, 27/27 ok, $0.13, drift audit
+CLEAN (residual r = +0.053).
+
+**WT's negotiate call costs 6,102 tokens — 1.47x LT's 4,138.** The prompt-size
+prediction was **backwards**: WT's menu is 28 experiments against LT's 59 and
+the negotiation prompts render the menu, so WT should be cheaper, and
+`_ROLE_C95` does behave that way (wt/targeted 2,868 against lt/targeted
+10,379). Negotiation does not, because its cost is dominated by **reasoning
+length rather than prompt length** — the regime `_A95_RECONCILE_BY_K` already
+documents at its lowest budget, where a 3+3-name prompt produced a 48.8x
+spread. **Do not extrapolate a negotiate figure from a menu size.**
+
+A single per-chamber constant is defensible, and that is measured rather than
+assumed. Per-call medians across k are **6,679 / 4,159 / 6,692** — flat, not
+monotone, varying **1.61x**, inside `_ROLE_C95`'s stated rule that
+budget-invariance holds while variation stays under the 4x provisioning
+multiple (its own WT figures vary 1.29-1.71x). `_A95_RECONCILE_BY_K` needs
+budget keying because the reconcile prompt lists *both* scouts' selections and
+grows with k; a negotiation prompt lists one claim and does not.
+
+**A methodological note on reading a partial run.** Mid-sweep, with k=21 at
+n=1, the three medians read 6,679 / 4,159 / 2,580 and looked cleanly monotone
+— which would have argued for budget keying. At n=9 the last figure is 6,692
+and the shape is flat. A single draw from an 4.5x-spread distribution
+supported a confident structural reading of the opposite shape. This is §27's
+failure mode in a new place: **do not read a shape off a partial sweep.**
+
+### The caveat that travels with the constant
+
+Within-budget spread is **13.4x / 8.1x / 4.5x**, worst at the smallest budget —
+the same shape as the aggregator's, and for the same reason. The 4x multiple
+does not cover that tail, so a `team` conservation failure at WT k=7 should be
+read as a forecast miss and not a mechanism failure, exactly as §12/§6 require
+for `a95`.
+
+Verified end to end: WT `team` cells now report True/False. **The negotiate
+term is not the binding one** — a cell spending 8,935 tokens per negotiate call
+conserved, while one spending 3,240 did not. So this unblocks the measurement
+without being the thing that decides its outcome.
+
+### Structural fix
+
+`_NEGOTIATE_CALIBRATED_CHAMBERS` is now **derived** from
+`_C95_NEGOTIATE_BY_CHAMBER` rather than maintained beside it. The old design
+held the constant in one place and the calibrated set in another, with the
+neighbouring `_PROVISIONAL_CALIBRATION` block carrying a comment warning that a
+stale entry "silently voids conservation for the whole sweep". A warning
+comment is not a guard.
+
+**Generalisable lesson**: a safety mechanism that voids a result until a
+measurement lands is only as good as the *measurability* of that measurement.
+Before shipping a "provisional until measured" gate, check that the
+instrumentation to take the measurement exists — otherwise the gate does not
+protect a number, it silently deletes one.
 
 ## How to add an entry
 

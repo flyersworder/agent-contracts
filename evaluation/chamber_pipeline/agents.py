@@ -50,6 +50,13 @@ from .llm_planner import (
     parse_selection_response,
     summarize_experiments,
 )
+from .menu_taxonomy import coverage_ordered, partition_pools_by_variable
+from .wt_menu_taxonomy import (
+    coverage_ordered as wt_coverage_ordered,
+)
+from .wt_menu_taxonomy import (
+    partition_pools_by_variable as wt_partition_pools_by_variable,
+)
 
 if TYPE_CHECKING:
     from agent_contracts.integrations.causalchamber import ContractedChamberAgent
@@ -179,6 +186,27 @@ _COORDINATION_REASONING_EFFORT = "high"
 # `overlap_frac` to 1.0 and collapse rung 1 into rung 0 at double the budget.
 _SCOUT_TEMPERATURE = 1.0
 
+# Sampling temperature. `None` means "send no `temperature` field", i.e. the
+# provider's default -- which is what every arm did up to 2026-08-30 and is
+# therefore what all recorded data was produced under.
+#
+# It is a REAL source of variance, not a nicety. `llm_pc` and `team` ran
+# unpinned through M6 and M7, so the cell seed governs only the fallback RNG and
+# PC, never the model: the same seed and config has produced F1 0.330 and 0.482.
+# The consequence showed up at the level of ARM MEANS, not just cells -- three
+# independent n>=10 estimates of the same `team` - `llm_pc` contrast span -0.023
+# to -0.048.
+#
+# The default stays `None` deliberately. Flipping it silently would make every
+# new cell incomparable with 2,000+ recorded ones while every column still
+# matched. Pass `--temperature` to pin it, and read `temperature` on the
+# RunRecord to know what a cell actually ran under.
+#
+# NOT applied to the scout roles: `_SCOUT_TEMPERATURE` exists to stop two
+# identically-prompted scouts returning the same claim list, and pinning them to
+# a shared low value would reintroduce exactly that degeneracy.
+_DEFAULT_TEMPERATURE: float | None = None
+
 
 # Pattern matching the LT experiment naming convention `uniform_<TARGET>_<STRENGTH>`
 # (and WT's analogous form). The single LT outlier `uniform_reference` is the
@@ -279,6 +307,193 @@ def random_agent(
     dfs = [adapter.query_intervention(name) for name in chosen]
     pooled = pool_experiment_data(dfs, nodes)
     return run_pc(pooled, nodes, alpha=pc_alpha)
+
+
+# ---------------------------------------------------------------------------
+# Coverage-manipulation controls (M7 Phase 1 follow-up). Neither uses an LLM.
+#
+# Phase 1 found `team` buys 23.4 distinct VARIABLES against the loop's 27.9 at
+# an identical 30 experiments, because two scouts unknowingly buy the same
+# variable at different strengths while `overlap_frac` reads 0.0 by
+# construction. What it could NOT settle is whether that deficit matters: the
+# loop's own F1 is flat in its variable count, but over a range of only 25-30
+# with n=10, and team's 23.4 sits below that range.
+#
+# These two arms replace the extrapolation with a direct manipulation. At LT
+# k=30 they span 11 to 30 distinct variables -- the full achievable range,
+# bracketing both the loop and team -- at an identical budget, identical PC
+# settings and no LLM in the loop to add variance. If F1 tracks coverage across
+# that span, team's deficit is redundancy after all; if it does not, the
+# coordination cost is real and the ladder needs a different instrument.
+#
+# `seed` is forwarded to `run_pc` as `llm_pc` and `team` do, NOT withheld as
+# `random_agent` does -- these are compared against the ladder rungs, so they
+# must draw their PC subsample the same way those do.
+# ---------------------------------------------------------------------------
+
+
+def _coverage_agent(
+    adapter: ContractedChamberAgent,
+    seed: int,
+    pc_alpha: float,
+    *,
+    maximize: bool,
+    exclude_strengths: tuple[str, ...] = (),
+) -> pd.DataFrame:
+    """Shared body: spend the whole budget on a coverage-ordered selection."""
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = adapter.available_experiments()
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+    chosen = coverage_ordered(
+        list(menu),
+        min(budget, len(menu)),
+        seed,
+        maximize=maximize,
+        exclude_strengths=exclude_strengths,
+    )
+    dfs = [adapter.query_intervention(name) for name in chosen]
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+def _wt_coverage_agent(
+    adapter: ContractedChamberAgent,
+    seed: int,
+    pc_alpha: float,
+    *,
+    maximize: bool,
+) -> pd.DataFrame:
+    """WT twin of :func:`_coverage_agent`, using the wind-tunnel parse.
+
+    Separate function rather than a branch inside `_coverage_agent` because
+    the two parses need different inputs: LT splits on a strength suffix and
+    needs only the name, WT resolves a longest node-name prefix and needs the
+    node list. Folding them together would mean passing an unused argument on
+    one path and silently doing nothing on the other.
+
+    There is no `_ms` variant here: WT entries carry no intervention strength,
+    so the strength confound the LT pair was built to close does not exist.
+    """
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = adapter.available_experiments()
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+    chosen = wt_coverage_ordered(
+        list(menu),
+        min(budget, len(menu)),
+        seed,
+        nodes,
+        maximize=maximize,
+    )
+    dfs = [adapter.query_intervention(name) for name in chosen]
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+def wt_coverage_max_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Spend `k` on as many DISTINCT WT variables as `k` allows.
+
+    **Not the same portfolio as its LT namesake.** WT's 28 entries cover 21
+    variables, and the only multi-entry ones are `hatch` (3), `load_in` (3)
+    and `load_out` (4) -- exactly the three highest out-degree drivers in the
+    ground truth (6, 8, 8 edges). Every other entry is a single-entry
+    apparatus setting with out-degree 1. So maximising breadth here spends the
+    budget on trivial settings and away from the real drivers, where on LT it
+    traded intervention strength for breadth. Same rule, opposite portfolio.
+    """
+    return _wt_coverage_agent(adapter, seed, pc_alpha, maximize=True)
+
+
+def wt_coverage_min_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Spend `k` on as FEW distinct WT variables as `k` allows.
+
+    Fattest-first, which on WT means `load_out`, `load_in` and `hatch` -- the
+    three real drivers.
+
+    **The prediction written here before the run was WRONG and is kept as a
+    failed pre-registration.** It read: "expected to do WELL, the reverse of
+    the LT case", reasoning that concentrating budget on out-degree 6/8/8
+    drivers should beat spreading it over out-degree-1 settings. Measured
+    (n=50): 0.124 / 0.165 / 0.229 at k=7/14/21, against `wt_coverage_max`'s
+    0.188 / 0.232 / 0.282. Breadth wins on WT too, and by a wide margin.
+
+    The reason is that buying a driver's several menu entries makes that ONE
+    variable vary several times -- redundant, in exactly the sense the M7
+    mechanism result measures -- while breadth activates a new source each
+    time. Out-degree is not what the budget buys; a distinct varying variable
+    is. That the same conclusion survives a menu whose fat entries are the
+    real drivers, rather than LT's intervention strengths, is the stronger
+    form of the coverage finding.
+    """
+    return _wt_coverage_agent(adapter, seed, pc_alpha, maximize=False)
+
+
+def coverage_max_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Spend `k` on as many DISTINCT variables as `k` allows — the upper bound.
+
+    One entry from every variable before a second from any, so at LT k=30 this
+    touches all 30 variables. Not an agent anyone would deploy: it is the
+    high-coverage end of a manipulation, and its only job is to sit opposite
+    :func:`coverage_min_agent` at the same budget.
+    """
+    return _coverage_agent(adapter, seed, pc_alpha, maximize=True)
+
+
+def coverage_min_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """Spend `k` on as FEW distinct variables as `k` allows — the lower bound.
+
+    Fattest variables first, each exhausted before the next, so at LT k=30 this
+    touches 11 variables: nine at all three strengths, then one pair and one
+    single. Deliberately the worst portfolio the menu permits at that budget.
+    """
+    return _coverage_agent(adapter, seed, pc_alpha, maximize=False)
+
+
+def coverage_max_ms_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """`coverage_max` restricted to mid+strong — the DECONFOUNDED upper end.
+
+    The unrestricted pair varies breadth and intervention STRENGTH together
+    (see `coverage_ordered`), so it cannot say which one moved F1. Dropping
+    `weak` leaves 50 entries over the same 30 variables and closes the strength
+    channel: this arm and :func:`coverage_min_ms_agent` both buy zero weak
+    interventions.
+    """
+    return _coverage_agent(adapter, seed, pc_alpha, maximize=True, exclude_strengths=("weak",))
+
+
+def coverage_min_ms_agent(
+    adapter: ContractedChamberAgent,
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+) -> pd.DataFrame:
+    """`coverage_min` restricted to mid+strong — the DECONFOUNDED lower end.
+
+    At LT k=30 this touches 15 variables (the 15 fattest, each at both mid and
+    strong) against the max arm's 30, so the span is 15-30 rather than the
+    confounded 11-30, and neither end buys a weak intervention.
+    """
+    return _coverage_agent(adapter, seed, pc_alpha, maximize=False, exclude_strengths=("weak",))
 
 
 # ---------------------------------------------------------------------------
@@ -702,6 +917,7 @@ def llm_pc_agent(
     pc_alpha: float = 0.05,
     *,
     llm: LLMCallable | None = None,
+    temperature: float | None = _DEFAULT_TEMPERATURE,
 ) -> pd.DataFrame:
     """LLM plans intervention sequence; classical PC infers the graph.
 
@@ -733,7 +949,7 @@ def llm_pc_agent(
         return _empty_adjacency(nodes)
 
     llm = llm or _default_llm()
-    _chosen, dfs = _llm_select_loop(adapter, llm, model, seed)
+    _chosen, dfs = _llm_select_loop(adapter, llm, model, seed, temperature=temperature)
 
     if not dfs:
         return _empty_adjacency(nodes)
@@ -1261,6 +1477,109 @@ def one_shot_agent(
     return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
 
 
+def shared_blackboard_agents(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """Two voices alternating over ONE complete shared record — the axis's top.
+
+    The ladder orders its rungs by how much of the loop's running record
+    survives the partition. Every multi-agent rung until now destroys some of
+    it: the fan-in rungs split it in half and blind each side, `team` splits it
+    by negotiated agreement, the relay leaves one seam. This arm removes the
+    partition entirely while keeping two agents — they alternate turns, they
+    draw from the SAME undivided menu, and each one sees every pick either has
+    made.
+
+    **It should collapse onto the loop, and that is the point.** Two agents
+    alternating with a complete shared history IS the loop with two voices, so
+    the pre-registered prediction is `shared_blackboard` ~ `llm_pc`. If it does
+    NOT collapse, the record axis is wrong: the cost would then be in having
+    several agents at all rather than in partitioning what they know, and the
+    paper's reframing fails. That is the most informative failure available to
+    this plan, which is why the arm is worth its cost even though its expected
+    result is "no difference".
+
+    The two voices are the coverage-seeking and disambiguation-seeking framings
+    already used by `fan_in_spec` (rung 2). Reusing them is deliberate: rung 2
+    gives those same two roles a SPLIT record and loses, so running them here
+    over a SHARED record isolates the record from the roles. Any gap between
+    the two arms is attributable to the partition and to nothing else.
+
+    Implementation is one `_llm_select_loop` call per pick, with the running
+    record threaded through `starting_chosen` — which both renders it into the
+    prompt's already-chosen block and removes those names from the selectable
+    menu. No new selection machinery, so the arm inherits the loop's tested
+    truncation, fallback and accounting behaviour.
+
+    **The board holds picks, not prose.** Neither voice can write a rationale,
+    an intention or a note to the other; the shared state is *what was done*,
+    never *what anyone thinks*. That is narrower than "blackboard" means in the
+    classical sense (Hearsay-II and successors), and the paper has to say so —
+    see spec §4. It is deliberate: the axis is how much of the loop's record
+    survives, the loop's record IS a list of picks, and sharing more would vary
+    two things at once.
+
+    A rationale-passing variant is the natural next arm and is specified in
+    spec §7: same topology, each pick carrying one line of reasoning the next
+    voice reads. It must be compared against THIS arm rather than against the
+    loop, or it varies two things and resolves nothing.
+    """
+    from evaluation.chamber_pipeline.llm_planner import (
+        build_scout_broad_prompt,
+        build_scout_targeted_prompt,
+    )
+
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = adapter.available_experiments()
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+    llm = llm or _default_llm()
+
+    voices = (
+        ("voice_a", build_scout_broad_prompt),
+        ("voice_b", build_scout_targeted_prompt),
+    )
+    record: list[str] = []
+    dfs: list[pd.DataFrame] = []
+    for step in range(min(budget, len(menu))):
+        node, builder = voices[step % 2]
+        with _maybe_node(adapter, node):
+            # A distinct seed per step: `seed` drives only the fallback RNG,
+            # and reusing one value would correlate every fallback pick across
+            # the whole record. Offset by `step`, not by `step + 1`, so step 0
+            # reproduces a plain loop's first call exactly.
+            picked, frames = _llm_select_loop(
+                adapter,
+                llm,
+                model,
+                seed * 1000 + step,
+                spend=1,
+                starting_chosen=record,
+                prompt_builder=builder,
+            )
+        if not picked:
+            # The menu is exhausted, or the adapter refused the purchase. Either
+            # way another turn cannot help, and looping would burn the rest of
+            # the budget on calls that buy nothing.
+            break
+        record.extend(picked)
+        dfs.extend(frames)
+
+    adapter.coordination_stats = {
+        "overlap_frac": None,  # no partition exists, so there is nothing to overlap
+        "n_experiments_distinct": len(set(record)),
+    }
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
 def critique_agents(
     adapter: ContractedChamberAgent,
     model: str = "openrouter/deepseek/deepseek-v4-flash",
@@ -1371,6 +1690,7 @@ def team_agents(
     scout_a_budget: int,
     scout_b_budget: int,
     llm: LLMCallable | None = None,
+    partition: str = "experiment",
 ) -> pd.DataFrame:
     """Two scouts negotiate their split before executing — ladder rung 4.
 
@@ -1513,17 +1833,46 @@ def team_agents(
     # strength, so `rest[0::2]` handed scout_a 0 of 3 `osr_c` and 0 of 2 `red`
     # experiments on LT -- the same blind spot in all 30 seeds, since nothing
     # about the slice depends on the seed.
-    rest = [m for m in menu if m not in set(claim_a) | set(claim_b)]
-    _random.Random(seed).shuffle(rest)
-    need_a = max(0, scout_a_budget - len(claim_a))
-    need_b = max(0, scout_b_budget - len(claim_b))
-    take_a, take_b, leftover = (
-        rest[:need_a],
-        rest[need_a : need_a + need_b],
-        rest[need_a + need_b :],
-    )
-    pool_a = set(claim_a) | set(take_a) | set(leftover[0::2])
-    pool_b = set(claim_b) | set(take_b) | set(leftover[1::2])
+    if partition == "variable":
+        # Same negotiation, same A-wins-ties rule, same budgets; only the
+        # GRANULARITY of the split changes. See
+        # `partition_pools_by_variable` for why, and `menu_taxonomy` for the
+        # null model that says the name-level split protects nothing.
+        #
+        # Dispatched on the CHAMBER, not on a name heuristic: the two menus
+        # need different parses (LT splits a strength suffix, WT resolves a
+        # longest node-name prefix) and the WT one additionally needs the node
+        # list. Reading `adapter.chamber` keeps the choice explicit rather than
+        # sniffing an entry's prefix, which would silently mis-parse the first
+        # chamber whose names happen to look like the other's.
+        if getattr(adapter, "chamber", "lt") == "wt":
+            pool_a, pool_b = wt_partition_pools_by_variable(
+                menu,
+                _node_names(adapter),
+                claim_a,
+                claim_b,
+                scout_a_budget,
+                scout_b_budget,
+                seed,
+            )
+        else:
+            pool_a, pool_b = partition_pools_by_variable(
+                menu, claim_a, claim_b, scout_a_budget, scout_b_budget, seed
+            )
+    elif partition == "experiment":
+        rest = [m for m in menu if m not in set(claim_a) | set(claim_b)]
+        _random.Random(seed).shuffle(rest)
+        need_a = max(0, scout_a_budget - len(claim_a))
+        need_b = max(0, scout_b_budget - len(claim_b))
+        take_a, take_b, leftover = (
+            rest[:need_a],
+            rest[need_a : need_a + need_b],
+            rest[need_a + need_b :],
+        )
+        pool_a = set(claim_a) | set(take_a) | set(leftover[0::2])
+        pool_b = set(claim_b) | set(take_b) | set(leftover[1::2])
+    else:
+        raise ValueError(f"partition must be 'experiment' or 'variable', got {partition!r}")
 
     all_names = set(menu)
     with adapter.as_node("scout_a"):
@@ -1595,12 +1944,76 @@ def team_agents(
     return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
 
 
+def team_varsplit_agents(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    scout_a_budget: int,
+    scout_b_budget: int,
+    llm: LLMCallable | None = None,
+) -> pd.DataFrame:
+    """`team`, partitioned by VARIABLE instead of by experiment name.
+
+    The one-change control for M7's mechanism finding. `team` loses ~0.048 F1
+    to the loop, and ~two-thirds of that is traced to buying 23.4 distinct
+    variables against the loop's 27.9 -- because its two pools are disjoint as
+    sets of EXPERIMENTS while a variable can sit in both at different
+    strengths. Measured, the cross-scout duplication is at chance: 5.6
+    observed against a random-split null of 4.11 +- 1.51.
+
+    This arm keeps the topology, the budgets, the four negotiation calls and
+    the A-wins-ties rule, and changes only what gets partitioned. If the
+    diagnosis holds it should recover most of the variable deficit and roughly
+    two-thirds of the F1 gap; if it does not, the cost is coordination itself
+    and the redundancy account is wrong.
+
+    `shared_variables` is 0 by construction here, exactly as `overlap_frac` is
+    0 by construction in both arms -- so neither is evidence of anything, and
+    the arm has to be judged on F1 and on distinct-variable count.
+
+    **This is not a free win, and the outcome is genuinely open.** Putting
+    every entry of a variable in one pool removes cross-scout duplication and
+    concentrates within-scout duplication: a pool of ~29 entries now spans only
+    ~15 variables, so a scout must pick almost exactly one entry per variable
+    to use its budget well. Measured against `team` under `--mock-llm`, where
+    selection degrades to seeded random, the two effects cancel almost exactly:
+
+    | | shared vars | per-scout distinct | total distinct |
+    |---|---|---|---|
+    | `team` | 3.83 | 12.5 / 12.3 | 21.0 |
+    | `team_varsplit` | **0.00** | 9.7 / 10.8 | 20.5 |
+
+    So the arm pays off only if the scouts are good at avoiding SELF-repetition
+    -- and the real ones are (0.8 and 0.2 repeats over 15 picks). If they hold
+    that behaviour inside the narrower pools, total distinct variables should
+    approach 29 against `team`'s 23.4. If they do not, this arm converts one
+    duplication problem into another and lands no better. The random-selection
+    control above is what separates those two outcomes.
+    """
+    return team_agents(
+        adapter,
+        model,
+        seed,
+        pc_alpha,
+        scout_a_budget=scout_a_budget,
+        scout_b_budget=scout_b_budget,
+        llm=llm,
+        partition="variable",
+    )
+
+
 # Declared at the END of the module, after every agent it names. The previous
 # copy sat mid-file and listed only the five M4b arms, so the three ladder arms
 # defined below it were absent from `import *` and from the package's
 # re-exports -- a public surface that disagreed with the registry the sweep
 # actually runs.
 __all__ = [
+    "coverage_max_agent",
+    "coverage_max_ms_agent",
+    "coverage_min_agent",
+    "coverage_min_ms_agent",
     "critique_agents",
     "fan_in_agents",
     "greedy_ig_lite_agent",
@@ -1609,6 +2022,8 @@ __all__ = [
     "one_shot_agent",
     "planner_reasoner_agents",
     "random_agent",
+    "shared_blackboard_agents",
     "team_agents",
+    "team_varsplit_agents",
     "uncontracted_agent",
 ]

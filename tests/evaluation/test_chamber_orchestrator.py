@@ -104,9 +104,10 @@ class FakeLLM:
 class TestAgentRegistry:
     """Inventory of the registered agents, plus AgentSpec.is_compatible."""
 
-    def test_registry_has_twelve_agents(self) -> None:
-        """Five M4b variants, three ladder arms, one ablation, one control."""
-        assert len(AGENT_REGISTRY) == 12
+    def test_registry_has_twenty_agents(self) -> None:
+        """Five M4b variants, three ladder arms, one ablation, one control,
+        the two shared-record arms, and the two coverage-manipulation arms."""
+        assert len(AGENT_REGISTRY) == 20
 
     def test_registry_names_are_unique(self) -> None:
         names = [s.name for s in AGENT_REGISTRY]
@@ -114,7 +115,9 @@ class TestAgentRegistry:
 
     def test_registry_matches_plan_5_1_plus_the_ladder(self) -> None:
         """Plan §5.1's five variants, the ladder's three arms, one ablation,
-        and the two shared-record arms added 2026-08-29."""
+        the two shared-record arms added 2026-08-29, and the four
+        coverage-manipulation arms added 2026-08-30 (M7 Phase 1 follow-up): the
+        unrestricted pair and the deconfounded `_ms` pair that excludes weak."""
         actual = sorted(s.name for s in AGENT_REGISTRY)
         expected = sorted(
             [
@@ -130,6 +133,14 @@ class TestAgentRegistry:
                 "team",
                 "one_shot",
                 "critique",
+                "coverage_max",
+                "coverage_min",
+                "coverage_max_ms",
+                "wt_coverage_max",
+                "wt_coverage_min",
+                "coverage_min_ms",
+                "team_varsplit",
+                "shared_blackboard",
             ]
         )
         assert actual == expected
@@ -1524,11 +1535,24 @@ class TestLadderSelfDescription:
         from evaluation.chamber_pipeline.orchestrator import AGENT_REGISTRY
 
         ladder = {s.name for s in AGENT_REGISTRY if s.is_ladder_arm}
-        # `fan_in_agg` is an ABLATION of rung 1, not a fifth rung. It declares
-        # scout roles because it needs rung 1's identical budget calibration --
-        # the ablation is only interpretable against a matched-budget control.
-        # Anything reporting "the ladder" must exclude it by name.
-        assert ladder == {"fan_in_homog", "fan_in_spec", "fan_in_agg", "team"}
+        # Two of these are NOT rungs and must be excluded by name from
+        # anything reporting "the ladder":
+        #
+        #  * `fan_in_agg` is an ABLATION of rung 1.
+        #  * `team_varsplit` is a one-change VARIANT of rung 4 (the pools are
+        #    partitioned by variable rather than by experiment name).
+        #
+        # Both declare scout roles for the same reason: they are only
+        # interpretable against a matched-budget control, so they must resolve
+        # the identical calibration as the arm they are compared with. That is
+        # exactly why `LADDER_ORDER` is a separate tuple from this set.
+        assert ladder == {
+            "fan_in_homog",
+            "fan_in_spec",
+            "fan_in_agg",
+            "team",
+            "team_varsplit",
+        }
 
     def test_calibration_refuses_a_non_ladder_arm(self) -> None:
         """A silent plain-role fallthrough is what this replaces."""
@@ -1805,15 +1829,19 @@ class TestParallelSweep:
         10x slower, and no other test would notice."""
         from evaluation.chamber_pipeline import orchestrator as _orch
 
-        called: list[int] = []
+        called: list[dict[str, object]] = []
 
-        def _fake(sweep, cells, on_cell, model, max_workers, llm):  # type: ignore[no-untyped-def]
-            called.append(max_workers)
+        def _fake(sweep, cells, on_cell, model, temperature, max_workers, llm):  # type: ignore[no-untyped-def]
+            called.append({"max_workers": max_workers, "temperature": temperature})
             return []
 
         monkeypatch.setattr(_orch, "_run_sweep_parallel", _fake)
-        run_sweep(self._spec(), max_workers=4)
-        assert called == [4]
+        run_sweep(self._spec(), max_workers=4, temperature=0.0)
+        # Both are asserted, and `temperature` is the more fragile: 0.0 is
+        # falsy, so any `if temperature:` guard on the way down would drop a
+        # pinned zero and silently restore provider-default sampling while
+        # every column still looked right.
+        assert called == [{"max_workers": 4, "temperature": 0.0}]
 
     def test_on_cell_fires_once_per_cell(self) -> None:
         """The CLI writes the checkpoint sidecar from this callback. It must
@@ -2499,3 +2527,123 @@ def test_every_arm_reports_distinct_experiment_count(arm: str) -> None:
     assert record.status == "ok", record.error_message
     assert record.n_experiments_distinct is not None
     assert record.n_experiments_distinct == len(set((record.chosen_experiments or "").split(",")))
+
+
+class TestTeamVarsplitIsAControlNotARung:
+    """`team_varsplit` must be budget-identical to `team` and outside the ladder.
+
+    The arm exists to isolate ONE change -- what the pools partition on -- so
+    any difference in provisioning or in call count would confound exactly the
+    contrast it is built for.
+    """
+
+    def test_it_is_not_listed_as_a_ladder_rung(self) -> None:
+        from evaluation.chamber_pipeline.analyze_results import LADDER_ORDER
+
+        assert "team_varsplit" not in LADDER_ORDER
+        assert "team" in LADDER_ORDER
+
+    def test_its_calibration_is_identical_to_team(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import (
+            _ladder_calibration,
+            get_spec,
+        )
+
+        for k in (6, 30, 45):
+            assert _ladder_calibration(get_spec("team_varsplit"), k) == (
+                _ladder_calibration(get_spec("team"), k)
+            )
+
+    def test_it_declares_the_same_negotiation_cost_as_team(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import get_spec
+
+        team, var = get_spec("team"), get_spec("team_varsplit")
+        assert var.negotiation_rounds == team.negotiation_rounds
+        assert var.scout_roles == team.scout_roles
+        assert var.extra_kwargs == team.extra_kwargs
+
+
+class TestTemperatureIsRecordedAndRouted:
+    """Temperature must reach the arms that declare it, and only those.
+
+    The failure this guards is silent in both directions: an unrouted pin looks
+    like a pinned run in the logs while sampling stays at the provider default,
+    and a pin forced onto the scout roles reintroduces the degeneracy
+    `_SCOUT_TEMPERATURE` exists to prevent.
+    """
+
+    def test_llm_pc_receives_a_pinned_temperature(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import (
+            _build_agent_kwargs,
+            get_spec,
+        )
+
+        kwargs = _build_agent_kwargs(get_spec("llm_pc"), 30, 0, 0.05, None, temperature=0.0)
+        assert kwargs["temperature"] == 0.0
+
+    def test_an_unset_temperature_sends_no_field_at_all(self) -> None:
+        """`None` must mean 'omit', not 'send None' — the recorded corpus was
+        produced with the field absent."""
+        from evaluation.chamber_pipeline.orchestrator import (
+            _build_agent_kwargs,
+            get_spec,
+        )
+
+        kwargs = _build_agent_kwargs(get_spec("llm_pc"), 30, 0, 0.05, None)
+        assert "temperature" not in kwargs
+
+    def test_arms_without_the_parameter_are_not_handed_one(self) -> None:
+        from evaluation.chamber_pipeline.orchestrator import (
+            _build_agent_kwargs,
+            get_spec,
+        )
+
+        for name in ("random", "team", "fan_in_homog"):
+            kwargs = _build_agent_kwargs(get_spec(name), 30, 0, 0.05, None, temperature=0.0)
+            assert "temperature" not in kwargs, name
+
+    def test_the_record_carries_the_field(self) -> None:
+        from evaluation.chamber_pipeline.results import RunRecord
+
+        assert "temperature" in RunRecord.__dataclass_fields__
+        assert RunRecord.__dataclass_fields__["temperature"].default is None
+
+
+def test_arms_are_adjacent_in_time_not_blocked_by_arm() -> None:
+    """Cells must interleave arms, so a time-varying provider hits both equally.
+
+    The iteration used to run every seed of arm A before starting arm B. That
+    is a confound whenever provider behaviour drifts during a sweep, which is
+    a measured phenomenon in this pillar, not a hypothetical: on 2026-09-02 a
+    WT k=21 run saw output tokens rise from 134k to 190k over two hours
+    (r=+0.44 with completion order) while `n_llm_calls` stayed pinned at 26.
+    Under arm-blocked ordering the whole of `team` would have run in the cheap
+    window and the whole of `team_varsplit` in the expensive one, so the arm
+    contrast would carry the drift.
+
+    Interleaving is exact blocking on time, which beats randomisation here:
+    consecutive cells share provider conditions as closely as the schedule
+    allows.
+    """
+    from evaluation.chamber_pipeline.orchestrator import SweepSpec, iter_sweep_cells
+
+    sweep = SweepSpec(
+        chambers=("wt",),
+        budget_fractions=(0.75,),
+        agent_names=("team", "team_varsplit"),
+        seeds=tuple(range(5)),
+    )
+    order = [spec.name for spec, *_ in iter_sweep_cells(sweep)]
+    assert len(order) == 10
+
+    # The defect's signature: one arm entirely before the other.
+    first_half, second_half = set(order[:5]), set(order[5:])
+    assert not (len(first_half) == 1 and len(second_half) == 1), (
+        f"arms are blocked, not interleaved: {order}"
+    )
+    # Every adjacent pair spans both arms, so no arm can occupy a time window
+    # the other does not.
+    assert all(order[i] != order[i + 1] for i in range(0, len(order) - 1, 2)), order
+    # Seeds still advance in order within each arm, so resume keys are stable.
+    seeds = [seed for spec, *_rest, seed in iter_sweep_cells(sweep) if spec.name == "team"]
+    assert seeds == list(range(5))
