@@ -508,7 +508,19 @@ agent-contracts/
 - LLM-only dominates Pareto (SHD=26, F1=0.75 at k/M=1.00); 4× better than next variant
 - Figures at `runs/m4-pilot-figs/`; sidecar `runs/m4-pilot.jsonl` kept for audit
 
-**Active: M5 (trimmed scope — see plan §6.1 callout dated 2026-05-18)**
+**Active: M7 Phase 3 (2026-09-05). M5 and M6 are COMPLETE; the M5 text below
+is kept for the reasoning that shaped the sweeps, not as a to-do list.**
+
+Where the pillar actually stands: 3,441+ cells over two chambers and two
+models, M6's ladder run on both, M7 Phase 1 and Phase 2 complete, the coverage
+oracle found, the WT `team_varsplit` prediction confirmed, and the whole M7
+corpus re-scored on one BLAS backend with every headline verdict holding. The
+current plan is **§8 of `docs/superpowers/specs/2026-08-29-m7-mechanism-and-
+missing-arms.md`**; `docs/chamber-results.md` holds the results and
+`docs/chamber-harness-validity-register.md` the defects. Remaining work is
+Phase 3 (mixed-model team, adaptive-feedback arm) and Phase 4 (rewrite).
+
+**Historical, from 2026-05-18 — the M5 scoping that produced those sweeps:**
 
 Scope revised post-M4b: skip 5-budget expansion (keep 3: 0.10, 0.50, 1.00).
 M4b's dramatic effect at 3 budgets makes intermediate budgets curve-shape
@@ -1287,9 +1299,9 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-08-22 (release 0.5.0: dependency refresh, floors raised to tested versions, slimmed sdist)*
-*Status: Production-ready, v0.5.0, 1235 tests passing (1 skipped), 91% coverage*
+*Last Updated: 2026-09-05 (M7: per-call token attribution, WT negotiate calibration, single-backend re-score)*
+*Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
-*Pilot dataset: `runs/m4-pilot.parquet` (450 cells, 442 ok, 8 timeouts) — submission-ready for AAMAS 2027 / ECAI 2027*
-*Next: M5 (WT + UNCONTRACTED + Pro robustness), then M6 topology benchmark (§7.7)*
+*Chamber corpus: two chambers, two models, ~12.5k cells — see `docs/chamber-results.md`*
+*Next: M7 Phase 3 (mixed-model team, adaptive-feedback arm), then Phase 4 rewrite — spec §8*

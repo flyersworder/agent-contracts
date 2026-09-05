@@ -934,7 +934,7 @@ Reprioritised because the oracle changed what the marginal dollar buys.
 
 | # | work | cost | why now |
 |---|---|---|---|
-| 1 | **Re-score the whole corpus on one backend**, quote `f1_rescored` throughout | $0 | register §31 moved two verdicts; until this is done "no LLM arm beats the rule" is not established |
+| 1 | ~~**Re-score the whole corpus on one backend**~~ **DONE 2026-09-05** | $0 | 2,604 cells / 19,854 design×seed scorings, uniformly `accelerate`. All 6 coverage verdicts and 17/18 Phase 2 verdicts reproduce — §31's contamination was confined to the coverage table. `critique` LT k=30 sits on its MDE boundary and should stop being re-adjudicated. Core-20 is now standard and is **LT-only** (0/1804 WT). |
 | 2 | **Core-20 as a standard reported column** | $0 | pre-empts the coverage-shape objection instead of conceding it |
 | 3 | **WT k=21 varsplit at n≈132** | ~250 WT cells | the model's own pre-registered confirmatory test; converts a non-replication into a law or falsifies it |
 | 4 | **3b `one_shot` menu-order shuffle** | ~$4 | unchanged; still blocking the record claim's bound |
