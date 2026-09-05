@@ -1854,6 +1854,19 @@ nothing measured what governance costs.
    WT 64.3% (193/300). A failure means `verify()` correctly CAUGHT an
    overrun: the mechanism worked every time, the cost prediction did not.
    Report as two numbers or a reader concludes the framework failed.
+
+   **Both WT figures exclude `team` entirely** — all 300 WT `team` cells
+   report `conservation_certified = None`, because its negotiate constant had
+   never been isolated on WT and `is_provisional_calibration` correctly
+   refuses to report conservation for a cell provisioned by a borrowed
+   figure. So WT's H-C is currently missing its most-coordinated rung, which
+   is the rung a reader will most want to see. **Unblocked 2026-09-05**
+   (register §33): the constant is measured (6,102 per call, 27 cells,
+   $0.13, drift audit clean) and WT `team` cells now certify True/False. The
+   300 archived cells cannot be retro-certified — the grant they ran under
+   was the LT-provisioned one — so recovering the number means **re-running
+   WT `team`**, roughly 300 cells at the arm's measured $0.011-0.027 per
+   cell. Cheap, and it should be done before H-C is reported for WT.
 3. **Chain vs loop cannot resolve at n=30.** At the observed spread,
    separating a ~0.03 gap needs n≈55. Reportable as an equivalence bound —
    the analyzer prints the MDE beside every delta so it cannot be read as a

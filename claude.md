@@ -694,6 +694,32 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   +0.001 residualised), and throughput tracks OUR OWN concurrency (flagged 10
   of 11 files). Threshold must scale as 3/√(n−3) — a flat cutoff over-flags
   because a sweep reports the max |r| over 9-15 blocks.
+- **A "provisional until measured" gate is only as good as the measurement's
+  FEASIBILITY** (register §33, 2026-09-05). WT `team` ran 300 cells reporting
+  `conservation_certified = None` because its negotiate constant was never
+  isolated there — the safety property worked perfectly, but the
+  instrumentation to take the measurement did not exist, so the gate silently
+  deleted a number rather than protecting one. Fixed by per-call token
+  attribution (`_CountingLLM.tokens_by_kind`, keyed by
+  `llm_planner.call_kind`). **The offline shortcut was contaminated**: `team`
+  scouts minus `fan_in_spec` scouts at matched budget/role gives +11,118 at
+  k=7 but −4,059 / −2,698 at k=14/21, because the selection loops differ too.
+  **Measured: WT = 6,102 per call, 1.47x LT's 4,138 — the prompt-size
+  prediction was BACKWARDS.** WT's menu is half LT's and `_ROLE_C95` does
+  scale that way, but negotiation cost tracks REASONING length, not prompt
+  length. Not budget-keyed, and that is measured: medians 6,679/4,159/6,692,
+  flat, 1.61x, inside the 4x multiple. **Mid-run at n=1 those read
+  6,679/4,159/2,580 and looked cleanly monotone** — §27's failure mode again:
+  never read a shape off a partial sweep. Re-run WT `team` (~300 cells,
+  $0.011-0.027 each) before reporting WT H-C; archived cells cannot be
+  retro-certified.
+- **Classifier guards must test EXCLUSIVITY, not correctness.** A first-match
+  classifier passes a "does each input classify right?" test whenever rule
+  order happens to favour the right answer — which is how a bare `"designer"`
+  marker counted reconcile calls as negotiation. Assert *exactly one* rule
+  matches each input, and that no marker is a substring of another. Third
+  version of this classifier; the first keyed on `max_tokens` (ambiguous once
+  two caps shared a value), the second on menu size (zero margin).
 - **OpenRouter rate limits**: `deepseek-v4-flash` is hosted by 8 providers; the orchestrator pins providers in order `(Novita, AtlasCloud, Parasail, SiliconFlow)` because per-provider throughput drifts day-to-day (May 9: Parasail was fastest; May 15: Novita was 7× faster). See `evaluation/chamber_pipeline/orchestrator.py:_CountingLLM.DEFAULT_PROVIDER_ORDER` and re-probe before any multi-hour sweep.
 - **Socket timeout**: `socket.setdefaulttimeout(30)` is set at `run_experiment.py` module load — without this, `litellm.completion(timeout=N)` doesn't propagate to the SSL socket and stuck calls hang the process forever.
 - **Max tokens**: `_llm_select_loop` caps output at 200 tokens (selection step) and `llm_only_agent` at **32768** (adjacency emission, was 4096 pre-M4b-fix). DeepSeek v4 Flash is a *reasoning model* — `reasoning_tokens` typically 95% of `completion_tokens`. At 38-node adjacency prompts the 4096 cap was entirely consumed by hidden reasoning before any `content` was emitted (verified via `usage.completion_tokens_details.reasoning_tokens` on a 2-node diagnostic, 2026-05-14).

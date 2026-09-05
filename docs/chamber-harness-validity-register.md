@@ -1842,6 +1842,111 @@ unchanged weights). Two consequences: never schedule arms in blocks, and record
 `n_llm_calls` and `tokens_out` per cell so the question can be asked at all —
 this audit is only possible because they were there.
 
+## 33. A calibration constant was never measurable, so 300 cells reported nothing (2026-09-05)
+
+**WT `team` ran on LT's negotiate constant with its conservation deliberately
+voided — 300 cells at `conservation_certified = None`, across
+`m6-wt-ladder-final` and `m6-wt-team-rerun`.** H-C on WT was missing its
+most-coordinated rung for the whole M6 WT campaign.
+
+This one is unusual for the register: **nothing was wrong, and no number is
+retracted.** `_NEGOTIATE_CALIBRATED_CHAMBERS` held only `"lt"`, and
+`is_provisional_calibration` correctly refused to report conservation for a
+cell provisioned by a borrowed figure. The safety property worked exactly as
+designed. What was defective is that the measurement it waited for **could not
+be taken**.
+
+### Why it could not be recovered offline
+
+A cell records node totals (`scout_a_tokens`, `aggregator_tokens`), but **a
+scout's total is selection PLUS negotiation** and the constant provisions only
+the second. The obvious estimator — `team` scouts minus `fan_in_spec` scouts at
+matched budget and role, both arms using the same two role prompts — gives:
+
+| k | scout_a delta | scout_b delta |
+|---|---|---|
+| 7 | +11,118 | +5,321 |
+| 14 | **−4,059** | — |
+| 21 | **−2,698** | — |
+
+Negative, so the subtraction is not isolating negotiation: the selection loops
+themselves differ between the arms. A confident-looking table from a
+contaminated probe, which is this register's most frequent single pattern (see
+§32's two rejected drift probes). It was not used.
+
+### The fix, and the property that makes it trustworthy
+
+Per-call attribution: `_CountingLLM.tokens_by_kind`, keyed by a prompt
+classifier promoted from `tests/conftest` into `llm_planner` beside the strings
+it matches, and widened from 4 builders to all 13.
+
+The classifier's guard is the part worth copying. The test-only version
+asserted only that each builder classified *correctly*, which a **first-match**
+classifier satisfies whenever rule order happens to favour the right answer —
+and that is precisely how the bare marker `"designer"` counted reconcile calls
+as negotiation for as long as it did (the reconcile system message says "You
+are one of two designers"). The replacement asserts **exactly one marker
+matches each builder**, plus **no marker is a substring of another**, so
+exclusivity no longer depends on rule order at all. Three mutations were run
+against it; each failed the intended test.
+
+### What the measurement said, and the prediction it broke
+
+27 cells, WT `team`, 9 seeds x k in {7,14,21}, 27/27 ok, $0.13, drift audit
+CLEAN (residual r = +0.053).
+
+**WT's negotiate call costs 6,102 tokens — 1.47x LT's 4,138.** The prompt-size
+prediction was **backwards**: WT's menu is 28 experiments against LT's 59 and
+the negotiation prompts render the menu, so WT should be cheaper, and
+`_ROLE_C95` does behave that way (wt/targeted 2,868 against lt/targeted
+10,379). Negotiation does not, because its cost is dominated by **reasoning
+length rather than prompt length** — the regime `_A95_RECONCILE_BY_K` already
+documents at its lowest budget, where a 3+3-name prompt produced a 48.8x
+spread. **Do not extrapolate a negotiate figure from a menu size.**
+
+A single per-chamber constant is defensible, and that is measured rather than
+assumed. Per-call medians across k are **6,679 / 4,159 / 6,692** — flat, not
+monotone, varying **1.61x**, inside `_ROLE_C95`'s stated rule that
+budget-invariance holds while variation stays under the 4x provisioning
+multiple (its own WT figures vary 1.29-1.71x). `_A95_RECONCILE_BY_K` needs
+budget keying because the reconcile prompt lists *both* scouts' selections and
+grows with k; a negotiation prompt lists one claim and does not.
+
+**A methodological note on reading a partial run.** Mid-sweep, with k=21 at
+n=1, the three medians read 6,679 / 4,159 / 2,580 and looked cleanly monotone
+— which would have argued for budget keying. At n=9 the last figure is 6,692
+and the shape is flat. A single draw from an 4.5x-spread distribution
+supported a confident structural reading of the opposite shape. This is §27's
+failure mode in a new place: **do not read a shape off a partial sweep.**
+
+### The caveat that travels with the constant
+
+Within-budget spread is **13.4x / 8.1x / 4.5x**, worst at the smallest budget —
+the same shape as the aggregator's, and for the same reason. The 4x multiple
+does not cover that tail, so a `team` conservation failure at WT k=7 should be
+read as a forecast miss and not a mechanism failure, exactly as §12/§6 require
+for `a95`.
+
+Verified end to end: WT `team` cells now report True/False. **The negotiate
+term is not the binding one** — a cell spending 8,935 tokens per negotiate call
+conserved, while one spending 3,240 did not. So this unblocks the measurement
+without being the thing that decides its outcome.
+
+### Structural fix
+
+`_NEGOTIATE_CALIBRATED_CHAMBERS` is now **derived** from
+`_C95_NEGOTIATE_BY_CHAMBER` rather than maintained beside it. The old design
+held the constant in one place and the calibrated set in another, with the
+neighbouring `_PROVISIONAL_CALIBRATION` block carrying a comment warning that a
+stale entry "silently voids conservation for the whole sweep". A warning
+comment is not a guard.
+
+**Generalisable lesson**: a safety mechanism that voids a result until a
+measurement lands is only as good as the *measurability* of that measurement.
+Before shipping a "provisional until measured" gate, check that the
+instrumentation to take the measurement exists — otherwise the gate does not
+protect a number, it silently deletes one.
+
 ## How to add an entry
 
 1. Measure the effect on the result — do not assert it. Residualise on
