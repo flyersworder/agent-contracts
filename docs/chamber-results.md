@@ -67,6 +67,109 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## THE ORACLE PROBE (2026-09-09): the task is NOT solved by coverage — headroom exists at every budget and no arm moved toward it
+
+The top-ranked threat was "the task is coverage-shaped, so a coverage rule
+tying every LLM arm is a benchmark artefact". It was being *scoped*, not
+measured. `oracle_probe.py` measures it, LLM-free and for $0, using the
+ground truth as an oracle: forward-greedy selection on true mean F1 plus a
+one-swap local search (a lower bound on the best reachable set), and a
+static ranking of experiments by their mean marginal gain over 20 random
+contexts. Search used PC seeds 0–4; **everything below is re-scored at
+disjoint seeds 100–108** to remove the winner's curse, so the oracle numbers
+are unbiased for the sets they name. Same machine and BLAS backend
+(Accelerate) as `rescored-single-backend.parquet`; the LLM arms are quoted
+from that file (seeds 0–8; the coverage rule re-scored at both seed sets
+agrees to within 0.013, so the two are comparable at that resolution).
+
+| | oracle set | oracle ranking | coverage rule | best LLM arm | random |
+|---|---|---|---|---|---|
+| LT k=6 | **0.273** | 0.239 | 0.176 | 0.207 (loop) | 0.171 |
+| LT k=30 | 0.437 | **0.483** | 0.437 | 0.432 (`one_shot`), 0.423 (loop) | 0.369 |
+| LT k=45 | 0.450 | 0.449 | 0.429 | 0.420 (loop) | 0.398 |
+| WT k=7 | **0.341** | 0.249 | 0.214 | 0.177 (`one_shot`) | 0.186 |
+| WT k=14 | **0.374** | 0.327 | 0.231 | 0.245 (loop) | 0.196 |
+| WT k=21 | **0.391** | 0.337 | 0.291 | 0.266 (loop) | 0.219 |
+
+`runs/oracle-probe-{lt,wt}-{greedy,summary,context,fresh}.parquet`,
+`oracle-probe-static-rank10.parquet`, `oracle-probe-lt-core.parquet`.
+
+**1. Headroom exists at every budget on both chambers.** Best oracle minus
+best arm: LT **+0.07 / +0.05 / +0.03**, WT **+0.16 / +0.13 / +0.10**. The
+coverage rule is not the ceiling; it is the plateau every policy we built
+converged to. On WT an oracle set of **7** experiments (0.341) beats every
+arm at **21** (0.291).
+
+**2. On LT the headroom is in the core subgraph, not the apparatus edges.**
+Core-20 at k=30: oracle ranking **0.294**, coverage rule 0.234, loop 0.226.
+The +0.05 full-graph gain is +0.06–0.07 on the 20 case-study variables. This
+retires the reading (§28) that the LLM's only possible edge over a rule lives
+in "did you buy the experiment that makes this setting vary".
+
+**3. The headroom is mostly a RANKING, not an interaction, at the level we
+can measure.** Marginal gain of an experiment varies across random contexts
+with sd 0.025–0.028 on LT against a measured noise floor of 0.024 for a
+5-seed gain, and 0.032–0.042 on WT against 0.039 — i.e. context dependence
+is not separable from PC noise here. Consistent with that, a static top-k by
+mean marginal gain reaches or beats the greedy set on LT at every budget
+(greedy is a weak optimiser under this noise) and reaches 73–87% of the
+oracle set on WT; the residual on WT at k=7 (0.249 vs 0.341) is where sets
+matter. Practical consequence: the missing knowledge is *which experiments
+are informative*, a per-experiment property, not a combinatorial one.
+
+**4. No arm moved toward it.** Score each arm's actual purchases on the
+oracle's marginal-gain scale (mean gain of the experiments bought, ×1000):
+
+| | LT k=6 | LT k=30 | LT k=45 | WT k=7 | WT k=14 | WT k=21 |
+|---|---|---|---|---|---|---|
+| random | 9.0 | 9.7 | 9.9 | 1.1 | 1.0 | 1.0 |
+| loop | 10.9 | 9.6 | 9.9 | 1.6 | 2.8 | 1.9 |
+| `one_shot` | 7.1 | 9.6 | 9.6 | 2.4 | 2.2 | 0.9 |
+| `critique` | 10.0 | 9.9 | 9.8 | 1.5 | 1.2 | 1.0 |
+| `shared_blackboard` | 6.0 | 9.3 | 9.3 | 1.8 | 1.8 | 1.4 |
+| `team` | — | 8.4 | — | — | 1.4 | 1.1 |
+| coverage rule | 9.3 | 9.7 | 9.4 | 1.8 | 1.6 | 1.6 |
+
+Every LLM arm, single or multi-agent, buys experiments whose oracle value is
+indistinguishable from a random draw's. The topologies did not differ on
+this axis because none of them had anything to coordinate: **coordination
+among agents that all lack the relevant knowledge cannot create it.**
+
+**5. Is the ranking describable?** Partly, on LT: apparatus-setting
+experiments gain +0.014 at any strength; source experiments gain +0.002 at
+mid and **hurt (−0.009) at strong** — strong interventions on the light
+sources push sensors off the linear regime Fisher-Z assumes. But a
+one-line rule built from that (mid-only coverage, or coverage excluding
+strong-source experiments) recovers only +0.028 at k=6 and +0.015 at k=45,
+nothing at k=30 (`oracle-probe-lt-rules.parquet`). The ranking's power is
+the sum of many small per-experiment differences (sd 0.010 across the
+menu), not one feature. On WT the per-experiment means are within noise of
+each other (sd 0.009) and the set effect dominates at small k. Whether an
+agent can learn the ranking WITHOUT ground truth — from the adjacency it
+has recovered so far — is exactly the adaptive-feedback arm (spec §8.3
+item 3d), which this result promotes from optional to the most informative
+next experiment: it is the only design whose success would be evidence
+that the headroom is reachable, and whose failure would bound it.
+
+**What this does to the paper.** The scoping sentence for threat 6 is
+withdrawn: the task is not coverage-shaped in the sense that matters.
+Coverage is where uninformed selection saturates; a ground-truth ranking
+sits 0.03–0.16 above it at every budget on both chambers, in the core
+subgraph on LT. The negative topology result is therefore stronger, not
+weaker — room existed, and no topology found it — and every arm now has a
+proper distance-from-optimum: LT arms sit at 85–96% of the oracle, WT arms
+at 52–68%. Report the oracle curve beside every results table.
+
+**Caveats.** (a) The oracle uses the ground truth; it bounds what *any*
+policy could reach, not what an agent could learn. (b) Greedy+swap is a
+lower bound on the optimum; the true ceiling is at least this high. (c) The
+ranking was learned from 20 contexts × 5 seeds; noise in learning can only
+make it worse, never inflate the fresh-seed evaluation. (d) Ranking learned
+at one budget transfers imperfectly (pooled ranking is 0.015 lower on LT,
+higher on WT at small k). (e) One BLAS backend, as everything else here.
+
+---
+
 ## THE COVERAGE ORACLE (2026-09-01): an LLM-free rule matches every LLM arm
 
 > **CORRECTED 2026-09-02 — the tables below crossed BLAS backends, and two
