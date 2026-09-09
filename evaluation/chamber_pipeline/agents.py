@@ -43,6 +43,7 @@ import pandas as pd
 from .inference import pool_experiment_data, run_pc
 from .llm_planner import (
     build_adjacency_prompt,
+    build_feedback_select_prompt,
     build_planner_select_prompt,
     build_reasoner_select_prompt,
     build_select_prompt,
@@ -53,6 +54,9 @@ from .llm_planner import (
 from .menu_taxonomy import coverage_ordered, partition_pools_by_variable
 from .wt_menu_taxonomy import (
     coverage_ordered as wt_coverage_ordered,
+)
+from .wt_menu_taxonomy import (
+    experiment_variable as _wt_experiment_variable,
 )
 from .wt_menu_taxonomy import (
     partition_pools_by_variable as wt_partition_pools_by_variable,
@@ -652,7 +656,7 @@ def _default_llm() -> LLMCallable:
 # default), build_planner_select_prompt + build_reasoner_select_prompt
 # (M3c). Any callable matching this shape is acceptable; tests can pass
 # stand-ins to verify the loop's role-handoff behaviour.
-PromptBuilder = Callable[[list[str], int, list[str] | None], list[dict[str, str]]]
+PromptBuilder = Callable[..., list[dict[str, str]]]
 
 
 def _says_stop(response: Any, stop_token: str) -> bool:
@@ -679,6 +683,11 @@ def _says_stop(response: Any, stop_token: str) -> bool:
     return lines[-1].strip(" .!*`'\"").upper() == stop_token.upper()
 
 
+#: `(chosen_so_far, dfs_so_far) -> feedback text or None`, called once per
+#: step by `_llm_select_loop` when an arm supplies it.
+FeedbackFn = Callable[[list[str], list[pd.DataFrame]], str | None]
+
+
 def _llm_select_loop(
     adapter: ContractedChamberAgent,
     llm: LLMCallable,
@@ -691,6 +700,7 @@ def _llm_select_loop(
     temperature: float | None = None,
     exclude: set[str] | None = None,
     stop_token: str | None = None,
+    feedback_fn: FeedbackFn | None = None,
 ) -> tuple[list[str], list[pd.DataFrame]]:
     """Step `spend` times: prompt LLM for one experiment, query, repeat.
 
@@ -777,7 +787,14 @@ def _llm_select_loop(
         # `actual_spend <= len(available)` guarantees this is non-empty at
         # every step.
         selectable = [m for m in menu if m not in all_chosen]
-        messages = prompt_builder(selectable, remaining, all_chosen)
+        if feedback_fn is None:
+            messages = prompt_builder(selectable, remaining, all_chosen)
+        else:
+            # The adaptive arm: the builder is handed what the data bought
+            # so far has revealed, computed by the caller from `dfs`.
+            messages = prompt_builder(
+                selectable, remaining, all_chosen, feedback=feedback_fn(chosen, dfs)
+            )
         # See `_SELECTION_MAX_TOKENS` for why 200 was untenable once
         # providers began counting reasoning tokens against `max_tokens`.
         # Note the cap is NOT a hard bound when `reasoning.effort` is set:
@@ -956,6 +973,109 @@ def llm_pc_agent(
 
     pooled = pool_experiment_data(dfs, nodes)
     return run_pc(pooled, nodes, alpha=pc_alpha, seed=seed)
+
+
+def _experiment_target(name: str, nodes: list[str]) -> str | None:
+    """The variable a menu entry perturbs, on either chamber; None if unparsable."""
+    target = _parse_target(name)
+    if target is not None:
+        return target
+    try:
+        return _wt_experiment_variable(name, nodes)
+    except ValueError:
+        return None
+
+
+def summarize_estimate(
+    adjacency: pd.DataFrame,
+    menu: list[str],
+    chosen: list[str],
+    nodes: list[str],
+    *,
+    max_listed: int = 25,
+) -> str:
+    """Render the current PC estimate as feedback keyed by MENU entries.
+
+    Three facts the loop otherwise never sees: how many edges the estimate
+    holds, which still-selectable entries perturb a variable no edge has
+    reached, and which perturb a variable already connected. Node names
+    appear only through the menu entries that encode them.
+    """
+    n_edges = int(adjacency.values.sum())
+    connected = {n for n in nodes if adjacency.loc[n].sum() > 0 or adjacency[n].sum() > 0}
+    unspent = [m for m in menu if m not in chosen]
+    unreached = [m for m in unspent if (t := _experiment_target(m, nodes)) and t not in connected]
+    reached = [m for m in unspent if (t := _experiment_target(m, nodes)) and t in connected]
+
+    def render(names: list[str]) -> str:
+        if not names:
+            return "(none)"
+        shown = ", ".join(names[:max_listed])
+        return shown + (
+            f", ... ({len(names) - max_listed} more)" if len(names) > max_listed else ""
+        )
+
+    return (
+        f"PC on the {len(chosen)} experiments bought so far finds {n_edges} directed "
+        f"edge(s) among {len(connected)} of {len(nodes)} variables.\n"
+        f"Menu entries that perturb a variable NO edge has reached yet: {render(unreached)}\n"
+        f"Menu entries that perturb a variable already connected: {render(reached)}"
+    )
+
+
+def adaptive_feedback_agent(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
+    temperature: float | None = _DEFAULT_TEMPERATURE,
+    feedback_interval: int = 5,
+) -> pd.DataFrame:
+    """The loop, plus what the data has revealed so far in every prompt.
+
+    Identical to `llm_pc_agent` in budget, contract, call count and final
+    inference. The one difference: every `feedback_interval` purchases PC
+    runs on the pooled data bought so far and its estimate is summarised
+    into the next prompts (`summarize_estimate`). Pre-registered as the
+    test of whether the oracle probe's headroom is LEARNABLE without ground
+    truth (spec 2026-08-29 s8.7 row 7): the prediction is that its purchases
+    sit above random's on the oracle's marginal-gain scale and its F1 above
+    the coverage rule at LT k=30.
+
+    The intermediate PC runs cost no tokens. They lengthen the prompt, so
+    this arm's per-call spend is NOT covered by `llm_pc`'s calibration and
+    must be measured before any conservation figure is quoted for it.
+    """
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = list(adapter.available_experiments())
+
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+
+    llm = llm or _default_llm()
+    last: dict[str, str | None] = {"text": None}
+
+    def feedback(chosen: list[str], dfs: list[pd.DataFrame]) -> str | None:
+        if dfs and len(dfs) % feedback_interval == 0:
+            estimate = run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+            last["text"] = summarize_estimate(estimate, menu, chosen, nodes)
+        return last["text"]
+
+    _chosen, dfs = _llm_select_loop(
+        adapter,
+        llm,
+        model,
+        seed,
+        prompt_builder=build_feedback_select_prompt,
+        temperature=temperature,
+        feedback_fn=feedback,
+    )
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
 
 
 def uncontracted_agent(

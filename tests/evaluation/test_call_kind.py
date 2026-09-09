@@ -18,6 +18,7 @@ from evaluation.chamber_pipeline.llm_planner import (
     build_adjacency_prompt,
     build_batch_select_prompt,
     build_critique_prompt,
+    build_feedback_select_prompt,
     build_negotiate_propose_prompt,
     build_negotiate_revise_prompt,
     build_planner_select_prompt,
@@ -44,6 +45,8 @@ ALL_BUILDERS: list[tuple[str, list[dict[str, str]], str]] = [
     ("reasoner", build_reasoner_select_prompt(MENU, 3, ["uniform_a"]), "select"),
     ("scout_broad", build_scout_broad_prompt(MENU, 3, None), "select"),
     ("scout_targeted", build_scout_targeted_prompt(MENU, 3, None), "select"),
+    ("feedback_none", build_feedback_select_prompt(MENU, 3, None, None), "select"),
+    ("feedback", build_feedback_select_prompt(MENU, 3, ["uniform_a"], "3 edges"), "select"),
     (
         "uncontracted",
         build_uncontracted_select_prompt(MENU, 3, ["uniform_a"]),
