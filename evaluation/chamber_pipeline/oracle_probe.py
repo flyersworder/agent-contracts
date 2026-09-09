@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -111,12 +112,26 @@ def score(chamber: str, names: Sequence[str], seeds: Sequence[int]) -> tuple[flo
     f1s: list[float] = []
     cores: list[float] = []
     for s in seeds:
-        predicted = run_pc(pooled, nodes, alpha=alpha, seed=s)
+        predicted = run_pc(pooled, nodes, alpha=alpha, seed=s, max_rows=_pc_max_rows())
         f1s.append(f1_edges(predicted, truth))
         cores.append(
             f1_edges(predicted.loc[core, core], truth.loc[core, core]) if core else float("nan")
         )
     return float(np.mean(f1s)), float(np.mean(cores))
+
+
+def _pc_max_rows() -> int | None:
+    """PC row cap for every scoring call, overridable via ORACLE_PC_MAX_ROWS.
+
+    An environment variable rather than an argument because `Scorer`'s
+    workers are spawned processes: the environment reaches them, a module
+    global set in `main` does not. Measured 2026-09-09: the best selection
+    CHANGES with this cap (register §34), so it is stamped into every output.
+    """
+    raw = os.environ.get("ORACLE_PC_MAX_ROWS")
+    if raw is None:
+        return pc_call_defaults()["max_rows"]  # type: ignore[no-any-return]
+    return None if raw.lower() == "none" else int(raw)
 
 
 def _score_task(task: tuple[str, tuple[str, ...], tuple[int, ...]]) -> tuple[float, float]:
@@ -156,7 +171,7 @@ def _stamp(chamber: str, names: Sequence[str]) -> dict[str, Any]:
         "selection_key": selection_key(chamber, CONFIGURATION, names),
         "n_experiments": len(names),
         "pc_alpha": float(defaults["alpha"]),
-        "pc_max_rows": defaults["max_rows"],
+        "pc_max_rows": _pc_max_rows(),
         "blas_backend": fp["blas"],
         "platform_tag": fp["platform"],
     }
@@ -328,7 +343,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--corpus", default="runs/rescored-single-backend.parquet")
     p.add_argument("--out", default="runs/oracle-probe")
+    p.add_argument(
+        "--pc-max-rows",
+        default=None,
+        help="PC row cap for every score (default: the pipeline's 300). Sets ORACLE_PC_MAX_ROWS.",
+    )
     a = p.parse_args(argv)
+    if a.pc_max_rows is not None:
+        os.environ["ORACLE_PC_MAX_ROWS"] = str(a.pc_max_rows)
 
     chamber = a.chamber
     budgets = (
