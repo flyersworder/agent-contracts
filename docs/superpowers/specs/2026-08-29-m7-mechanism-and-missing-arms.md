@@ -940,6 +940,8 @@ Reprioritised because the oracle changed what the marginal dollar buys.
 | 4 | **3b `one_shot` menu-order shuffle** | ~$4 | unchanged; still blocking the record claim's bound |
 | 5 | **3a cross-vendor replication** | ~$20–30 | **value DOWNGRADED**: if an LLM-free rule ties every LLM arm, a second vendor mostly confirms that a second vendor also ties the rule. Still answers a reviewer reflex, no longer the central threat |
 | 6 | **Lagged-estimator variant** (coverage does not bind) | engineering, $0 API | the only work that answers the top-ranked threat; the difference between a solid paper and one that is hard to reject |
+| 6′ | ~~Lagged-estimator variant~~ **SUPERSEDED 2026-09-09 by the oracle probe** | $0, done | No lagged ground truth ships with the chambers, so a temporal estimator has nothing to score against. Instead `oracle_probe.py` MEASURED the threat: a ground-truth oracle sits +0.03–0.07 (LT) and +0.10–0.16 (WT) above every arm at every budget, in the core-20 subgraph on LT, and every LLM arm's purchases score as random on the oracle's marginal-gain scale. **Threat 6 is withdrawn as a scope limit and reported as a result**: coverage is the plateau uninformed selection reaches, not the ceiling. See `docs/chamber-results.md` "THE ORACLE PROBE". |
+| 7 | **Adaptive-feedback arm** (3d) — PROMOTED from optional | engineering + ~$3–5 | the only design whose success would show the oracle headroom is learnable WITHOUT ground truth; its failure bounds it. Pre-register: loop + current adjacency estimate, LT k=30, n=30, prediction = moves the arm's mean oracle-gain above random's (9.7×10⁻³) and F1 above the coverage rule. |
 
 ## 7. Non-goals
 

@@ -758,6 +758,20 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   Substituting `min(n_a,n_b)` inflates the MDE **1.23×** and flips WT k=21 on
   its own. Use `2.8·pooled_sd·√(1/n_a + 1/n_b)`. Coverage arms will always hit
   this, because a near-deterministic rule re-picks designs.
+- **COVERAGE IS A PLATEAU, NOT THE CEILING — measured 2026-09-09
+  (`oracle_probe.py`, results doc "THE ORACLE PROBE").** A ground-truth
+  oracle (greedy+swap set, and a static ranking by mean marginal gain)
+  re-scored at PC seeds DISJOINT from the search seeds sits above every arm
+  at every budget: LT +0.07/+0.05/+0.03, WT +0.16/+0.13/+0.10; LT core-20
+  0.294 vs the rule's 0.234 at k=30. Every LLM arm's purchases score as a
+  random draw on the oracle's marginal-gain scale. **Threat "the task is
+  coverage-shaped" is no longer scoped, it is refuted** — the negative
+  topology result got stronger. Three rules from doing it: (1) an oracle's
+  own search score is a max over noisy candidates — ALWAYS re-score the
+  chosen set at fresh seeds before quoting it (greedy read 0.474 at LT k=30
+  in-search and 0.432 fresh); (2) greedy is a weak optimiser under PC noise —
+  a static ranking beat the greedy set on LT; (3) the chambers ship NO
+  lagged ground truth, so the lagged-estimator idea is dead, not deferred.
 - **Core-20 is LT-only.** `f1_core_rescored` is 800/800 on LT and 0/1804 on WT
   — `LT_CASE_STUDY_NODES` has no WT counterpart. "No LLM arm beats round-robin
   coverage on the non-trivial subgraph" is an LT-only claim.
@@ -1299,9 +1313,9 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-05 (M7: per-call token attribution, WT negotiate calibration, single-backend re-score)*
+*Last Updated: 2026-09-09 (oracle probe: coverage is a plateau, not the ceiling)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
 *Chamber corpus: two chambers, two models, ~12.5k cells — see `docs/chamber-results.md`*
-*Next: M7 Phase 3 (mixed-model team, adaptive-feedback arm), then Phase 4 rewrite — spec §8*
+*Next: AAMAS 2027 main track (abstract 1 Oct, paper 8 Oct 2026; skeleton in `paper/aamas2027/`, untracked). Adaptive-feedback arm promoted to the one experiment worth running first — spec §8.7 row 7*
