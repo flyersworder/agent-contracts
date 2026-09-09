@@ -777,6 +777,19 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   is a max over noise, gate it on the measured floor); (2) greedy is a weak
   optimiser under PC noise — a static ranking beat the greedy set on LT; (3) the chambers ship NO
   lagged ground truth, so the lagged-estimator idea is dead, not deferred.
+- **FEEDBACK MOVES AN ARM OFF THE RANDOM LINE, BUT NOT PAST THE PLATEAU —
+  measured 2026-09-09 (`adaptive_feedback`, spec §8.7 row 7, pre-registered;
+  results doc "THE ADAPTIVE-FEEDBACK ARM").** The loop plus a PC estimate of
+  the data bought so far in the prompt every 5 purchases, LT k=30, n=30,
+  interleaved with a fresh loop control: purchases score above random on the
+  oracle scale (10.6 vs 9.7 ×10⁻³, MDE 0.79 — on the boundary, ratio 1.02,
+  Welch p=0.0065; the first LLM arm on LT to do so) and the arm resolves
+  above the same-sweep loop (+0.027, MDE 0.013), but it does NOT beat the
+  coverage rule (+0.008, MDE 0.017). 10% of the random→oracle range, 17% of
+  the rule→oracle headroom. Say all three; a reader who hears only "beats the
+  loop" over-reads it. Cheaper per cell than the loop (336 vs 395 s) despite
+  a 53% longer prompt. 1.8% of its picks fell back to random (loop: 0) —
+  biases AGAINST the arm, report it, don't correct it. Drift audit clean.
 - **Core-20 is LT-only.** `f1_core_rescored` is 800/800 on LT and 0/1804 on WT
   — `LT_CASE_STUDY_NODES` has no WT counterpart. "No LLM arm beats round-robin
   coverage on the non-trivial subgraph" is an LT-only claim.
@@ -1318,9 +1331,9 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-09 (oracle probe: coverage is a plateau, not the ceiling)*
+*Last Updated: 2026-09-09 (adaptive-feedback arm run: off the random line, not past the plateau)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
 *Chamber corpus: two chambers, two models, ~12.5k cells — see `docs/chamber-results.md`*
-*Next: AAMAS 2027 main track (abstract 1 Oct, paper 8 Oct 2026; skeleton in `paper/aamas2027/`, untracked). Adaptive-feedback arm promoted to the one experiment worth running first — spec §8.7 row 7*
+*Next: AAMAS 2027 main track (abstract 1 Oct, paper 8 Oct 2026; skeleton in `paper/aamas2027/`, untracked). Adaptive-feedback arm run at LT k=30 (spec §8.7 row 7); WT replication and the LT budget ends are the remaining optional experiments*

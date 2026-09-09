@@ -10,7 +10,7 @@ before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-01**: 18,063 cells, **$108.39**, **zero errored cells**,
+**Corpus as of 2026-09-09**: 18,123 cells, **$114.54**, **zero errored cells**, (2026-09-01 read 18,063 / $108.39; the adaptive-feedback sweep adds 60 cells and $6.15)
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
 LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The table below is
@@ -43,6 +43,8 @@ the arithmetic of record.)
 | `runs/m7-coverage-lt-ends.parquet` | 180 | $0.00 | the coverage rule at LT k=6 and k=45, LLM-free |
 | `runs/m7-coverage-wt.parquet` | 300 | $0.00 | WT random at 3 budgets; the LT-only coverage arm correctly skipped |
 | `runs/m7-coverage-wt2.parquet` | 300 | $0.00 | the WT coverage arms, breadth and depth, 3 budgets x 50 seeds |
+| `runs/m7-adaptive-lt.parquet` | 60 | $6.15 | `adaptive_feedback` vs same-sweep `llm_pc`, LT k=30, n=30 each (pre-registered, spec §8.7 row 7) |
+| `runs/oracle-probe-{lt,wt}-*.parquet` | — | $0.00 | ground-truth oracle sets, static ranking, policies, arm purchase gains (`oracle_probe.py`) |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -64,6 +66,72 @@ cross-backend gap is ΔF1 = 0.055, larger than most effects reported below.
 Chambers: light tunnel (LT) 38 nodes / 57 edges / 59-experiment menu; wind
 tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
+
+---
+
+## THE ADAPTIVE-FEEDBACK ARM (2026-09-09): the headroom is partly learnable without ground truth — and the effect is small
+
+The oracle probe (next section) left one question that decides how the
+paper reads: is the headroom above the coverage plateau *learnable* by an
+agent that never sees the ground truth, or is it visible only to an oracle
+that does? `adaptive_feedback` is the loop (`llm_pc`) with one change: every
+five purchases it runs PC on the data bought so far and puts a menu-keyed
+summary of the current estimate in the selection prompt (edges found so far;
+which menu entries perturb variables the estimate has not yet connected).
+Same budget, same call count, same contract. Pre-registered in spec §8.7
+row 7 before launch (commit `33dcc6d`): LT k=30, n=30, interleaved with a
+fresh `llm_pc` control in the same sweep so provider drift cannot land on one
+arm. `runs/m7-adaptive-lt.parquet`, 60/60 ok, $6.15, 1.2 h on six workers,
+`deepseek-v4-flash-0731`, macOS/Accelerate (matching the re-scored corpus).
+
+**The two pre-registered predictions split**, re-scored at 9 PC seeds and
+clustered by distinct design (30 distinct designs for the adaptive arm, 29
+for the loop):
+
+| prediction | measured | MDE | verdict |
+|---|---|---|---|
+| P1: purchases above random on the oracle marginal-gain scale (random 9.7×10⁻³) | adaptive **10.6×10⁻³**, Δ **+0.81×10⁻³** | 0.79×10⁻³ | **RESOLVED**, on the boundary (ratio 1.02; Welch p=0.0065). Same-sweep loop: 9.5×10⁻³, Δ −0.26, ns. |
+| P2: F1 above the coverage rule (0.437 at fresh seeds) | adaptive **0.445**, Δ **+0.008** | 0.017 | **below MDE — not supported** |
+
+Against the same-sweep loop the arm resolves cleanly: **+0.027 F1
+(0.445 vs 0.418), MDE 0.013, 2.1× the bound**. Core-20 moves the same way
+but does not resolve (+0.013, MDE 0.015; 0.236 vs 0.223, rule 0.228).
+
+**How to read it.** The arm did what the oracle said an agent could do
+and the coverage plateau said it could not: its purchases score above
+random on the oracle's own scale, the first LLM arm on LT to do so, and it
+beats the loop it is built from. But it covers **10% of the random→oracle
+range** on the purchase scale and **17% of the rule→oracle headroom** in F1
+(0.437 → 0.483). It reaches the plateau; it does not climb past it. The
+paper's sentence is therefore: *feedback from the data is the first thing
+that moves an LLM arm off the random line on the oracle scale, and the
+first single-loop change that resolves above the loop at the middle
+budget — and it is still not enough to beat a ten-line coverage rule.* The
+oracle headroom is real and partly learnable, and most of it is still
+unclaimed.
+
+**Costs and hygiene.** The arm is *cheaper* than the loop per cell
+(336 s vs 395 s; 68k vs 78k output tokens) despite a 53% longer prompt
+(28k vs 18k input) — the model reasons less when told what it already
+knows. Two things to carry into the write-up:
+
+- **Selection fallbacks: 16 of 900 picks (1.8%) in 10 of 30 adaptive cells
+  went to `rng.choice`; the loop had 0.** The longer prompt occasionally
+  yields an unparsable reply. This biases the arm *toward* random, so it
+  understates rather than inflates the effect; cells with a fallback scored
+  0.455 vs 0.445 without (n=10 vs 20, noise). Report it; do not correct
+  for it.
+- **Drift audit CLEAN** (`analyze_drift.py`): window overlap 0.99, no block
+  trending, tokens per call flat across the sweep for both arms.
+
+**Not yet done, and the order to do it in:** WT replication (the only
+chamber where an existing arm, the loop, already beats random on the oracle
+scale — if feedback stacks on top of that, the learnability claim gets a
+second chamber); the small and large LT budgets (the middle budget is where
+skill peaks, so k=30 is the friendliest test, and a k=6 result would say
+whether feedback helps where selection variance is largest); and a
+feedback-interval ablation (5 was a guess). None of these is required for
+the AAMAS submission; the k=30 result is the one the abstract needs.
 
 ---
 
