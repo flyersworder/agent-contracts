@@ -790,6 +790,28 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   loop" over-reads it. Cheaper per cell than the loop (336 vs 395 s) despite
   a 53% longer prompt. 1.8% of its picks fell back to random (loop: 0) —
   biases AGAINST the arm, report it, don't correct it. Drift audit clean.
+- **THE HEADROOM IS A DIFFERENT REGIME, NOT A BETTER COVERAGE — measured
+  2026-09-09 evening (results doc "WHAT THE HEADROOM IS").** In every LT
+  experiment the SAME 20 columns vary (light sources, polarisers, LED
+  currents, sensors); the intervened apparatus setting is CONSTANT inside its
+  own experiment and varies only across the pool. So light-source experiments
+  add no variation (they shift the range — `red` 171–255 vs 0–85 — which is
+  the harm) and the 18 apparatus settings are the only informative buys, each
+  a two-level contrast, so DEPTH on them pays. One line — "sensor-setting
+  entries mid/strong first, fill from apparatus, never light sources/`osr`" —
+  scores 0.468 vs the rule's 0.437 at k=30 (RESOLVED, 67% of rule→oracle;
+  purchases 17.5 vs oracle 17.8). Data-only learners (uncertainty sampling,
+  family bandit) score BELOW the rule; uncertainty sampling buys exactly the
+  spurious-edge makers. **And the models' data-free prior is NEGATIVELY
+  correlated with the oracle across three models and two vendors**
+  (deepseek flash ρ −0.37, gpt-5.6-sol −0.28, glm-5.3-flash +0.07; 29/29
+  parsed draws put the strong light-source interventions in the top 30 with
+  "strong root interventions give signal-to-noise"; the oracle ranks them
+  last). A frontier model is not better, only more consistent. The LLM arms
+  carry the opposite of the needed knowledge; the fix is documentation or
+  learning, not model scale. **Rules:** (1) before calling a ranking "not
+  describable", try rules that ABANDON coverage, not only reorder it; (2) the
+  next feedback arm must report per-experiment WHAT VARIED, not coverage.
 - **Core-20 is LT-only.** `f1_core_rescored` is 800/800 on LT and 0/1804 on WT
   — `LT_CASE_STUDY_NODES` has no WT counterpart. "No LLM arm beats round-robin
   coverage on the non-trivial subgraph" is an LT-only claim.

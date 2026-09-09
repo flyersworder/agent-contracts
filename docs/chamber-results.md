@@ -69,6 +69,115 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## WHAT THE HEADROOM IS (2026-09-09, evening): a one-line rule claims two-thirds of it, data-only learners claim none, and the model's prior points the wrong way
+
+Three LLM-free probes and one $0.37 LLM probe, all LT, all scored at PC
+seeds 100–108 like the oracle. Files: `runs/learners-lt.parquet`,
+`runs/depth-rule-lt.parquet`, `runs/llm-prior-lt.parquet` (+`-2`).
+Scripts in the session scratchpad (`learners.py`, `depth_rule.py`,
+`llm_prior.py`); worth promoting to the pipeline if the paper quotes them.
+
+**1. Data-only learners do not climb past the rule.** Every learner sees
+only the data it bought. LT k=30, n=10 rule seeds:
+
+| learner | F1 | vs rule 0.437 [MDE] | purchases on oracle scale (×10⁻³) |
+|---|---|---|---|
+| uncertainty sampling (bootstrap edge instability, B=8) | 0.267 ± 0.021 | **−0.170 [0.023] RESOLVED** | 5.9 |
+| uncertainty inside coverage | 0.434 ± 0.014 | −0.003 [0.019] | 9.7 |
+| credit-assignment bandit over (family, strength) | 0.382 ± 0.044 | **−0.056 [0.041] RESOLVED** | 9.2 |
+| perfect family-level prior, one entry per variable (uses ground truth) | 0.434 ± 0.019 | −0.003 [0.022] | 10.0 |
+
+Same picture at k=6 and k=45 (all learners ≤ rule; uncertainty −0.025
+resolved at k=45). Pure uncertainty sampling fails for an instructive
+reason: instability rewards the experiments that CREATE spurious edges, so
+it buys every strong light-source entry (5.0 of 5 possible). And a perfect
+family ordering that still covers every variable ties the rule — so the
+headroom is neither a better estimate nor a better family order.
+
+**2. The headroom is a different regime.** The oracle ranking's top-30
+covers only **15 distinct variables**: 27 of 30 picks are sensor-setting
+experiments (`t_*` ×18, `diode_*` ×9), the same variable bought at two or
+three strengths. Testing that as a rule, n=10, k=30:
+
+| rule | F1 | vs coverage rule [MDE] | rule→oracle | purchases (×10⁻³) |
+|---|---|---|---|---|
+| all 27 sensor-setting entries + 3 other apparatus | 0.462 ± 0.011 | +0.024 [0.017] RESOLVED | 53% | 17.6 |
+| 30 random from sensor-setting + `v_*` + reference (34) | 0.464 ± 0.010 | +0.027 [0.017] RESOLVED | 59% | 17.1 |
+| **sensor-setting mid/strong first (24), fill from the 34** | **0.468 ± 0.018** | **+0.031 [0.021] RESOLVED** | **67%** | 17.5 |
+| 30 random from ALL apparatus incl. `osr_*` (48) | 0.425 ± 0.022 | −0.013 [0.024] | −28% | 14.0 |
+
+**This corrects the oracle-probe section's "a one-line rule recovers some
+of it at the ends and none in the middle"** — the rules tried there were
+all coverage-first. A rule that ABANDONS coverage of the light sources,
+polarisers, LED currents and `osr_*` and spends the freed budget on repeat
+purchases of the sensor settings is one line long and gets two-thirds of
+the way to the oracle, with purchases scoring 17.5 against the oracle's
+own 17.8.
+
+**3. Why, mechanically (measured on the data, not argued).** In EVERY LT
+experiment the same 20 columns vary: `red`, `green`, `blue`, `current`,
+`pol_1`, `pol_2`, `angle_1`, `angle_2`, the six sensors and the six `l_*`
+— whatever the experiment is named. The intervened apparatus setting does
+NOT vary inside its own experiment (`t_ir_2` is the constant 1.0 in
+`uniform_t_ir_2_mid` and the constant 3.0 in `uniform_reference`); it
+varies only ACROSS the pool, as a two-level contrast, once its experiment
+is bought. Consequences: (a) a light-source experiment adds no new
+variation in its own variable — it shifts the range (`red` 171–255 in
+`red_strong` vs 0–85 at reference), which is where the harm comes from;
+(b) the 18 apparatus settings are the only purchases that add information,
+each as one two-level contrast, so one entry per setting is not enough and
+depth pays; (c) "breadth beats depth" (WT, `wt_coverage_min`) is a
+statement about the fat drivers there, not a law — on LT depth on the
+sensor settings beats breadth. `osr_*` is the exception among apparatus
+settings (family gain +2.8 vs `t` +17.3, `diode` +20.1); including it
+costs 0.04.
+
+**4. The models' prior points the wrong way — and it is not a capability
+gap.** Asked with no data to rank all 59 entries by informativeness (names
+only, and with a one-paragraph chamber description), reasoning effort high,
+five draws per condition, `runs/llm-prior-lt-all.parquet`, $0.87 total:
+
+| model | condition | n | Spearman vs oracle (min…max) | top-30 purchases (×10⁻³; random 9.7, oracle 17.8) | top-30 F1 (rule 0.437) |
+|---|---|---|---|---|---|
+| `deepseek-v4-flash-0731` | names only | 4 | **−0.37** (−0.50…−0.12) | 5.7 | **0.323** (below random 0.369) |
+| | + description | 5 | −0.22 (−0.26…−0.14) | 9.1 | 0.438 |
+| `glm-5.3-flash` | names only | 5 | +0.07 (−0.02…+0.15) | 9.3 | 0.421 |
+| | + description | 5 | −0.15 (−0.27…+0.02) | 9.5 | 0.433 |
+| `gpt-5.6-sol` (frontier) | names only | 5 | **−0.28** (−0.37…−0.24) | 9.4 | 0.440 |
+| | + description | 5 | −0.26 (−0.36…−0.04) | 9.4 | 0.437 |
+
+Every one of 29 parsed draws across three models and two vendors puts the
+five strong light-source and polariser interventions in its top 30, and
+all give the same reason: "strong interventions on the roots give the
+largest signal-to-noise for Fisher-Z". The oracle ranks those five
+55th–59th of 59. The frontier model is not better — it is more
+consistently wrong (sd 0.06) — and lands its purchases at exactly random's
+level because it executes coverage tidily ("the reference plus one strong
+intervention per target"). GLM is the only model near zero, for the same
+reason. DeepSeek's four empty-content draws (of 14) are the register §8
+failure mode and are excluded. **The LLM arms do not merely lack the
+relevant knowledge; they carry its opposite, at every model scale we can
+buy** — which is why `team` scores resolved BELOW random on the oracle
+scale and why no LLM arm's purchases beat a random draw on LT. The fix is
+therefore not a better model; it is documentation or learning (item 5).
+
+**5. What this does to the learnability question.** The signal that
+separates the oracle from the rule — which columns vary within an
+experiment and which only across the pool — is visible in the bought data
+after ONE purchase. It is learnable in principle and cheaply. The
+adaptive-feedback arm never saw it: its summary was coverage-shaped (edges
+found; variables unreached). And a prior that must be overridden makes the
+feedback's job harder, not easier. The next feedback design should tell the
+model exactly this (per experiment: what varied, what did not, whether the
+range moved) and nothing about coverage — a pre-registrable prediction that
+it clears the rule. Not required for the AAMAS submission.
+
+**Also corrects** oracle-probe item 5 below ("A one-line rule built from
+that recovers some of it at the ends and none in the middle") — true of
+coverage-first rules only.
+
+---
+
 ## THE ADAPTIVE-FEEDBACK ARM (2026-09-09): the headroom is partly learnable without ground truth — and the effect is small
 
 The oracle probe (next section) left one question that decides how the
@@ -227,8 +336,10 @@ arm that found a little of it was the single loop.
 **5. Is the ranking describable?** Partly, on LT: apparatus-setting
 experiments gain +0.014 at any strength; source experiments gain +0.002 at
 mid and **hurt (−0.009) at strong** — strong interventions on the light
-sources push sensors off the linear regime Fisher-Z assumes. A one-line rule
-built from that recovers some of it at the ends and none in the middle:
+sources push sensors off the linear regime Fisher-Z assumes. A one-line
+**coverage-first** rule built from that recovers some of it at the ends and none
+in the middle (**superseded the same evening — a rule that abandons coverage
+and repeats the sensor settings gets 67% at k=30; see "WHAT THE HEADROOM IS"**):
 mid-only coverage **+0.028** over the rule at k=6 (0.205 vs 0.176), nothing
 at k=30; excluding strong-source experiments **+0.015** at k=45 (0.444 vs
 0.429), nothing elsewhere. The ranking's power at k=30 is the sum of many
