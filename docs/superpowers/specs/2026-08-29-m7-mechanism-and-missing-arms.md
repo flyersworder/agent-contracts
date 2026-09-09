@@ -789,7 +789,7 @@ noise is most of our per-cell spread. **Only valid after clustering by
 selection** (register §24 records the near-miss where it was not). Applies to
 M7 files only — the M6 ladders predate `chosen_experiments`.
 
-**3d. Adaptive feedback — DEMOTED to optional.** Still the right design (loop +
+**3d. Adaptive feedback — ~~DEMOTED to optional~~ PROMOTED 2026-09-09 (see §8.7 row 7; the oracle probe found headroom every arm missed, and this is the one design that tests whether it is learnable without ground truth).** Still the right design (loop +
 current adjacency estimate, LT, one budget, as a bound rather than a branch),
 and its direction is pre-registered by the bagging/boosting framing. But it
 answers a reviewer objection about scope, while 3a answers one about validity.
@@ -920,13 +920,15 @@ measurable before running a model. `analyze_headroom.py`.
 > duplication the action space affords — which is why the effect resolves on
 > the redundant menu and is predicted to be undetectable on the sparse one.
 
-**The threat this framing creates, and the only honest response.** "Your task
-is coverage-shaped, so a coverage rule winning is a benchmark artifact." It is
-correct: §29's ground truth is bipartite, depth 1, zero mediators, and §28
-notes 18 of 38 nodes are pure apparatus sources. **Scope it in the title and
-abstract.** The closable version is that the chambers' depth is TEMPORAL and
-our pooled-i.i.d. reduction discards it; the authors' own WT case study meets
-the same autocorrelation with PCMCI+ rather than a different dataset.
+**The threat this framing creates — MEASURED AND REFUTED 2026-09-09.** "Your
+task is coverage-shaped, so a coverage rule winning is a benchmark artifact."
+~~It is correct ... Scope it in the title and abstract.~~ The oracle probe
+(results doc, "THE ORACLE PROBE") shows the rule is a plateau, not the
+ceiling: a ground-truth oracle sits +0.02–0.07 above every arm at every budget by ranking (5 of 6 resolved)
+and +0.10–0.15 by set on WT, in the core subgraph on LT, and every LLM arm's
+purchases score as random on the oracle's marginal-gain scale. **Do not
+scope it; report it**: room existed and no topology found it. The temporal
+angle is closed — no lagged ground truth exists to score against.
 
 ### 8.7 Sequencing, revised 2026-09-02
 
@@ -940,7 +942,7 @@ Reprioritised because the oracle changed what the marginal dollar buys.
 | 4 | **3b `one_shot` menu-order shuffle** | ~$4 | unchanged; still blocking the record claim's bound |
 | 5 | **3a cross-vendor replication** | ~$20–30 | **value DOWNGRADED**: if an LLM-free rule ties every LLM arm, a second vendor mostly confirms that a second vendor also ties the rule. Still answers a reviewer reflex, no longer the central threat |
 | 6 | **Lagged-estimator variant** (coverage does not bind) | engineering, $0 API | the only work that answers the top-ranked threat; the difference between a solid paper and one that is hard to reject |
-| 6′ | ~~Lagged-estimator variant~~ **SUPERSEDED 2026-09-09 by the oracle probe** | $0, done | No lagged ground truth ships with the chambers, so a temporal estimator has nothing to score against. Instead `oracle_probe.py` MEASURED the threat: a ground-truth oracle sits +0.03–0.07 (LT) and +0.10–0.16 (WT) above every arm at every budget, in the core-20 subgraph on LT, and every LLM arm's purchases score as random on the oracle's marginal-gain scale. **Threat 6 is withdrawn as a scope limit and reported as a result**: coverage is the plateau uninformed selection reaches, not the ceiling. See `docs/chamber-results.md` "THE ORACLE PROBE". |
+| 6′ | ~~Lagged-estimator variant~~ **SUPERSEDED 2026-09-09 by the oracle probe** | $0, done | No lagged ground truth ships with the chambers, so a temporal estimator has nothing to score against. Instead `oracle_probe.py` MEASURED the threat: a ground-truth oracle sits +0.02–0.07 above every arm by ranking (5 of 6 resolved) and +0.10–0.15 by set on WT, in the core-20 subgraph on LT; on LT no LLM arm's purchases beat random on the oracle's marginal-gain scale, on WT only the loop does (~27% of the range). **Threat 6 is withdrawn as a scope limit and reported as a result**: coverage is the plateau uninformed selection reaches, not the ceiling. See `docs/chamber-results.md` "THE ORACLE PROBE". |
 | 7 | **Adaptive-feedback arm** (3d) — PROMOTED from optional | engineering + ~$3–5 | the only design whose success would show the oracle headroom is learnable WITHOUT ground truth; its failure bounds it. Pre-register: loop + current adjacency estimate, LT k=30, n=30, prediction = moves the arm's mean oracle-gain above random's (9.7×10⁻³) and F1 above the coverage rule. |
 
 ## 7. Non-goals
