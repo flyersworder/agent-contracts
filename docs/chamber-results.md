@@ -71,6 +71,17 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ## WHAT THE HEADROOM IS (2026-09-09, evening): a one-line rule claims two-thirds of it, data-only learners claim none, and the model's prior points the wrong way
 
+> **CONDITIONAL ON `pc_max_rows=300` — see register §34 (found the same
+> night).** At 1500 rows the coverage rule scores 0.460 and the 300-row
+> oracle ranking 0.394, the sensor-setting rule 0.386. Everything in this
+> section and the oracle-probe section below is a statement about the
+> estimator at its 300-row cap, not about the chamber. The arm contrasts
+> stand (adaptive − loop is +0.045 at 1500 rows, resolved). A 1500-row
+> oracle is being derived on the VPS; until it lands, the coverage rule is
+> the best policy we hold and "plateau, not ceiling" is withdrawn as a
+> task property.
+
+
 Three LLM-free probes and one $0.37 LLM probe, all LT, all scored at PC
 seeds 100–108 like the oracle. Files: `runs/learners-lt.parquet`,
 `runs/depth-rule-lt.parquet`, `runs/llm-prior-lt.parquet` (+`-2`).
@@ -123,7 +134,20 @@ NOT vary inside its own experiment (`t_ir_2` is the constant 1.0 in
 varies only ACROSS the pool, as a two-level contrast, once its experiment
 is bought. Consequences: (a) a light-source experiment adds no new
 variation in its own variable — it shifts the range (`red` 171–255 in
-`red_strong` vs 0–85 at reference), which is where the harm comes from;
+`red_strong` vs 0–85 at reference). **The sensors do NOT saturate under
+it** (measured: sensor sd and corr(red, ir_1) are 0.78 in `red_strong` vs
+0.77 at reference; no readings pinned at a ceiling), so the earlier
+"pushes sensors off the linear regime" was an assumption and is
+RETRACTED. What is measured instead: the 27 sensor-setting entries + 2
+`v_*` score **0.510** at 9 fresh seeds — above the oracle ranking's
+top-30 (0.483) — and adding ANY 30th experiment lowers it (`+red_strong`
+0.440, `+red_mid` 0.455, `+green_strong` 0.460, `+l_11_mid` 0.456,
+`+reference` 0.467); `red_strong` hurts most by LOSING input→sensor edges
+(9.8 → 6.7 found of the 11 input sources' edges) with 4 more false
+positives, not by spurious sensor–sensor edges (3.0 → 4.1). Whether that
+is a property of pooling shifted regimes or of PC's 300-row subsample
+(`pc_max_rows`) is being tested; if the latter, part of the oracle
+headroom is a harness setting and belongs in the register;
 (b) the 18 apparatus settings are the only purchases that add information,
 each as one two-level contrast, so one entry per setting is not enough and
 depth pays; (c) "breadth beats depth" (WT, `wt_coverage_min`) is a
@@ -160,6 +184,26 @@ relevant knowledge; they carry its opposite, at every model scale we can
 buy** — which is why `team` scores resolved BELOW random on the oracle
 scale and why no LLM arm's purchases beat a random draw on LT. The fix is
 therefore not a better model; it is documentation or learning (item 5).
+
+**4b. Documentation works for the frontier model and not for the flash
+model.** The same ranking prompt with a paragraph quoted from the dataset
+README (all manipulable inputs sampled independently in every experiment;
+mid/strong shift one input's range; apparatus-setting experiments fix one
+setting) — documentation, not the answer:
+
+| model | n parsed | Spearman (min…max) | purchases (×10⁻³) | top-30 F1 |
+|---|---|---|---|---|
+| `deepseek-v4-flash-0731` | 2 of 5 (3 empty) | −0.15 (−0.19…−0.12) | 9.4 | 0.446 |
+| `gpt-5.6-sol` | 5 of 5 | **+0.32** (+0.06…+0.68) | 11.9 (two draws at 15.4) | 0.446 ± 0.021 |
+
+sol's rationale flips to the correct one — "fixed-setting interventions
+rank highest because those variables otherwise have no variance" — in 3
+of 5 draws (those three buy zero strong light-source entries); the other
+two revert to coverage. DeepSeek, given the identical text, restates its
+belief in the document's own words ("larger distributional shifts, more
+detectable dependencies"). **So no model HAS the knowledge, and only the
+frontier model can DERIVE it from the manual, and not reliably.** Files
+`runs/llm-prior-lt-protocol-*.parquet`, $0.59.
 
 **5. What this does to the learnability question.** The signal that
 separates the oracle from the rule — which columns vary within an
@@ -245,6 +289,13 @@ the AAMAS submission; the k=30 result is the one the abstract needs.
 ---
 
 ## THE ORACLE PROBE (2026-09-09, regenerated after review): the task is NOT solved by coverage — headroom exists at every budget and no arm reached it
+
+> **WITHDRAWN AS A TASK PROPERTY THE SAME NIGHT — register §34.** These
+> oracles were derived and scored at `pc_max_rows=300`; at 1500 rows the LT
+> k=30 ranking falls 0.066 BELOW the coverage rule. The tables stand as
+> "best selection for the estimator at 300 rows". Re-derivation at 1500
+> rows is in progress (`runs/oracle-probe-rows1500-*`, VPS/OpenBLAS).
+
 
 The top-ranked threat was "the task is coverage-shaped, so a coverage rule
 tying every LLM arm is a benchmark artefact". It was being *scoped*, not
@@ -335,8 +386,10 @@ arm that found a little of it was the single loop.
 
 **5. Is the ranking describable?** Partly, on LT: apparatus-setting
 experiments gain +0.014 at any strength; source experiments gain +0.002 at
-mid and **hurt (−0.009) at strong** — strong interventions on the light
-sources push sensors off the linear regime Fisher-Z assumes. A one-line
+mid and **hurt (−0.009) at strong** — ~~strong interventions on the light
+sources push sensors off the linear regime Fisher-Z assumes~~ (retracted
+the same evening: no saturation is measurable; see "WHAT THE HEADROOM IS"
+item 3 for what the data show). A one-line
 **coverage-first** rule built from that recovers some of it at the ends and none
 in the middle (**superseded the same evening — a rule that abandons coverage
 and repeats the sensor settings gets 67% at k=30; see "WHAT THE HEADROOM IS"**):

@@ -790,13 +790,29 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   loop" over-reads it. Cheaper per cell than the loop (336 vs 395 s) despite
   a 53% longer prompt. 1.8% of its picks fell back to random (loop: 0) —
   biases AGAINST the arm, report it, don't correct it. Drift audit clean.
+- **THE ORACLE WAS AN ORACLE FOR THE HARNESS — register §34, 2026-09-09
+  night, supersedes the two bullets below it as TASK claims.** The best
+  selection depends on PC's row cap: at `max_rows=300` (configuration of
+  record) the 300-derived oracle ranking scores 0.468 and the coverage rule
+  0.437; at 1500 rows the rule scores **0.460** and that same ranking
+  **0.394**; at 5000 everything degrades. So "coverage is a plateau, not the
+  ceiling", "the headroom is sensor-setting depth" and "the models' prior
+  points the wrong way" are all statements about the estimator at 300 rows.
+  **Arm contrasts stand** (adaptive − loop +0.045 at 1500, resolved; every
+  arm ran under one estimator). A 1500-row oracle is being derived on the
+  VPS. **Rules:** sweep the estimator's nuisance parameters on neutral
+  designs BEFORE deriving an oracle; a penalty for adding data is a harness
+  signature, never explain it with physics; report every best-selection
+  claim at two caps. `oracle_probe.py --pc-max-rows`; `rescore.py` needs
+  the same override next.
 - **THE HEADROOM IS A DIFFERENT REGIME, NOT A BETTER COVERAGE — measured
   2026-09-09 evening (results doc "WHAT THE HEADROOM IS").** In every LT
   experiment the SAME 20 columns vary (light sources, polarisers, LED
   currents, sensors); the intervened apparatus setting is CONSTANT inside its
   own experiment and varies only across the pool. So light-source experiments
-  add no variation (they shift the range — `red` 171–255 vs 0–85 — which is
-  the harm) and the 18 apparatus settings are the only informative buys, each
+  add no variation (they shift the range — `red` 171–255 vs 0–85; sensors
+  do NOT saturate, measured — the harm is losing input→sensor edges when a
+  shifted regime is pooled, mechanism under test vs `pc_max_rows`) and the 18 apparatus settings are the only informative buys, each
   a two-level contrast, so DEPTH on them pays. One line — "sensor-setting
   entries mid/strong first, fill from apparatus, never light sources/`osr`" —
   scores 0.468 vs the rule's 0.437 at k=30 (RESOLVED, 67% of rule→oracle;
@@ -808,8 +824,10 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   parsed draws put the strong light-source interventions in the top 30 with
   "strong root interventions give signal-to-noise"; the oracle ranks them
   last). A frontier model is not better, only more consistent. The LLM arms
-  carry the opposite of the needed knowledge; the fix is documentation or
-  learning, not model scale. **Rules:** (1) before calling a ranking "not
+  carry the opposite of the needed knowledge. **Documentation (the README's
+  protocol paragraph) flips gpt-5.6-sol to ρ +0.32 (3/5 draws correct) and
+  does nothing for deepseek flash (−0.15)**: no model has the knowledge;
+  only the frontier model can derive it from the manual, unreliably. **Rules:** (1) before calling a ranking "not
   describable", try rules that ABANDON coverage, not only reorder it; (2) the
   next feedback arm must report per-experiment WHAT VARIED, not coverage.
 - **Core-20 is LT-only.** `f1_core_rescored` is 800/800 on LT and 0/1804 on WT
