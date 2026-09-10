@@ -125,7 +125,26 @@ block that is itself a two-regime mixture — the very thing the indicator
 exists to remove. JCI's context variable is the REGIME. `regime_label` now
 emits `<variable>@<strength>` on LT and one label per menu entry on WT;
 `rescore.py --context regime` selects it and stamps `rescore_context`
-(`3b101fa`, 47 tests). Probe on the 84 designs at 1500 rows: below.
+(`3b101fa`, 47 tests).
+
+**Probe on the 84 designs at 1500 rows, 3 seeds — the fix does NOT help:**
+
+| chamber, k | PC | JCI per-variable | JCI per-regime |
+|---|---|---|---|
+| LT 6 | 0.176 | 0.194 | 0.185 |
+| LT 30 | 0.379 | **0.410** | 0.380 |
+| LT 45 | 0.432 | 0.388 | **0.310** |
+| WT 7 / 14 / 21 | 0.177 / 0.175 / 0.196 | 0.196 / 0.185 / 0.206 | 0.199 / 0.192 / 0.210 |
+
+Splitting a merged indicator removes one within-block mixture but adds one
+more sparse binary node, and at 1500 rows the second cost exceeds the first
+on LT (WT is unchanged: its entries are already one regime each). The merged-
+pair correlation was genuine; its counterfactual was not. **Per-variable
+stays the JCI-PC design of record; per-regime is queued at 5000 rows on the
+LT k=30/45 subset, the only cap where a sparse indicator might be cheap
+enough for the split to pay.** Third lesson of the day in the same shape as
+the first two: a correlate that explains a penalty is not a fix until the
+counterfactual is run.
 
 **What stands regardless of the indicator design**, because it holds under
 PC at both caps and under JCI-PC: no LLM arm beats the rule at LT k=6/30 or
