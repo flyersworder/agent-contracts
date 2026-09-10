@@ -381,8 +381,18 @@ dilution under a cap would have gone the other way (recovered with rows).
    intervened variable removes the large-n collapse** (JCI-PC probe, next
    section): PC at 5000 rows falls to 0.273 / 0.255 at LT k=30 / 45 while
    JCI-PC holds 0.376 / 0.418 and its skeleton keeps rising with rows.
-3. It is **not the chamber**: the strong regime alone is as recoverable as
-   the mid one.
+3. It is **not the strong regime in particular**: alone, at 1,000 rows, the
+   strong experiment is as recoverable as the mid one. **But it is partly
+   the chamber's data meeting a linear-Gaussian test, even in ONE regime**
+   (measured 2026-09-10 evening): PC on the reference run ALONE scores
+   core-20 F1 0.177 / 0.205 / 0.186 / **0.114** at 300 / 1,000 / 3,000 /
+   10,000 rows, false positives 15 → 27. The inputs are uniform and the
+   sensor response is not exactly linear, so a partial-correlation test with
+   enough power reads nonlinear residual dependence as edges. Pooling
+   regimes AMPLIFIES that misfit (ladder 2's collapse is far sharper than
+   the single-regime decline); it does not create it alone. UT-IGSP shows
+   the same signature on its observational sample (core 0.49 at 10,000 rows,
+   0.63 at 1,000), so the effect is the test family, not PC's search.
 4. It IS a property of **pooled-regime estimation that ignores the regime**
    — the reduction this harness applies. The models' "strong root
    interventions give signal-to-noise" prior is right about the regime and
@@ -391,7 +401,8 @@ dilution under a cap would have gone the other way (recovered with rows).
    interventions differently is now a runnable question, not a deferred one.
 
 **Rules.** State the anti-prior as an estimator-relative finding. Never quote
-a "more rows is better" default for a pooled interventional table; sweep it.
+a "more rows is better" default for ANY Gaussian-test estimator on chamber
+data, pooled or not; sweep it.
 When a penalty for adding data appears, test alone / pooled / centred before
 naming a mechanism — the first two explanations offered here (saturation,
 then mean-shift mixture) were both wrong and both plausible.
