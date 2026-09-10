@@ -2033,3 +2033,19 @@ best-selection claims are reported at both caps.
 
 **Related:** §23 (the +0.025 that was left on the table), §10 (structural
 noise), §31 (the previous oracle-table defect, cross-backend).
+
+**Outcome, corpus re-score (2026-09-10 midday, results doc "THE TWO-CAP CORPUS
+RE-SCORE").** The whole M7 corpus at 300 and 1500 rows on one machine: **10
+of 39 headline verdicts change with the cap on directed F1, 2 of 39 on the
+skeleton.** So the sentence above, "arm contrasts stand", is corrected to:
+arm contrasts are FAIR at either cap and their resolution is cap-dependent
+on directed F1 — mostly boundary cases, mostly toward more separation at
+1500 (the rule beats the loop at LT k=30/45; the WT k=21 varsplit
+confirmation resolves; `critique` flips sign). Rule: every arm contrast is
+reported at both caps and on both metrics. Mechanism of the cap's effect:
+results doc "WHY STRONG INTERVENTIONS HURT" — pooled regimes, harm growing
+with rows. Second estimators (JCI-PC, GES) queued the same day.
+
+**Also settled here: the design-level 9-seed re-score is BLAS-invariant**
+(2,202 of 2,207 designs identical to the digit across Accelerate and
+OpenBLAS; §31's cell-level divergence averages out).

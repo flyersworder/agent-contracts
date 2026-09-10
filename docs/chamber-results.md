@@ -69,6 +69,114 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## THE TWO-CAP CORPUS RE-SCORE (2026-09-10, VPS/OpenBLAS, `runs/rescored-vps-rows300.parquet`, `runs/rescored-vps-rows1500.parquet`): arm contrasts are NOT cap-invariant on directed F1 — they are on the skeleton
+
+The twelve M7 source files (2,206 distinct designs, 9 PC seeds, $0) re-scored
+on ONE machine at `--pc-max-rows 300` and `1500` (`rescore.py --pc-max-rows`,
+`14ab67c`). Every headline contrast, design-clustered, unequal-n MDE:
+
+| contrast | n | Δ @300 (MDE) | Δ @1500 (MDE) | directed verdict 300 → 1500 | skeleton verdict 300 → 1500 |
+|---|---|---|---|---|---|
+| LT k=6 `one_shot` − `llm_pc` | 30/30 | -0.047 (0.025) | -0.042 (0.026) | **R−** → **R−** | tie → tie |
+| LT k=6 `critique` − `llm_pc` | 30/30 | -0.010 (0.026) | -0.006 (0.028) | tie → tie | tie → tie |
+| LT k=6 `shared_blackboard` − `llm_pc` | 30/30 | -0.058 (0.023) | -0.047 (0.027) | **R−** → **R−** | **R−** → **R−** |
+| LT k=6 `llm_pc` − `coverage_max_ms` | 30/30 | +0.037 (0.029) | +0.026 (0.032) | **R+** → tie ◀ | tie → tie |
+| LT k=6 `coverage_max_ms` − `random` | 30/30 | -0.001 (0.030) | -0.007 (0.037) | tie → tie | tie → tie |
+| LT k=6 `coverage_min_ms` − `coverage_max_ms` | 30/30 | -0.014 (0.028) | +0.005 (0.034) | tie → tie | tie → tie |
+| LT k=30 `one_shot` − `llm_pc` | 6/70 | +0.002 (0.019) | +0.038 (0.028) | tie → **R+** ◀ | tie → tie |
+| LT k=30 `critique` − `llm_pc` | 30/70 | -0.015 (0.014) | +0.022 (0.019) | **R−** → **R+** ◀ | tie → tie |
+| LT k=30 `shared_blackboard` − `llm_pc` | 30/70 | -0.020 (0.013) | -0.022 (0.022) | **R−** → tie ◀ | **R−** → **R−** |
+| LT k=30 `llm_pc` − `coverage_max_ms` | 70/30 | -0.001 (0.010) | -0.032 (0.014) | tie → **R−** ◀ | tie → tie |
+| LT k=30 `coverage_max_ms` − `random` | 30/30 | +0.065 (0.020) | +0.099 (0.027) | **R+** → **R+** | **R+** → **R+** |
+| LT k=30 `coverage_min_ms` − `coverage_max_ms` | 30/30 | -0.100 (0.014) | -0.241 (0.017) | **R−** → **R−** | **R−** → **R−** |
+| LT k=30 `team_varsplit` − `team` | 30/40 | +0.042 (0.018) | +0.057 (0.019) | **R+** → **R+** | **R+** → **R+** |
+| LT k=45 `one_shot` − `llm_pc` | 24/30 | -0.007 (0.016) | -0.002 (0.014) | tie → tie | tie → tie |
+| LT k=45 `critique` − `llm_pc` | 30/30 | -0.015 (0.019) | +0.010 (0.013) | tie → tie | tie → tie |
+| LT k=45 `shared_blackboard` − `llm_pc` | 30/30 | -0.002 (0.012) | -0.004 (0.010) | tie → tie | tie → tie |
+| LT k=45 `llm_pc` − `coverage_max_ms` | 30/30 | -0.001 (0.013) | -0.012 (0.011) | tie → **R−** ◀ | tie → tie |
+| LT k=45 `coverage_max_ms` − `random` | 30/30 | +0.017 (0.015) | +0.021 (0.016) | **R+** → **R+** | tie → **R+** ◀ |
+| LT k=45 `coverage_min_ms` − `coverage_max_ms` | 30/30 | -0.009 (0.012) | -0.042 (0.012) | tie → **R−** ◀ | tie → **R−** ◀ |
+| WT k=7 `one_shot` − `llm_pc` | 32/50 | +0.009 (0.023) | +0.014 (0.026) | tie → tie | tie → tie |
+| WT k=7 `critique` − `llm_pc` | 49/50 | +0.001 (0.022) | -0.000 (0.024) | tie → tie | tie → tie |
+| WT k=7 `shared_blackboard` − `llm_pc` | 50/50 | +0.001 (0.021) | -0.000 (0.026) | tie → tie | tie → tie |
+| WT k=7 `llm_pc` − `wt_coverage_max` | 50/50 | -0.024 (0.020) | -0.026 (0.024) | **R−** → **R−** | tie → tie |
+| WT k=7 `wt_coverage_max` − `random` | 50/50 | +0.003 (0.020) | +0.018 (0.023) | tie → tie | tie → tie |
+| WT k=7 `wt_coverage_min` − `wt_coverage_max` | 44/50 | -0.067 (0.015) | -0.081 (0.019) | **R−** → **R−** | **R−** → **R−** |
+| WT k=14 `one_shot` − `llm_pc` | 34/100 | -0.006 (0.023) | +0.012 (0.020) | tie → tie | tie → tie |
+| WT k=14 `critique` − `llm_pc` | 50/100 | -0.023 (0.021) | -0.004 (0.018) | **R−** → tie ◀ | tie → tie |
+| WT k=14 `shared_blackboard` − `llm_pc` | 50/100 | -0.005 (0.021) | +0.016 (0.018) | tie → tie | tie → tie |
+| WT k=14 `llm_pc` − `wt_coverage_max` | 100/50 | +0.003 (0.019) | -0.014 (0.018) | tie → tie | tie → tie |
+| WT k=14 `wt_coverage_max` − `random` | 50/50 | +0.023 (0.018) | +0.028 (0.022) | **R+** → **R+** | **R+** → **R+** |
+| WT k=14 `wt_coverage_min` − `wt_coverage_max` | 50/50 | -0.073 (0.019) | -0.043 (0.022) | **R−** → **R−** | **R−** → **R−** |
+| WT k=14 `team_varsplit` − `team` | 50/50 | -0.000 (0.023) | +0.016 (0.020) | tie → tie | tie → tie |
+| WT k=21 `one_shot` − `llm_pc` | 30/100 | -0.012 (0.025) | -0.002 (0.021) | tie → tie | tie → tie |
+| WT k=21 `critique` − `llm_pc` | 50/100 | -0.008 (0.023) | -0.021 (0.017) | tie → **R−** ◀ | tie → tie |
+| WT k=21 `shared_blackboard` − `llm_pc` | 50/100 | -0.001 (0.020) | -0.002 (0.018) | tie → tie | tie → tie |
+| WT k=21 `llm_pc` − `wt_coverage_max` | 100/50 | -0.026 (0.018) | -0.038 (0.018) | **R−** → **R−** | **R−** → **R−** |
+| WT k=21 `wt_coverage_max` − `random` | 50/50 | +0.056 (0.017) | +0.059 (0.018) | **R+** → **R+** | **R+** → **R+** |
+| WT k=21 `wt_coverage_min` − `wt_coverage_max` | 50/50 | -0.074 (0.019) | -0.067 (0.018) | **R−** → **R−** | **R−** → **R−** |
+| WT k=21 `team_varsplit` − `team` | 124/132 | +0.013 (0.015) | +0.018 (0.013) | tie → **R+** ◀ | **R+** → **R+** |
+
+`R+` = first arm resolved above the second; `R−` below; ◀ = the verdict
+changes with the cap. **Directed F1: 10 of 39 verdicts flip. Skeleton F1:
+2 of 39**, both at LT k=45 and both toward MORE separation at 1500 rows.
+
+**What the 1500-row estimator says, claim by claim.**
+
+- **The coverage headline gets stronger.** At 300 rows the loop beat the rule
+  at LT k=6 (+0.037, resolved) and tied it elsewhere on LT. At 1500 rows the
+  LT k=6 win is a tie (+0.026, MDE 0.032), and the RULE beats the loop at
+  LT k=30 (−0.032, resolved) and k=45 (−0.012, on the bound), as it already
+  did at WT k=7 and k=21. **No LLM arm beats the rule at either cap; at 1500
+  rows the rule beats the loop at four of six points.** The rule's escape at
+  the smallest budgets (tie with random at LT k=6, WT k=7) is unchanged.
+- **The record claim holds and, if anything, reverses.** `one_shot` ties the
+  loop at five points at both caps and loses only at LT k=6 (−0.047 / −0.042).
+  At LT k=30 and 1500 rows it is resolved ABOVE the loop on directed F1
+  (+0.038, MDE 0.028; six distinct designs all at 0.435–0.466 against the
+  loop's 0.415) while the skeleton says tie (−0.013). Orientation, not
+  selection — say "ties or beats".
+- **`critique` is cap-chaotic and must be reported as a tie.** Directed F1:
+  LT k=30 goes from resolved-below (−0.015) to resolved-ABOVE (+0.022); WT
+  k=14 from resolved-below to tie; WT k=21 from tie to resolved-below. Its
+  skeleton verdict is a tie at every point at both caps. Third flip of this
+  cell; the standing instruction ("stop re-adjudicating") now has its reason:
+  the directed verdict is orientation noise.
+- **`shared_blackboard` below the loop at LT k=6 and k=30 on the skeleton at
+  both caps** (−0.038/−0.043, −0.016/−0.035, all resolved); directed LT k=30
+  sits exactly on its bound at 1500 (−0.022, MDE 0.022). The WT ties hold.
+- **`team_varsplit`: LT k=30 resolved at both caps (+0.042 → +0.057).** WT
+  k=14 tie at both. **WT k=21 — the n=132 confirmation — resolves at 1500
+  rows (+0.018, MDE 0.013) and on the SKELETON at both caps (+0.017 at 300,
+  +0.030 at 1500)**, having read +0.013 / MDE 0.015 on the pre-registered
+  directed-300 analysis. Report it as: does not clear the house bar on the
+  pre-registered analysis; clears it under two of three alternative readings;
+  the prediction (+0.0149) is inside every interval. Do not switch bars.
+- **Breadth-vs-depth (`coverage_min` − `coverage_max`) widens at 1500** (LT
+  k=30 −0.100 → −0.241); the one-per-variable rule's advantage is larger,
+  not smaller, when the estimator has power.
+
+**Consequence for register §34's wording.** "Arm contrasts stand because
+every arm ran under one estimator" was too strong. Every contrast is FAIR at
+either cap, but which ones resolve depends on the cap for a quarter of them
+on directed F1 — mostly boundary cases, and mostly in the direction of more
+separation at 1500. **On skeleton F1 the verdicts are cap-invariant to two
+boundary cases**, consistent with §28's finding that the skeleton has ~1.7×
+the signal-to-noise of the directed score. Rule: report every arm contrast at
+both caps and on both metrics; a directed flip whose skeleton verdict holds is
+orientation, and orientation is where PC's noise lives.
+
+**And the BLAS finding, at the design level, is gone.** The same 2,207
+designs re-scored at 300 rows on Accelerate (`rescored-single-backend`, 5 Sep)
+and on OpenBLAS (this file) agree on the 9-seed design mean to the digit on
+**2,202 of 2,207**; the remaining five differ by at most 0.025; correlation
+1.0000; all 39 contrasts give the same delta to three decimals. Register §31's
+cell-level divergence (0.38 vs 0.29 on one seed) is real and averages out at
+nine seeds. The reproducibility statement can now say: design-level, 9-seed
+scores are backend-invariant; single-seed cell scores are not.
+
+---
+
 ## WHY STRONG INTERVENTIONS HURT (2026-09-10, local/Accelerate, `runs/mixture-probe-lt.parquet`, `runs/dilution-probe-lt.parquet`): pooled regimes, not the row cap and not the mean shift
 
 Two LLM-free ladders, 9 PC seeds each, built to say WHICH part of the harness

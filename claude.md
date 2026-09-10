@@ -805,7 +805,26 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   ranking resolved BELOW the rule — so "plateau, not ceiling" holds at the
   ends and fails at the middle budget where every headline lives; say
   "beatable at the ends, within noise in the middle". The 1500-row oracle
-  buys 22 distinct variables of 30 (coverage-like), not 15. **Rules:** sweep the estimator's nuisance parameters on neutral
+  buys 22 distinct variables of 30 (coverage-like), not 15. **CORPUS AT TWO
+  CAPS (2026-09-10 midday, results doc "THE TWO-CAP CORPUS RE-SCORE"): "arm
+  contrasts stand" was too strong — 10 of 39 headline verdicts flip with the
+  cap on directed F1, 2 of 39 on the skeleton.** Mostly boundary, mostly
+  toward MORE separation at 1500: the rule beats the loop at LT k=30/45
+  (no LLM arm beats the rule at either cap); `one_shot` ties-or-beats the
+  loop; `critique` flips SIGN at LT k=30 (skeleton: tie everywhere — stop
+  adjudicating it, the directed verdict is orientation noise); WT k=21
+  varsplit resolves at 1500 and on the skeleton at both caps. Report every
+  arm contrast at both caps and both metrics. MECHANISM (same day, "WHY
+  STRONG INTERVENTIONS HURT"): a strong experiment is fine ALONE; pooling
+  regimes into one Gaussian test is the harm and it GROWS with rows (all
+  rows: F1 0.194→0.067 when one strong block joins five) — not the cap, not
+  the mean shift (centring is inert), not the chamber. JCI-PC (`jci.py`,
+  regime indicators) is monotone in rows where PC collapses (LT k=45 at 5000
+  rows: PC 0.255, JCI-PC 0.418) but pays an indicator penalty at 300 rows
+  that is confounded with coverage; GES (`ges.py`) is the cross-family
+  check. Both queued on the VPS via `rescore.py --estimator`. And the BLAS
+  finding is GONE at the design level: 2,202/2,207 nine-seed design means
+  identical across Accelerate and OpenBLAS. **Rules:** sweep the estimator's nuisance parameters on neutral
   designs BEFORE deriving an oracle; a penalty for adding data is a harness
   signature, never explain it with physics; report every best-selection
   claim at two caps. `oracle_probe.py --pc-max-rows`; `rescore.py` needs
