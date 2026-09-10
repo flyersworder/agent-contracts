@@ -69,6 +69,80 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## WHY STRONG INTERVENTIONS HURT (2026-09-10, local/Accelerate, `runs/mixture-probe-lt.parquet`, `runs/dilution-probe-lt.parquet`): pooled regimes, not the row cap and not the mean shift
+
+Two LLM-free ladders, 9 PC seeds each, built to say WHICH part of the harness
+makes a strong light-source experiment score badly. Register §34 had shown
+the row cap reorders selections; this asks what the cap is interacting with.
+
+**Ladder 1 — the source's own edges.** For each of `red`, `green`, `blue` at
+`mid` and `strong`: PC on the experiment ALONE; on `reference` + experiment
+POOLED as the pipeline pools; and on the same pool with every column CENTRED
+within its block first (mean shift removed, within-block variation kept).
+
+| strength | mode | rows | recall of source's out-edges | false positives |
+|---|---|---|---|---|
+| mid | alone | 1500 / all | 0.286 | 14.7 |
+| mid | pooled | 1500 / all | 0.280 / 0.238 | 14.9 / 20.0 |
+| mid | centred | 1500 / all | 0.275 / 0.238 | 18.3 / 21.8 |
+| strong | alone | 1500 / all | 0.286 | 13.3 |
+| strong | pooled | 1500 / all | 0.286 / 0.286 | 17.7 / 18.8 |
+| strong | centred | 1500 / all | 0.249 / 0.243 | 16.2 / 20.6 |
+| any | any | 300 | 0.185–0.243 | 14.6–17.6 |
+
+- Strength does not matter for the source's own edges: `mid` and `strong`
+  recover the same fraction, alone or pooled.
+- The strong block ALONE is fine (recall equal to mid, fewer false
+  positives). The regime is not the problem; mixing regimes is.
+- Pooling adds false positives and **centring does not remove them** — so
+  the extra edges are not the between-block mean shift. An indicator column
+  (JCI, below) cannot absorb them either, for the same reason.
+- 300 rows is a power floor in every mode, alone included.
+
+**Ladder 2 — the OTHER inputs' edges.** Base pool `reference`, `green_mid`,
+`blue_mid`, `t_ir_1_mid`, `osr_c_mid`; add nothing, `red_mid` or
+`red_strong`; read the recall of `green`'s and `blue`'s true out-edges.
+
+| rows | added | recall green | recall blue | false positives | F1 |
+|---|---|---|---|---|---|
+| all (~6,000) | none | 0.000 | 0.429 | 27.0 | 0.194 |
+| all | red_mid | 0.286 | 0.286 | 27.0 | 0.174 |
+| all | red_strong | **0.000** | **0.000** | 30.0 | **0.067** |
+| 1500 | none | 0.222 | 0.254 | 20.9 | 0.172 |
+| 1500 | red_mid | 0.111 | 0.270 | 18.6 | 0.166 |
+| 1500 | red_strong | 0.079 | 0.254 | 19.1 | 0.166 |
+| 300 | any | 0.03–0.06 | 0.14–0.21 | 16.1–16.4 | 0.133–0.144 |
+
+**The harm grows with rows.** With every row used, the strong block wipes
+out both other inputs' edges and F1 falls from 0.194 to 0.067; at 1500 rows
+the damage is partial; at 300 it is invisible under the power floor. Variance
+dilution under a cap would have gone the other way (recovered with rows).
+
+**What this settles.**
+
+1. The strong-intervention penalty is **not a row-cap artefact** — a larger
+   cap makes it worse. This is the mechanism behind §34's non-monotone row
+   response: more rows give Fisher-Z more power to find the misfit of one
+   linear-Gaussian model to two regimes with different covariance.
+2. It is **not a mean shift**, so no context indicator fixes it (JCI-PC
+   measured, next section).
+3. It is **not the chamber**: the strong regime alone is as recoverable as
+   the mid one.
+4. It IS a property of **pooled-regime estimation with a linear test** — the
+   reduction this harness and every PC/GES-on-pooled-data pipeline applies.
+   The models' "strong root interventions give signal-to-noise" prior is
+   right about the regime and wrong about the estimator. Only an estimator
+   that models regimes separately (UT-IGSP, GIES) could rank strong
+   interventions differently; that comparison is deferred (register §28).
+
+**Rules.** State the anti-prior as an estimator-relative finding. Never quote
+a "more rows is better" default for a pooled interventional table; sweep it.
+When a penalty for adding data appears, test alone / pooled / centred before
+naming a mechanism — the first two explanations offered here (saturation,
+then mean-shift mixture) were both wrong and both plausible.
+
+---
+
 ## THE 1500-ROW ORACLE (2026-09-10, VPS/OpenBLAS, `runs/oracle-probe-rows1500-lt-*`): headroom at the ends, a tie in the middle
 
 Re-derivation of the LT oracle with `--pc-max-rows 1500` (register §34),
