@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
 from .ges import run_ges
+from .igsp import run_utigsp
 from .inference import DEFAULT_MAX_ROWS, pool_experiment_data, run_pc, runtime_fingerprint
 from .jci import intervention_target, pool_with_context, regime_label, run_jci_pc
 from .scoring import f1_edges, f1_skeleton, shd
@@ -87,7 +88,8 @@ LT_CASE_STUDY_NODES: tuple[str, ...] = (
 #: One unit of re-scoring work: everything a worker process needs, as plain
 #: picklable data. A tuple rather than a dataclass so it crosses the process
 #: boundary without the worker importing anything this module owns.
-ESTIMATORS = ("pc", "jci_pc", "ges")
+ESTIMATORS = ("pc", "jci_pc", "ges", "utigsp")
+OBSERVATIONAL_ENTRY = {"lt": "uniform_reference"}
 CONTEXT_MODES = ("variable", "regime")
 _DesignTask = tuple[str, str, str, list[str], int, float, int | None, str, str]
 
@@ -167,6 +169,51 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
     nodes = list(adapter.ground_truth().index)
     truth = adapter.ground_truth()
     experiment_dfs = [adapter.query_intervention(name) for name in names]
+    if estimator == "utigsp":
+        # Never pooled: one observational sample (the chamber's reference
+        # run, whether or not the arm bought it — the estimator's own prior
+        # data, identical for every arm) plus one sample per bought
+        # experiment with its target (`igsp.py`). LT only.
+        obs_name = OBSERVATIONAL_ENTRY.get(chamber)
+        if obs_name is None:
+            raise ValueError(f"UT-IGSP needs an observational entry; chamber {chamber!r} has none")
+        observational = adapter.query_intervention(obs_name)
+        interventional = [
+            (df, intervention_target(chamber, name, nodes))
+            for df, name in zip(experiment_dfs, names, strict=True)
+            if name != obs_name
+        ]
+        records = []
+        for pc_seed in range(n_pc_seeds):
+            predicted = (
+                run_utigsp(
+                    observational,
+                    interventional,
+                    nodes,
+                    alpha=pc_alpha,
+                    alpha_inv=pc_alpha,
+                    seed=pc_seed,
+                    max_rows=pc_max_rows,
+                )
+                if interventional
+                else pd.DataFrame(0, index=nodes, columns=nodes)
+            )
+            records.append(
+                _record(
+                    key,
+                    chamber,
+                    configuration,
+                    names,
+                    pc_seed,
+                    pc_max_rows,
+                    estimator,
+                    None,
+                    predicted,
+                    truth,
+                    nodes,
+                )
+            )
+        return records
     if estimator == "jci_pc":
         # One 0/1 context column per intervened variable, edges into it
         # forbidden (`jci.py`). Same PC underneath; the table differs.
@@ -188,37 +235,65 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
         else:
             predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows)
         records.append(
-            {
-                DESIGN_KEY_COLUMN: key,
-                SELECTION_KEY_COLUMN: selection_key(chamber, configuration, names),
-                "chamber": chamber,
-                "configuration": configuration,
-                "n_experiments": len(names),
-                "pc_seed": pc_seed,
-                # The row cap is part of the estimator, not a detail of it:
-                # the best selection CHANGES with it (register §34), so every
-                # re-scored row carries the cap it was scored under.
-                "rescore_pc_max_rows": pc_max_rows,
-                "rescore_estimator": estimator,
-                "rescore_context": context_mode if estimator == "jci_pc" else None,
-                "f1": float(f1_edges(predicted, truth)),
-                # Undirected companion, for the robustness check: the
-                # chambers' own case study scores the equivalence class
-                # rather than one orientation. NOT a replacement -- see
-                # `f1_skeleton`, the two are different metrics.
-                "f1_skeleton": float(f1_skeleton(predicted, truth)),
-                # Induced subgraph on the case study's 20 variables,
-                # excluding the pure-source settings. LT only.
-                "f1_core": (
-                    float(f1_edges(predicted.loc[core, core], truth.loc[core, core]))
-                    if (core := [n for n in LT_CASE_STUDY_NODES if n in nodes])
-                    and len(core) == len(LT_CASE_STUDY_NODES)
-                    else float("nan")
-                ),
-                "shd": float(shd(predicted, truth)),
-            }
+            _record(
+                key,
+                chamber,
+                configuration,
+                names,
+                pc_seed,
+                pc_max_rows,
+                estimator,
+                context_mode if estimator == "jci_pc" else None,
+                predicted,
+                truth,
+                nodes,
+            )
         )
     return records
+
+
+def _record(
+    key: str,
+    chamber: str,
+    configuration: str,
+    names: list[str],
+    pc_seed: int,
+    pc_max_rows: int | None,
+    estimator: str,
+    context_mode: str | None,
+    predicted: pd.DataFrame,
+    truth: pd.DataFrame,
+    nodes: list[str],
+) -> dict[str, Any]:
+    return {
+        DESIGN_KEY_COLUMN: key,
+        SELECTION_KEY_COLUMN: selection_key(chamber, configuration, names),
+        "chamber": chamber,
+        "configuration": configuration,
+        "n_experiments": len(names),
+        "pc_seed": pc_seed,
+        # The row cap is part of the estimator, not a detail of it: the best
+        # selection CHANGES with it (register §34), so every re-scored row
+        # carries the cap it was scored under, and which estimator scored it.
+        "rescore_pc_max_rows": pc_max_rows,
+        "rescore_estimator": estimator,
+        "rescore_context": context_mode,
+        "f1": float(f1_edges(predicted, truth)),
+        # Undirected companion, for the robustness check: the chambers' own
+        # case study scores the equivalence class rather than one
+        # orientation. NOT a replacement -- see `f1_skeleton`, the two are
+        # different metrics.
+        "f1_skeleton": float(f1_skeleton(predicted, truth)),
+        # Induced subgraph on the case study's 20 variables, excluding the
+        # pure-source settings. LT only.
+        "f1_core": (
+            float(f1_edges(predicted.loc[core, core], truth.loc[core, core]))
+            if (core := [n for n in LT_CASE_STUDY_NODES if n in nodes])
+            and len(core) == len(LT_CASE_STUDY_NODES)
+            else float("nan")
+        ),
+        "shd": float(shd(predicted, truth)),
+    }
 
 
 def rescore_selections(
@@ -475,7 +550,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             "augmented with one context indicator per intervened variable, "
             "edges into indicators forbidden (Mooij et al. 2020, jci.py); "
             "'ges': score-based BIC search on the same pool (ges.py), the "
-            "chamber authors' observational method."
+            "chamber authors' observational method; 'utigsp': never pooled — "
+            "observational + one sample per experiment (igsp.py), LT only, "
+            "core-20 by construction; --pc-max-rows caps EACH sample."
         ),
     )
     parser.add_argument(
