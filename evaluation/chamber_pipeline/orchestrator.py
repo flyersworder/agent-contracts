@@ -54,6 +54,7 @@ from agent_contracts.integrations.causalchamber import (
 
 from . import inference as inference_module
 from .agents import (
+    adaptive_feedback_agent,
     coverage_max_agent,
     coverage_max_ms_agent,
     coverage_min_agent,
@@ -274,6 +275,19 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
     AgentSpec(
         name="one_shot",
         run=one_shot_agent,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_single",
+    ),
+    # The loop with the data's verdict in the prompt: every `feedback_interval`
+    # purchases PC runs on what was bought and the next prompts carry which
+    # menu entries perturb a still-unreached variable. Same budget, calls and
+    # contract as `llm_pc`; only the information differs. Pre-registered
+    # (spec 2026-08-29 s8.7 row 7) as the test of whether the oracle probe's
+    # headroom is learnable without ground truth.
+    AgentSpec(
+        name="adaptive_feedback",
+        run=adaptive_feedback_agent,
         chambers=("lt", "wt"),
         accepts_llm=True,
         kind="llm_single",

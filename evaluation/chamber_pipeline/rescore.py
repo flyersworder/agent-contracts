@@ -41,7 +41,10 @@ from agent_contracts.integrations.causalchamber import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-from .inference import pool_experiment_data, run_pc, runtime_fingerprint
+from .ges import run_ges
+from .igsp import run_utigsp
+from .inference import DEFAULT_MAX_ROWS, pool_experiment_data, run_pc, runtime_fingerprint
+from .jci import intervention_target, pool_with_context, regime_label, run_jci_pc
 from .scoring import f1_edges, f1_skeleton, shd
 
 SELECTION_KEY_COLUMN = "selection_key"
@@ -85,7 +88,10 @@ LT_CASE_STUDY_NODES: tuple[str, ...] = (
 #: One unit of re-scoring work: everything a worker process needs, as plain
 #: picklable data. A tuple rather than a dataclass so it crosses the process
 #: boundary without the worker importing anything this module owns.
-_DesignTask = tuple[str, str, str, list[str], int, float]
+ESTIMATORS = ("pc", "jci_pc", "ges", "utigsp")
+OBSERVATIONAL_ENTRY = {"lt": "uniform_reference"}
+CONTEXT_MODES = ("variable", "regime")
+_DesignTask = tuple[str, str, str, list[str], int, float, int | None, str, str]
 
 #: Columns a source frame must carry to be re-scorable.
 REQUIRED_COLUMNS = ("chamber", "configuration", "chosen_experiments", "status")
@@ -144,44 +150,156 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
     from a local cache, so the cost is a parquet read that the OS page cache
     absorbs after the first design.
     """
-    key, chamber, configuration, names, n_pc_seeds, pc_alpha = task
+    (
+        key,
+        chamber,
+        configuration,
+        names,
+        n_pc_seeds,
+        pc_alpha,
+        pc_max_rows,
+        estimator,
+        context_mode,
+    ) = task
     adapter = create_contracted_chamber_agent(
         chamber=chamber,  # type: ignore[arg-type]
         configuration=configuration,  # type: ignore[arg-type]
-        intervention_budget=len(names),
+        # UT-IGSP also queries the observational entry, which the adapter
+        # meters as an intervention; give it the one extra unit.
+        intervention_budget=len(names) + (1 if estimator == "utigsp" else 0),
     )
     nodes = list(adapter.ground_truth().index)
     truth = adapter.ground_truth()
-    pooled = pool_experiment_data([adapter.query_intervention(name) for name in names], nodes)
+    experiment_dfs = [adapter.query_intervention(name) for name in names]
+    if estimator == "utigsp":
+        # Never pooled: one observational sample (the chamber's reference
+        # run, whether or not the arm bought it — the estimator's own prior
+        # data, identical for every arm) plus one sample per bought
+        # experiment with its target (`igsp.py`). LT only.
+        obs_name = OBSERVATIONAL_ENTRY.get(chamber)
+        if obs_name is None:
+            raise ValueError(f"UT-IGSP needs an observational entry; chamber {chamber!r} has none")
+        observational = adapter.query_intervention(obs_name)
+        interventional = [
+            (df, intervention_target(chamber, name, nodes))
+            for df, name in zip(experiment_dfs, names, strict=True)
+            if name != obs_name
+        ]
+        records = []
+        for pc_seed in range(n_pc_seeds):
+            predicted = (
+                run_utigsp(
+                    observational,
+                    interventional,
+                    nodes,
+                    alpha=pc_alpha,
+                    alpha_inv=pc_alpha,
+                    seed=pc_seed,
+                    max_rows=pc_max_rows,
+                )
+                if interventional
+                else pd.DataFrame(0, index=nodes, columns=nodes)
+            )
+            records.append(
+                _record(
+                    key,
+                    chamber,
+                    configuration,
+                    names,
+                    pc_seed,
+                    pc_max_rows,
+                    estimator,
+                    None,
+                    pc_alpha,
+                    predicted,
+                    truth,
+                    nodes,
+                )
+            )
+        return records
+    if estimator == "jci_pc":
+        # One 0/1 context column per intervened variable, edges into it
+        # forbidden (`jci.py`). Same PC underneath; the table differs.
+        labeller = regime_label if context_mode == "regime" else intervention_target
+        targets = [labeller(chamber, name, nodes) for name in names]
+        pooled, context = pool_with_context(experiment_dfs, targets, nodes)
+    else:
+        pooled = pool_experiment_data(experiment_dfs, nodes)
+        context = []
     records: list[dict[str, Any]] = []
     for pc_seed in range(n_pc_seeds):
-        predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed)
+        if estimator == "jci_pc":
+            predicted = run_jci_pc(
+                pooled, nodes, context, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows
+            )
+        elif estimator == "ges":
+            # Score-based, no alpha: `pc_alpha` does not apply (`ges.py`).
+            predicted = run_ges(pooled, nodes, seed=pc_seed, max_rows=pc_max_rows)
+        else:
+            predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows)
         records.append(
-            {
-                DESIGN_KEY_COLUMN: key,
-                SELECTION_KEY_COLUMN: selection_key(chamber, configuration, names),
-                "chamber": chamber,
-                "configuration": configuration,
-                "n_experiments": len(names),
-                "pc_seed": pc_seed,
-                "f1": float(f1_edges(predicted, truth)),
-                # Undirected companion, for the robustness check: the
-                # chambers' own case study scores the equivalence class
-                # rather than one orientation. NOT a replacement -- see
-                # `f1_skeleton`, the two are different metrics.
-                "f1_skeleton": float(f1_skeleton(predicted, truth)),
-                # Induced subgraph on the case study's 20 variables,
-                # excluding the pure-source settings. LT only.
-                "f1_core": (
-                    float(f1_edges(predicted.loc[core, core], truth.loc[core, core]))
-                    if (core := [n for n in LT_CASE_STUDY_NODES if n in nodes])
-                    and len(core) == len(LT_CASE_STUDY_NODES)
-                    else float("nan")
-                ),
-                "shd": float(shd(predicted, truth)),
-            }
+            _record(
+                key,
+                chamber,
+                configuration,
+                names,
+                pc_seed,
+                pc_max_rows,
+                estimator,
+                context_mode if estimator == "jci_pc" else None,
+                pc_alpha,
+                predicted,
+                truth,
+                nodes,
+            )
         )
     return records
+
+
+def _record(
+    key: str,
+    chamber: str,
+    configuration: str,
+    names: list[str],
+    pc_seed: int,
+    pc_max_rows: int | None,
+    estimator: str,
+    context_mode: str | None,
+    pc_alpha: float,
+    predicted: pd.DataFrame,
+    truth: pd.DataFrame,
+    nodes: list[str],
+) -> dict[str, Any]:
+    return {
+        DESIGN_KEY_COLUMN: key,
+        SELECTION_KEY_COLUMN: selection_key(chamber, configuration, names),
+        "chamber": chamber,
+        "configuration": configuration,
+        "n_experiments": len(names),
+        "pc_seed": pc_seed,
+        # The row cap is part of the estimator, not a detail of it: the best
+        # selection CHANGES with it (register §34), so every re-scored row
+        # carries the cap it was scored under, and which estimator scored it.
+        "rescore_pc_max_rows": pc_max_rows,
+        "rescore_estimator": estimator,
+        "rescore_context": context_mode,
+        "rescore_pc_alpha": pc_alpha,
+        "f1": float(f1_edges(predicted, truth)),
+        # Undirected companion, for the robustness check: the chambers' own
+        # case study scores the equivalence class rather than one
+        # orientation. NOT a replacement -- see `f1_skeleton`, the two are
+        # different metrics.
+        "f1_skeleton": float(f1_skeleton(predicted, truth)),
+        # Induced subgraph on the case study's 20 variables, excluding the
+        # pure-source settings. LT only.
+        "f1_core": (
+            float(f1_edges(predicted.loc[core, core], truth.loc[core, core]))
+            if (core := [n for n in LT_CASE_STUDY_NODES if n in nodes])
+            and len(core) == len(LT_CASE_STUDY_NODES)
+            else float("nan")
+        ),
+        "shd": float(shd(predicted, truth)),
+    }
 
 
 def rescore_selections(
@@ -191,6 +309,9 @@ def rescore_selections(
     pc_alpha: float = 0.05,
     progress_every: int = 50,
     max_workers: int = 1,
+    pc_max_rows: int | None = DEFAULT_MAX_ROWS,
+    estimator: str = "pc",
+    context_mode: str = "variable",
 ) -> pd.DataFrame:
     """Score every DISTINCT recorded buy in `frame` under `n_pc_seeds` seeds.
 
@@ -221,6 +342,10 @@ def rescore_selections(
 
     Returns one row per (selection_key, pc_seed).
     """
+    if estimator not in ESTIMATORS:
+        raise ValueError(f"unknown estimator {estimator!r}; expected one of {ESTIMATORS}")
+    if context_mode not in CONTEXT_MODES:
+        raise ValueError(f"unknown context_mode {context_mode!r}; expected one of {CONTEXT_MODES}")
     missing = [c for c in REQUIRED_COLUMNS if c not in frame.columns]
     if missing:
         raise ValueError(
@@ -270,6 +395,9 @@ def rescore_selections(
             names,
             n_pc_seeds,
             pc_alpha,
+            pc_max_rows,
+            estimator,
+            context_mode,
         )
         for (chamber, configuration, _), names in seen.items()
     ]
@@ -400,6 +528,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     parser.add_argument("sources", nargs="+", help="Parquet files to re-score")
     parser.add_argument("--n-pc-seeds", type=int, default=9)
     parser.add_argument(
+        "--pc-alpha",
+        type=float,
+        default=0.05,
+        help="significance level for the estimator's tests (PC's Fisher-Z; UT-IGSP's CI and invariance tests). Stamped on every row.",
+    )
+    parser.add_argument(
         "--max-workers",
         type=int,
         default=1,
@@ -408,6 +542,39 @@ def main(argv: Iterable[str] | None = None) -> None:
             "core count there is nothing to gain; each worker holds its own "
             "pooled dataset, which is what caps the 8 GB VPS well below any "
             "CPU limit. Output is identical at every setting."
+        ),
+    )
+    parser.add_argument(
+        "--pc-max-rows",
+        default=None,
+        help=(
+            "PC row cap for every scoring call (default: the pipeline's "
+            f"{DEFAULT_MAX_ROWS}; 'none' lifts the cap). Register §34: the best "
+            "selection depends on it, so report selection claims at two caps."
+        ),
+    )
+    parser.add_argument(
+        "--estimator",
+        choices=ESTIMATORS,
+        default="pc",
+        help=(
+            "'pc' (the configuration of record); 'jci_pc': PC on the pool "
+            "augmented with one context indicator per intervened variable, "
+            "edges into indicators forbidden (Mooij et al. 2020, jci.py); "
+            "'ges': score-based BIC search on the same pool (ges.py), the "
+            "chamber authors' observational method; 'utigsp': never pooled — "
+            "observational + one sample per experiment (igsp.py), LT only, "
+            "core-20 by construction; --pc-max-rows caps EACH sample."
+        ),
+    )
+    parser.add_argument(
+        "--context",
+        choices=CONTEXT_MODES,
+        default="variable",
+        help=(
+            "jci_pc only: one indicator per intervened VARIABLE (merges the "
+            "strengths of one variable into one block) or per REGIME "
+            "(`<variable>@<strength>` on LT, one per menu entry on WT)."
         ),
     )
     parser.add_argument("--out", default="runs/rescored.parquet")
@@ -430,8 +597,25 @@ def main(argv: Iterable[str] | None = None) -> None:
     combined = pd.concat(frames, ignore_index=True)
     print(f"{len(combined)} rows from {len(args.sources)} files", flush=True)
 
+    if args.pc_max_rows is None:
+        pc_max_rows: int | None = DEFAULT_MAX_ROWS
+    elif str(args.pc_max_rows).lower() == "none":
+        pc_max_rows = None
+    else:
+        pc_max_rows = int(args.pc_max_rows)
+    print(
+        f"pc_max_rows={pc_max_rows} estimator={args.estimator} context={args.context} alpha={args.pc_alpha}",
+        flush=True,
+    )
+
     rescored = rescore_selections(
-        combined, n_pc_seeds=args.n_pc_seeds, max_workers=args.max_workers
+        combined,
+        n_pc_seeds=args.n_pc_seeds,
+        pc_alpha=args.pc_alpha,
+        max_workers=args.max_workers,
+        pc_max_rows=pc_max_rows,
+        estimator=args.estimator,
+        context_mode=args.context,
     )
     joined = attach_rescored(combined, rescored, allow_backend_mismatch=args.allow_backend_mismatch)
 

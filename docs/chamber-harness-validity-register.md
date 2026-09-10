@@ -1956,3 +1956,96 @@ protect a number, it silently deletes one.
 3. Write the test against the *behaviour*, then mutate the implementation and
    confirm the test fails. Two tests in this repo passed against a deliberately
    broken implementation before this step was added.
+
+## 34. The best selection depends on PC's row cap — the oracle was an oracle for the harness (2026-09-09)
+
+**What was found.** Re-scoring the day's designs at `max_rows=1500` instead
+of the configuration-of-record 300, same seeds (100–108), same machine
+(macOS/Accelerate), LT k=30:
+
+| design | 300 rows | 1500 rows | 5000 rows (n=3) |
+|---|---|---|---|
+| coverage rule (round-robin, no weak) | 0.437 | **0.460** | 0.355 |
+| oracle ranking top-30 (derived at 300) | 0.468 | 0.394 | — |
+| "sensor settings only, repeated" rule | 0.470 | 0.386 | — |
+| 29 sensor-setting entries | 0.510 | 0.344 | 0.278 |
+| `adaptive_feedback` (30 cells) | 0.433 | 0.450 | — |
+| `llm_pc` (30 cells) | 0.418 | 0.405 | — |
+| random | 0.369 | 0.309 | — |
+
+The ordering of designs INVERTS between 300 and 1500 rows. Under 300 rows,
+repeat purchases of the apparatus settings dominate (each setting is a
+two-level contrast seen in ~10 of the 300 rows, so more copies help) and
+every added light-source experiment dilutes those contrasts; under 1500 rows
+the contrasts are already well sampled, breadth wins, and the "oracle"
+ranking derived at 300 scores 0.066 BELOW the rule it was supposed to sit
+0.046 above. At 5000 rows everything degrades — Fisher-Z at large N flags
+weak non-linear dependencies as edges — so the cap is non-monotone in
+accuracy and 1500 is the best of the three tested for the neutral designs
+(random, rule), consistent with the +0.025 noted in §23.
+
+**What this does to the record.**
+
+1. **Every ARM CONTRAST stands.** All arms ran under the same estimator, and
+   the two arm contrasts re-scored at 1500 keep their sign and resolve:
+   `adaptive_feedback − llm_pc` +0.015 → **+0.045** (both resolved);
+   `llm_pc − rule` below MDE → −0.055 resolved. (Phase 2 and M6 verdicts
+   are not yet re-scored at 1500 — that is the next $0 job; `rescore.py`
+   needs the same `max_rows` override `oracle_probe.py` now has.)
+2. **The 2026-09-09 morning verdict "coverage is a plateau, not the
+   ceiling" is CONDITIONAL on the 300-row cap and is withdrawn as a task
+   property until the oracle is re-derived at 1500 rows** (running on the
+   VPS, `runs/oracle-probe-rows1500-*`, OpenBLAS — compare only within that
+   file). At 1500 rows the coverage rule is the best policy we hold. The
+   "one-line rule claims two-thirds of the headroom", "depth on the sensor
+   settings beats breadth", and "the models' prior points the wrong way"
+   findings of the same evening are all statements about the estimator at
+   300 rows: at 1500 rows the models' "one strong intervention per target"
+   answer is close to the best known policy.
+3. **Not a bug in the pipeline; a nuisance parameter that was never
+   varied.** `DEFAULT_MAX_ROWS = 300` was set for runtime (its comment says
+   "additional rows slow PC without improving inference quality", which §23
+   already showed to be false by +0.025). The estimator is part of the task
+   definition, and any claim about WHICH selection is good must be shown to
+   hold across caps, or the cap must be chosen on a neutral design before
+   any oracle is derived.
+
+**How it was found.** Adding ANY 30th experiment to the 29 sensor-setting
+entries lowered F1 at 300 rows (even `uniform_reference`: 0.510 → 0.467),
+which is not a property any physical mechanism predicts; the sensors do not
+saturate (corr(red, ir_1) 0.78 under `red_strong` vs 0.77 at reference). A
+penalty for adding data is a subsampling signature, so the cap was varied.
+
+**Rules.** (1) Before deriving any oracle, sweep the estimator's nuisance
+parameters on neutral designs and fix the configuration of record at the
+best one — an oracle at a bad setting optimises the setting. (2) A penalty
+for adding data is a harness signature; do not explain it with physics.
+(3) Report every "best selection" claim at two caps.
+
+**Outcome (2026-09-10, `runs/oracle-probe-rows1500-lt-*`).** Re-derived at
+1500 rows: headroom above the rule is **resolved at k=6 (+0.185 by set) and
+k=45 (+0.068)** and a **tie at k=30 (+0.028, MDE 0.032)**, with the static
+ranking resolved below the rule there. The 300-row "headroom at every
+budget" does not replicate at the middle budget; the sensor-setting depth
+regime is gone (22 distinct variables of 30, not 15). Results doc "THE
+1500-ROW ORACLE". The configuration of record stays 300 for arm contrasts;
+best-selection claims are reported at both caps.
+
+**Related:** §23 (the +0.025 that was left on the table), §10 (structural
+noise), §31 (the previous oracle-table defect, cross-backend).
+
+**Outcome, corpus re-score (2026-09-10 midday, results doc "THE TWO-CAP CORPUS
+RE-SCORE").** The whole M7 corpus at 300 and 1500 rows on one machine: **10
+of 39 headline verdicts change with the cap on directed F1, 2 of 39 on the
+skeleton.** So the sentence above, "arm contrasts stand", is corrected to:
+arm contrasts are FAIR at either cap and their resolution is cap-dependent
+on directed F1 — mostly boundary cases, mostly toward more separation at
+1500 (the rule beats the loop at LT k=30/45; the WT k=21 varsplit
+confirmation resolves; `critique` flips sign). Rule: every arm contrast is
+reported at both caps and on both metrics. Mechanism of the cap's effect:
+results doc "WHY STRONG INTERVENTIONS HURT" — pooled regimes, harm growing
+with rows. Second estimators (JCI-PC, GES) queued the same day.
+
+**Also settled here: the design-level 9-seed re-score is BLAS-invariant**
+(2,202 of 2,207 designs identical to the digit across Accelerate and
+OpenBLAS; §31's cell-level divergence averages out).

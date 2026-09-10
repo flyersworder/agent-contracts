@@ -373,3 +373,142 @@ def test_the_same_buy_in_two_orders_is_scored_twice() -> None:
     for row, key in ((0, names), (1, list(reversed(names)))):
         own = rescored[rescored[DESIGN_KEY_COLUMN] == design_key("lt", "standard", key)]
         assert joined.loc[row, "f1_rescored"] == pytest.approx(own["f1"].mean())
+
+
+def test_rescore_stamps_the_row_cap_and_the_cap_changes_the_score() -> None:
+    """Register §34: PC's row cap is part of the estimator, so every
+    re-scored row carries it, and a different cap must be able to produce a
+    different graph (a stamp that never varied would prove nothing)."""
+    from evaluation.chamber_pipeline.inference import DEFAULT_MAX_ROWS
+
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"] * 3,
+            "configuration": ["standard"] * 3,
+            "status": ["ok"] * 3,
+            "chosen_experiments": [
+                "uniform_t_ir_2_weak,uniform_osr_angle_1_mid,uniform_diode_ir_3_strong,uniform_blue_mid"
+            ]
+            * 3,
+        }
+    )
+    default = rescore_selections(cells, n_pc_seeds=2, progress_every=0)
+    capped = rescore_selections(cells, n_pc_seeds=2, progress_every=0, pc_max_rows=1500)
+    assert set(default["rescore_pc_max_rows"]) == {DEFAULT_MAX_ROWS}
+    assert set(capped["rescore_pc_max_rows"]) == {1500}
+    assert len(default) == len(capped) == 2
+    assert not default[["f1", "shd"]].equals(capped[["f1", "shd"]])
+
+
+def test_rescore_stamps_the_estimator_and_scores_the_same_designs() -> None:
+    """A second estimator (JCI-PC, `jci.py`) rides the same re-scorer: every
+    row says which estimator scored it, over the same design x seed grid.
+    Whether the two DISAGREE on a given design is a measurement, not an
+    invariant — on LT the intervened variables are all sources, so a range
+    shift on one is structurally inert and the graphs often coincide."""
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_reference,uniform_red_strong,uniform_t_ir_1_mid"],
+        }
+    )
+    plain = rescore_selections(cells, n_pc_seeds=2, progress_every=0)
+    jci = rescore_selections(cells, n_pc_seeds=2, progress_every=0, estimator="jci_pc")
+    assert set(plain["rescore_estimator"]) == {"pc"}
+    assert set(jci["rescore_estimator"]) == {"jci_pc"}
+    assert list(jci["design_key"]) == list(plain["design_key"])
+    assert list(jci["pc_seed"]) == list(plain["pc_seed"])
+
+
+def test_rescore_rejects_an_unknown_estimator() -> None:
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_reference"],
+        }
+    )
+    with pytest.raises(ValueError, match="estimator"):
+        rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="lingam")
+
+
+def test_rescore_can_score_with_ges() -> None:
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_reference,uniform_red_strong,uniform_t_ir_1_mid"],
+        }
+    )
+    out = rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="ges")
+    assert set(out["rescore_estimator"]) == {"ges"}
+    assert len(out) == 1 and 0.0 <= out["f1"].iloc[0] <= 1.0
+
+
+def test_rescore_jci_regime_context_is_stamped_and_differs_from_variable() -> None:
+    """A design with one variable at two strengths: per-variable context
+    merges them into one indicator, per-regime keeps two — the graphs may
+    differ, and the stamp says which was used."""
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": [
+                "uniform_reference,uniform_red_mid,uniform_red_strong,uniform_green_mid"
+            ],
+        }
+    )
+    var = rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="jci_pc")
+    reg = rescore_selections(
+        cells, n_pc_seeds=1, progress_every=0, estimator="jci_pc", context_mode="regime"
+    )
+    assert set(var["rescore_context"]) == {"variable"}
+    assert set(reg["rescore_context"]) == {"regime"}
+    plain = rescore_selections(cells, n_pc_seeds=1, progress_every=0)
+    assert plain["rescore_context"].isna().all()
+
+
+def test_rescore_utigsp_is_lt_only_and_stamped() -> None:
+    from evaluation.chamber_pipeline.igsp import IGSP_AVAILABLE
+
+    wt = pd.DataFrame(
+        {
+            "chamber": ["wt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["validate_load_in,validate_hatch_mic"],
+        }
+    )
+    with pytest.raises(ValueError, match="observational"):
+        rescore_selections(wt, n_pc_seeds=1, progress_every=0, estimator="utigsp")
+    if not IGSP_AVAILABLE:
+        pytest.skip("graphical-model-learning not importable")
+    lt = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_red_strong,uniform_green_mid,uniform_t_ir_1_mid"],
+        }
+    )
+    out = rescore_selections(lt, n_pc_seeds=1, progress_every=0, estimator="utigsp")
+    assert set(out["rescore_estimator"]) == {"utigsp"}
+    assert 0.0 <= out["f1_core"].iloc[0] <= 1.0
+
+
+def test_rescore_stamps_alpha_on_every_row() -> None:
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_reference"],
+        }
+    )
+    out = rescore_selections(cells, n_pc_seeds=1, progress_every=0, pc_alpha=0.01)
+    assert set(out["rescore_pc_alpha"]) == {0.01}

@@ -10,7 +10,7 @@ before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-01**: 18,063 cells, **$108.39**, **zero errored cells**,
+**Corpus as of 2026-09-09**: 18,123 cells, **$114.54**, **zero errored cells**, (2026-09-01 read 18,063 / $108.39; the adaptive-feedback sweep adds 60 cells and $6.15)
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
 LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The table below is
@@ -43,6 +43,8 @@ the arithmetic of record.)
 | `runs/m7-coverage-lt-ends.parquet` | 180 | $0.00 | the coverage rule at LT k=6 and k=45, LLM-free |
 | `runs/m7-coverage-wt.parquet` | 300 | $0.00 | WT random at 3 budgets; the LT-only coverage arm correctly skipped |
 | `runs/m7-coverage-wt2.parquet` | 300 | $0.00 | the WT coverage arms, breadth and depth, 3 budgets x 50 seeds |
+| `runs/m7-adaptive-lt.parquet` | 60 | $6.15 | `adaptive_feedback` vs same-sweep `llm_pc`, LT k=30, n=30 each (pre-registered, spec §8.7 row 7) |
+| `runs/oracle-probe-{lt,wt}-*.parquet` | — | $0.00 | ground-truth oracle sets, static ranking, policies, arm purchase gains (`oracle_probe.py`) |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -67,7 +69,763 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## UT-IGSP — THE ESTIMATOR THAT NEVER POOLS (2026-09-10 evening, VPS, `runs/igsp-calibration-lt.parquet`): first look, alpha sweep in progress
+
+`igsp.py` + `rescore.py --estimator utigsp` (`5491860`..`0e94bfe`): the
+chamber authors' interventional method (Squires, Wang & Uhler 2020, via the
+maintained split of `causaldag`). One observational sample — the reference
+run, 10,000 rows, given to every arm whether or not it bought it — plus one
+sample per bought experiment with its known target; CI tests inside the
+observational sample, invariance tests between it and each interventional
+one; no table is ever concatenated. **LT only** (WT has no observational
+entry). **Core-20 by construction**: the 18 apparatus settings are constant
+within every sample and drop out, so the numbers belong beside `f1_core`.
+Runtime 3–8 s per design at all rows.
+
+**Alpha calibration on NEUTRAL designs only** (`random` + `coverage_max_ms`,
+LT k=6/30/45, 120 designs, 3 seeds, all rows; CI and invariance alpha set
+equal):
+
+| alpha | core-20 F1 | full F1 | SHD |
+|---|---|---|---|
+| 0.05 | 0.461 | 0.387 | 69.4 |
+| 0.01 | 0.471 | 0.393 | 66.0 |
+| **0.001** | **0.489** | **0.404** | **61.5** |
+
+Still monotone at 1e-4 (0.497) and 1e-5 (0.543) on ALL rows — a symptom,
+not a calibration: the test rejects too often on this data and only an
+extreme threshold compensates. **Capping every sample — observational
+included — at 1,000 rows changes both facts** (`runs/igsp-obscap-lt.parquet`,
+`igsp-calibration-lt-cap1000.parquet`): the level rises (core 0.49 → 0.63 at
+alpha 1e-3) and alpha gains an interior optimum:
+
+| alpha, all samples capped at 1,000 rows | core-20 F1 | full F1 | SHD |
+|---|---|---|---|
+| 1e-3 | 0.622 | 0.484 | 42.0 |
+| **1e-4** | **0.634** | **0.492** | **40.7** |
+| 1e-5 | 0.609 | 0.469 | 41.7 |
+| 1e-6 | 0.599 | 0.460 | 42.1 |
+
+**Design of record: every sample capped at 1,000 rows (the observational
+run sized like an experiment — also the fair comparison), alpha 1e-4 for
+both test families.** Chosen on neutral designs only, before the corpus
+pass. The authors' grid on the same chamber is 1e-4…1e-2.
+
+The 10,000-row observational sample scoring BELOW its own 1,000-row subsample
+is the single-regime row effect of "WHY STRONG INTERVENTIONS HURT" item 3,
+seen through a second test family.
+
+**Two things visible before calibration ends, both to be read as hypotheses
+for the corpus pass, not results:**
+
+1. **Selection barely registers.** At every k, every alpha AND every cap,
+   `random` and the coverage rule are within 0.01 core-20 F1 of each other
+   (cap 1,000, k=30: 0.622 vs 0.628). So the flatness is not the free
+   observational rows — it survives sizing them like one experiment. Under PC at 1500 rows the same two arms differ
+   by 0.099. If this survives the corpus, the entire "which experiments to
+   buy" signal this benchmark measures lives in the pooled reduction, and
+   under the authors' own estimator the purchasing task has almost no
+   headroom — because the observational sample identifies the core skeleton
+   on its own and interventions only orient.
+2. **The budget response is nearly flat**: core-20 0.61 → 0.63 → 0.63 at
+   k=6/30/45 under the design of record, against PC's 0.18 → 0.22 → 0.23.
+   Same reason.
+
+**Absolute level.** Core-20 F1 ≈ 0.49 on random designs against PC's 0.22
+at LT k=30: the never-pooled estimator with 10,000 observational rows is a
+much better instrument for the core graph. That is not a comparison of
+purchases; it is a statement about the judge, and the paper reports it as
+one.
+
+**Pre-registered for the LT corpus pass (before it ran):** (a) arm means
+converge — the spread across arms at k=30 falls below 0.02; (b) the
+coverage rule does NOT resolve above the loop; (c) the marginal gain of a
+strong light-source experiment is non-negative, i.e. the anti-prior does
+not reproduce when regimes are never mixed.
+
+### Outcome (2026-09-10 night, `runs/rescored-vps-utigsp-lt.parquet`, 769 designs × 3 seeds, 51 min): all three hold
+
+| k | spread of arm means, core-20 (UT-IGSP) | same under PC@1500 | loop − rule (UT-IGSP) | strong-buy slope (UT-IGSP) | strong-buy slope (PC@1500) |
+|---|---|---|---|---|---|
+| 6 | 0.013 | 0.051 | −0.004 (tie) | −0.003 | −0.022 |
+| 30 | 0.015 | 0.077 | −0.002 (tie) | +0.000 | −0.009 |
+| 45 | 0.004 | 0.033 | +0.002 (tie) | +0.001 | −0.006 |
+
+- **(a) Convergence — confirmed.** Every arm sits at core-20 F1 0.615–0.642;
+  at k=30 the spread is 0.015 and at k=45 it is 0.004. Several arms have
+  **zero variance across designs** (`coverage_max` 0.642 ± 0.000, `llm_pc`
+  at k=45 0.642 ± 0.000): the estimator returns the same graph whatever was
+  bought. 0.642 is its ceiling on this chamber, and almost any k=30 purchase
+  reaches it.
+- **(b) The rule does not beat the loop — confirmed**, nor does anything
+  beat anything by more than 0.008. Three contrasts "resolve" only because
+  the variance collapsed (MDEs of 0.003–0.006): `shared_blackboard` −0.005,
+  rule vs random +0.008, `coverage_min` vs `coverage_max` −0.006. Report
+  them as what they are: differences smaller than a rounding convention.
+- **(c) The anti-prior does not reproduce — confirmed.** Within each budget,
+  the partial slope of core-20 F1 on the number of STRONG light-source
+  buys (controlling for light-source buys overall) is −0.003 / +0.000 /
+  +0.001 under UT-IGSP against −0.022 / −0.009 / −0.006 under PC at 1500
+  rows; the raw correlation is **+0.25 / +0.23 at k=30/45** under UT-IGSP
+  against −0.31 / −0.30 under PC. **The models' "strong root interventions
+  give the most signal" prior was right about the chamber and wrong about
+  our estimator.** "The LLM arms carry the opposite of the needed
+  knowledge" is withdrawn; what they lacked was knowledge of the JUDGE.
+
+**What this does to the paper.** Under the chamber authors' own estimator
+the budgeted-selection task has essentially no headroom on the core graph:
+the observational sample plus any handful of interventions identifies what
+the tests can identify, and purchases only add orientation the ceiling
+already includes. Every selection-level finding in this document — the
+coverage rule as near-oracle, the oracle headroom, the sensor-setting
+regime, the anti-prior — is therefore a property of **PC on pooled data at
+a fixed row cap**, the estimator of record, and is reported as such. The
+arm-contrast findings survive in the only form they ever had: under one
+judge, held fixed, with the judge named. And the contract finding (a floor
+on effort) does not depend on the judge at all.
+
+**Two caveats that travel with this.** (1) UT-IGSP scores the 20-variable
+core; the 18 apparatus edges, where 78% of PC's budget response lives
+(register §28), are invisible to it by construction — so "no headroom"
+is a core-graph statement. (2) The result depends on giving the estimator
+the observational sample at all; sized like one experiment it still holds,
+but an estimator denied any observational data was not tested.
+
+---
+
+## JCI-PC ON THE CORPUS AT 1500 ROWS (2026-09-10 afternoon, VPS/OpenBLAS, `runs/rescored-vps-jci-rows1500.parquet`): the predictions scored, and a defect in the indicator design found and fixed
+
+The same 2,206 designs, 9 seeds, `--estimator jci_pc` (per-VARIABLE
+indicators, the design of record when this ran), against PC at the same cap.
+
+**Verdict changes, PC → JCI-PC, both at 1500 rows: 9 of 39 on directed F1,
+5 of 39 on the skeleton.** Every change:
+
+| contrast | PC Δ (verdict) | JCI-PC Δ (verdict) | skeleton |
+|---|---|---|---|
+| LT k=45 `one_shot` − loop | −0.002 (tie) | −0.049 (**R−**) | tie → R− |
+| LT k=45 `shared_blackboard` − loop | −0.004 (tie) | −0.019 (**R−**) | tie, tie |
+| LT k=45 loop − rule | −0.012 (R−) | **+0.044 (R+)** | tie → **R+** |
+| LT k=45 rule − random | +0.021 (R+) | **−0.032 (R−)** | R+ → **R−** |
+| LT k=30 loop − rule | −0.032 (R−) | −0.043 (R−) | tie → R− |
+| LT k=6 `one_shot` − loop | −0.042 (R−) | −0.032 (R−) | tie → R− |
+| WT k=7 `critique` − loop | −0.000 (tie) | −0.035 (R−) | tie, tie |
+| WT k=7 loop − rule | −0.026 (R−) | +0.015 (tie) | tie, tie |
+| WT k=14 `one_shot` − loop | +0.012 (tie) | −0.035 (R−) | tie, tie |
+| WT k=21 `critique` − loop | −0.021 (R−) | +0.001 (tie) | tie, tie |
+| WT k=21 `team_varsplit` − `team` | +0.018 (R+) | +0.009 (tie) | R+, R+ |
+
+**Arm means, JCI-PC minus PC, LT:** k=6 every arm +0.005 to +0.027; k=30
+every arm +0.018 to +0.030 (`coverage_min` +0.157 — the depth rule, one
+variable at three strengths, gains most from a regime column); **k=45 every
+arm LOSES, and unequally: loop −0.020, random −0.023, `shared_blackboard`
+−0.035, `one_shot` −0.067, `coverage_max` −0.076, `coverage_min` −0.118.**
+That inequality is where four of the nine flips come from, including the
+one that reverses a headline (the rule falling below the loop AND below
+random at LT k=45).
+
+**Prediction scorecard** (written before the file came back, "JCI-PC PROBE"):
+
+1. *Every resolved arm contrast reproduces.* **Partly false**: 9 of 39
+   directed, 5 of 39 skeleton. Six of the nine are boundary cases; three at
+   LT k=45 are not.
+2. *The rule loses ground in proportion to distinct variables bought.*
+   **Wrong as stated.** At LT k=45 every arm bought ≈11 light-source
+   variables (loop 11.0, rule 11.0, `one_shot` 10.96) and their penalties
+   differ four-fold, so the indicator COUNT explains nothing there
+   (r = +0.32 the wrong way). What does: **light-source variables bought
+   at two strengths and merged into ONE indicator** — r −0.38 directed /
+   −0.47 skeleton, OLS **−0.0105 per merged pair** with single-regime light
+   buys at +0.0093. `coverage_min_ms` merges 5.0 pairs (−0.118), the rule
+   3.8 (−0.076), the loop 2.5 (−0.020). At LT k=30 the penalty tracks
+   light-source experiments bought (r −0.71 / −0.74), i.e. regimes, not
+   variables. The confound with coverage is real but it runs through
+   DEPTH (regimes per variable), not breadth.
+3. *Skeleton verdicts move less than directed ones.* **True** (5 vs 9).
+
+**The defect and the fix.** "One indicator per target variable" (jci.py,
+decision recorded that morning) puts `red_mid` and `red_strong` rows in one
+block that is itself a two-regime mixture — the very thing the indicator
+exists to remove. JCI's context variable is the REGIME. `regime_label` now
+emits `<variable>@<strength>` on LT and one label per menu entry on WT;
+`rescore.py --context regime` selects it and stamps `rescore_context`
+(`3b101fa`, 47 tests).
+
+**Probe on the 84 designs at 1500 rows, 3 seeds — the fix does NOT help:**
+
+| chamber, k | PC | JCI per-variable | JCI per-regime |
+|---|---|---|---|
+| LT 6 | 0.176 | 0.194 | 0.185 |
+| LT 30 | 0.379 | **0.410** | 0.380 |
+| LT 45 | 0.432 | 0.388 | **0.310** |
+| WT 7 / 14 / 21 | 0.177 / 0.175 / 0.196 | 0.196 / 0.185 / 0.206 | 0.199 / 0.192 / 0.210 |
+
+Splitting a merged indicator removes one within-block mixture but adds one
+more sparse binary node, and at 1500 rows the second cost exceeds the first
+on LT (WT is unchanged: its entries are already one regime each). The merged-
+pair correlation was genuine; its counterfactual was not. **Per-variable
+stays the JCI-PC design of record; per-regime is queued at 5000 rows on the
+LT k=30/45 subset, the only cap where a sparse indicator might be cheap
+enough for the split to pay.** Third lesson of the day in the same shape as
+the first two: a correlate that explains a penalty is not a fix until the
+counterfactual is run.
+
+**What stands regardless of the indicator design**, because it holds under
+PC at both caps and under JCI-PC: no LLM arm beats the rule at LT k=6/30 or
+WT k=14/21; `one_shot` ≥ loop at LT k=30; `team_varsplit` > `team` at LT
+k=30 (+0.078 under JCI); `coverage_min` ≪ `coverage_max` everywhere. What
+is estimator-sensitive: everything at LT k=45, `critique` everywhere, the
+WT k=21 varsplit confirmation (R+ under PC-1500 and on every skeleton
+reading; tie under JCI directed).
+
+---
+
+## THE TWO-CAP CORPUS RE-SCORE (2026-09-10, VPS/OpenBLAS, `runs/rescored-vps-rows300.parquet`, `runs/rescored-vps-rows1500.parquet`): arm contrasts are NOT cap-invariant on directed F1 — they are on the skeleton
+
+The twelve M7 source files (2,206 distinct designs, 9 PC seeds, $0) re-scored
+on ONE machine at `--pc-max-rows 300` and `1500` (`rescore.py --pc-max-rows`,
+`14ab67c`). Every headline contrast, design-clustered, unequal-n MDE:
+
+| contrast | n | Δ @300 (MDE) | Δ @1500 (MDE) | directed verdict 300 → 1500 | skeleton verdict 300 → 1500 |
+|---|---|---|---|---|---|
+| LT k=6 `one_shot` − `llm_pc` | 30/30 | -0.047 (0.025) | -0.042 (0.026) | **R−** → **R−** | tie → tie |
+| LT k=6 `critique` − `llm_pc` | 30/30 | -0.010 (0.026) | -0.006 (0.028) | tie → tie | tie → tie |
+| LT k=6 `shared_blackboard` − `llm_pc` | 30/30 | -0.058 (0.023) | -0.047 (0.027) | **R−** → **R−** | **R−** → **R−** |
+| LT k=6 `llm_pc` − `coverage_max_ms` | 30/30 | +0.037 (0.029) | +0.026 (0.032) | **R+** → tie ◀ | tie → tie |
+| LT k=6 `coverage_max_ms` − `random` | 30/30 | -0.001 (0.030) | -0.007 (0.037) | tie → tie | tie → tie |
+| LT k=6 `coverage_min_ms` − `coverage_max_ms` | 30/30 | -0.014 (0.028) | +0.005 (0.034) | tie → tie | tie → tie |
+| LT k=30 `one_shot` − `llm_pc` | 6/70 | +0.002 (0.019) | +0.038 (0.028) | tie → **R+** ◀ | tie → tie |
+| LT k=30 `critique` − `llm_pc` | 30/70 | -0.015 (0.014) | +0.022 (0.019) | **R−** → **R+** ◀ | tie → tie |
+| LT k=30 `shared_blackboard` − `llm_pc` | 30/70 | -0.020 (0.013) | -0.022 (0.022) | **R−** → tie ◀ | **R−** → **R−** |
+| LT k=30 `llm_pc` − `coverage_max_ms` | 70/30 | -0.001 (0.010) | -0.032 (0.014) | tie → **R−** ◀ | tie → tie |
+| LT k=30 `coverage_max_ms` − `random` | 30/30 | +0.065 (0.020) | +0.099 (0.027) | **R+** → **R+** | **R+** → **R+** |
+| LT k=30 `coverage_min_ms` − `coverage_max_ms` | 30/30 | -0.100 (0.014) | -0.241 (0.017) | **R−** → **R−** | **R−** → **R−** |
+| LT k=30 `team_varsplit` − `team` | 30/40 | +0.042 (0.018) | +0.057 (0.019) | **R+** → **R+** | **R+** → **R+** |
+| LT k=45 `one_shot` − `llm_pc` | 24/30 | -0.007 (0.016) | -0.002 (0.014) | tie → tie | tie → tie |
+| LT k=45 `critique` − `llm_pc` | 30/30 | -0.015 (0.019) | +0.010 (0.013) | tie → tie | tie → tie |
+| LT k=45 `shared_blackboard` − `llm_pc` | 30/30 | -0.002 (0.012) | -0.004 (0.010) | tie → tie | tie → tie |
+| LT k=45 `llm_pc` − `coverage_max_ms` | 30/30 | -0.001 (0.013) | -0.012 (0.011) | tie → **R−** ◀ | tie → tie |
+| LT k=45 `coverage_max_ms` − `random` | 30/30 | +0.017 (0.015) | +0.021 (0.016) | **R+** → **R+** | tie → **R+** ◀ |
+| LT k=45 `coverage_min_ms` − `coverage_max_ms` | 30/30 | -0.009 (0.012) | -0.042 (0.012) | tie → **R−** ◀ | tie → **R−** ◀ |
+| WT k=7 `one_shot` − `llm_pc` | 32/50 | +0.009 (0.023) | +0.014 (0.026) | tie → tie | tie → tie |
+| WT k=7 `critique` − `llm_pc` | 49/50 | +0.001 (0.022) | -0.000 (0.024) | tie → tie | tie → tie |
+| WT k=7 `shared_blackboard` − `llm_pc` | 50/50 | +0.001 (0.021) | -0.000 (0.026) | tie → tie | tie → tie |
+| WT k=7 `llm_pc` − `wt_coverage_max` | 50/50 | -0.024 (0.020) | -0.026 (0.024) | **R−** → **R−** | tie → tie |
+| WT k=7 `wt_coverage_max` − `random` | 50/50 | +0.003 (0.020) | +0.018 (0.023) | tie → tie | tie → tie |
+| WT k=7 `wt_coverage_min` − `wt_coverage_max` | 44/50 | -0.067 (0.015) | -0.081 (0.019) | **R−** → **R−** | **R−** → **R−** |
+| WT k=14 `one_shot` − `llm_pc` | 34/100 | -0.006 (0.023) | +0.012 (0.020) | tie → tie | tie → tie |
+| WT k=14 `critique` − `llm_pc` | 50/100 | -0.023 (0.021) | -0.004 (0.018) | **R−** → tie ◀ | tie → tie |
+| WT k=14 `shared_blackboard` − `llm_pc` | 50/100 | -0.005 (0.021) | +0.016 (0.018) | tie → tie | tie → tie |
+| WT k=14 `llm_pc` − `wt_coverage_max` | 100/50 | +0.003 (0.019) | -0.014 (0.018) | tie → tie | tie → tie |
+| WT k=14 `wt_coverage_max` − `random` | 50/50 | +0.023 (0.018) | +0.028 (0.022) | **R+** → **R+** | **R+** → **R+** |
+| WT k=14 `wt_coverage_min` − `wt_coverage_max` | 50/50 | -0.073 (0.019) | -0.043 (0.022) | **R−** → **R−** | **R−** → **R−** |
+| WT k=14 `team_varsplit` − `team` | 50/50 | -0.000 (0.023) | +0.016 (0.020) | tie → tie | tie → tie |
+| WT k=21 `one_shot` − `llm_pc` | 30/100 | -0.012 (0.025) | -0.002 (0.021) | tie → tie | tie → tie |
+| WT k=21 `critique` − `llm_pc` | 50/100 | -0.008 (0.023) | -0.021 (0.017) | tie → **R−** ◀ | tie → tie |
+| WT k=21 `shared_blackboard` − `llm_pc` | 50/100 | -0.001 (0.020) | -0.002 (0.018) | tie → tie | tie → tie |
+| WT k=21 `llm_pc` − `wt_coverage_max` | 100/50 | -0.026 (0.018) | -0.038 (0.018) | **R−** → **R−** | **R−** → **R−** |
+| WT k=21 `wt_coverage_max` − `random` | 50/50 | +0.056 (0.017) | +0.059 (0.018) | **R+** → **R+** | **R+** → **R+** |
+| WT k=21 `wt_coverage_min` − `wt_coverage_max` | 50/50 | -0.074 (0.019) | -0.067 (0.018) | **R−** → **R−** | **R−** → **R−** |
+| WT k=21 `team_varsplit` − `team` | 124/132 | +0.013 (0.015) | +0.018 (0.013) | tie → **R+** ◀ | **R+** → **R+** |
+
+`R+` = first arm resolved above the second; `R−` below; ◀ = the verdict
+changes with the cap. **Directed F1: 10 of 39 verdicts flip. Skeleton F1:
+2 of 39**, both at LT k=45 and both toward MORE separation at 1500 rows.
+
+**What the 1500-row estimator says, claim by claim.**
+
+- **The coverage headline gets stronger.** At 300 rows the loop beat the rule
+  at LT k=6 (+0.037, resolved) and tied it elsewhere on LT. At 1500 rows the
+  LT k=6 win is a tie (+0.026, MDE 0.032), and the RULE beats the loop at
+  LT k=30 (−0.032, resolved) and k=45 (−0.012, on the bound), as it already
+  did at WT k=7 and k=21. **No LLM arm beats the rule at either cap; at 1500
+  rows the rule beats the loop at four of six points.** The rule's escape at
+  the smallest budgets (tie with random at LT k=6, WT k=7) is unchanged.
+- **The record claim holds and, if anything, reverses.** `one_shot` ties the
+  loop at five points at both caps and loses only at LT k=6 (−0.047 / −0.042).
+  At LT k=30 and 1500 rows it is resolved ABOVE the loop on directed F1
+  (+0.038, MDE 0.028; six distinct designs all at 0.435–0.466 against the
+  loop's 0.415) while the skeleton says tie (−0.013). Orientation, not
+  selection — say "ties or beats".
+- **`critique` is cap-chaotic and must be reported as a tie.** Directed F1:
+  LT k=30 goes from resolved-below (−0.015) to resolved-ABOVE (+0.022); WT
+  k=14 from resolved-below to tie; WT k=21 from tie to resolved-below. Its
+  skeleton verdict is a tie at every point at both caps. Third flip of this
+  cell; the standing instruction ("stop re-adjudicating") now has its reason:
+  the directed verdict is orientation noise.
+- **`shared_blackboard` below the loop at LT k=6 and k=30 on the skeleton at
+  both caps** (−0.038/−0.043, −0.016/−0.035, all resolved); directed LT k=30
+  sits exactly on its bound at 1500 (−0.022, MDE 0.022). The WT ties hold.
+- **`team_varsplit`: LT k=30 resolved at both caps (+0.042 → +0.057).** WT
+  k=14 tie at both. **WT k=21 — the n=132 confirmation — resolves at 1500
+  rows (+0.018, MDE 0.013) and on the SKELETON at both caps (+0.017 at 300,
+  +0.030 at 1500)**, having read +0.013 / MDE 0.015 on the pre-registered
+  directed-300 analysis. Report it as: does not clear the house bar on the
+  pre-registered analysis; clears it under two of three alternative readings;
+  the prediction (+0.0149) is inside every interval. Do not switch bars.
+- **Breadth-vs-depth (`coverage_min` − `coverage_max`) widens at 1500** (LT
+  k=30 −0.100 → −0.241); the one-per-variable rule's advantage is larger,
+  not smaller, when the estimator has power.
+
+**Consequence for register §34's wording.** "Arm contrasts stand because
+every arm ran under one estimator" was too strong. Every contrast is FAIR at
+either cap, but which ones resolve depends on the cap for a quarter of them
+on directed F1 — mostly boundary cases, and mostly in the direction of more
+separation at 1500. **On skeleton F1 the verdicts are cap-invariant to two
+boundary cases**, consistent with §28's finding that the skeleton has ~1.7×
+the signal-to-noise of the directed score. Rule: report every arm contrast at
+both caps and on both metrics; a directed flip whose skeleton verdict holds is
+orientation, and orientation is where PC's noise lives.
+
+**And the BLAS finding, at the design level, is gone.** The same 2,207
+designs re-scored at 300 rows on Accelerate (`rescored-single-backend`, 5 Sep)
+and on OpenBLAS (this file) agree on the 9-seed design mean to the digit on
+**2,202 of 2,207**; the remaining five differ by at most 0.025; correlation
+1.0000; all 39 contrasts give the same delta to three decimals. Register §31's
+cell-level divergence (0.38 vs 0.29 on one seed) is real and averages out at
+nine seeds. The reproducibility statement can now say: design-level, 9-seed
+scores are backend-invariant; single-seed cell scores are not.
+
+---
+
+## WHY STRONG INTERVENTIONS HURT (2026-09-10, local/Accelerate, `runs/mixture-probe-lt.parquet`, `runs/dilution-probe-lt.parquet`): pooled regimes, not the row cap and not the mean shift
+
+Two LLM-free ladders, 9 PC seeds each, built to say WHICH part of the harness
+makes a strong light-source experiment score badly. Register §34 had shown
+the row cap reorders selections; this asks what the cap is interacting with.
+
+**Ladder 1 — the source's own edges.** For each of `red`, `green`, `blue` at
+`mid` and `strong`: PC on the experiment ALONE; on `reference` + experiment
+POOLED as the pipeline pools; and on the same pool with every column CENTRED
+within its block first (mean shift removed, within-block variation kept).
+
+| strength | mode | rows | recall of source's out-edges | false positives |
+|---|---|---|---|---|
+| mid | alone | 1500 / all | 0.286 | 14.7 |
+| mid | pooled | 1500 / all | 0.280 / 0.238 | 14.9 / 20.0 |
+| mid | centred | 1500 / all | 0.275 / 0.238 | 18.3 / 21.8 |
+| strong | alone | 1500 / all | 0.286 | 13.3 |
+| strong | pooled | 1500 / all | 0.286 / 0.286 | 17.7 / 18.8 |
+| strong | centred | 1500 / all | 0.249 / 0.243 | 16.2 / 20.6 |
+| any | any | 300 | 0.185–0.243 | 14.6–17.6 |
+
+- Strength does not matter for the source's own edges: `mid` and `strong`
+  recover the same fraction, alone or pooled.
+- The strong block ALONE is fine (recall equal to mid, fewer false
+  positives). The regime is not the problem; mixing regimes is.
+- Pooling adds false positives and **centring does not remove them** — so
+  in a TWO-block pool the extra edges are not the between-block mean shift.
+  (This does NOT generalise to many-block pools: see the JCI-PC probe below,
+  where indicator columns DO prevent the large-n collapse. An earlier draft
+  of this section said an indicator "cannot absorb them either"; withdrawn
+  the same day, by measurement.)
+- 300 rows is a power floor in every mode, alone included.
+
+**Ladder 2 — the OTHER inputs' edges.** Base pool `reference`, `green_mid`,
+`blue_mid`, `t_ir_1_mid`, `osr_c_mid`; add nothing, `red_mid` or
+`red_strong`; read the recall of `green`'s and `blue`'s true out-edges.
+
+| rows | added | recall green | recall blue | false positives | F1 |
+|---|---|---|---|---|---|
+| all (~6,000) | none | 0.000 | 0.429 | 27.0 | 0.194 |
+| all | red_mid | 0.286 | 0.286 | 27.0 | 0.174 |
+| all | red_strong | **0.000** | **0.000** | 30.0 | **0.067** |
+| 1500 | none | 0.222 | 0.254 | 20.9 | 0.172 |
+| 1500 | red_mid | 0.111 | 0.270 | 18.6 | 0.166 |
+| 1500 | red_strong | 0.079 | 0.254 | 19.1 | 0.166 |
+| 300 | any | 0.03–0.06 | 0.14–0.21 | 16.1–16.4 | 0.133–0.144 |
+
+**The harm grows with rows.** With every row used, the strong block wipes
+out both other inputs' edges and F1 falls from 0.194 to 0.067; at 1500 rows
+the damage is partial; at 300 it is invisible under the power floor. Variance
+dilution under a cap would have gone the other way (recovered with rows).
+
+**What this settles.**
+
+1. The strong-intervention penalty is **not a row-cap artefact** — a larger
+   cap makes it worse. This is the mechanism behind §34's non-monotone row
+   response: more rows give Fisher-Z more power to find the misfit of one
+   linear-Gaussian model to two regimes with different covariance.
+2. In a two-block pool it is **not a mean shift** (centring is inert). In
+   the 30–45-block pools the arms actually buy, **one context indicator per
+   intervened variable removes the large-n collapse** (JCI-PC probe, next
+   section): PC at 5000 rows falls to 0.273 / 0.255 at LT k=30 / 45 while
+   JCI-PC holds 0.376 / 0.418 and its skeleton keeps rising with rows.
+3. It is **not the strong regime in particular**: alone, at 1,000 rows, the
+   strong experiment is as recoverable as the mid one. **But it is partly
+   the chamber's data meeting a linear-Gaussian test, even in ONE regime**
+   (measured 2026-09-10 evening): PC on the reference run ALONE scores
+   core-20 F1 0.177 / 0.205 / 0.186 / **0.114** at 300 / 1,000 / 3,000 /
+   10,000 rows, false positives 15 → 27. The inputs are uniform and the
+   sensor response is not exactly linear, so a partial-correlation test with
+   enough power reads nonlinear residual dependence as edges. Pooling
+   regimes AMPLIFIES that misfit (ladder 2's collapse is far sharper than
+   the single-regime decline); it does not create it alone. UT-IGSP shows
+   the same signature on its observational sample (core 0.49 at 10,000 rows,
+   0.63 at 1,000), so the effect is the test family, not PC's search.
+4. It IS a property of **pooled-regime estimation that ignores the regime**
+   — the reduction this harness applies. The models' "strong root
+   interventions give signal-to-noise" prior is right about the regime and
+   wrong about the estimator. Whether an estimator that KNOWS the regime
+   (JCI-PC at a large cap, or UT-IGSP/GIES which never pool) ranks strong
+   interventions differently is now a runnable question, not a deferred one.
+
+**Rules.** State the anti-prior as an estimator-relative finding. Never quote
+a "more rows is better" default for ANY Gaussian-test estimator on chamber
+data, pooled or not; sweep it.
+When a penalty for adding data appears, test alone / pooled / centred before
+naming a mechanism — the first two explanations offered here (saturation,
+then mean-shift mixture) were both wrong and both plausible.
+
+---
+
+## JCI-PC PROBE (2026-09-10, local/Accelerate, `runs/jci-probe.parquet`, `runs/jci-probe-rows5000.parquet`): a second estimator that knows the regime
+
+`jci.py` + `rescore.py --estimator jci_pc`: the plain PC on the pooled table
+widened by one 0/1 column per intervened variable, with every edge INTO an
+indicator forbidden (Joint Causal Inference, Mooij, Magliacane & Claassen,
+JMLR 2020, assumption 0 only — assumption 3, declaring the mutually exclusive
+indicators adjacent, is unenforceable in causal-learn's skeleton phase and
+was removed after its own test showed it inert). Indicators are stripped
+before scoring. Apparatus indicators are dropped as collinear with the
+setting they mark unless the setting was bought at two strengths, so the
+surviving indicators are mostly the sampled light-source inputs.
+
+**84 corpus designs (14 per chamber × budget), 3 seeds, JCI-PC minus PC:**
+
+| chamber, k | 300 rows | 1500 rows | 5000 rows (LT only) |
+|---|---|---|---|
+| LT 6 | +0.009 | +0.019 | +0.018 |
+| LT 30 | −0.021 | **+0.032** | **+0.103** |
+| LT 45 | −0.128 | −0.044 | **+0.163** |
+| WT 7 | +0.016 | +0.019 | — |
+| WT 14 | −0.002 | +0.010 | — |
+| WT 21 | −0.026 | +0.010 | — |
+
+98% of design × seed cells differ; mean |Δ| 0.053. Three mechanisms, each
+measured:
+
+1. **Orientation, not skeleton, at 1500 rows.** LT k=30: directed +0.032,
+   skeleton +0.005. A forced C→X edge lets Meek's rule 1 orient X—Y whenever
+   C is not adjacent to Y, and the scorer charges an unoriented edge as
+   TP+FP. Core-20 F1 moves +0.017.
+2. **An indicator penalty at small caps.** Δ correlates −0.58 (300 rows) /
+   −0.48 (1500) with the number of range-shifting buys: each indicator is a
+   sparse binary node (≈10 ones at 300 rows) that adds tests and forks. This
+   is CONFOUNDED WITH VARIABLE COVERAGE — the coverage rule buys the most
+   indicators — so JCI-PC at 300 rows must never adjudicate the rule.
+3. **Monotone in rows where PC is not.** LT, same 42 designs:
+
+| k | rows | PC | JCI-PC | PC skeleton | JCI-PC skeleton |
+|---|---|---|---|---|---|
+| 30 | 300 / 1500 / 5000 | 0.387 / 0.379 / **0.273** | 0.366 / 0.410 / 0.376 | 0.447 / 0.481 / 0.391 | 0.397 / 0.486 / 0.469 |
+| 45 | 300 / 1500 / 5000 | 0.413 / 0.432 / **0.255** | 0.285 / 0.388 / **0.418** | 0.460 / 0.529 / 0.357 | 0.315 / 0.452 / **0.516** |
+
+   PC's collapse past 1500 rows (register §34) is the pooled-regime misfit of
+   the previous section given enough power to find it; the indicators block
+   it. JCI-PC's natural cap is therefore LARGE, the reverse of PC's.
+
+**How to read the corpus run** (queued on the VPS at 1500 rows; pre-registered
+2026-09-10 before any file came back): (1) every resolved arm-vs-arm verdict
+reproduces, because the orientation gain is shared by all arms; (2) the
+coverage rule loses ground in proportion to distinct variables bought — the
+indicator penalty, a harness signature, not a finding about coverage; (3)
+skeleton verdicts move less than directed ones; a directed flip whose
+skeleton verdict holds is orientation. Selection-level claims (oracle
+headroom, the anti-prior) are read under JCI-PC ONLY at a cap where its
+indicator penalty is gone, i.e. ≥1500 rows, and reported beside PC's.
+
+---
+
+## THE 1500-ROW ORACLE (2026-09-10, VPS/OpenBLAS, `runs/oracle-probe-rows1500-lt-*`): headroom at the ends, a tie in the middle
+
+Re-derivation of the LT oracle with `--pc-max-rows 1500` (register §34),
+same procedure (greedy to k=45 at search seeds 0–4, one-swap gated on the
+noise floor, static ranking over 20 contexts, everything re-scored at
+seeds 100–108). **Compare only within this file** — it is OpenBLAS; the
+300-row probe and the corpus are Accelerate.
+
+| k | coverage rule | random | ranking top-k | greedy(+swap) set, fresh | ranking − rule [MDE] | set − rule [MDE] |
+|---|---|---|---|---|---|---|
+| 6 | 0.152 ± 0.041 | 0.181 | 0.248 | **0.338** | **+0.096 [0.038] R** | **+0.185 [0.090] R** |
+| 30 | 0.447 ± 0.015 | 0.324 | 0.414 | 0.475 | **−0.033 [0.018] R** (ranking is WORSE) | +0.028 [0.032] below MDE |
+| 45 | 0.429 ± 0.013 | 0.411 | 0.432 (pooled 0.452) | **0.497** | +0.003 / **+0.023 [0.017] R** | **+0.068 [0.029] R** |
+
+**Verdict.** "Coverage is a plateau, not the ceiling" **survives at k=6
+and k=45 and fails at k=30** — the middle budget, where every headline
+contrast of the pillar lives. At k=30 the best set found sits +0.028 above
+the rule with an MDE of 0.032 (one design vs ten rule draws), and the
+static ranking is resolved *below* the rule. The 300-row picture
+(headroom at all three budgets, +0.046 by ranking at k=30) does not
+replicate at the middle budget. State it as: **at a well-set estimator the
+coverage rule is within noise of the best known selection at the middle
+budget, and beatable at the small and large ones.**
+
+**What the 1500-row oracle buys** — and what it does not. The sensor-setting
+depth regime is gone: the k=30 set covers **22 distinct variables** (rule:
+30; 300-row oracle: 15), families t 10 / diode 6 / v 5 / osr 3 / l 2 /
+pol 2 / green 1 / reference, 19 of 30 at mid strength and 6 weak. The
+residual advantage at k=45 is coverage plus a preference for apparatus
+entries at mid strength and an aversion to `osr_*` and `red_*` (per-family
+mean gain at k=30: reference +61, diode +8, v +6, t −1, osr −6, red −11
+×10⁻³). `rule_no_strong_sources` — the coverage rule minus strong
+light-source entries — captures +0.025 of the +0.068 at k=45 (resolved),
+and `rule_mid_only` +0.060 of +0.185 at k=6 (resolved); at k=30 neither
+moves. **Also new at 1500 rows: the coverage rule at k=6 (0.152) is BELOW
+random (0.181)** — round-robin over 30 variables with 6 picks buys six
+singletons, and at this cap the reference run alone is worth more.
+
+**Arm purchases on this scale.** Only informative at k=6, where marginal
+gains are large: `llm_pc` 4.7 and `critique` 4.6 ×10⁻³ vs random −0.8 (sd
+≈ 5, n=30, MDE ≈ 3.6) — **the loop's purchases ARE better than random at
+the small budget on the 1500-row scale**, consistent with its resolved
+k=6 win over the rule at 300 rows. At k=30 and k=45 the per-experiment
+gains are within ±1×10⁻³ of zero for every arm (sd 0.7): the scale is
+flat and says nothing.
+
+**Winner's curse is small here** (search 0.500 → fresh 0.475 at k=30;
+0.506 → 0.497 at k=45), unlike the 300-row run (0.474 → 0.432), which is
+itself a sign the 300-row search was optimising noise.
+
+**Status of the 2026-09-09 claims after this run.**
+
+| claim | 300 rows | 1500 rows | paper |
+|---|---|---|---|
+| headroom above the rule at every budget | yes (5/6 contrasts) | k=6 and k=45 yes; k=30 tie | "beatable at the ends, within noise in the middle" |
+| the residual is sensor-setting depth | yes (15 vars of 30) | no (22 of 30, coverage-like) | withdrawn |
+| the models' prior points the wrong way | ρ −0.4 | not re-run; their "one strong per target" ≈ rule ≈ best at k=30 | withdrawn as stated |
+| feedback arm beats the loop | +0.027 R | +0.045 R (local re-score) | stands, strengthened |
+| no LLM arm beats the rule | yes | yes (loop −0.055 R at k=30, local re-score) | stands |
+
+---
+
+## WHAT THE HEADROOM IS (2026-09-09, evening): a one-line rule claims two-thirds of it, data-only learners claim none, and the model's prior points the wrong way
+
+> **CONDITIONAL ON `pc_max_rows=300` — see register §34 (found the same
+> night).** At 1500 rows the coverage rule scores 0.460 and the 300-row
+> oracle ranking 0.394, the sensor-setting rule 0.386. Everything in this
+> section and the oracle-probe section below is a statement about the
+> estimator at its 300-row cap, not about the chamber. The arm contrasts
+> stand (adaptive − loop is +0.045 at 1500 rows, resolved). A 1500-row
+> oracle is being derived on the VPS; until it lands, the coverage rule is
+> the best policy we hold and "plateau, not ceiling" is withdrawn as a
+> task property.
+
+
+Three LLM-free probes and one $0.37 LLM probe, all LT, all scored at PC
+seeds 100–108 like the oracle. Files: `runs/learners-lt.parquet`,
+`runs/depth-rule-lt.parquet`, `runs/llm-prior-lt.parquet` (+`-2`).
+Scripts in the session scratchpad (`learners.py`, `depth_rule.py`,
+`llm_prior.py`); worth promoting to the pipeline if the paper quotes them.
+
+**1. Data-only learners do not climb past the rule.** Every learner sees
+only the data it bought. LT k=30, n=10 rule seeds:
+
+| learner | F1 | vs rule 0.437 [MDE] | purchases on oracle scale (×10⁻³) |
+|---|---|---|---|
+| uncertainty sampling (bootstrap edge instability, B=8) | 0.267 ± 0.021 | **−0.170 [0.023] RESOLVED** | 5.9 |
+| uncertainty inside coverage | 0.434 ± 0.014 | −0.003 [0.019] | 9.7 |
+| credit-assignment bandit over (family, strength) | 0.382 ± 0.044 | **−0.056 [0.041] RESOLVED** | 9.2 |
+| perfect family-level prior, one entry per variable (uses ground truth) | 0.434 ± 0.019 | −0.003 [0.022] | 10.0 |
+
+Same picture at k=6 and k=45 (all learners ≤ rule; uncertainty −0.025
+resolved at k=45). Pure uncertainty sampling fails for an instructive
+reason: instability rewards the experiments that CREATE spurious edges, so
+it buys every strong light-source entry (5.0 of 5 possible). And a perfect
+family ordering that still covers every variable ties the rule — so the
+headroom is neither a better estimate nor a better family order.
+
+**2. The headroom is a different regime.** The oracle ranking's top-30
+covers only **15 distinct variables**: 27 of 30 picks are sensor-setting
+experiments (`t_*` ×18, `diode_*` ×9), the same variable bought at two or
+three strengths. Testing that as a rule, n=10, k=30:
+
+| rule | F1 | vs coverage rule [MDE] | rule→oracle | purchases (×10⁻³) |
+|---|---|---|---|---|
+| all 27 sensor-setting entries + 3 other apparatus | 0.462 ± 0.011 | +0.024 [0.017] RESOLVED | 53% | 17.6 |
+| 30 random from sensor-setting + `v_*` + reference (34) | 0.464 ± 0.010 | +0.027 [0.017] RESOLVED | 59% | 17.1 |
+| **sensor-setting mid/strong first (24), fill from the 34** | **0.468 ± 0.018** | **+0.031 [0.021] RESOLVED** | **67%** | 17.5 |
+| 30 random from ALL apparatus incl. `osr_*` (48) | 0.425 ± 0.022 | −0.013 [0.024] | −28% | 14.0 |
+
+**This corrects the oracle-probe section's "a one-line rule recovers some
+of it at the ends and none in the middle"** — the rules tried there were
+all coverage-first. A rule that ABANDONS coverage of the light sources,
+polarisers, LED currents and `osr_*` and spends the freed budget on repeat
+purchases of the sensor settings is one line long and gets two-thirds of
+the way to the oracle, with purchases scoring 17.5 against the oracle's
+own 17.8.
+
+**3. Why, mechanically (measured on the data, not argued).** In EVERY LT
+experiment the same 20 columns vary: `red`, `green`, `blue`, `current`,
+`pol_1`, `pol_2`, `angle_1`, `angle_2`, the six sensors and the six `l_*`
+— whatever the experiment is named. The intervened apparatus setting does
+NOT vary inside its own experiment (`t_ir_2` is the constant 1.0 in
+`uniform_t_ir_2_mid` and the constant 3.0 in `uniform_reference`); it
+varies only ACROSS the pool, as a two-level contrast, once its experiment
+is bought. Consequences: (a) a light-source experiment adds no new
+variation in its own variable — it shifts the range (`red` 171–255 in
+`red_strong` vs 0–85 at reference). **The sensors do NOT saturate under
+it** (measured: sensor sd and corr(red, ir_1) are 0.78 in `red_strong` vs
+0.77 at reference; no readings pinned at a ceiling), so the earlier
+"pushes sensors off the linear regime" was an assumption and is
+RETRACTED. What is measured instead: the 27 sensor-setting entries + 2
+`v_*` score **0.510** at 9 fresh seeds — above the oracle ranking's
+top-30 (0.483) — and adding ANY 30th experiment lowers it (`+red_strong`
+0.440, `+red_mid` 0.455, `+green_strong` 0.460, `+l_11_mid` 0.456,
+`+reference` 0.467); `red_strong` hurts most by LOSING input→sensor edges
+(9.8 → 6.7 found of the 11 input sources' edges) with 4 more false
+positives, not by spurious sensor–sensor edges (3.0 → 4.1). Whether that
+is a property of pooling shifted regimes or of PC's 300-row subsample
+(`pc_max_rows`) is being tested; if the latter, part of the oracle
+headroom is a harness setting and belongs in the register;
+(b) the 18 apparatus settings are the only purchases that add information,
+each as one two-level contrast, so one entry per setting is not enough and
+depth pays; (c) "breadth beats depth" (WT, `wt_coverage_min`) is a
+statement about the fat drivers there, not a law — on LT depth on the
+sensor settings beats breadth. `osr_*` is the exception among apparatus
+settings (family gain +2.8 vs `t` +17.3, `diode` +20.1); including it
+costs 0.04.
+
+**4. The models' prior points the wrong way — and it is not a capability
+gap.** Asked with no data to rank all 59 entries by informativeness (names
+only, and with a one-paragraph chamber description), reasoning effort high,
+five draws per condition, `runs/llm-prior-lt-all.parquet`, $0.87 total:
+
+| model | condition | n | Spearman vs oracle (min…max) | top-30 purchases (×10⁻³; random 9.7, oracle 17.8) | top-30 F1 (rule 0.437) |
+|---|---|---|---|---|---|
+| `deepseek-v4-flash-0731` | names only | 4 | **−0.37** (−0.50…−0.12) | 5.7 | **0.323** (below random 0.369) |
+| | + description | 5 | −0.22 (−0.26…−0.14) | 9.1 | 0.438 |
+| `glm-5.3-flash` | names only | 5 | +0.07 (−0.02…+0.15) | 9.3 | 0.421 |
+| | + description | 5 | −0.15 (−0.27…+0.02) | 9.5 | 0.433 |
+| `gpt-5.6-sol` (frontier) | names only | 5 | **−0.28** (−0.37…−0.24) | 9.4 | 0.440 |
+| | + description | 5 | −0.26 (−0.36…−0.04) | 9.4 | 0.437 |
+
+Every one of 29 parsed draws across three models and two vendors puts the
+five strong light-source and polariser interventions in its top 30, and
+all give the same reason: "strong interventions on the roots give the
+largest signal-to-noise for Fisher-Z". The oracle ranks those five
+55th–59th of 59. The frontier model is not better — it is more
+consistently wrong (sd 0.06) — and lands its purchases at exactly random's
+level because it executes coverage tidily ("the reference plus one strong
+intervention per target"). GLM is the only model near zero, for the same
+reason. DeepSeek's four empty-content draws (of 14) are the register §8
+failure mode and are excluded. **The LLM arms do not merely lack the
+relevant knowledge; they carry its opposite, at every model scale we can
+buy** — which is why `team` scores resolved BELOW random on the oracle
+scale and why no LLM arm's purchases beat a random draw on LT. The fix is
+therefore not a better model; it is documentation or learning (item 5).
+
+**4b. Documentation works for the frontier model and not for the flash
+model.** The same ranking prompt with a paragraph quoted from the dataset
+README (all manipulable inputs sampled independently in every experiment;
+mid/strong shift one input's range; apparatus-setting experiments fix one
+setting) — documentation, not the answer:
+
+| model | n parsed | Spearman (min…max) | purchases (×10⁻³) | top-30 F1 |
+|---|---|---|---|---|
+| `deepseek-v4-flash-0731` | 2 of 5 (3 empty) | −0.15 (−0.19…−0.12) | 9.4 | 0.446 |
+| `gpt-5.6-sol` | 5 of 5 | **+0.32** (+0.06…+0.68) | 11.9 (two draws at 15.4) | 0.446 ± 0.021 |
+
+sol's rationale flips to the correct one — "fixed-setting interventions
+rank highest because those variables otherwise have no variance" — in 3
+of 5 draws (those three buy zero strong light-source entries); the other
+two revert to coverage. DeepSeek, given the identical text, restates its
+belief in the document's own words ("larger distributional shifts, more
+detectable dependencies"). **So no model HAS the knowledge, and only the
+frontier model can DERIVE it from the manual, and not reliably.** Files
+`runs/llm-prior-lt-protocol-*.parquet`, $0.59.
+
+**5. What this does to the learnability question.** The signal that
+separates the oracle from the rule — which columns vary within an
+experiment and which only across the pool — is visible in the bought data
+after ONE purchase. It is learnable in principle and cheaply. The
+adaptive-feedback arm never saw it: its summary was coverage-shaped (edges
+found; variables unreached). And a prior that must be overridden makes the
+feedback's job harder, not easier. The next feedback design should tell the
+model exactly this (per experiment: what varied, what did not, whether the
+range moved) and nothing about coverage — a pre-registrable prediction that
+it clears the rule. Not required for the AAMAS submission.
+
+**Also corrects** oracle-probe item 5 below ("A one-line rule built from
+that recovers some of it at the ends and none in the middle") — true of
+coverage-first rules only.
+
+---
+
+## THE ADAPTIVE-FEEDBACK ARM (2026-09-09): the headroom is partly learnable without ground truth — and the effect is small
+
+The oracle probe (next section) left one question that decides how the
+paper reads: is the headroom above the coverage plateau *learnable* by an
+agent that never sees the ground truth, or is it visible only to an oracle
+that does? `adaptive_feedback` is the loop (`llm_pc`) with one change: every
+five purchases it runs PC on the data bought so far and puts a menu-keyed
+summary of the current estimate in the selection prompt (edges found so far;
+which menu entries perturb variables the estimate has not yet connected).
+Same budget, same call count, same contract. Pre-registered in spec §8.7
+row 7 before launch (commit `33dcc6d`): LT k=30, n=30, interleaved with a
+fresh `llm_pc` control in the same sweep so provider drift cannot land on one
+arm. `runs/m7-adaptive-lt.parquet`, 60/60 ok, $6.15, 1.2 h on six workers,
+`deepseek-v4-flash-0731`, macOS/Accelerate (matching the re-scored corpus).
+
+**The two pre-registered predictions split**, re-scored at 9 PC seeds and
+clustered by distinct design (30 distinct designs for the adaptive arm, 29
+for the loop):
+
+| prediction | measured | MDE | verdict |
+|---|---|---|---|
+| P1: purchases above random on the oracle marginal-gain scale (random 9.7×10⁻³) | adaptive **10.6×10⁻³**, Δ **+0.81×10⁻³** | 0.79×10⁻³ | **RESOLVED**, on the boundary (ratio 1.02; Welch p=0.0065). Same-sweep loop: 9.5×10⁻³, Δ −0.26, ns. |
+| P2: F1 above the coverage rule (0.437 at fresh seeds) | adaptive **0.445**, Δ **+0.008** | 0.017 | **below MDE — not supported** |
+
+Against the same-sweep loop the arm resolves cleanly: **+0.027 F1
+(0.445 vs 0.418), MDE 0.013, 2.1× the bound**. Core-20 moves the same way
+but does not resolve (+0.013, MDE 0.015; 0.236 vs 0.223, rule 0.228).
+
+**How to read it.** The arm did what the oracle said an agent could do
+and the coverage plateau said it could not: its purchases score above
+random on the oracle's own scale, the first LLM arm on LT to do so, and it
+beats the loop it is built from. But it covers **10% of the random→oracle
+range** on the purchase scale and **17% of the rule→oracle headroom** in F1
+(0.437 → 0.483). It reaches the plateau; it does not climb past it. The
+paper's sentence is therefore: *feedback from the data is the first thing
+that moves an LLM arm off the random line on the oracle scale, and the
+first single-loop change that resolves above the loop at the middle
+budget — and it is still not enough to beat a ten-line coverage rule.* The
+oracle headroom is real and partly learnable, and most of it is still
+unclaimed.
+
+**Costs and hygiene.** The arm is *cheaper* than the loop per cell
+(336 s vs 395 s; 68k vs 78k output tokens) despite a 53% longer prompt
+(28k vs 18k input) — the model reasons less when told what it already
+knows. Two things to carry into the write-up:
+
+- **Selection fallbacks: 16 of 900 picks (1.8%) in 10 of 30 adaptive cells
+  went to `rng.choice`; the loop had 0.** The longer prompt occasionally
+  yields an unparsable reply. This biases the arm *toward* random, so it
+  understates rather than inflates the effect; cells with a fallback scored
+  0.455 vs 0.445 without (n=10 vs 20, noise). Report it; do not correct
+  for it.
+- **Drift audit CLEAN** (`analyze_drift.py`): window overlap 0.99, no block
+  trending, tokens per call flat across the sweep for both arms.
+
+**Not yet done, and the order to do it in:** WT replication (the only
+chamber where an existing arm, the loop, already beats random on the oracle
+scale — if feedback stacks on top of that, the learnability claim gets a
+second chamber); the small and large LT budgets (the middle budget is where
+skill peaks, so k=30 is the friendliest test, and a k=6 result would say
+whether feedback helps where selection variance is largest); and a
+feedback-interval ablation (5 was a guess). None of these is required for
+the AAMAS submission; the k=30 result is the one the abstract needs.
+
+---
+
 ## THE ORACLE PROBE (2026-09-09, regenerated after review): the task is NOT solved by coverage — headroom exists at every budget and no arm reached it
+
+> **WITHDRAWN AS A TASK PROPERTY THE SAME NIGHT — register §34.** These
+> oracles were derived and scored at `pc_max_rows=300`; at 1500 rows the LT
+> k=30 ranking falls 0.066 BELOW the coverage rule. The tables stand as
+> "best selection for the estimator at 300 rows". Re-derivation at 1500
+> rows is in progress (`runs/oracle-probe-rows1500-*`, VPS/OpenBLAS).
+
 
 The top-ranked threat was "the task is coverage-shaped, so a coverage rule
 tying every LLM arm is a benchmark artefact". It was being *scoped*, not
@@ -158,9 +916,13 @@ arm that found a little of it was the single loop.
 
 **5. Is the ranking describable?** Partly, on LT: apparatus-setting
 experiments gain +0.014 at any strength; source experiments gain +0.002 at
-mid and **hurt (−0.009) at strong** — strong interventions on the light
-sources push sensors off the linear regime Fisher-Z assumes. A one-line rule
-built from that recovers some of it at the ends and none in the middle:
+mid and **hurt (−0.009) at strong** — ~~strong interventions on the light
+sources push sensors off the linear regime Fisher-Z assumes~~ (retracted
+the same evening: no saturation is measurable; see "WHAT THE HEADROOM IS"
+item 3 for what the data show). A one-line
+**coverage-first** rule built from that recovers some of it at the ends and none
+in the middle (**superseded the same evening — a rule that abandons coverage
+and repeats the sensor settings gets 67% at k=30; see "WHAT THE HEADROOM IS"**):
 mid-only coverage **+0.028** over the rule at k=6 (0.205 vs 0.176), nothing
 at k=30; excluding strong-source experiments **+0.015** at k=45 (0.444 vs
 0.429), nothing elsewhere. The ranking's power at k=30 is the sum of many

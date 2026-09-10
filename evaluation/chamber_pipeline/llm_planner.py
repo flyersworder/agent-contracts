@@ -191,6 +191,42 @@ def build_select_prompt(
     ]
 
 
+FEEDBACK_HEADER = "Current estimate from the data bought so far"
+
+
+def build_feedback_select_prompt(
+    menu: list[str],
+    remaining_budget: int,
+    already_chosen: list[str] | None = None,
+    feedback: str | None = None,
+) -> list[dict[str, str]]:
+    """`build_select_prompt` plus a block describing what the data has revealed.
+
+    The adaptive-feedback arm. Every other arm's prompt tells the model what
+    it has SPENT; this one also tells it what the inference so far has FOUND
+    -- how many edges the current estimate contains, and which menu entries
+    perturb a variable that no edge has reached yet. The block is keyed by
+    menu entries, never by a node list, so the arm sees no name the loop's
+    menu does not already encode.
+
+    `feedback=None` renders exactly as `build_select_prompt` (with the
+    header stating that no estimate exists yet), so the first few picks are
+    the loop's own; the difference starts at the first inference.
+
+    Classifies as a plain "select" call on purpose: it keeps the marker set
+    exclusive (this prompt contains the select marker), and the arm issues
+    no other kind of call, so per-arm attribution loses nothing.
+    """
+    base = build_select_prompt(menu, remaining_budget, already_chosen)
+    block = (
+        f"{FEEDBACK_HEADER}:\n{feedback.strip()}\n\n"
+        if feedback
+        else f"{FEEDBACK_HEADER}: (no estimate yet)\n\n"
+    )
+    base[1] = {"role": "user", "content": block + base[1]["content"]}
+    return base
+
+
 # ---------------------------------------------------------------------------
 # Two-role variants used by the Planner+Reasoner agents (M3c).
 #

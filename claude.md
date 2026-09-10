@@ -777,6 +777,99 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   is a max over noise, gate it on the measured floor); (2) greedy is a weak
   optimiser under PC noise — a static ranking beat the greedy set on LT; (3) the chambers ship NO
   lagged ground truth, so the lagged-estimator idea is dead, not deferred.
+- **FEEDBACK MOVES AN ARM OFF THE RANDOM LINE, BUT NOT PAST THE PLATEAU —
+  measured 2026-09-09 (`adaptive_feedback`, spec §8.7 row 7, pre-registered;
+  results doc "THE ADAPTIVE-FEEDBACK ARM").** The loop plus a PC estimate of
+  the data bought so far in the prompt every 5 purchases, LT k=30, n=30,
+  interleaved with a fresh loop control: purchases score above random on the
+  oracle scale (10.6 vs 9.7 ×10⁻³, MDE 0.79 — on the boundary, ratio 1.02,
+  Welch p=0.0065; the first LLM arm on LT to do so) and the arm resolves
+  above the same-sweep loop (+0.027, MDE 0.013), but it does NOT beat the
+  coverage rule (+0.008, MDE 0.017). 10% of the random→oracle range, 17% of
+  the rule→oracle headroom. Say all three; a reader who hears only "beats the
+  loop" over-reads it. Cheaper per cell than the loop (336 vs 395 s) despite
+  a 53% longer prompt. 1.8% of its picks fell back to random (loop: 0) —
+  biases AGAINST the arm, report it, don't correct it. Drift audit clean.
+- **THE ORACLE WAS AN ORACLE FOR THE HARNESS — register §34, 2026-09-09
+  night, supersedes the two bullets below it as TASK claims.** The best
+  selection depends on PC's row cap: at `max_rows=300` (configuration of
+  record) the 300-derived oracle ranking scores 0.468 and the coverage rule
+  0.437; at 1500 rows the rule scores **0.460** and that same ranking
+  **0.394**; at 5000 everything degrades. So "coverage is a plateau, not the
+  ceiling", "the headroom is sensor-setting depth" and "the models' prior
+  points the wrong way" are all statements about the estimator at 300 rows.
+  **Arm contrasts stand** (adaptive − loop +0.045 at 1500, resolved; every
+  arm ran under one estimator). **1500-row oracle DONE 2026-09-10** (results doc "THE
+  1500-ROW ORACLE"): headroom above the rule resolved at k=6 (+0.185 by
+  set) and k=45 (+0.068), a TIE at k=30 (+0.028, MDE 0.032) with the static
+  ranking resolved BELOW the rule — so "plateau, not ceiling" holds at the
+  ends and fails at the middle budget where every headline lives; say
+  "beatable at the ends, within noise in the middle". The 1500-row oracle
+  buys 22 distinct variables of 30 (coverage-like), not 15. **CORPUS AT TWO
+  CAPS (2026-09-10 midday, results doc "THE TWO-CAP CORPUS RE-SCORE"): "arm
+  contrasts stand" was too strong — 10 of 39 headline verdicts flip with the
+  cap on directed F1, 2 of 39 on the skeleton.** Mostly boundary, mostly
+  toward MORE separation at 1500: the rule beats the loop at LT k=30/45
+  (no LLM arm beats the rule at either cap); `one_shot` ties-or-beats the
+  loop; `critique` flips SIGN at LT k=30 (skeleton: tie everywhere — stop
+  adjudicating it, the directed verdict is orientation noise); WT k=21
+  varsplit resolves at 1500 and on the skeleton at both caps. Report every
+  arm contrast at both caps and both metrics. MECHANISM (same day, "WHY
+  STRONG INTERVENTIONS HURT"): a strong experiment is fine ALONE; pooling
+  regimes into one Gaussian test is the harm and it GROWS with rows (all
+  rows: F1 0.194→0.067 when one strong block joins five) — not the cap, not
+  the mean shift (centring is inert), not the chamber. JCI-PC (`jci.py`,
+  regime indicators) is monotone in rows where PC collapses (LT k=45 at 5000
+  rows: PC 0.255, JCI-PC 0.418) but pays an indicator penalty at 300 rows
+  that is confounded with coverage; GES (`ges.py`) is the cross-family
+  check. Both queued on the VPS via `rescore.py --estimator`. And the BLAS
+  finding is GONE at the design level: 2,202/2,207 nine-seed design means
+  identical across Accelerate and OpenBLAS. **UT-IGSP (`igsp.py`, the
+  authors' never-pooled estimator; LT only; core-20 by construction; design
+  of record all samples capped at 1,000 rows, alpha 1e-4, calibrated on
+  neutral designs) — RUN ON THE LT CORPUS 2026-09-10 NIGHT, three
+  pre-registered predictions all hold:** every arm converges to core-20
+  0.615–0.642 (spread 0.015 at k=30 vs PC's 0.077; several arms ± 0.000 —
+  the estimator's ceiling, reached by almost any k=30 buy), nothing beats
+  anything by >0.008, and **the anti-prior is GONE** (strong-buy slope
+  +0.000/+0.001 at k=30/45, raw corr +0.25/+0.23, vs PC −0.31/−0.30). The
+  models' prior was right about the chamber and wrong about our judge;
+  "LLM arms carry the opposite of the needed knowledge" is WITHDRAWN. Every
+  selection-level claim is a property of PC-on-pooled-data at a fixed cap;
+  say so. The row effect also exists within ONE regime (PC on the reference
+  alone: core 0.205 → 0.114 from 1k to 10k rows) — the test family meets
+  uniform inputs and not-quite-linear sensors; pooling amplifies it. GES
+  runs on the headline subsets only (full corpus would take two days).
+  **Rules:** sweep the estimator's nuisance parameters on neutral
+  designs BEFORE deriving an oracle; a penalty for adding data is a harness
+  signature, never explain it with physics; report every best-selection
+  claim at two caps. `oracle_probe.py --pc-max-rows`; `rescore.py` needs
+  the same override next.
+- **THE HEADROOM IS A DIFFERENT REGIME, NOT A BETTER COVERAGE — measured
+  2026-09-09 evening (results doc "WHAT THE HEADROOM IS").** In every LT
+  experiment the SAME 20 columns vary (light sources, polarisers, LED
+  currents, sensors); the intervened apparatus setting is CONSTANT inside its
+  own experiment and varies only across the pool. So light-source experiments
+  add no variation (they shift the range — `red` 171–255 vs 0–85; sensors
+  do NOT saturate, measured — the harm is losing input→sensor edges when a
+  shifted regime is pooled, mechanism under test vs `pc_max_rows`) and the 18 apparatus settings are the only informative buys, each
+  a two-level contrast, so DEPTH on them pays. One line — "sensor-setting
+  entries mid/strong first, fill from apparatus, never light sources/`osr`" —
+  scores 0.468 vs the rule's 0.437 at k=30 (RESOLVED, 67% of rule→oracle;
+  purchases 17.5 vs oracle 17.8). Data-only learners (uncertainty sampling,
+  family bandit) score BELOW the rule; uncertainty sampling buys exactly the
+  spurious-edge makers. **And the models' data-free prior is NEGATIVELY
+  correlated with the oracle across three models and two vendors**
+  (deepseek flash ρ −0.37, gpt-5.6-sol −0.28, glm-5.3-flash +0.07; 29/29
+  parsed draws put the strong light-source interventions in the top 30 with
+  "strong root interventions give signal-to-noise"; the oracle ranks them
+  last). A frontier model is not better, only more consistent. The LLM arms
+  carry the opposite of the needed knowledge. **Documentation (the README's
+  protocol paragraph) flips gpt-5.6-sol to ρ +0.32 (3/5 draws correct) and
+  does nothing for deepseek flash (−0.15)**: no model has the knowledge;
+  only the frontier model can derive it from the manual, unreliably. **Rules:** (1) before calling a ranking "not
+  describable", try rules that ABANDON coverage, not only reorder it; (2) the
+  next feedback arm must report per-experiment WHAT VARIED, not coverage.
 - **Core-20 is LT-only.** `f1_core_rescored` is 800/800 on LT and 0/1804 on WT
   — `LT_CASE_STUDY_NODES` has no WT counterpart. "No LLM arm beats round-robin
   coverage on the non-trivial subgraph" is an LT-only claim.
@@ -1318,9 +1411,9 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-09 (oracle probe: coverage is a plateau, not the ceiling)*
+*Last Updated: 2026-09-09 (adaptive-feedback arm run: off the random line, not past the plateau)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
 *Chamber corpus: two chambers, two models, ~12.5k cells — see `docs/chamber-results.md`*
-*Next: AAMAS 2027 main track (abstract 1 Oct, paper 8 Oct 2026; skeleton in `paper/aamas2027/`, untracked). Adaptive-feedback arm promoted to the one experiment worth running first — spec §8.7 row 7*
+*Next: AAMAS 2027 main track (abstract 1 Oct, paper 8 Oct 2026; skeleton in `paper/aamas2027/`, untracked). Adaptive-feedback arm run at LT k=30 (spec §8.7 row 7); WT replication and the LT budget ends are the remaining optional experiments*
