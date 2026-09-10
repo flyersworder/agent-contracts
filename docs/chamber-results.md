@@ -69,6 +69,74 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## JCI-PC ON THE CORPUS AT 1500 ROWS (2026-09-10 afternoon, VPS/OpenBLAS, `runs/rescored-vps-jci-rows1500.parquet`): the predictions scored, and a defect in the indicator design found and fixed
+
+The same 2,206 designs, 9 seeds, `--estimator jci_pc` (per-VARIABLE
+indicators, the design of record when this ran), against PC at the same cap.
+
+**Verdict changes, PC → JCI-PC, both at 1500 rows: 9 of 39 on directed F1,
+5 of 39 on the skeleton.** Every change:
+
+| contrast | PC Δ (verdict) | JCI-PC Δ (verdict) | skeleton |
+|---|---|---|---|
+| LT k=45 `one_shot` − loop | −0.002 (tie) | −0.049 (**R−**) | tie → R− |
+| LT k=45 `shared_blackboard` − loop | −0.004 (tie) | −0.019 (**R−**) | tie, tie |
+| LT k=45 loop − rule | −0.012 (R−) | **+0.044 (R+)** | tie → **R+** |
+| LT k=45 rule − random | +0.021 (R+) | **−0.032 (R−)** | R+ → **R−** |
+| LT k=30 loop − rule | −0.032 (R−) | −0.043 (R−) | tie → R− |
+| LT k=6 `one_shot` − loop | −0.042 (R−) | −0.032 (R−) | tie → R− |
+| WT k=7 `critique` − loop | −0.000 (tie) | −0.035 (R−) | tie, tie |
+| WT k=7 loop − rule | −0.026 (R−) | +0.015 (tie) | tie, tie |
+| WT k=14 `one_shot` − loop | +0.012 (tie) | −0.035 (R−) | tie, tie |
+| WT k=21 `critique` − loop | −0.021 (R−) | +0.001 (tie) | tie, tie |
+| WT k=21 `team_varsplit` − `team` | +0.018 (R+) | +0.009 (tie) | R+, R+ |
+
+**Arm means, JCI-PC minus PC, LT:** k=6 every arm +0.005 to +0.027; k=30
+every arm +0.018 to +0.030 (`coverage_min` +0.157 — the depth rule, one
+variable at three strengths, gains most from a regime column); **k=45 every
+arm LOSES, and unequally: loop −0.020, random −0.023, `shared_blackboard`
+−0.035, `one_shot` −0.067, `coverage_max` −0.076, `coverage_min` −0.118.**
+That inequality is where four of the nine flips come from, including the
+one that reverses a headline (the rule falling below the loop AND below
+random at LT k=45).
+
+**Prediction scorecard** (written before the file came back, "JCI-PC PROBE"):
+
+1. *Every resolved arm contrast reproduces.* **Partly false**: 9 of 39
+   directed, 5 of 39 skeleton. Six of the nine are boundary cases; three at
+   LT k=45 are not.
+2. *The rule loses ground in proportion to distinct variables bought.*
+   **Wrong as stated.** At LT k=45 every arm bought ≈11 light-source
+   variables (loop 11.0, rule 11.0, `one_shot` 10.96) and their penalties
+   differ four-fold, so the indicator COUNT explains nothing there
+   (r = +0.32 the wrong way). What does: **light-source variables bought
+   at two strengths and merged into ONE indicator** — r −0.38 directed /
+   −0.47 skeleton, OLS **−0.0105 per merged pair** with single-regime light
+   buys at +0.0093. `coverage_min_ms` merges 5.0 pairs (−0.118), the rule
+   3.8 (−0.076), the loop 2.5 (−0.020). At LT k=30 the penalty tracks
+   light-source experiments bought (r −0.71 / −0.74), i.e. regimes, not
+   variables. The confound with coverage is real but it runs through
+   DEPTH (regimes per variable), not breadth.
+3. *Skeleton verdicts move less than directed ones.* **True** (5 vs 9).
+
+**The defect and the fix.** "One indicator per target variable" (jci.py,
+decision recorded that morning) puts `red_mid` and `red_strong` rows in one
+block that is itself a two-regime mixture — the very thing the indicator
+exists to remove. JCI's context variable is the REGIME. `regime_label` now
+emits `<variable>@<strength>` on LT and one label per menu entry on WT;
+`rescore.py --context regime` selects it and stamps `rescore_context`
+(`3b101fa`, 47 tests). Probe on the 84 designs at 1500 rows: below.
+
+**What stands regardless of the indicator design**, because it holds under
+PC at both caps and under JCI-PC: no LLM arm beats the rule at LT k=6/30 or
+WT k=14/21; `one_shot` ≥ loop at LT k=30; `team_varsplit` > `team` at LT
+k=30 (+0.078 under JCI); `coverage_min` ≪ `coverage_max` everywhere. What
+is estimator-sensitive: everything at LT k=45, `critique` everywhere, the
+WT k=21 varsplit confirmation (R+ under PC-1500 and on every skeleton
+reading; tie under JCI directed).
+
+---
+
 ## THE TWO-CAP CORPUS RE-SCORE (2026-09-10, VPS/OpenBLAS, `runs/rescored-vps-rows300.parquet`, `runs/rescored-vps-rows1500.parquet`): arm contrasts are NOT cap-invariant on directed F1 — they are on the skeleton
 
 The twelve M7 source files (2,206 distinct designs, 9 PC seeds, $0) re-scored
