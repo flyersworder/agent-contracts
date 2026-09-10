@@ -69,6 +69,60 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## UT-IGSP — THE ESTIMATOR THAT NEVER POOLS (2026-09-10 evening, VPS, `runs/igsp-calibration-lt.parquet`): first look, alpha sweep in progress
+
+`igsp.py` + `rescore.py --estimator utigsp` (`5491860`..`0e94bfe`): the
+chamber authors' interventional method (Squires, Wang & Uhler 2020, via the
+maintained split of `causaldag`). One observational sample — the reference
+run, 10,000 rows, given to every arm whether or not it bought it — plus one
+sample per bought experiment with its known target; CI tests inside the
+observational sample, invariance tests between it and each interventional
+one; no table is ever concatenated. **LT only** (WT has no observational
+entry). **Core-20 by construction**: the 18 apparatus settings are constant
+within every sample and drop out, so the numbers belong beside `f1_core`.
+Runtime 3–8 s per design at all rows.
+
+**Alpha calibration on NEUTRAL designs only** (`random` + `coverage_max_ms`,
+LT k=6/30/45, 120 designs, 3 seeds, all rows; CI and invariance alpha set
+equal):
+
+| alpha | core-20 F1 | full F1 | SHD |
+|---|---|---|---|
+| 0.05 | 0.461 | 0.387 | 69.4 |
+| 0.01 | 0.471 | 0.393 | 66.0 |
+| **0.001** | **0.489** | **0.404** | **61.5** |
+
+Monotone, so 1e-4 and 1e-5 are running before any value is fixed. The
+authors grid-search 1e-4…1e-2 on the same chamber.
+
+**Two things visible before calibration ends, both to be read as hypotheses
+for the corpus pass, not results:**
+
+1. **Selection barely registers.** At every k and every alpha, `random` and
+   the coverage rule are within 0.01 core-20 F1 of each other (k=30, alpha
+   0.001: 0.498 vs 0.496). Under PC at 1500 rows the same two arms differ
+   by 0.099. If this survives the corpus, the entire "which experiments to
+   buy" signal this benchmark measures lives in the pooled reduction, and
+   under the authors' own estimator the purchasing task has almost no
+   headroom — because the observational sample identifies the core skeleton
+   on its own and interventions only orient.
+2. **The budget response is nearly flat**: core-20 0.47 → 0.50 → 0.50 at
+   k=6/30/45, against PC's 0.18 → 0.22 → 0.23. Same reason.
+
+**Absolute level.** Core-20 F1 ≈ 0.49 on random designs against PC's 0.22
+at LT k=30: the never-pooled estimator with 10,000 observational rows is a
+much better instrument for the core graph. That is not a comparison of
+purchases; it is a statement about the judge, and the paper reports it as
+one.
+
+**Pre-registered for the LT corpus pass (before it runs):** (a) arm means
+converge — the spread across arms at k=30 falls below 0.02; (b) the
+coverage rule does NOT resolve above the loop; (c) the marginal gain of a
+strong light-source experiment is non-negative, i.e. the anti-prior does
+not reproduce when regimes are never mixed.
+
+---
+
 ## JCI-PC ON THE CORPUS AT 1500 ROWS (2026-09-10 afternoon, VPS/OpenBLAS, `runs/rescored-vps-jci-rows1500.parquet`): the predictions scored, and a defect in the indicator design found and fixed
 
 The same 2,206 designs, 9 seeds, `--estimator jci_pc` (per-VARIABLE
