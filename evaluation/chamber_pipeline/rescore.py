@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
 from .inference import DEFAULT_MAX_ROWS, pool_experiment_data, run_pc, runtime_fingerprint
+from .jci import intervention_target, pool_with_context, run_jci_pc
 from .scoring import f1_edges, f1_skeleton, shd
 
 SELECTION_KEY_COLUMN = "selection_key"
@@ -85,7 +86,8 @@ LT_CASE_STUDY_NODES: tuple[str, ...] = (
 #: One unit of re-scoring work: everything a worker process needs, as plain
 #: picklable data. A tuple rather than a dataclass so it crosses the process
 #: boundary without the worker importing anything this module owns.
-_DesignTask = tuple[str, str, str, list[str], int, float, int | None]
+ESTIMATORS = ("pc", "jci_pc")
+_DesignTask = tuple[str, str, str, list[str], int, float, int | None, str]
 
 #: Columns a source frame must carry to be re-scorable.
 REQUIRED_COLUMNS = ("chamber", "configuration", "chosen_experiments", "status")
@@ -144,7 +146,7 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
     from a local cache, so the cost is a parquet read that the OS page cache
     absorbs after the first design.
     """
-    key, chamber, configuration, names, n_pc_seeds, pc_alpha, pc_max_rows = task
+    key, chamber, configuration, names, n_pc_seeds, pc_alpha, pc_max_rows, estimator = task
     adapter = create_contracted_chamber_agent(
         chamber=chamber,  # type: ignore[arg-type]
         configuration=configuration,  # type: ignore[arg-type]
@@ -152,10 +154,23 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
     )
     nodes = list(adapter.ground_truth().index)
     truth = adapter.ground_truth()
-    pooled = pool_experiment_data([adapter.query_intervention(name) for name in names], nodes)
+    experiment_dfs = [adapter.query_intervention(name) for name in names]
+    if estimator == "jci_pc":
+        # One 0/1 context column per intervened variable, edges into it
+        # forbidden (`jci.py`). Same PC underneath; the table differs.
+        targets = [intervention_target(chamber, name, nodes) for name in names]
+        pooled, context = pool_with_context(experiment_dfs, targets, nodes)
+    else:
+        pooled = pool_experiment_data(experiment_dfs, nodes)
+        context = []
     records: list[dict[str, Any]] = []
     for pc_seed in range(n_pc_seeds):
-        predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows)
+        if estimator == "jci_pc":
+            predicted = run_jci_pc(
+                pooled, nodes, context, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows
+            )
+        else:
+            predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows)
         records.append(
             {
                 DESIGN_KEY_COLUMN: key,
@@ -168,6 +183,7 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
                 # the best selection CHANGES with it (register §34), so every
                 # re-scored row carries the cap it was scored under.
                 "rescore_pc_max_rows": pc_max_rows,
+                "rescore_estimator": estimator,
                 "f1": float(f1_edges(predicted, truth)),
                 # Undirected companion, for the robustness check: the
                 # chambers' own case study scores the equivalence class
@@ -196,6 +212,7 @@ def rescore_selections(
     progress_every: int = 50,
     max_workers: int = 1,
     pc_max_rows: int | None = DEFAULT_MAX_ROWS,
+    estimator: str = "pc",
 ) -> pd.DataFrame:
     """Score every DISTINCT recorded buy in `frame` under `n_pc_seeds` seeds.
 
@@ -226,6 +243,8 @@ def rescore_selections(
 
     Returns one row per (selection_key, pc_seed).
     """
+    if estimator not in ESTIMATORS:
+        raise ValueError(f"unknown estimator {estimator!r}; expected one of {ESTIMATORS}")
     missing = [c for c in REQUIRED_COLUMNS if c not in frame.columns]
     if missing:
         raise ValueError(
@@ -276,6 +295,7 @@ def rescore_selections(
             n_pc_seeds,
             pc_alpha,
             pc_max_rows,
+            estimator,
         )
         for (chamber, configuration, _), names in seen.items()
     ]
@@ -425,6 +445,16 @@ def main(argv: Iterable[str] | None = None) -> None:
             "selection depends on it, so report selection claims at two caps."
         ),
     )
+    parser.add_argument(
+        "--estimator",
+        choices=ESTIMATORS,
+        default="pc",
+        help=(
+            "'pc' (the configuration of record) or 'jci_pc': PC on the pool "
+            "augmented with one context indicator per intervened variable, "
+            "edges into indicators forbidden (Mooij et al. 2020). See jci.py."
+        ),
+    )
     parser.add_argument("--out", default="runs/rescored.parquet")
     parser.add_argument(
         "--allow-backend-mismatch",
@@ -451,13 +481,14 @@ def main(argv: Iterable[str] | None = None) -> None:
         pc_max_rows = None
     else:
         pc_max_rows = int(args.pc_max_rows)
-    print(f"pc_max_rows={pc_max_rows}", flush=True)
+    print(f"pc_max_rows={pc_max_rows} estimator={args.estimator}", flush=True)
 
     rescored = rescore_selections(
         combined,
         n_pc_seeds=args.n_pc_seeds,
         max_workers=args.max_workers,
         pc_max_rows=pc_max_rows,
+        estimator=args.estimator,
     )
     joined = attach_rescored(combined, rescored, allow_backend_mismatch=args.allow_backend_mismatch)
 

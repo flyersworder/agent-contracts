@@ -398,3 +398,38 @@ def test_rescore_stamps_the_row_cap_and_the_cap_changes_the_score() -> None:
     assert set(capped["rescore_pc_max_rows"]) == {1500}
     assert len(default) == len(capped) == 2
     assert not default[["f1", "shd"]].equals(capped[["f1", "shd"]])
+
+
+def test_rescore_stamps_the_estimator_and_scores_the_same_designs() -> None:
+    """A second estimator (JCI-PC, `jci.py`) rides the same re-scorer: every
+    row says which estimator scored it, over the same design x seed grid.
+    Whether the two DISAGREE on a given design is a measurement, not an
+    invariant — on LT the intervened variables are all sources, so a range
+    shift on one is structurally inert and the graphs often coincide."""
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_reference,uniform_red_strong,uniform_t_ir_1_mid"],
+        }
+    )
+    plain = rescore_selections(cells, n_pc_seeds=2, progress_every=0)
+    jci = rescore_selections(cells, n_pc_seeds=2, progress_every=0, estimator="jci_pc")
+    assert set(plain["rescore_estimator"]) == {"pc"}
+    assert set(jci["rescore_estimator"]) == {"jci_pc"}
+    assert list(jci["design_key"]) == list(plain["design_key"])
+    assert list(jci["pc_seed"]) == list(plain["pc_seed"])
+
+
+def test_rescore_rejects_an_unknown_estimator() -> None:
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_reference"],
+        }
+    )
+    with pytest.raises(ValueError, match="estimator"):
+        rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="ges")

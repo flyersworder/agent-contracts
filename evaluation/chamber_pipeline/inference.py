@@ -453,6 +453,13 @@ def run_pc(
     valid_data = pooled_data[valid_cols]
     data_array = valid_data.to_numpy(dtype=float)
     try:
+        if "background_knowledge" in pc_kwargs:
+            # Background knowledge is matched by NODE NAME (patterns are
+            # regexes over them), so the surviving column names must reach
+            # causal-learn; its default `X1..Xn` would match nothing. Only
+            # on this path — naming does not change the graph, but the
+            # plain call stays byte-for-byte what it always was.
+            pc_kwargs = {**pc_kwargs, "node_names": valid_cols}
         result = _causallearn_pc(
             data_array,
             alpha=alpha,
