@@ -107,6 +107,17 @@ def run_jci_pc(
     handling and the singular-matrix fallback are exactly the plain
     estimator's. Returns the adjacency restricted to `node_names` unless
     `keep_context` is set (for inspecting what each indicator reached).
+
+    Context nodes are pairwise NON-adjacent by construction (every edge into
+    a context node is forbidden, the context pairs included, which
+    causal-learn's skeleton phase treats as "remove before testing"). That is
+    JCI assumption 0 only. Assumption 3 — mutually exclusive indicators are
+    dependent, so declare them adjacent — is NOT available here: causal-learn
+    honours `required` edges only during orientation, never in skeleton
+    discovery (`SkeletonDiscovery.py` checks `is_forbidden` alone), so a
+    required context pair is still deleted by the first independence test.
+    Measured consequence (probe, 2026-09-10): the skeleton cost of JCI-PC
+    scales with the number of surviving indicators. Report it as such.
     """
     all_names = list(node_names) + list(context_names)
     if list(pooled_with_context.columns) != all_names:
@@ -117,10 +128,9 @@ def run_jci_pc(
     from causallearn.utils.PCUtils.BackgroundKnowledge import BackgroundKnowledge
 
     bk = BackgroundKnowledge()
-    # Any node -> any context node is forbidden (JCI exogeneity). Patterns
-    # are regexes over causal-learn's node names; `run_pc` forwards the
-    # column names to `pc` whenever background knowledge is supplied, since
-    # its default `X1..Xn` names would match nothing.
+    # Patterns are regexes over causal-learn's node names; `run_pc` forwards
+    # the column names to `pc` whenever background knowledge is supplied,
+    # since its default `X1..Xn` names would match nothing.
     bk.add_forbidden_by_pattern(".*", f"^{CONTEXT_PREFIX}")
 
     full = run_pc(

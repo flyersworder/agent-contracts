@@ -140,3 +140,19 @@ def test_plain_pc_and_jci_pc_agree_when_nothing_was_intervened() -> None:
     plain = run_pc(pooled, NODES, max_rows=None)
     jci = run_jci_pc(pooled, NODES, context, max_rows=None)
     pd.testing.assert_frame_equal(plain, jci)
+
+
+@requires_causal_learn
+def test_context_nodes_are_pairwise_non_adjacent() -> None:
+    """JCI assumption 0 only. Assumption 3 (declare mutually exclusive
+    indicators adjacent) is NOT enforceable: causal-learn honours required
+    edges in orientation only, so this pins the behaviour we actually have —
+    context pairs are removed from the skeleton before any test."""
+    rng = np.random.default_rng(7)
+    dfs = [_experiment(rng, 300), _experiment(rng, 300, a_shift=6.0), _experiment(rng, 300)]
+    dfs[2]["c"] = dfs[2]["c"] + 6.0
+    pooled, context = pool_with_context(dfs, [None, "a", "c"], NODES)
+    full = run_jci_pc(pooled, NODES, context, max_rows=None, keep_context=True)
+    ca, cc = context
+    assert full.loc[ca, cc] == 0 and full.loc[cc, ca] == 0
+    assert full.loc[NODES, context].to_numpy().sum() == 0
