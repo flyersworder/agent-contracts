@@ -92,22 +92,44 @@ equal):
 | 0.01 | 0.471 | 0.393 | 66.0 |
 | **0.001** | **0.489** | **0.404** | **61.5** |
 
-Monotone, so 1e-4 and 1e-5 are running before any value is fixed. The
-authors grid-search 1e-4…1e-2 on the same chamber.
+Still monotone at 1e-4 (0.497) and 1e-5 (0.543) on ALL rows — a symptom,
+not a calibration: the test rejects too often on this data and only an
+extreme threshold compensates. **Capping every sample — observational
+included — at 1,000 rows changes both facts** (`runs/igsp-obscap-lt.parquet`,
+`igsp-calibration-lt-cap1000.parquet`): the level rises (core 0.49 → 0.63 at
+alpha 1e-3) and alpha gains an interior optimum:
+
+| alpha, all samples capped at 1,000 rows | core-20 F1 | full F1 | SHD |
+|---|---|---|---|
+| 1e-3 | 0.622 | 0.484 | 42.0 |
+| **1e-4** | **0.634** | **0.492** | **40.7** |
+| 1e-5 | 0.609 | 0.469 | 41.7 |
+| 1e-6 | 0.599 | 0.460 | 42.1 |
+
+**Design of record: every sample capped at 1,000 rows (the observational
+run sized like an experiment — also the fair comparison), alpha 1e-4 for
+both test families.** Chosen on neutral designs only, before the corpus
+pass. The authors' grid on the same chamber is 1e-4…1e-2.
+
+The 10,000-row observational sample scoring BELOW its own 1,000-row subsample
+is the single-regime row effect of "WHY STRONG INTERVENTIONS HURT" item 3,
+seen through a second test family.
 
 **Two things visible before calibration ends, both to be read as hypotheses
 for the corpus pass, not results:**
 
-1. **Selection barely registers.** At every k and every alpha, `random` and
-   the coverage rule are within 0.01 core-20 F1 of each other (k=30, alpha
-   0.001: 0.498 vs 0.496). Under PC at 1500 rows the same two arms differ
+1. **Selection barely registers.** At every k, every alpha AND every cap,
+   `random` and the coverage rule are within 0.01 core-20 F1 of each other
+   (cap 1,000, k=30: 0.622 vs 0.628). So the flatness is not the free
+   observational rows — it survives sizing them like one experiment. Under PC at 1500 rows the same two arms differ
    by 0.099. If this survives the corpus, the entire "which experiments to
    buy" signal this benchmark measures lives in the pooled reduction, and
    under the authors' own estimator the purchasing task has almost no
    headroom — because the observational sample identifies the core skeleton
    on its own and interventions only orient.
-2. **The budget response is nearly flat**: core-20 0.47 → 0.50 → 0.50 at
-   k=6/30/45, against PC's 0.18 → 0.22 → 0.23. Same reason.
+2. **The budget response is nearly flat**: core-20 0.61 → 0.63 → 0.63 at
+   k=6/30/45 under the design of record, against PC's 0.18 → 0.22 → 0.23.
+   Same reason.
 
 **Absolute level.** Core-20 F1 ≈ 0.49 on random designs against PC's 0.22
 at LT k=30: the never-pooled estimator with 10,000 observational rows is a
