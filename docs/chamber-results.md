@@ -95,8 +95,11 @@ within its block first (mean shift removed, within-block variation kept).
 - The strong block ALONE is fine (recall equal to mid, fewer false
   positives). The regime is not the problem; mixing regimes is.
 - Pooling adds false positives and **centring does not remove them** — so
-  the extra edges are not the between-block mean shift. An indicator column
-  (JCI, below) cannot absorb them either, for the same reason.
+  in a TWO-block pool the extra edges are not the between-block mean shift.
+  (This does NOT generalise to many-block pools: see the JCI-PC probe below,
+  where indicator columns DO prevent the large-n collapse. An earlier draft
+  of this section said an indicator "cannot absorb them either"; withdrawn
+  the same day, by measurement.)
 - 300 rows is a power floor in every mode, alone included.
 
 **Ladder 2 — the OTHER inputs' edges.** Base pool `reference`, `green_mid`,
@@ -124,22 +127,83 @@ dilution under a cap would have gone the other way (recovered with rows).
    cap makes it worse. This is the mechanism behind §34's non-monotone row
    response: more rows give Fisher-Z more power to find the misfit of one
    linear-Gaussian model to two regimes with different covariance.
-2. It is **not a mean shift**, so no context indicator fixes it (JCI-PC
-   measured, next section).
+2. In a two-block pool it is **not a mean shift** (centring is inert). In
+   the 30–45-block pools the arms actually buy, **one context indicator per
+   intervened variable removes the large-n collapse** (JCI-PC probe, next
+   section): PC at 5000 rows falls to 0.273 / 0.255 at LT k=30 / 45 while
+   JCI-PC holds 0.376 / 0.418 and its skeleton keeps rising with rows.
 3. It is **not the chamber**: the strong regime alone is as recoverable as
    the mid one.
-4. It IS a property of **pooled-regime estimation with a linear test** — the
-   reduction this harness and every PC/GES-on-pooled-data pipeline applies.
-   The models' "strong root interventions give signal-to-noise" prior is
-   right about the regime and wrong about the estimator. Only an estimator
-   that models regimes separately (UT-IGSP, GIES) could rank strong
-   interventions differently; that comparison is deferred (register §28).
+4. It IS a property of **pooled-regime estimation that ignores the regime**
+   — the reduction this harness applies. The models' "strong root
+   interventions give signal-to-noise" prior is right about the regime and
+   wrong about the estimator. Whether an estimator that KNOWS the regime
+   (JCI-PC at a large cap, or UT-IGSP/GIES which never pool) ranks strong
+   interventions differently is now a runnable question, not a deferred one.
 
 **Rules.** State the anti-prior as an estimator-relative finding. Never quote
 a "more rows is better" default for a pooled interventional table; sweep it.
 When a penalty for adding data appears, test alone / pooled / centred before
 naming a mechanism — the first two explanations offered here (saturation,
 then mean-shift mixture) were both wrong and both plausible.
+
+---
+
+## JCI-PC PROBE (2026-09-10, local/Accelerate, `runs/jci-probe.parquet`, `runs/jci-probe-rows5000.parquet`): a second estimator that knows the regime
+
+`jci.py` + `rescore.py --estimator jci_pc`: the plain PC on the pooled table
+widened by one 0/1 column per intervened variable, with every edge INTO an
+indicator forbidden (Joint Causal Inference, Mooij, Magliacane & Claassen,
+JMLR 2020, assumption 0 only — assumption 3, declaring the mutually exclusive
+indicators adjacent, is unenforceable in causal-learn's skeleton phase and
+was removed after its own test showed it inert). Indicators are stripped
+before scoring. Apparatus indicators are dropped as collinear with the
+setting they mark unless the setting was bought at two strengths, so the
+surviving indicators are mostly the sampled light-source inputs.
+
+**84 corpus designs (14 per chamber × budget), 3 seeds, JCI-PC minus PC:**
+
+| chamber, k | 300 rows | 1500 rows | 5000 rows (LT only) |
+|---|---|---|---|
+| LT 6 | +0.009 | +0.019 | +0.018 |
+| LT 30 | −0.021 | **+0.032** | **+0.103** |
+| LT 45 | −0.128 | −0.044 | **+0.163** |
+| WT 7 | +0.016 | +0.019 | — |
+| WT 14 | −0.002 | +0.010 | — |
+| WT 21 | −0.026 | +0.010 | — |
+
+98% of design × seed cells differ; mean |Δ| 0.053. Three mechanisms, each
+measured:
+
+1. **Orientation, not skeleton, at 1500 rows.** LT k=30: directed +0.032,
+   skeleton +0.005. A forced C→X edge lets Meek's rule 1 orient X—Y whenever
+   C is not adjacent to Y, and the scorer charges an unoriented edge as
+   TP+FP. Core-20 F1 moves +0.017.
+2. **An indicator penalty at small caps.** Δ correlates −0.58 (300 rows) /
+   −0.48 (1500) with the number of range-shifting buys: each indicator is a
+   sparse binary node (≈10 ones at 300 rows) that adds tests and forks. This
+   is CONFOUNDED WITH VARIABLE COVERAGE — the coverage rule buys the most
+   indicators — so JCI-PC at 300 rows must never adjudicate the rule.
+3. **Monotone in rows where PC is not.** LT, same 42 designs:
+
+| k | rows | PC | JCI-PC | PC skeleton | JCI-PC skeleton |
+|---|---|---|---|---|---|
+| 30 | 300 / 1500 / 5000 | 0.387 / 0.379 / **0.273** | 0.366 / 0.410 / 0.376 | 0.447 / 0.481 / 0.391 | 0.397 / 0.486 / 0.469 |
+| 45 | 300 / 1500 / 5000 | 0.413 / 0.432 / **0.255** | 0.285 / 0.388 / **0.418** | 0.460 / 0.529 / 0.357 | 0.315 / 0.452 / **0.516** |
+
+   PC's collapse past 1500 rows (register §34) is the pooled-regime misfit of
+   the previous section given enough power to find it; the indicators block
+   it. JCI-PC's natural cap is therefore LARGE, the reverse of PC's.
+
+**How to read the corpus run** (queued on the VPS at 1500 rows; pre-registered
+2026-09-10 before any file came back): (1) every resolved arm-vs-arm verdict
+reproduces, because the orientation gain is shared by all arms; (2) the
+coverage rule loses ground in proportion to distinct variables bought — the
+indicator penalty, a harness signature, not a finding about coverage; (3)
+skeleton verdicts move less than directed ones; a directed flip whose
+skeleton verdict holds is orientation. Selection-level claims (oracle
+headroom, the anti-prior) are read under JCI-PC ONLY at a cap where its
+indicator penalty is gone, i.e. ≥1500 rows, and reported beside PC's.
 
 ---
 
