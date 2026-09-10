@@ -432,4 +432,18 @@ def test_rescore_rejects_an_unknown_estimator() -> None:
         }
     )
     with pytest.raises(ValueError, match="estimator"):
-        rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="ges")
+        rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="lingam")
+
+
+def test_rescore_can_score_with_ges() -> None:
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_reference,uniform_red_strong,uniform_t_ir_1_mid"],
+        }
+    )
+    out = rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="ges")
+    assert set(out["rescore_estimator"]) == {"ges"}
+    assert len(out) == 1 and 0.0 <= out["f1"].iloc[0] <= 1.0

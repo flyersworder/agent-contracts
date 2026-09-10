@@ -41,6 +41,7 @@ from agent_contracts.integrations.causalchamber import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
+from .ges import run_ges
 from .inference import DEFAULT_MAX_ROWS, pool_experiment_data, run_pc, runtime_fingerprint
 from .jci import intervention_target, pool_with_context, run_jci_pc
 from .scoring import f1_edges, f1_skeleton, shd
@@ -86,7 +87,7 @@ LT_CASE_STUDY_NODES: tuple[str, ...] = (
 #: One unit of re-scoring work: everything a worker process needs, as plain
 #: picklable data. A tuple rather than a dataclass so it crosses the process
 #: boundary without the worker importing anything this module owns.
-ESTIMATORS = ("pc", "jci_pc")
+ESTIMATORS = ("pc", "jci_pc", "ges")
 _DesignTask = tuple[str, str, str, list[str], int, float, int | None, str]
 
 #: Columns a source frame must carry to be re-scorable.
@@ -169,6 +170,9 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
             predicted = run_jci_pc(
                 pooled, nodes, context, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows
             )
+        elif estimator == "ges":
+            # Score-based, no alpha: `pc_alpha` does not apply (`ges.py`).
+            predicted = run_ges(pooled, nodes, seed=pc_seed, max_rows=pc_max_rows)
         else:
             predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows)
         records.append(
@@ -450,9 +454,11 @@ def main(argv: Iterable[str] | None = None) -> None:
         choices=ESTIMATORS,
         default="pc",
         help=(
-            "'pc' (the configuration of record) or 'jci_pc': PC on the pool "
+            "'pc' (the configuration of record); 'jci_pc': PC on the pool "
             "augmented with one context indicator per intervened variable, "
-            "edges into indicators forbidden (Mooij et al. 2020). See jci.py."
+            "edges into indicators forbidden (Mooij et al. 2020, jci.py); "
+            "'ges': score-based BIC search on the same pool (ges.py), the "
+            "chamber authors' observational method."
         ),
     )
     parser.add_argument("--out", default="runs/rescored.parquet")
