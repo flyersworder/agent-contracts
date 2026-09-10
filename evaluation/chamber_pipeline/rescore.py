@@ -164,7 +164,9 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
     adapter = create_contracted_chamber_agent(
         chamber=chamber,  # type: ignore[arg-type]
         configuration=configuration,  # type: ignore[arg-type]
-        intervention_budget=len(names),
+        # UT-IGSP also queries the observational entry, which the adapter
+        # meters as an intervention; give it the one extra unit.
+        intervention_budget=len(names) + (1 if estimator == "utigsp" else 0),
     )
     nodes = list(adapter.ground_truth().index)
     truth = adapter.ground_truth()
