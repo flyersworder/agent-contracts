@@ -69,6 +69,68 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## THE 1500-ROW ORACLE (2026-09-10, VPS/OpenBLAS, `runs/oracle-probe-rows1500-lt-*`): headroom at the ends, a tie in the middle
+
+Re-derivation of the LT oracle with `--pc-max-rows 1500` (register §34),
+same procedure (greedy to k=45 at search seeds 0–4, one-swap gated on the
+noise floor, static ranking over 20 contexts, everything re-scored at
+seeds 100–108). **Compare only within this file** — it is OpenBLAS; the
+300-row probe and the corpus are Accelerate.
+
+| k | coverage rule | random | ranking top-k | greedy(+swap) set, fresh | ranking − rule [MDE] | set − rule [MDE] |
+|---|---|---|---|---|---|---|
+| 6 | 0.152 ± 0.041 | 0.181 | 0.248 | **0.338** | **+0.096 [0.038] R** | **+0.185 [0.090] R** |
+| 30 | 0.447 ± 0.015 | 0.324 | 0.414 | 0.475 | **−0.033 [0.018] R** (ranking is WORSE) | +0.028 [0.032] below MDE |
+| 45 | 0.429 ± 0.013 | 0.411 | 0.432 (pooled 0.452) | **0.497** | +0.003 / **+0.023 [0.017] R** | **+0.068 [0.029] R** |
+
+**Verdict.** "Coverage is a plateau, not the ceiling" **survives at k=6
+and k=45 and fails at k=30** — the middle budget, where every headline
+contrast of the pillar lives. At k=30 the best set found sits +0.028 above
+the rule with an MDE of 0.032 (one design vs ten rule draws), and the
+static ranking is resolved *below* the rule. The 300-row picture
+(headroom at all three budgets, +0.046 by ranking at k=30) does not
+replicate at the middle budget. State it as: **at a well-set estimator the
+coverage rule is within noise of the best known selection at the middle
+budget, and beatable at the small and large ones.**
+
+**What the 1500-row oracle buys** — and what it does not. The sensor-setting
+depth regime is gone: the k=30 set covers **22 distinct variables** (rule:
+30; 300-row oracle: 15), families t 10 / diode 6 / v 5 / osr 3 / l 2 /
+pol 2 / green 1 / reference, 19 of 30 at mid strength and 6 weak. The
+residual advantage at k=45 is coverage plus a preference for apparatus
+entries at mid strength and an aversion to `osr_*` and `red_*` (per-family
+mean gain at k=30: reference +61, diode +8, v +6, t −1, osr −6, red −11
+×10⁻³). `rule_no_strong_sources` — the coverage rule minus strong
+light-source entries — captures +0.025 of the +0.068 at k=45 (resolved),
+and `rule_mid_only` +0.060 of +0.185 at k=6 (resolved); at k=30 neither
+moves. **Also new at 1500 rows: the coverage rule at k=6 (0.152) is BELOW
+random (0.181)** — round-robin over 30 variables with 6 picks buys six
+singletons, and at this cap the reference run alone is worth more.
+
+**Arm purchases on this scale.** Only informative at k=6, where marginal
+gains are large: `llm_pc` 4.7 and `critique` 4.6 ×10⁻³ vs random −0.8 (sd
+≈ 5, n=30, MDE ≈ 3.6) — **the loop's purchases ARE better than random at
+the small budget on the 1500-row scale**, consistent with its resolved
+k=6 win over the rule at 300 rows. At k=30 and k=45 the per-experiment
+gains are within ±1×10⁻³ of zero for every arm (sd 0.7): the scale is
+flat and says nothing.
+
+**Winner's curse is small here** (search 0.500 → fresh 0.475 at k=30;
+0.506 → 0.497 at k=45), unlike the 300-row run (0.474 → 0.432), which is
+itself a sign the 300-row search was optimising noise.
+
+**Status of the 2026-09-09 claims after this run.**
+
+| claim | 300 rows | 1500 rows | paper |
+|---|---|---|---|
+| headroom above the rule at every budget | yes (5/6 contrasts) | k=6 and k=45 yes; k=30 tie | "beatable at the ends, within noise in the middle" |
+| the residual is sensor-setting depth | yes (15 vars of 30) | no (22 of 30, coverage-like) | withdrawn |
+| the models' prior points the wrong way | ρ −0.4 | not re-run; their "one strong per target" ≈ rule ≈ best at k=30 | withdrawn as stated |
+| feedback arm beats the loop | +0.027 R | +0.045 R (local re-score) | stands, strengthened |
+| no LLM arm beats the rule | yes | yes (loop −0.055 R at k=30, local re-score) | stands |
+
+---
+
 ## WHAT THE HEADROOM IS (2026-09-09, evening): a one-line rule claims two-thirds of it, data-only learners claim none, and the model's prior points the wrong way
 
 > **CONDITIONAL ON `pc_max_rows=300` — see register §34 (found the same

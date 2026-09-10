@@ -799,8 +799,13 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   ceiling", "the headroom is sensor-setting depth" and "the models' prior
   points the wrong way" are all statements about the estimator at 300 rows.
   **Arm contrasts stand** (adaptive − loop +0.045 at 1500, resolved; every
-  arm ran under one estimator). A 1500-row oracle is being derived on the
-  VPS. **Rules:** sweep the estimator's nuisance parameters on neutral
+  arm ran under one estimator). **1500-row oracle DONE 2026-09-10** (results doc "THE
+  1500-ROW ORACLE"): headroom above the rule resolved at k=6 (+0.185 by
+  set) and k=45 (+0.068), a TIE at k=30 (+0.028, MDE 0.032) with the static
+  ranking resolved BELOW the rule — so "plateau, not ceiling" holds at the
+  ends and fails at the middle budget where every headline lives; say
+  "beatable at the ends, within noise in the middle". The 1500-row oracle
+  buys 22 distinct variables of 30 (coverage-like), not 15. **Rules:** sweep the estimator's nuisance parameters on neutral
   designs BEFORE deriving an oracle; a penalty for adding data is a harness
   signature, never explain it with physics; report every best-selection
   claim at two caps. `oracle_probe.py --pc-max-rows`; `rescore.py` needs

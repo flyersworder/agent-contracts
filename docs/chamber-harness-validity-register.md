@@ -2022,5 +2022,14 @@ best one — an oracle at a bad setting optimises the setting. (2) A penalty
 for adding data is a harness signature; do not explain it with physics.
 (3) Report every "best selection" claim at two caps.
 
+**Outcome (2026-09-10, `runs/oracle-probe-rows1500-lt-*`).** Re-derived at
+1500 rows: headroom above the rule is **resolved at k=6 (+0.185 by set) and
+k=45 (+0.068)** and a **tie at k=30 (+0.028, MDE 0.032)**, with the static
+ranking resolved below the rule there. The 300-row "headroom at every
+budget" does not replicate at the middle budget; the sensor-setting depth
+regime is gone (22 distinct variables of 30, not 15). Results doc "THE
+1500-ROW ORACLE". The configuration of record stays 300 for arm contrasts;
+best-selection claims are reported at both caps.
+
 **Related:** §23 (the +0.025 that was left on the table), §10 (structural
 noise), §31 (the previous oracle-table defect, cross-backend).
