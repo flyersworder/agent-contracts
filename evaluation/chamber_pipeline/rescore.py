@@ -41,7 +41,7 @@ from agent_contracts.integrations.causalchamber import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
-from .inference import pool_experiment_data, run_pc, runtime_fingerprint
+from .inference import DEFAULT_MAX_ROWS, pool_experiment_data, run_pc, runtime_fingerprint
 from .scoring import f1_edges, f1_skeleton, shd
 
 SELECTION_KEY_COLUMN = "selection_key"
@@ -85,7 +85,7 @@ LT_CASE_STUDY_NODES: tuple[str, ...] = (
 #: One unit of re-scoring work: everything a worker process needs, as plain
 #: picklable data. A tuple rather than a dataclass so it crosses the process
 #: boundary without the worker importing anything this module owns.
-_DesignTask = tuple[str, str, str, list[str], int, float]
+_DesignTask = tuple[str, str, str, list[str], int, float, int | None]
 
 #: Columns a source frame must carry to be re-scorable.
 REQUIRED_COLUMNS = ("chamber", "configuration", "chosen_experiments", "status")
@@ -144,7 +144,7 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
     from a local cache, so the cost is a parquet read that the OS page cache
     absorbs after the first design.
     """
-    key, chamber, configuration, names, n_pc_seeds, pc_alpha = task
+    key, chamber, configuration, names, n_pc_seeds, pc_alpha, pc_max_rows = task
     adapter = create_contracted_chamber_agent(
         chamber=chamber,  # type: ignore[arg-type]
         configuration=configuration,  # type: ignore[arg-type]
@@ -155,7 +155,7 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
     pooled = pool_experiment_data([adapter.query_intervention(name) for name in names], nodes)
     records: list[dict[str, Any]] = []
     for pc_seed in range(n_pc_seeds):
-        predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed)
+        predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows)
         records.append(
             {
                 DESIGN_KEY_COLUMN: key,
@@ -164,6 +164,10 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
                 "configuration": configuration,
                 "n_experiments": len(names),
                 "pc_seed": pc_seed,
+                # The row cap is part of the estimator, not a detail of it:
+                # the best selection CHANGES with it (register §34), so every
+                # re-scored row carries the cap it was scored under.
+                "rescore_pc_max_rows": pc_max_rows,
                 "f1": float(f1_edges(predicted, truth)),
                 # Undirected companion, for the robustness check: the
                 # chambers' own case study scores the equivalence class
@@ -191,6 +195,7 @@ def rescore_selections(
     pc_alpha: float = 0.05,
     progress_every: int = 50,
     max_workers: int = 1,
+    pc_max_rows: int | None = DEFAULT_MAX_ROWS,
 ) -> pd.DataFrame:
     """Score every DISTINCT recorded buy in `frame` under `n_pc_seeds` seeds.
 
@@ -270,6 +275,7 @@ def rescore_selections(
             names,
             n_pc_seeds,
             pc_alpha,
+            pc_max_rows,
         )
         for (chamber, configuration, _), names in seen.items()
     ]
@@ -410,6 +416,15 @@ def main(argv: Iterable[str] | None = None) -> None:
             "CPU limit. Output is identical at every setting."
         ),
     )
+    parser.add_argument(
+        "--pc-max-rows",
+        default=None,
+        help=(
+            "PC row cap for every scoring call (default: the pipeline's "
+            f"{DEFAULT_MAX_ROWS}; 'none' lifts the cap). Register §34: the best "
+            "selection depends on it, so report selection claims at two caps."
+        ),
+    )
     parser.add_argument("--out", default="runs/rescored.parquet")
     parser.add_argument(
         "--allow-backend-mismatch",
@@ -430,8 +445,19 @@ def main(argv: Iterable[str] | None = None) -> None:
     combined = pd.concat(frames, ignore_index=True)
     print(f"{len(combined)} rows from {len(args.sources)} files", flush=True)
 
+    if args.pc_max_rows is None:
+        pc_max_rows: int | None = DEFAULT_MAX_ROWS
+    elif str(args.pc_max_rows).lower() == "none":
+        pc_max_rows = None
+    else:
+        pc_max_rows = int(args.pc_max_rows)
+    print(f"pc_max_rows={pc_max_rows}", flush=True)
+
     rescored = rescore_selections(
-        combined, n_pc_seeds=args.n_pc_seeds, max_workers=args.max_workers
+        combined,
+        n_pc_seeds=args.n_pc_seeds,
+        max_workers=args.max_workers,
+        pc_max_rows=pc_max_rows,
     )
     joined = attach_rescored(combined, rescored, allow_backend_mismatch=args.allow_backend_mismatch)
 

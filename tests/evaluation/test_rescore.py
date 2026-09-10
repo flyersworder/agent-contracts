@@ -373,3 +373,28 @@ def test_the_same_buy_in_two_orders_is_scored_twice() -> None:
     for row, key in ((0, names), (1, list(reversed(names)))):
         own = rescored[rescored[DESIGN_KEY_COLUMN] == design_key("lt", "standard", key)]
         assert joined.loc[row, "f1_rescored"] == pytest.approx(own["f1"].mean())
+
+
+def test_rescore_stamps_the_row_cap_and_the_cap_changes_the_score() -> None:
+    """Register §34: PC's row cap is part of the estimator, so every
+    re-scored row carries it, and a different cap must be able to produce a
+    different graph (a stamp that never varied would prove nothing)."""
+    from evaluation.chamber_pipeline.inference import DEFAULT_MAX_ROWS
+
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"] * 3,
+            "configuration": ["standard"] * 3,
+            "status": ["ok"] * 3,
+            "chosen_experiments": [
+                "uniform_t_ir_2_weak,uniform_osr_angle_1_mid,uniform_diode_ir_3_strong,uniform_blue_mid"
+            ]
+            * 3,
+        }
+    )
+    default = rescore_selections(cells, n_pc_seeds=2, progress_every=0)
+    capped = rescore_selections(cells, n_pc_seeds=2, progress_every=0, pc_max_rows=1500)
+    assert set(default["rescore_pc_max_rows"]) == {DEFAULT_MAX_ROWS}
+    assert set(capped["rescore_pc_max_rows"]) == {1500}
+    assert len(default) == len(capped) == 2
+    assert not default[["f1", "shd"]].equals(capped[["f1", "shd"]])
