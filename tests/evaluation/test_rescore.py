@@ -471,3 +471,31 @@ def test_rescore_jci_regime_context_is_stamped_and_differs_from_variable() -> No
     assert set(reg["rescore_context"]) == {"regime"}
     plain = rescore_selections(cells, n_pc_seeds=1, progress_every=0)
     assert plain["rescore_context"].isna().all()
+
+
+def test_rescore_utigsp_is_lt_only_and_stamped() -> None:
+    from evaluation.chamber_pipeline.igsp import IGSP_AVAILABLE
+
+    wt = pd.DataFrame(
+        {
+            "chamber": ["wt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["validate_load_in,validate_hatch_mic"],
+        }
+    )
+    with pytest.raises(ValueError, match="observational"):
+        rescore_selections(wt, n_pc_seeds=1, progress_every=0, estimator="utigsp")
+    if not IGSP_AVAILABLE:
+        pytest.skip("graphical-model-learning not importable")
+    lt = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_red_strong,uniform_green_mid,uniform_t_ir_1_mid"],
+        }
+    )
+    out = rescore_selections(lt, n_pc_seeds=1, progress_every=0, estimator="utigsp")
+    assert set(out["rescore_estimator"]) == {"utigsp"}
+    assert 0.0 <= out["f1_core"].iloc[0] <= 1.0

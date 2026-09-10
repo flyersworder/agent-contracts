@@ -53,6 +53,14 @@ google-adk = [
 claude-agent-sdk = [
     "claude-agent-sdk>=0.2.143",
 ]
+igsp = [
+    # UT-IGSP (Squires et al. 2020) — the chamber authors' interventional
+    # estimator. The old `causaldag` split into these three; alpha releases.
+    # Imports need an OpenMP runtime (libomp on macOS): tests skip without it.
+    "graphical-model-learning>=0.1a8",
+    "conditional-independence>=0.1a6",
+    "graphical-models>=0.1a21",
+]
 chambers = [
     "causal-learn>=0.1.4",
     # Causal Chamber benchmark — Gamella et al. NMI 2025
