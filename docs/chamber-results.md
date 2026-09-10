@@ -137,11 +137,59 @@ much better instrument for the core graph. That is not a comparison of
 purchases; it is a statement about the judge, and the paper reports it as
 one.
 
-**Pre-registered for the LT corpus pass (before it runs):** (a) arm means
+**Pre-registered for the LT corpus pass (before it ran):** (a) arm means
 converge — the spread across arms at k=30 falls below 0.02; (b) the
 coverage rule does NOT resolve above the loop; (c) the marginal gain of a
 strong light-source experiment is non-negative, i.e. the anti-prior does
 not reproduce when regimes are never mixed.
+
+### Outcome (2026-09-10 night, `runs/rescored-vps-utigsp-lt.parquet`, 769 designs × 3 seeds, 51 min): all three hold
+
+| k | spread of arm means, core-20 (UT-IGSP) | same under PC@1500 | loop − rule (UT-IGSP) | strong-buy slope (UT-IGSP) | strong-buy slope (PC@1500) |
+|---|---|---|---|---|---|
+| 6 | 0.013 | 0.051 | −0.004 (tie) | −0.003 | −0.022 |
+| 30 | 0.015 | 0.077 | −0.002 (tie) | +0.000 | −0.009 |
+| 45 | 0.004 | 0.033 | +0.002 (tie) | +0.001 | −0.006 |
+
+- **(a) Convergence — confirmed.** Every arm sits at core-20 F1 0.615–0.642;
+  at k=30 the spread is 0.015 and at k=45 it is 0.004. Several arms have
+  **zero variance across designs** (`coverage_max` 0.642 ± 0.000, `llm_pc`
+  at k=45 0.642 ± 0.000): the estimator returns the same graph whatever was
+  bought. 0.642 is its ceiling on this chamber, and almost any k=30 purchase
+  reaches it.
+- **(b) The rule does not beat the loop — confirmed**, nor does anything
+  beat anything by more than 0.008. Three contrasts "resolve" only because
+  the variance collapsed (MDEs of 0.003–0.006): `shared_blackboard` −0.005,
+  rule vs random +0.008, `coverage_min` vs `coverage_max` −0.006. Report
+  them as what they are: differences smaller than a rounding convention.
+- **(c) The anti-prior does not reproduce — confirmed.** Within each budget,
+  the partial slope of core-20 F1 on the number of STRONG light-source
+  buys (controlling for light-source buys overall) is −0.003 / +0.000 /
+  +0.001 under UT-IGSP against −0.022 / −0.009 / −0.006 under PC at 1500
+  rows; the raw correlation is **+0.25 / +0.23 at k=30/45** under UT-IGSP
+  against −0.31 / −0.30 under PC. **The models' "strong root interventions
+  give the most signal" prior was right about the chamber and wrong about
+  our estimator.** "The LLM arms carry the opposite of the needed
+  knowledge" is withdrawn; what they lacked was knowledge of the JUDGE.
+
+**What this does to the paper.** Under the chamber authors' own estimator
+the budgeted-selection task has essentially no headroom on the core graph:
+the observational sample plus any handful of interventions identifies what
+the tests can identify, and purchases only add orientation the ceiling
+already includes. Every selection-level finding in this document — the
+coverage rule as near-oracle, the oracle headroom, the sensor-setting
+regime, the anti-prior — is therefore a property of **PC on pooled data at
+a fixed row cap**, the estimator of record, and is reported as such. The
+arm-contrast findings survive in the only form they ever had: under one
+judge, held fixed, with the judge named. And the contract finding (a floor
+on effort) does not depend on the judge at all.
+
+**Two caveats that travel with this.** (1) UT-IGSP scores the 20-variable
+core; the 18 apparatus edges, where 78% of PC's budget response lives
+(register §28), are invisible to it by construction — so "no headroom"
+is a core-graph statement. (2) The result depends on giving the estimator
+the observational sample at all; sized like one experiment it still holds,
+but an estimator denied any observational data was not tested.
 
 ---
 

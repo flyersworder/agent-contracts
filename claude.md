@@ -824,7 +824,23 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   that is confounded with coverage; GES (`ges.py`) is the cross-family
   check. Both queued on the VPS via `rescore.py --estimator`. And the BLAS
   finding is GONE at the design level: 2,202/2,207 nine-seed design means
-  identical across Accelerate and OpenBLAS. **Rules:** sweep the estimator's nuisance parameters on neutral
+  identical across Accelerate and OpenBLAS. **UT-IGSP (`igsp.py`, the
+  authors' never-pooled estimator; LT only; core-20 by construction; design
+  of record all samples capped at 1,000 rows, alpha 1e-4, calibrated on
+  neutral designs) — RUN ON THE LT CORPUS 2026-09-10 NIGHT, three
+  pre-registered predictions all hold:** every arm converges to core-20
+  0.615–0.642 (spread 0.015 at k=30 vs PC's 0.077; several arms ± 0.000 —
+  the estimator's ceiling, reached by almost any k=30 buy), nothing beats
+  anything by >0.008, and **the anti-prior is GONE** (strong-buy slope
+  +0.000/+0.001 at k=30/45, raw corr +0.25/+0.23, vs PC −0.31/−0.30). The
+  models' prior was right about the chamber and wrong about our judge;
+  "LLM arms carry the opposite of the needed knowledge" is WITHDRAWN. Every
+  selection-level claim is a property of PC-on-pooled-data at a fixed cap;
+  say so. The row effect also exists within ONE regime (PC on the reference
+  alone: core 0.205 → 0.114 from 1k to 10k rows) — the test family meets
+  uniform inputs and not-quite-linear sensors; pooling amplifies it. GES
+  runs on the headline subsets only (full corpus would take two days).
+  **Rules:** sweep the estimator's nuisance parameters on neutral
   designs BEFORE deriving an oracle; a penalty for adding data is a harness
   signature, never explain it with physics; report every best-selection
   claim at two caps. `oracle_probe.py --pc-max-rows`; `rescore.py` needs
