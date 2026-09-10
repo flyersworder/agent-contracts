@@ -156,3 +156,43 @@ def test_context_nodes_are_pairwise_non_adjacent() -> None:
     ca, cc = context
     assert full.loc[ca, cc] == 0 and full.loc[cc, ca] == 0
     assert full.loc[NODES, context].to_numpy().sum() == 0
+
+
+# ---------------------------------------------------------------------------
+# regime labels: one indicator per (variable, strength), not per variable
+# ---------------------------------------------------------------------------
+
+
+def test_regime_label_names_the_variable_and_the_strength() -> None:
+    from evaluation.chamber_pipeline.jci import regime_label
+
+    assert regime_label("lt", "uniform_red_strong", ["red"]) == "red@strong"
+    assert regime_label("lt", "uniform_red_mid", ["red"]) == "red@mid"
+    assert regime_label("lt", "uniform_reference", ["red"]) is None
+    assert (
+        regime_label("wt", "validate_load_out_mic", ["load_in", "load_out"])
+        == "load_out@validate_load_out_mic"
+    )
+
+
+def test_regime_context_gives_one_column_per_regime_of_the_same_variable() -> None:
+    """Two strengths of one variable are two regimes; merging them into one
+    indicator leaves a mixture inside the indicator's own block (measured
+    2026-09-10: -0.010 F1 per merged pair at LT k=45)."""
+    rng = np.random.default_rng(9)
+    dfs = [
+        _experiment(rng, 10),
+        _experiment(rng, 20, a_shift=3.0),
+        _experiment(rng, 30, a_shift=6.0),
+    ]
+    pooled, context = pool_with_context(dfs, [None, "a@mid", "a@strong"], NODES)
+    assert context == [CONTEXT_PREFIX + "a@mid", CONTEXT_PREFIX + "a@strong"]
+    assert pooled[CONTEXT_PREFIX + "a@mid"].to_numpy()[10:30].all()
+    assert pooled[CONTEXT_PREFIX + "a@mid"].to_numpy()[30:].sum() == 0
+    assert pooled[CONTEXT_PREFIX + "a@strong"].to_numpy()[30:].all()
+
+
+def test_regime_label_must_still_name_a_node() -> None:
+    rng = np.random.default_rng(10)
+    with pytest.raises(ValueError, match="not a node"):
+        pool_with_context([_experiment(rng, 5)], ["zz@strong"], NODES)

@@ -54,6 +54,25 @@ def intervention_target(chamber: str, experiment_name: str, node_names: list[str
     raise ValueError(f"unknown chamber {chamber!r}; expected 'lt' or 'wt'")
 
 
+def regime_label(chamber: str, experiment_name: str, node_names: list[str]) -> str | None:
+    """`<target>@<regime>`: one label per experimental REGIME, not per variable.
+
+    Measured 2026-09-10 on the corpus at 1500 rows: a per-variable indicator
+    merges `red_mid` and `red_strong` into one block that is itself a mixture,
+    and each such merged pair costs about 0.010 F1 at LT k=45 — exactly the
+    arms that buy depth were penalised. On LT the regime is the strength; on
+    WT every menu entry is its own regime. Observational entries return None.
+    """
+    target = intervention_target(chamber, experiment_name, node_names)
+    if target is None:
+        return None
+    if chamber == "lt":
+        from .menu_taxonomy import experiment_strength
+
+        return f"{target}@{experiment_strength(experiment_name)}"
+    return f"{target}@{experiment_name}"
+
+
 def pool_with_context(
     experiment_dfs: list[pd.DataFrame],
     targets: list[str | None],
@@ -72,7 +91,8 @@ def pool_with_context(
         )
     node_set = set(node_names)
     for t in targets:
-        if t is not None and t not in node_set:
+        # A label is either a node name or `<node>@<regime>` (`regime_label`).
+        if t is not None and t.split("@", 1)[0] not in node_set:
             raise ValueError(f"intervention target {t!r} is not a node of this chamber")
 
     pooled = pool_experiment_data(experiment_dfs, node_names)
@@ -144,4 +164,10 @@ def run_jci_pc(
     return full.loc[node_names, node_names].copy()
 
 
-__all__ = ["CONTEXT_PREFIX", "intervention_target", "pool_with_context", "run_jci_pc"]
+__all__ = [
+    "CONTEXT_PREFIX",
+    "intervention_target",
+    "pool_with_context",
+    "regime_label",
+    "run_jci_pc",
+]

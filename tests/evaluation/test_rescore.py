@@ -447,3 +447,27 @@ def test_rescore_can_score_with_ges() -> None:
     out = rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="ges")
     assert set(out["rescore_estimator"]) == {"ges"}
     assert len(out) == 1 and 0.0 <= out["f1"].iloc[0] <= 1.0
+
+
+def test_rescore_jci_regime_context_is_stamped_and_differs_from_variable() -> None:
+    """A design with one variable at two strengths: per-variable context
+    merges them into one indicator, per-regime keeps two — the graphs may
+    differ, and the stamp says which was used."""
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": [
+                "uniform_reference,uniform_red_mid,uniform_red_strong,uniform_green_mid"
+            ],
+        }
+    )
+    var = rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="jci_pc")
+    reg = rescore_selections(
+        cells, n_pc_seeds=1, progress_every=0, estimator="jci_pc", context_mode="regime"
+    )
+    assert set(var["rescore_context"]) == {"variable"}
+    assert set(reg["rescore_context"]) == {"regime"}
+    plain = rescore_selections(cells, n_pc_seeds=1, progress_every=0)
+    assert plain["rescore_context"].isna().all()
