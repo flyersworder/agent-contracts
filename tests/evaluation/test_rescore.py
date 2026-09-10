@@ -499,3 +499,16 @@ def test_rescore_utigsp_is_lt_only_and_stamped() -> None:
     out = rescore_selections(lt, n_pc_seeds=1, progress_every=0, estimator="utigsp")
     assert set(out["rescore_estimator"]) == {"utigsp"}
     assert 0.0 <= out["f1_core"].iloc[0] <= 1.0
+
+
+def test_rescore_stamps_alpha_on_every_row() -> None:
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_reference"],
+        }
+    )
+    out = rescore_selections(cells, n_pc_seeds=1, progress_every=0, pc_alpha=0.01)
+    assert set(out["rescore_pc_alpha"]) == {0.01}

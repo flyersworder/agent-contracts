@@ -210,6 +210,7 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
                     pc_max_rows,
                     estimator,
                     None,
+                    pc_alpha,
                     predicted,
                     truth,
                     nodes,
@@ -246,6 +247,7 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
                 pc_max_rows,
                 estimator,
                 context_mode if estimator == "jci_pc" else None,
+                pc_alpha,
                 predicted,
                 truth,
                 nodes,
@@ -263,6 +265,7 @@ def _record(
     pc_max_rows: int | None,
     estimator: str,
     context_mode: str | None,
+    pc_alpha: float,
     predicted: pd.DataFrame,
     truth: pd.DataFrame,
     nodes: list[str],
@@ -280,6 +283,7 @@ def _record(
         "rescore_pc_max_rows": pc_max_rows,
         "rescore_estimator": estimator,
         "rescore_context": context_mode,
+        "rescore_pc_alpha": pc_alpha,
         "f1": float(f1_edges(predicted, truth)),
         # Undirected companion, for the robustness check: the chambers' own
         # case study scores the equivalence class rather than one
@@ -524,6 +528,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     parser.add_argument("sources", nargs="+", help="Parquet files to re-score")
     parser.add_argument("--n-pc-seeds", type=int, default=9)
     parser.add_argument(
+        "--pc-alpha",
+        type=float,
+        default=0.05,
+        help="significance level for the estimator's tests (PC's Fisher-Z; UT-IGSP's CI and invariance tests). Stamped on every row.",
+    )
+    parser.add_argument(
         "--max-workers",
         type=int,
         default=1,
@@ -594,12 +604,14 @@ def main(argv: Iterable[str] | None = None) -> None:
     else:
         pc_max_rows = int(args.pc_max_rows)
     print(
-        f"pc_max_rows={pc_max_rows} estimator={args.estimator} context={args.context}", flush=True
+        f"pc_max_rows={pc_max_rows} estimator={args.estimator} context={args.context} alpha={args.pc_alpha}",
+        flush=True,
     )
 
     rescored = rescore_selections(
         combined,
         n_pc_seeds=args.n_pc_seeds,
+        pc_alpha=args.pc_alpha,
         max_workers=args.max_workers,
         pc_max_rows=pc_max_rows,
         estimator=args.estimator,
