@@ -1222,8 +1222,20 @@ two models. Headlines, with the detail and the caveats in the results doc:
 - **The running record is not load-bearing** (M7 Phase 2, 2026-08-31, 960
   cells). `one_shot` — ONE call picking all k experiments, no record at all —
   ties the loop at LT k=30/45 and at all three WT budgets, losing only at
-  LT k=6 (−0.059). The M6 ordering replicates, but **the record-survival axis
-  we built the ladder on does not explain it**; do not draft from that axis.
+  LT k=6 (−0.059) — **and that one loss DID NOT REPLICATE (2026-09-11,
+  register §35): same day, same regime, fresh loop control, 57 single-call
+  designs vs 30 loop designs: −0.006 [0.024] at both caps and all three
+  metrics. The record pays nowhere we have measured.** The M6 ordering
+  replicates, but **the record-survival axis we built the ladder on does
+  not explain it**; do not draft from that axis. **Two rules from it:** a
+  resolved n=30 verdict the paper rests on gets re-run on another day with
+  its comparator before it is written as resolved ($1.33 here); and
+  estimate a sweep's wall time from the ARM'S OWN call count (`one_shot` is
+  one call per cell: 90 cells in 8 minutes, forecast "hours" from the loop's
+  pace). **Menu shuffling per seed (`one_shot_shuffle`) is a dead end for
+  §24's k=30 bound**: 7 distinct sets vs 6, the dominant set identical, no
+  position bias to remove — the model's canonical k=30 answer is its prior,
+  not the layout.
 - **What the axis DOES buy, on both chambers, at the middle budget only**:
   sharing a record beats *splitting* one. `shared_blackboard` vs
   `fan_in_spec` — same two role prompts — gives +0.053 (LT k=30) and +0.046
@@ -1429,7 +1441,7 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-11 (GES cross-family check: structural claims hold, anti-prior reverses; 5000-row JCI pass abandoned on memory growth)*
+*Last Updated: 2026-09-11 night (GES cross-family check; menu shuffle run — the LT k=6 single-call loss did not replicate, register §35)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*

@@ -10,7 +10,7 @@ before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-09**: 18,123 cells, **$114.54**, **zero errored cells**, (2026-09-01 read 18,063 / $108.39; the adaptive-feedback sweep adds 60 cells and $6.15)
+**Corpus as of 2026-09-11**: 18,303 cells, **$115.87**, **zero errored cells**, (2026-09-09 read 18,123 / $114.54; the menu-shuffle sweep and the two k=6 controls add 180 cells and $1.33)
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
 LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The table below is
@@ -44,6 +44,9 @@ the arithmetic of record.)
 | `runs/m7-coverage-wt.parquet` | 300 | $0.00 | WT random at 3 budgets; the LT-only coverage arm correctly skipped |
 | `runs/m7-coverage-wt2.parquet` | 300 | $0.00 | the WT coverage arms, breadth and depth, 3 budgets x 50 seeds |
 | `runs/m7-adaptive-lt.parquet` | 60 | $6.15 | `adaptive_feedback` vs same-sweep `llm_pc`, LT k=30, n=30 each (pre-registered, spec §8.7 row 7) |
+| `runs/m7-oneshot-shuffle-lt.parquet` | 90 | $0.57 | `one_shot_shuffle`, LT k=6/30/45: menu order per seed does not diversify k=30 |
+| `runs/m7-oneshot-k6-control.parquet` | 60 | $0.17 | same-day `one_shot` + `one_shot_shuffle` at LT k=6, interleaved |
+| `runs/m7-loop-k6-control.parquet` | 30 | $0.59 | same-day `llm_pc` at LT k=6; the 30 Aug single-call loss does not replicate |
 | `runs/oracle-probe-{lt,wt}-*.parquet` | — | $0.00 | ground-truth oracle sets, static ranking, policies, arm purchase gains (`oracle_probe.py`) |
 | `runs/rescored-vps-{rows300,rows1500,jci-rows1500}.parquet` (+`-bykey`) | 2,206 designs | $0.00 | the corpus under PC at two caps and JCI-PC at 1500, 9 seeds |
 | `runs/rescored-vps-utigsp-lt.parquet` (+`-bykey`) | 769 designs | $0.00 | the LT corpus under UT-IGSP, never pooled, core-20 |
@@ -69,6 +72,93 @@ cross-backend gap is ΔF1 = 0.055, larger than most effects reported below.
 Chambers: light tunnel (LT) 38 nodes / 57 edges / 59-experiment menu; wind
 tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
+
+---
+
+## MENU SHUFFLE, AND THE LT k=6 SINGLE-CALL LOSS THAT DID NOT REPLICATE (2026-09-11 night, VPS/OpenBLAS, `runs/m7-oneshot-shuffle-lt.parquet`, `runs/m7-oneshot-k6-control.parquet`, `runs/m7-loop-k6-control.parquet`)
+
+Three small sweeps, 180 cells, $1.33, zero errors, all flash-0731, all
+re-scored together with `m7-p2-lt` and `m7-p2-ref` at 9 PC seeds on one
+machine at 300 and 1500 rows (`runs/rescored-shuffle-rows{300,1500}.parquet`).
+
+1. **`one_shot_shuffle`** (new arm, `da68be1`): `one_shot` with the prompt's
+   menu order permuted on a seeded RNG per seed, nothing else changed. LT
+   k=6/30/45, n=30. Register §24's fix for the single-call arm re-picking
+   the same design.
+2. **Same-day k=6 control**: `one_shot` and `one_shot_shuffle` interleaved in
+   one sweep, n=30 each — because (1) came out above the 30 Aug `one_shot`
+   at k=6 and the two files were twelve days and one reasoning regime apart.
+3. **Same-day loop control**: `llm_pc` at k=6, n=30, twenty minutes after
+   (2) — because the loop reference was also from 30 Aug.
+
+### The shuffle does not diversify the middle budget
+
+| k | fixed prompt (30 Aug), distinct sets / 30 | shuffled (11 Sep) | sets shared | dominant set |
+|---|---|---|---|---|
+| 6 | 30 | 30 | 0 | — |
+| **30** | **6** | **7** | 2 | **identical**: 18 of 30 shuffled cells buy the same 30 experiments as the fixed prompt's 17-cell mode (20 strong buys) |
+| 45 | 24 | 24 | 3 | — |
+
+At k=30 the model has a canonical answer — one experiment per variable, the
+strong level wherever one exists — and menu order does not move it. There is
+no position bias to remove either: picks sit at the uniform mean menu index
+(30.7 / 30.3 vs 29.0 uniform; top-15 share 0.26 vs 0.25) in both files at
+every budget. So register §24's k=30 bound is a property of the model's
+prior, not of the prompt layout, and **menu shuffling cannot tighten it**.
+Pooling both files' distinct designs (11) gives single-call − loop at k=30
+of −0.000 [0.017] at 300 rows and +0.022 [0.026] at 1500: the same tie,
+the same width. The remaining lever is a pinned non-zero temperature, which
+register §21/§26 already showed to be no lever at all on this endpoint.
+Closed, not deferred: at LT k=30 the single-call arm's bound is what it is.
+
+The shuffled arm's F1 ties the loop and the fixed arm everywhere (LT k=30:
+−0.000 [0.019] vs loop at 300, +0.012 [0.031] at 1500; k=45: −0.006 / +0.007,
+both ties) — no prompt-order sensitivity in the score either.
+
+### The k=6 loss was a 30 Aug draw
+
+Phase 2's one resolved single-call finding — "the record pays at the tight
+budget", `one_shot` − loop −0.047 [0.025] at LT k=6, −0.042 at 1500 rows,
+−0.028 on core-20 — **does not replicate**. Same day, same reasoning
+regime (2.1–2.4k output tokens per call on every arm), a fresh loop
+control, design-clustered, unequal-n bound:
+
+| LT k=6, 11 Sep | directed @300 | directed @1500 | skeleton @300 | core-20 @300 | core-20 @1500 |
+|---|---|---|---|---|---|
+| fixed prompt − loop (28/30) | −0.010 [0.026] tie | −0.008 [0.030] tie | +0.007 tie | −0.009 tie | −0.008 tie |
+| shuffled − loop (29/30) | −0.002 [0.028] tie | +0.007 [0.029] tie | +0.001 tie | +0.000 tie | +0.012 tie |
+| **both single-call − loop (57/30)** | **−0.006 [0.024] tie** | **−0.001 [0.026] tie** | +0.004 tie | −0.004 tie | +0.002 tie |
+| 30 Aug fixed − 30 Aug loop (30/30) | −0.047 [0.025] **R−** | −0.042 [0.026] **R−** | −0.023 tie | −0.028 R− | −0.034 R− |
+
+What moved is the single-call arm, not the loop: loop today − loop 30 Aug
+is −0.015 [0.025] (tie, and the same to 0.000 on core-20), while `one_shot`
+at k=6 went 0.159 → 0.182 (fixed) and 0.190 (shuffled). The 30 Aug
+`one_shot` k=6 cells bought more strong light-source experiments (2.6 per
+cell vs 1.9–2.3 today) — the PC-penalised buy — and reasoned twice as long
+(5,015 vs 2,061 tokens per call). Whether that is the reasoning regime
+(register §32) or a low draw at n=30 cannot be separated after the fact;
+what can be said is that under today's regime, with 57 single-call designs
+against 30 fresh loop designs, the gap is −0.006 with a bound of 0.024.
+
+**Consequence.** "A running record pays only while the budget is tight" is
+withdrawn as a resolved claim. The honest sentence is: **the single-call arm
+ties the loop at every LT budget and every WT budget in the best-controlled
+reading we have; the one resolved loss (LT k=6, 30 Aug) did not replicate
+same-regime at n=57 vs 30.** The record is not load-bearing anywhere we
+have measured. That strengthens Phase 2's headline and removes its one
+exception; it also removes the "pays only when tight" moderator sentence
+from the brief, §08 and the abstract. Sixth retraction, and the second
+(after `critique`) to fall to a same-regime re-run of a resolved n=30 cell.
+This is register §32's rule biting in the other direction: the two arms of
+the 30 Aug contrast WERE interleaved, so drift could not land on one of
+them — but a single-day n=30 resolution at 1.9× its bound is still one
+draw of the endpoint's regime, and a resolved verdict that matters should
+be re-run on another day before it goes in a paper.
+
+**One estimate corrected.** This sweep was forecast at "hours" from the
+Phase 2 pace and took 8 minutes: `one_shot` is one call per cell, and the
+Phase 2 pace was set by the loop's k calls. Estimate from the arm's own
+call count, never from the sweep it will be compared with.
 
 ---
 
@@ -1293,7 +1383,11 @@ MDEs 0.028–0.037 throughout; bold marks the four contrasts that resolve.
 **1. One call matches k calls above the smallest budget.** `one_shot` carries
 no record whatsoever, and it ties the loop at LT k=30 and k=45 and at all
 three WT budgets. Five of six chances to beat it, and the loop takes none. The
-record only pays at LT k=6, where it is worth +0.059.
+record only pays at LT k=6, where it is worth +0.059. **(Did not replicate
+2026-09-11: same-regime re-run with a fresh loop control gives −0.006
+[0.024] over 57 single-call designs — see "MENU SHUFFLE, AND THE LT k=6
+SINGLE-CALL LOSS THAT DID NOT REPLICATE". The record pays nowhere we have
+measured.)**
 
 This is the reverse of the ladder's premise. M6 ordered the rungs by how much
 of the record survives a partition; Phase 2 removes the record entirely and
@@ -1367,7 +1461,7 @@ is a weaker but more defensible negative than "it hurts".
 
 | pre-registration | verdict |
 |---|---|
-| `one_shot` < loop | **FALSE at 5 of 6 budgets** (holds only at LT k=6, −0.047) |
+| `one_shot` < loop | **FALSE at 5 of 6 budgets** (held only at LT k=6, −0.047 — and that did not replicate same-regime on 2026-09-11: −0.006 [0.024]) |
 | `critique` ≈ loop | **TRUE** — |Δ| < 0.022 everywhere (was reported false) |
 | `shared_blackboard` ≈ loop | **TRUE except LT k=6** (−0.057 there) |
 
@@ -1419,7 +1513,9 @@ a difference.
 negative under all three metrics — `one_shot` −0.047 / −0.022 / −0.028,
 `shared_blackboard` −0.057 / −0.037 / −0.023 — but neither clears MDE under all
 three. **The sign is robust; the resolution is marginal.** Report the k=6 result
-that way rather than as a clean effect.
+that way rather than as a clean effect. **Superseded 2026-09-11: the
+`one_shot` k=6 loss did not replicate same-regime (−0.006 [0.024], n=57 vs
+30); `shared_blackboard`'s was not re-run.**
 
 ### What the node set is doing to the headline numbers
 
@@ -1527,8 +1623,9 @@ for the loop — a rate correlated with the arm, which is exactly the shape of a
 harness moderator. It is not one: the drop costs ~nothing. Pooled across arms,
 drop-fired 0.172 vs not-fired 0.182; within `critique` −0.006, within
 `shared_blackboard` −0.002. (`llm_pc` shows +0.036 on n=6, the wrong sign for
-the confound and too small to weigh.) `one_shot`'s −0.059 at k=6 is a real
-record effect, not a collinearity artifact.
+the confound and too small to weigh.) `one_shot`'s −0.059 at k=6 is not a
+collinearity artifact — but it is not a stable record effect either: it did
+not replicate same-regime on 2026-09-11 (−0.006 [0.024]).
 
 ---
 

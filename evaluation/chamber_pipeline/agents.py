@@ -1558,6 +1558,7 @@ def one_shot_agent(
     pc_alpha: float = 0.05,
     *,
     llm: LLMCallable | None = None,
+    shuffle_menu: bool = False,
 ) -> pd.DataFrame:
     """Pick the whole budget in ONE call, then infer. The no-history control.
 
@@ -1566,6 +1567,13 @@ def one_shot_agent(
     record between agents without anything establishing what an unsplit record
     is worth -- so without this arm the ladder measures the cost of dividing a
     resource whose value was never priced.
+
+    `shuffle_menu` (the `one_shot_shuffle` spec) permutes the menu ORDER in
+    the prompt on a seeded RNG. With a fixed prompt the endpoint re-picks the
+    same design across seeds (register §24: 6 distinct designs in 30 LT k=30
+    cells), so the arm's bound is set by a handful of selections however many
+    cells run. The permutation is the only difference: same menu, same
+    budget, same call, same parse against the unshuffled menu.
     """
     from evaluation.chamber_pipeline.llm_planner import build_batch_select_prompt
 
@@ -1577,9 +1585,12 @@ def one_shot_agent(
 
     llm = llm or _default_llm()
     budget = min(budget, len(menu))
+    prompt_menu = list(menu)
+    if shuffle_menu:
+        _random.Random(f"one-shot-menu:{seed}").shuffle(prompt_menu)
     response = llm(
         model=model,
-        messages=build_batch_select_prompt(menu, budget),
+        messages=build_batch_select_prompt(prompt_menu, budget),
         max_tokens=_SELECTION_MAX_TOKENS,
         extra_body={"reasoning": {"effort": _SELECTION_REASONING_EFFORT}},
     )

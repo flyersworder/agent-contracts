@@ -104,11 +104,12 @@ class FakeLLM:
 class TestAgentRegistry:
     """Inventory of the registered agents, plus AgentSpec.is_compatible."""
 
-    def test_registry_has_twenty_one_agents(self) -> None:
+    def test_registry_has_twenty_two_agents(self) -> None:
         """Five M4b variants, three ladder arms, one ablation, one control,
-        the two shared-record arms, the two coverage-manipulation arms, and
-        the adaptive-feedback arm (spec §8.7 row 7)."""
-        assert len(AGENT_REGISTRY) == 21
+        the two shared-record arms, the two coverage-manipulation arms, the
+        adaptive-feedback arm (spec §8.7 row 7) and the menu-shuffled
+        single-call arm (register §24)."""
+        assert len(AGENT_REGISTRY) == 22
 
     def test_registry_names_are_unique(self) -> None:
         names = [s.name for s in AGENT_REGISTRY]
@@ -143,6 +144,7 @@ class TestAgentRegistry:
                 "team_varsplit",
                 "shared_blackboard",
                 "adaptive_feedback",
+                "one_shot_shuffle",
             ]
         )
         assert actual == expected

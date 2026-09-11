@@ -279,6 +279,18 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         accepts_llm=True,
         kind="llm_single",
     ),
+    # The same arm with the prompt's menu order permuted per seed. `one_shot`
+    # re-picks the same design across seeds (register §24), so its bound is
+    # set by ~6 selections at LT k=30 however many cells run; the permutation
+    # is the one lever that moves the prompt without changing the task.
+    AgentSpec(
+        name="one_shot_shuffle",
+        run=one_shot_agent,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_single",
+        static_kwargs=MappingProxyType({"shuffle_menu": True}),
+    ),
     # The loop with the data's verdict in the prompt: every `feedback_interval`
     # purchases PC runs on what was bought and the next prompts carry which
     # menu entries perturb a still-unreached variable. Same budget, calls and
