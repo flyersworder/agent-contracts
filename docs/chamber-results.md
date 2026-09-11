@@ -75,6 +75,38 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## PRE-REGISTERED (2026-09-11, before launch): the adaptive-feedback arm on the wind tunnel
+
+`adaptive_feedback` vs a same-sweep `llm_pc` control, WT `standard`, k=14 and
+k=21, n=50 per arm per budget, interleaved (200 cells), flash-0731, VPS. The
+feedback summary's menu→variable mapping was verified against
+`wt_menu_taxonomy` before launch (28 of 28 entries). Analysis as for the LT
+run: re-scored at 9 PC seeds on one machine at 300 and 1500 rows, clustered
+by distinct design, unequal-n bound; purchases scored on the WT oracle
+marginal-gain scale (`oracle-probe-wt-context.parquet`).
+
+Predictions, written before any cell ran:
+
+- **P1 (oracle scale).** The feedback arm's purchases sit above the
+  same-sweep loop's at both budgets. On WT the loop already beats random on
+  this scale (27–28% of the random→oracle range at k=14/21), so the
+  prediction is that feedback STACKS on it, not merely that it clears random.
+- **P2 (vs the rule).** The arm does NOT resolve above `wt_coverage_max` at
+  either budget; at k=21, where the rule beats the loop (−0.026 R−), the arm
+  sits at or below the rule. Same outcome as LT.
+- **P3 (vs the same-sweep loop, the interval prediction).** Point prediction
+  **+0.012 at k=14 and +0.010 at k=21** on directed F1 at 300 rows — LT's
+  +0.027 scaled by WT's ~2.2× effect compression. Decision rule keyed on the
+  interval, not a threshold (register §-lesson from the WT k=21
+  confirmation): supported if the 95% CI contains the prediction and
+  excludes zero; consistent-but-underpowered if it contains both; refuted if
+  it excludes the prediction. At n=50 the bound is ~0.022–0.028, so a
+  RESOLVED result is not expected and its absence is not a failure.
+- **Also reported, not predicted:** the fallback rate (LT: 1.8% of picks),
+  tokens per call vs the loop (LT: cheaper), and the 1500-row reading.
+
+---
+
 ## MENU SHUFFLE, AND THE LT k=6 SINGLE-CALL LOSS THAT DID NOT REPLICATE (2026-09-11 night, VPS/OpenBLAS, `runs/m7-oneshot-shuffle-lt.parquet`, `runs/m7-oneshot-k6-control.parquet`, `runs/m7-loop-k6-control.parquet`)
 
 Three small sweeps, 180 cells, $1.33, zero errors, all flash-0731, all
