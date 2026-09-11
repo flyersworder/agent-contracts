@@ -140,3 +140,82 @@ def test_both_arms_are_registered_and_need_no_scout_calibration() -> None:
         assert spec.accepts_llm
         assert spec.scout_roles is None
         assert spec.extra_kwargs == ()
+
+
+class TestOneShotShuffle:
+    """`one_shot` re-picks the same design across seeds because a fixed prompt
+    at a nondeterministic-but-narrow endpoint keeps landing on the same answer
+    (register §24: 6 distinct designs in 30 LT k=30 cells). `one_shot_shuffle`
+    is the same arm with the menu order in the prompt permuted per seed, so
+    that the seed actually moves the prompt. Nothing else may differ."""
+
+    @staticmethod
+    def _capture(seen: dict[int, list[str]], key: int):
+        def fake(**kw):
+            text = kw["messages"][-1]["content"]
+            menu = [line for line in text.split("Menu:\n")[-1].split("\n\n")[0].split("\n") if line]
+            seen[key] = menu
+
+            class M:
+                content = "\n".join(menu[:5])
+
+            class C:
+                message = M()
+
+            resp = type("R", (), {})()
+            resp.choices = [C()]
+            resp.usage = type("U", (), {"prompt_tokens": 1, "completion_tokens": 1})()
+            return resp
+
+        return fake
+
+    def test_shuffle_permutes_the_prompt_menu_per_seed(self) -> None:
+        seen: dict[int, list[str]] = {}
+        for seed in (0, 1):
+            record = run_cell(
+                get_spec("one_shot_shuffle"),
+                "lt",
+                "standard",
+                budget_k=5,
+                seed=seed,
+                llm=self._capture(seen, seed),
+            )
+            assert record.status == "ok"
+            assert len((record.chosen_experiments or "").split(",")) == 5
+        assert sorted(seen[0]) == sorted(seen[1]), "a permutation, never a different menu"
+        assert seen[0] != seen[1], "the seed must move the prompt"
+
+    def test_shuffle_is_deterministic_in_the_seed(self) -> None:
+        seen: dict[int, list[str]] = {}
+        for key in (0, 1):
+            run_cell(
+                get_spec("one_shot_shuffle"),
+                "lt",
+                "standard",
+                budget_k=5,
+                seed=7,
+                llm=self._capture(seen, key),
+            )
+        assert seen[0] == seen[1]
+
+    def test_plain_one_shot_keeps_the_menu_order(self) -> None:
+        """The control must not have changed: `one_shot` renders the adapter's
+        own order, which is what every existing `one_shot` row was prompted with."""
+        seen: dict[int, list[str]] = {}
+        for seed in (0, 1):
+            run_cell(
+                get_spec("one_shot"),
+                "lt",
+                "standard",
+                budget_k=5,
+                seed=seed,
+                llm=self._capture(seen, seed),
+            )
+        assert seen[0] == seen[1]
+
+    def test_shuffle_spec_differs_from_one_shot_only_by_the_flag(self) -> None:
+        a, b = get_spec("one_shot"), get_spec("one_shot_shuffle")
+        assert b.run is a.run
+        assert b.chambers == a.chambers and b.kind == a.kind and b.accepts_llm
+        assert dict(a.static_kwargs) == {}
+        assert dict(b.static_kwargs) == {"shuffle_menu": True}

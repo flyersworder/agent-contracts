@@ -70,6 +70,7 @@ VARIANT_COLORS: dict[str, str] = {
     "uncontracted": "#7f7f7f",  # gray — the ungoverned control
     "fan_in_agg": "#17becf",  # cyan — rung-1 ablation, not a rung
     "one_shot": "#bcbd22",  # olive — the no-history control
+    "one_shot_shuffle": "#8c8c1a",  # dark olive — the same arm, menu order permuted per seed
     "critique": "#393b79",  # indigo — executor-evaluator
     "shared_blackboard": "#00838f",  # teal — two voices, one record
     "adaptive_feedback": "#ad1457",  # magenta — the loop told what it has learned
@@ -97,6 +98,7 @@ VARIANT_LABELS: dict[str, str] = {
     "uncontracted": "Uncontracted (self-terminating)",
     "fan_in_agg": "Ensemble (aggregator honored)",
     "one_shot": "One-shot (no history)",
+    "one_shot_shuffle": "One-shot, shuffled menu",
     "critique": "Critique (executor-evaluator)",
     "shared_blackboard": "Shared blackboard (two voices)",
     "adaptive_feedback": "Adaptive feedback (loop + PC summary)",
@@ -123,6 +125,7 @@ VARIANT_MARKERS: dict[str, str] = {
     "uncontracted": "X",
     "fan_in_agg": "P",
     "one_shot": "*",
+    "one_shot_shuffle": "p",
     "critique": "h",
     "shared_blackboard": "8",
     "adaptive_feedback": "X",
@@ -147,6 +150,7 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "uncontracted": (0, (7, 2)),
     "fan_in_agg": (0, (3, 1, 1, 1)),
     "one_shot": "dashdot",
+    "one_shot_shuffle": (0, (3, 1, 1, 1, 1, 1)),
     "critique": "dotted",
     "shared_blackboard": (0, (5, 1, 1, 1)),
     "adaptive_feedback": (0, (1, 1)),
@@ -179,6 +183,7 @@ VARIANT_ORDER: tuple[str, ...] = (
     "team",
     "team_varsplit",
     "one_shot",
+    "one_shot_shuffle",
     "critique",
     "shared_blackboard",
     "adaptive_feedback",
