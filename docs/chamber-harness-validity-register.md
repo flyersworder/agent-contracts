@@ -1105,6 +1105,17 @@ limitation of those files, not a defect in the contrasts.
 consequence for inference, not just for variance), §23 (a variance whose
 components must be separated before it can be read).
 
+**Addendum 2026-09-11 — the menu-shuffle fix was run and does NOT
+diversify k=30.** `one_shot_shuffle` (menu order permuted per seed) gives 7
+distinct sets in 30 cells at LT k=30 against the fixed prompt's 6, and the
+dominant set is IDENTICAL (18 of 30 cells buy the fixed prompt's 17-cell
+mode). No position bias exists to remove (picks at the uniform menu index in
+both files). The k=30 bound is a property of the model's prior — one entry
+per variable, strong where offered — and no prompt-layout lever tightens it.
+Pooled over both files' 11 distinct designs it reads −0.000 [0.017] at 300
+rows, +0.022 [0.026] at 1500. Closed. Results doc "MENU SHUFFLE, AND THE LT
+k=6 SINGLE-CALL LOSS THAT DID NOT REPLICATE".
+
 ## 25. Endpoint defaults diverge 130x — but we already pin past them (2026-08-31)
 
 **Recorded as a corrected investigation, because the first version of this
@@ -2053,3 +2064,41 @@ on pooled data, not of pooling alone.
 **Also settled here: the design-level 9-seed re-score is BLAS-invariant**
 (2,202 of 2,207 designs identical to the digit across Accelerate and
 OpenBLAS; §31's cell-level divergence averages out).
+
+## 35. A resolved n=30 verdict was one day's draw — the LT k=6 single-call loss did not replicate (2026-09-11)
+
+**What looked like a finding.** Phase 2's only resolved single-call result:
+`one_shot` − loop at LT k=6 = −0.047 [0.025] (−0.042 at 1500 rows, −0.028 on
+core-20), reported since 2026-08-31 as "the running record pays only while
+the budget is tight" and carried into the brief, §08 and the draft abstract.
+
+**What it was.** Re-run on 2026-09-11 with `one_shot` and `one_shot_shuffle`
+interleaved (n=30 each) and a fresh `llm_pc` control twenty minutes later
+(n=30), all under one reasoning regime, re-scored together at 9 seeds on one
+machine: fixed − loop −0.010 [0.026], shuffled − loop −0.002 [0.028], both
+pooled (57 designs) −0.006 [0.024]; the same at 1500 rows, on the skeleton
+and on core-20. The loop did not move between the two days (−0.015 [0.025],
+0.000 on core-20); the single-call arm did (0.159 → 0.182 / 0.190), buying
+fewer strong light-source experiments (2.6 → 1.9–2.3 per cell) and reasoning
+half as long (5,015 → 2,061 tokens per call).
+
+**Why the 30 Aug reading was not protected by our rules.** §32's interleave
+rule was followed — both arms ran in one sweep, so drift could not land on
+one of them. What it does not protect against is a resolved contrast that is
+itself one draw of the endpoint's regime: the 30 Aug `one_shot` k=6 cells
+came from a longer-reasoning, strong-buying regime that the same prompt no
+longer produces. At n=30 and 1.9× its bound, that was enough to resolve.
+
+**Rule.** A resolved verdict that a sentence in the paper rests on is re-run
+on another day, with its comparator, before it is written down as resolved.
+Cost here: $1.33. The verdicts that have survived that test (`team_varsplit`
+at LT k=30 across three files; `shared_blackboard` vs `fan_in_spec`; the WT
+k=21 confirmation) are the ones to lead with; the two that have not
+(`critique` at LT k=30, now this) were both n=30 single-day resolutions at
+under 2× their bound.
+
+**What it changes.** "The record pays only when the budget is tight" is
+withdrawn. The single-call arm ties the loop at every budget on both chambers
+in the best-controlled reading; the record-survival axis buys nothing at any
+budget on LT. Sixth retraction. `shared_blackboard`'s k=6 loss (−0.057) was
+NOT re-run and keeps its 30 Aug status with this entry cited beside it.
