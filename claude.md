@@ -822,7 +822,18 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   regime indicators) is monotone in rows where PC collapses (LT k=45 at 5000
   rows: PC 0.255, JCI-PC 0.418) but pays an indicator penalty at 300 rows
   that is confounded with coverage; GES (`ges.py`) is the cross-family
-  check. Both queued on the VPS via `rescore.py --estimator`. And the BLAS
+  check — **RUN 2026-09-11 on the headline subset (LT k=30/45, WT k=21;
+  results doc "GES — THE CROSS-FAMILY CHECK")**: breadth-beats-depth,
+  rule-beats-random, no-LLM-arm-beats-the-rule and varsplit-beats-team
+  all hold under a score-based estimator (9 of 23 directed verdicts move,
+  5 of 23 skeleton, mostly boundary; `shared_blackboard` is resolved BELOW
+  the loop at LT k=30, −0.074, on every metric); and **the anti-prior
+  REVERSES** — core-20 slope on strong light buys +0.009/+0.017 at k=30/45
+  (r +0.43/+0.31) vs PC −0.009/−0.007. The dossier predicted GES would
+  reproduce it; it did not. So: absent under UT-IGSP, reversed under GES,
+  present only under the independence-test family (PC, JCI-PC) — say
+  "a property of the independence-test family on pooled data at a fixed
+  cap", not "of the estimator". And the BLAS
   finding is GONE at the design level: 2,202/2,207 nine-seed design means
   identical across Accelerate and OpenBLAS. **UT-IGSP (`igsp.py`, the
   authors' never-pooled estimator; LT only; core-20 by construction; design
@@ -839,7 +850,14 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   say so. The row effect also exists within ONE regime (PC on the reference
   alone: core 0.205 → 0.114 from 1k to 10k rows) — the test family meets
   uniform inputs and not-quite-linear sensors; pooling amplifies it. GES
-  runs on the headline subsets only (full corpus would take two days).
+  ran on the headline subsets only (full corpus would take two days).
+  **The 5000-row JCI-PC corpus pass DID NOT LAND (2026-09-11): 2 workers
+  on LT k=30 stalled at 205/356 after 12 h — per-worker memory GROWS over
+  the run (2.4 GB at launch → 5.8 and 8.2 GB), filled 8 GB of swap, pace
+  fell to ~3 designs/h; killed, and the k=45/regime passes withdrawn. Two
+  rules: size workers by the END-of-run memory, not the launch reading;
+  and `rescore.py` has no checkpoint, so a kill loses the whole stage —
+  add a per-design sidecar before any pass longer than a few hours.**
   **Rules:** sweep the estimator's nuisance parameters on neutral
   designs BEFORE deriving an oracle; a penalty for adding data is a harness
   signature, never explain it with physics; report every best-selection
@@ -1411,7 +1429,7 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-09 (adaptive-feedback arm run: off the random line, not past the plateau)*
+*Last Updated: 2026-09-11 (GES cross-family check: structural claims hold, anti-prior reverses; 5000-row JCI pass abandoned on memory growth)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*

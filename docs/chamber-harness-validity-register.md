@@ -2044,7 +2044,11 @@ on directed F1 — mostly boundary cases, mostly toward more separation at
 confirmation resolves; `critique` flips sign). Rule: every arm contrast is
 reported at both caps and on both metrics. Mechanism of the cap's effect:
 results doc "WHY STRONG INTERVENTIONS HURT" — pooled regimes, harm growing
-with rows. Second estimators (JCI-PC, GES) queued the same day.
+with rows. Second estimators (JCI-PC, GES) queued the same day; GES ran
+2026-09-11 on the headline subset (results doc "GES — THE CROSS-FAMILY
+CHECK"): the structural verdicts hold and the anti-prior reverses sign, so
+the selection-level claims are properties of the independence-test family
+on pooled data, not of pooling alone.
 
 **Also settled here: the design-level 9-seed re-score is BLAS-invariant**
 (2,202 of 2,207 designs identical to the digit across Accelerate and

@@ -45,6 +45,9 @@ the arithmetic of record.)
 | `runs/m7-coverage-wt2.parquet` | 300 | $0.00 | the WT coverage arms, breadth and depth, 3 budgets x 50 seeds |
 | `runs/m7-adaptive-lt.parquet` | 60 | $6.15 | `adaptive_feedback` vs same-sweep `llm_pc`, LT k=30, n=30 each (pre-registered, spec §8.7 row 7) |
 | `runs/oracle-probe-{lt,wt}-*.parquet` | — | $0.00 | ground-truth oracle sets, static ranking, policies, arm purchase gains (`oracle_probe.py`) |
+| `runs/rescored-vps-{rows300,rows1500,jci-rows1500}.parquet` (+`-bykey`) | 2,206 designs | $0.00 | the corpus under PC at two caps and JCI-PC at 1500, 9 seeds |
+| `runs/rescored-vps-utigsp-lt.parquet` (+`-bykey`) | 769 designs | $0.00 | the LT corpus under UT-IGSP, never pooled, core-20 |
+| `runs/rescored-vps-ges-rows1500-subset.parquet` (+`-bykey`) | 1,190 designs | $0.00 | LT k=30/45 + WT k=21 under GES at 1500 rows, 3 seeds — the cross-family check |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -66,6 +69,143 @@ cross-backend gap is ΔF1 = 0.055, larger than most effects reported below.
 Chambers: light tunnel (LT) 38 nodes / 57 edges / 59-experiment menu; wind
 tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
+
+---
+
+## GES — THE CROSS-FAMILY CHECK (2026-09-11, VPS/OpenBLAS, `runs/rescored-vps-ges-rows1500-subset.parquet`): the structural claims hold under a score-based estimator; the anti-prior REVERSES
+
+`ges.py` + `rescore.py --estimator ges --pc-max-rows 1500`, causal-learn
+`local_score_BIC`, on the headline subset only: the LT k=30 and k=45 designs
+and the WT k=21 designs (1,394 cells, 1,190 distinct designs × 3 seeds,
+3,570 scorings, 3 workers, 4 h 08 min, ~550 MB per worker). The full
+corpus would have taken two days and was not run. GES pools regimes exactly
+as PC does and shares the row cap, so it tests the TEST FAMILY (score vs
+independence tests), not the pooling. Compared throughout against PC and
+JCI-PC at the same 1500-row cap on the same designs; design-clustered,
+unequal-n MDE.
+
+**The dossier's prediction (4) was "GES reproduces the anti-prior". It does
+not — it reverses it.**
+
+### Arm contrasts, directed F1 (design-level, 3 seeds)
+
+| contrast | PC@300 | PC@1500 | JCI-PC@1500 | GES@1500 |
+|---|---|---|---|---|
+| LT k=30 loop − coverage rule | −0.001 tie | −0.032 R− | −0.043 R− | +0.007 tie |
+| LT k=30 rule − random | +0.065 R+ | +0.099 R+ | +0.107 R+ | +0.096 R+ |
+| LT k=30 min-rule − rule | −0.100 R− | −0.241 R− | −0.246 R− | **−0.303 R−** |
+| LT k=30 loop − random | +0.065 R+ | +0.067 R+ | +0.065 R+ | +0.103 R+ |
+| LT k=30 `team_varsplit` − `team` | +0.042 R+ | +0.057 R+ | +0.078 R+ | +0.061 R+ |
+| LT k=30 `one_shot` − loop (6 designs) | +0.002 tie | +0.038 R+ | +0.038 R+ | +0.016 tie |
+| LT k=30 `critique` − loop | −0.015 R− | +0.022 R+ | +0.021 R+ | +0.004 tie |
+| LT k=30 `shared_blackboard` − loop | −0.020 R− | −0.022 tie | −0.014 tie | **−0.074 R−** |
+| LT k=45 loop − rule | −0.001 tie | −0.012 R− | +0.044 R+ | −0.026 tie |
+| LT k=45 rule − random | +0.017 R+ | +0.021 R+ | −0.032 R− | +0.069 R+ |
+| LT k=45 min-rule − rule | −0.009 tie | −0.042 R− | −0.084 R− | **+0.002 tie** |
+| LT k=45 Phase 2 arms − loop | tie ×3 | tie ×3 | R− / tie / R− | tie ×3 |
+| WT k=21 loop − rule | −0.026 R− | −0.038 R− | −0.025 R− | −0.021 R− |
+| WT k=21 rule − random | +0.056 R+ | +0.059 R+ | +0.031 R+ | +0.027 R+ |
+| WT k=21 min-rule − rule | −0.074 R− | −0.067 R− | −0.032 R− | −0.028 R− |
+| WT k=21 loop − random | +0.030 R+ | +0.020 R+ | +0.006 tie | +0.005 tie |
+| WT k=21 `team_varsplit` − `team` | +0.013 tie | +0.018 R+ | +0.009 tie | +0.001 tie |
+| WT k=21 Phase 2 arms − loop | tie ×3 | tie / R− / tie | tie ×3 | tie ×3 |
+
+9 of 23 directed verdicts differ between GES and PC at 1500 rows; 5 of 23
+on the skeleton; 9 of 15 on core-20 (where GES's absolute level is far
+higher, so its MDEs are wider in the same units). Skeleton and core-20
+tables: `ges_verdicts.py f1_skeleton` / `f1_core` in the session scratch.
+
+What holds under all four estimator settings, both chambers:
+
+- **Breadth beats depth.** The min-rule loses to the max-rule everywhere it
+  is tested except LT k=45 under GES, where the two tie at 0.679 / 0.677 —
+  at three-quarters of the menu a score-based estimator no longer cares
+  which entries were bought. On LT k=30 the margin under GES is the largest
+  of any estimator: −0.303, with `coverage_min` at 0.246 against
+  `coverage_max` at 0.671.
+- **The coverage rule beats random**, and **no LLM arm resolves above the
+  rule** (LT k=30 +0.007 tie, LT k=45 −0.026 tie, WT k=21 −0.021 R−).
+- **`team_varsplit` beats `team` at LT k=30** (+0.061 under GES), the
+  fourth estimator setting to resolve it. At WT k=21 it is a tie under GES
+  (+0.001), as under PC@300 and JCI-PC; only PC@1500 resolves it.
+- **The loop beats random at LT k=30** (+0.103, the largest of the four).
+
+What moves:
+
+- **`shared_blackboard` is resolved BELOW the loop at LT k=30 under GES on
+  every metric** (directed −0.074, skeleton −0.063, core −0.055), where PC
+  had it on the boundary (−0.020 R− at 300, −0.022 tie at 1500) and UT-IGSP
+  at −0.004 R−. The Phase 2 "sharing a record beats splitting one" finding
+  is `shared_blackboard` vs `fan_in_spec`, which is not in this subset;
+  what this says is that sharing a record with the loop is WORSE than the
+  loop under a score-based judge, not merely equal. Report it beside the
+  Phase 2 claim.
+- `one_shot` and `critique` return to ties with the loop (PC@1500 and
+  JCI-PC had both R+). Consistent with the standing rule: those two
+  contrasts are orientation noise and should not be adjudicated.
+- WT loop − random shrinks to +0.005 (tie) under GES and JCI-PC from
+  +0.030 / +0.020 under PC. On WT the LLM's advantage over random is a
+  PC-only result; the rule's advantage over random is not.
+
+### The anti-prior reverses
+
+Within-budget partial slope of F1 on the number of STRONG light-source
+buys, controlling for light-source buys overall (the same regression as
+the UT-IGSP section), LT subset:
+
+| k | metric | PC@1500 | JCI-PC@1500 | GES@1500 | UT-IGSP (corpus) |
+|---|---|---|---|---|---|
+| 30 | core-20 | −0.0092 (r −0.31) | −0.0072 (r −0.38) | **+0.0088 (r +0.43)** | +0.0003 (r +0.25) |
+| 45 | core-20 | −0.0065 (r −0.30) | −0.0030 (r −0.25) | **+0.0171 (r +0.31)** | +0.0008 (r +0.23) |
+| 30 | directed | −0.0083 | −0.0149 | **+0.0023** | — |
+| 45 | directed | −0.0053 | −0.0121 | **+0.0148** | — |
+
+Under GES a strong light-source experiment is the BEST thing to buy on the
+core graph, by the same margin per experiment that PC charges for it. GES
+pools the same rows PC pools; the difference is the test. A BIC score over
+the pooled Gaussian is a global fit and tolerates a shifted regime; a
+sequence of Fisher-Z accept/reject decisions is not, and one shifted block
+flips the borderline tests (results doc "WHY STRONG INTERVENTIONS HURT").
+So the anti-prior is now bracketed from both sides: absent under the
+estimator that never pools (UT-IGSP), reversed under a pooled estimator
+from a different family (GES), present only under the independence-test
+family (PC, JCI-PC). **The models' prior — "strong root interventions give
+the most signal" — is right under two of the three families we have run.**
+"The LLM arms carry the opposite of the needed knowledge" stays withdrawn,
+and the sentence to use is: the selection findings are properties of the
+independence-test family on pooled data at a fixed cap.
+
+### Levels, and a caveat
+
+GES sits far above PC in absolute terms on LT (loop 0.651 directed at k=30
+against PC's ~0.40; core-20 0.686 against PC's ~0.22, beside UT-IGSP's
+0.642 ceiling) and slightly below on WT (0.271 against ~0.29). LT arm means
+under GES span 0.246–0.671 at k=30 — unlike UT-IGSP, GES discriminates
+designs strongly, which is why it can resolve contrasts at all. Seed noise
+is comparable (within-design sd 0.045 vs PC's 0.040). The CPDAG is read through
+`cpdag_to_directed_adjacency`, PC's own encoding: an undirected edge
+counts in both directions (one true positive and one false positive when
+the true edge exists); the same convention for both estimators, favouring
+neither.
+
+Caveat: this is the headline SUBSET, not the corpus — LT k=6, WT k=7 and
+k=14 and the ladder arms are not scored under GES, and the WT rule-vs-loop
+figures above are the only WT budget tested.
+
+### The 5000-row JCI-PC pass did not land
+
+The per-variable JCI-PC pass at 5000 rows on the LT k=30 designs (2
+workers) stalled at 205 of 356 designs after 12 h and was killed: per-worker
+memory grew from ~2.4 GB at launch to 5.8 and 8.2 GB, 8 GB of swap filled,
+and the pace fell to ~3 designs/h. PC's skeleton phase at 5000 rows with
+~30 context columns is exponential in surviving degree; the re-scorer has
+no checkpoint, so the partial work is lost. The k=45 and per-regime 5000-row
+passes queued behind it were withdrawn. If re-run: one worker, one PC seed,
+LT k=30 only, and only after `rescore.py` writes a per-design sidecar.
+Prediction (5) of the dossier — whether JCI-PC at 5000 rows still ranks the
+strong light-source experiments last — stays open; the GES and UT-IGSP
+results above make it less load-bearing, since two other families already
+answer it in the models' favour.
 
 ---
 
