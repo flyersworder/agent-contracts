@@ -17,9 +17,13 @@ import pytest
 from evaluation.chamber_pipeline.inference import CAUSAL_LEARN_AVAILABLE
 from evaluation.chamber_pipeline.jci import (
     CONTEXT_PREFIX,
+    SESSION_CONTEXT,
+    SESSION_GAP_SECONDS,
+    add_session_context,
     intervention_target,
     pool_with_context,
     run_jci_pc,
+    session_ids,
 )
 
 requires_causal_learn = pytest.mark.skipif(
@@ -196,3 +200,74 @@ def test_regime_label_must_still_name_a_node() -> None:
     rng = np.random.default_rng(10)
     with pytest.raises(ValueError, match="not a node"):
         pool_with_context([_experiment(rng, 5)], ["zz@strong"], NODES)
+
+
+# ---------------------------------------------------------------------------
+# Register §37: a recording session is a regime nobody bought. One indicator
+# per session, derived from each experiment's own timestamps.
+
+
+def _stamped(rng: np.random.Generator, n: int, t0: float) -> pd.DataFrame:
+    df = _experiment(rng, n)
+    df["timestamp"] = t0 + np.arange(n, dtype=float)
+    return df
+
+
+def test_session_ids_split_on_a_large_timestamp_gap_only() -> None:
+    rng = np.random.default_rng(0)
+    dfs = [_stamped(rng, 50, 1_000.0), _stamped(rng, 50, 5_000.0), _stamped(rng, 50, 400_000.0)]
+    assert session_ids(dfs, gap=SESSION_GAP_SECONDS) == [0, 0, 1]
+    # ids follow time order, not buy order
+    assert session_ids(dfs[::-1], gap=SESSION_GAP_SECONDS) == [1, 0, 0]
+    # frames without a timestamp column are one session
+    assert session_ids([_experiment(rng, 10), _experiment(rng, 10)], gap=SESSION_GAP_SECONDS) == [
+        0,
+        0,
+    ]
+
+
+def test_add_session_context_marks_rows_and_is_absent_for_one_session() -> None:
+    rng = np.random.default_rng(1)
+    dfs = [_stamped(rng, 40, 1_000.0), _stamped(rng, 60, 400_000.0)]
+    pooled, ctx = pool_with_context(dfs, ["a", None], NODES)
+    pooled2, ctx2 = add_session_context(pooled, ctx, dfs, session_ids(dfs, gap=SESSION_GAP_SECONDS))
+    assert ctx2 == [*ctx, SESSION_CONTEXT]
+    assert list(pooled2[SESSION_CONTEXT]) == [0] * 40 + [1] * 60
+    one = [_stamped(rng, 40, 1_000.0), _stamped(rng, 60, 2_000.0)]
+    pooled3, ctx3 = pool_with_context(one, ["a", None], NODES)
+    pooled4, ctx4 = add_session_context(
+        pooled3, ctx3, one, session_ids(one, gap=SESSION_GAP_SECONDS)
+    )
+    assert ctx4 == ctx3 and SESSION_CONTEXT not in pooled4.columns
+
+
+def test_wt_menu_has_two_sessions_and_lt_one() -> None:
+    from agent_contracts.integrations.causalchamber import create_contracted_chamber_agent
+
+    wt = create_contracted_chamber_agent(chamber="wt", intervention_budget=28)
+    names = list(wt.available_experiments())
+    ids = session_ids([wt.query_intervention(n) for n in names], gap=SESSION_GAP_SECONDS)
+    early = {n for n, i in zip(names, ids, strict=True) if i == 0}
+    assert early == {
+        "validate_osr_ambient",
+        "validate_hatch_mic",
+        "validate_load_out_mic",
+        "validate_load_in_current_out",
+        "validate_load_out_current_in",
+        "validate_load_out_pressure_intake",
+    }
+    lt = create_contracted_chamber_agent(chamber="lt", intervention_budget=59)
+    lt_names = list(lt.available_experiments())
+    assert set(
+        session_ids([lt.query_intervention(n) for n in lt_names], gap=SESSION_GAP_SECONDS)
+    ) == {0}
+
+
+@requires_causal_learn
+def test_rescore_session_context_runs_and_labels_records() -> None:
+    from evaluation.chamber_pipeline.rescore import _rescore_one_design
+
+    names = ["validate_osr_ambient", "validate_v_out", "validate_load_in"]
+    recs = _rescore_one_design(("k", "wt", "standard", names, 2, 0.05, 300, "jci_pc", "session"))
+    assert len(recs) == 2 and all(r["rescore_context"] == "session" for r in recs)
+    assert all(0.0 <= r["f1"] <= 1.0 for r in recs)

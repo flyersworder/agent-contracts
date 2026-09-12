@@ -2226,3 +2226,14 @@ per-experiment means of every sensor that nothing in the menu controls
 (here: ambient pressure) and the timestamps; two clusters mean two
 sessions, and a session is a regime you did not buy. Register entries 8
 (collinear barometers) and 36 both sit downstream of this one.
+
+**Closed the same night ($0; results doc "THE SESSION INDICATOR CHANGES NO
+WT VERDICT").** `rescore.py --estimator jci_pc --context session` adds one
+indicator for the recording session (`jci.session_ids`, timestamp clusters
+200,000 s apart; WT 6/22, LT one session). Over 1,637 WT designs: **0 sign
+flips** among re-scorable headline contrasts, two boundary moves tie-ward.
+The indicator is nearly redundant (+0.001–0.005) because JCI's per-entry
+variable indicators already absorb the step; against plain PC the number
+of low-session buys correlates with JCI's per-design gain (r = 0.44 at
+k=21). Scope note, not retraction: absolute WT F1 under plain PC carries
+the session; contrasts do not.

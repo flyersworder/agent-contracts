@@ -165,6 +165,83 @@ the estimate has not connected — the "what varied" arm, still unbuilt.
 
 ---
 
+## THE SESSION INDICATOR CHANGES NO WT VERDICT (2026-09-12 night, VPS/OpenBLAS, `runs/rescored-wt-jci-{var,session}-rows300*.parquet`): JCI's per-entry indicators already absorb the day shift; plain PC does not, and every arm faced the same menu
+
+Pre-registered (next section). 1,637 distinct designs from the seven WT
+headline files, JCI-PC at 300 rows, 9 seeds, variable context vs variable
++ session context, same machine, $0, ~3.5 h. The M6 ladder files carry no
+`chosen_experiments` and cannot be re-scored, so `team`, `fan_in_*` and
+`planner_reasoner` verdicts stay at cell level (as they always have);
+the re-scorable contrasts are below.
+
+**S1 — HOLDS: 0 sign flips.** Two boundary moves, both tie-ward: rule vs
+loop at k=14 (−0.022 R− → −0.020 tie) and adaptive vs loop at k=21
+(−0.018 R− → −0.012 tie). `one_shot` below the loop at k=14/21 under JCI
+(−0.034 / −0.020, both contexts), varsplit vs team a tie at both budgets
+(+0.010 at k=21, MDE 0.011), rule above random at k=21 (+0.028 / +0.023
+R+), adaptive below the loop at k=14 (−0.036 / −0.033 R−).
+
+**S2 — FAILS, and the reason is the finding.** The session column moves
+design-clustered F1 by **−0.0003 / +0.0013 / +0.0041** at k=7/14/21 on
+designs that contain a low-session entry (predicted ≥ +0.02) and by
+exactly 0.0000 on designs that do not (as constructed). It is nearly
+redundant because on WT every menu entry is its own variable, so JCI's
+variable context already carries one indicator per low-session
+experiment — the union of those six indicators IS the session column
+whenever the design holds only one of them. Plain PC has no such column:
+against it, JCI's gain per design correlates with the number of
+low-session buys (r = 0.44 at k=21; JCI-var − PC is −0.040 on average at
+k=21 but less negative the more low-session entries a design holds). So
+the session shift is a plain-PC phenomenon at the cap of record, partly
+absorbed by any estimator that knows the regimes, and fully absorbed by
+one that also knows the session (+0.005 more).
+
+**S3 — as predicted:** adaptive − loop shrinks at both budgets (k=14
+−0.036 → −0.033, still R−; k=21 −0.018 → −0.012, R− → tie) and reverses
+nowhere.
+
+**What the paper says.** WT absolute F1 at the cap of record carries a
+recording-session step in every design that bought one of six entries
+(most designs at k ≥ 14); arm contrasts stand because every arm faced the
+same menu and the same estimator, and an estimator that knows the regimes
+removes the step without changing a single sign. Register §37 is a scope
+note with numbers, not a retraction.
+
+---
+
+## PRE-REGISTERED (2026-09-12 evening, before launch): the WT corpus re-scored with a SESSION indicator (register §37)
+
+**What runs.** Every WT headline file (`m6-wt-ladder-final`,
+`m6-wt-team-rerun`, `m7-p2-wt`, `m7-wt-varsplit-n132`, `m7-adaptive-wt`,
+`m7-coverage-wt`, `m7-coverage-wt2`) re-scored on the VPS at 300 rows, 9
+PC seeds, under JCI-PC with (a) the variable context as before and (b)
+`--context session`: the same variable indicators plus ONE 0/1 column
+marking rows from the later recording session (`jci.session_ids`, clusters
+of experiment timestamp medians more than 200,000 s apart; WT splits 6 vs
+22, LT does not split, tested). Edges into the session column are
+forbidden like any context column. Same machine for (a) and (b), so the
+contrast is the indicator alone. Outputs `runs/rescored-wt-jci-var-rows300*`
+and `runs/rescored-wt-jci-session-rows300*`.
+
+**Predictions:**
+
+- **S1.** No WT headline verdict changes SIGN between (a) and (b):
+  team vs loop at k=7 (+, resolved) and k=14/21 (−), varsplit vs team at
+  k=21 (+), the rule above every LLM arm at k=21, `shared_blackboard` vs
+  `fan_in_spec` at k=14 (+), `one_shot` ties, adaptive vs loop at k=14
+  (−) and k=21 (tie). Boundary verdicts may move between tie and resolved.
+- **S2.** The session indicator RAISES design-clustered F1 on designs that
+  contain a low-session entry (mean +0.02 or more) and leaves designs with
+  none unchanged (|Δ| < 0.005) — the indicator absorbs the step and does
+  nothing else.
+- **S3.** The adaptive-feedback k=14 loss vs the loop SHRINKS under (b)
+  (its designs carry `osr_ambient` in 78 % of cells, the loop's in 18 %)
+  but does not reverse.
+- If S1 fails on any contrast the paper reports that contrast under both
+  contexts and says the session is the reason.
+
+---
+
 ## EFFECT FEEDBACK LOSES TO COVERAGE FEEDBACK (2026-09-12 afternoon, VPS/OpenBLAS, `runs/m7-effect-lt.parquet`): a feedback that reports true effects steers the arm toward the regimes that hurt the judge
 
 Pre-registered (next section). 90/90 ok, $12.16 (the effect arm reasons

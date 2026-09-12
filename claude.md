@@ -821,7 +821,13 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   actuator change, so pooling it injects a pure day-shift regime —
   correcting its barometers halves the 300-row harm and removes the
   1500-row harm. Tabulate per-experiment means of uncontrolled sensors
-  and timestamps before pooling any released dataset.** **EFFECT FEEDBACK
+  and timestamps before pooling any released dataset. CLOSED the same
+  night ($0): a `--context session` JCI re-score of 1,637 WT designs
+  gives 0 sign flips among headline contrasts; the indicator is nearly
+  redundant with JCI's per-entry variable indicators (+0.001–0.005), and
+  exactly zero on designs without a low-session entry. Scope note in the
+  paper, not a retraction; absolute WT F1 under plain PC carries it,
+  contrasts do not.** **EFFECT FEEDBACK
   (`effect_feedback`, `summarize_effects`: what each buy shifted, judged
   pairwise vs the majority of other buys, no estimator in the loop) LOSES
   on LT (2026-09-12, 90 cells / $12.16, three arms same day): −0.033
