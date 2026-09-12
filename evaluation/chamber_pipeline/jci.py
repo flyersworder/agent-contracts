@@ -29,6 +29,7 @@ Two decisions, recorded rather than argued:
 
 from __future__ import annotations
 
+import itertools
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -41,6 +42,67 @@ from .menu_taxonomy import experiment_variable as lt_experiment_variable
 from .wt_menu_taxonomy import experiment_variable as wt_experiment_variable
 
 CONTEXT_PREFIX = "ctx__"
+
+# Register §37: `wt_validate_v1`'s 28 `standard` entries were recorded in two
+# sessions 2.3 kPa of ambient pressure apart (timestamp medians 6k-154k s vs
+# 426k-438k s; LT's 59 entries span 26k s with no gap above 2.2k s). A session
+# is a regime nobody bought, and pooling across one puts a weather step into
+# every barometer. Sessions are clusters of experiment timestamp medians
+# separated by more than this gap; the indicator is added only when the
+# bought set spans more than one, so LT is untouched.
+SESSION_GAP_SECONDS = 200_000.0
+SESSION_CONTEXT = CONTEXT_PREFIX + "session"
+TIMESTAMP_COLUMN = "timestamp"
+
+
+def session_ids(
+    experiment_dfs: list[pd.DataFrame], *, gap: float = SESSION_GAP_SECONDS
+) -> list[int]:
+    """One integer per experiment: which recording session it came from.
+
+    Sessions are numbered in time order (0 = earliest), from each frame's
+    own `timestamp` median; a frame without the column, or a set with no
+    gap above `gap`, is one session. Data-derived — no ground truth and no
+    chamber semantics.
+    """
+    if not experiment_dfs or any(TIMESTAMP_COLUMN not in df.columns for df in experiment_dfs):
+        return [0] * len(experiment_dfs)
+    medians = np.array([float(df[TIMESTAMP_COLUMN].median()) for df in experiment_dfs])
+    order = np.argsort(medians, kind="stable")
+    ids = [0] * len(experiment_dfs)
+    current = 0
+    for prev, cur in itertools.pairwise(order):
+        if medians[cur] - medians[prev] > gap:
+            current += 1
+        ids[int(cur)] = current
+    ids[int(order[0])] = 0
+    return ids
+
+
+def add_session_context(
+    pooled: pd.DataFrame,
+    context_names: list[str],
+    experiment_dfs: list[pd.DataFrame],
+    sessions: list[int],
+) -> tuple[pd.DataFrame, list[str]]:
+    """Append one 0/1 `SESSION_CONTEXT` column marking rows of the later session(s).
+
+    Absent when every experiment shares a session (a constant column would
+    only be dropped as zero-variance downstream). With more than two
+    sessions the column is "not the earliest" — one indicator, because the
+    step we are absorbing is a level shift and the WT data has two levels.
+    """
+    if len(experiment_dfs) != len(sessions):
+        raise ValueError("one session id per experiment")
+    if len(set(sessions)) < 2:
+        return pooled, context_names
+    lengths = [len(df) for df in experiment_dfs]
+    col = np.concatenate(
+        [np.full(n, 1 if s > 0 else 0, dtype=int) for n, s in zip(lengths, sessions, strict=True)]
+    )
+    out = pooled.copy()
+    out[SESSION_CONTEXT] = col
+    return out, [*context_names, SESSION_CONTEXT]
 
 
 def intervention_target(chamber: str, experiment_name: str, node_names: list[str]) -> str | None:

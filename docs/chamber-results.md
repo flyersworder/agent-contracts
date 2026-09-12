@@ -165,6 +165,39 @@ the estimate has not connected — the "what varied" arm, still unbuilt.
 
 ---
 
+## PRE-REGISTERED (2026-09-12 evening, before launch): the WT corpus re-scored with a SESSION indicator (register §37)
+
+**What runs.** Every WT headline file (`m6-wt-ladder-final`,
+`m6-wt-team-rerun`, `m7-p2-wt`, `m7-wt-varsplit-n132`, `m7-adaptive-wt`,
+`m7-coverage-wt`, `m7-coverage-wt2`) re-scored on the VPS at 300 rows, 9
+PC seeds, under JCI-PC with (a) the variable context as before and (b)
+`--context session`: the same variable indicators plus ONE 0/1 column
+marking rows from the later recording session (`jci.session_ids`, clusters
+of experiment timestamp medians more than 200,000 s apart; WT splits 6 vs
+22, LT does not split, tested). Edges into the session column are
+forbidden like any context column. Same machine for (a) and (b), so the
+contrast is the indicator alone. Outputs `runs/rescored-wt-jci-var-rows300*`
+and `runs/rescored-wt-jci-session-rows300*`.
+
+**Predictions:**
+
+- **S1.** No WT headline verdict changes SIGN between (a) and (b):
+  team vs loop at k=7 (+, resolved) and k=14/21 (−), varsplit vs team at
+  k=21 (+), the rule above every LLM arm at k=21, `shared_blackboard` vs
+  `fan_in_spec` at k=14 (+), `one_shot` ties, adaptive vs loop at k=14
+  (−) and k=21 (tie). Boundary verdicts may move between tie and resolved.
+- **S2.** The session indicator RAISES design-clustered F1 on designs that
+  contain a low-session entry (mean +0.02 or more) and leaves designs with
+  none unchanged (|Δ| < 0.005) — the indicator absorbs the step and does
+  nothing else.
+- **S3.** The adaptive-feedback k=14 loss vs the loop SHRINKS under (b)
+  (its designs carry `osr_ambient` in 78 % of cells, the loop's in 18 %)
+  but does not reverse.
+- If S1 fails on any contrast the paper reports that contrast under both
+  contexts and says the session is the reason.
+
+---
+
 ## EFFECT FEEDBACK LOSES TO COVERAGE FEEDBACK (2026-09-12 afternoon, VPS/OpenBLAS, `runs/m7-effect-lt.parquet`): a feedback that reports true effects steers the arm toward the regimes that hurt the judge
 
 Pre-registered (next section). 90/90 ok, $12.16 (the effect arm reasons

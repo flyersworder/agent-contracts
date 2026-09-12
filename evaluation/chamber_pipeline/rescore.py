@@ -44,7 +44,14 @@ if TYPE_CHECKING:
 from .ges import run_ges
 from .igsp import run_utigsp
 from .inference import DEFAULT_MAX_ROWS, pool_experiment_data, run_pc, runtime_fingerprint
-from .jci import intervention_target, pool_with_context, regime_label, run_jci_pc
+from .jci import (
+    add_session_context,
+    intervention_target,
+    pool_with_context,
+    regime_label,
+    run_jci_pc,
+    session_ids,
+)
 from .scoring import f1_edges, f1_skeleton, shd
 
 SELECTION_KEY_COLUMN = "selection_key"
@@ -90,7 +97,7 @@ LT_CASE_STUDY_NODES: tuple[str, ...] = (
 #: boundary without the worker importing anything this module owns.
 ESTIMATORS = ("pc", "jci_pc", "ges", "utigsp")
 OBSERVATIONAL_ENTRY = {"lt": "uniform_reference"}
-CONTEXT_MODES = ("variable", "regime")
+CONTEXT_MODES = ("variable", "regime", "session")
 _DesignTask = tuple[str, str, str, list[str], int, float, int | None, str, str]
 
 #: Columns a source frame must carry to be re-scorable.
@@ -223,6 +230,12 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
         labeller = regime_label if context_mode == "regime" else intervention_target
         targets = [labeller(chamber, name, nodes) for name in names]
         pooled, context = pool_with_context(experiment_dfs, targets, nodes)
+        if context_mode == "session":
+            # Register §37: variable indicators plus one for the recording
+            # session, derived from the frames' own timestamps; absent on LT.
+            pooled, context = add_session_context(
+                pooled, context, experiment_dfs, session_ids(experiment_dfs)
+            )
     else:
         pooled = pool_experiment_data(experiment_dfs, nodes)
         context = []
@@ -573,8 +586,10 @@ def main(argv: Iterable[str] | None = None) -> None:
         default="variable",
         help=(
             "jci_pc only: one indicator per intervened VARIABLE (merges the "
-            "strengths of one variable into one block) or per REGIME "
-            "(`<variable>@<strength>` on LT, one per menu entry on WT)."
+            "strengths of one variable into one block), per REGIME "
+            "(`<variable>@<strength>` on LT, one per menu entry on WT), or "
+            "VARIABLE plus one indicator for the recording SESSION (register "
+            "§37; WT has two sessions 2.3 kPa apart, LT one)."
         ),
     )
     parser.add_argument("--out", default="runs/rescored.parquet")
