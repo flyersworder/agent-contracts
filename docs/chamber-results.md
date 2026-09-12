@@ -4,13 +4,13 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the thirty
+**Companions.** `docs/chamber-harness-validity-register.md` records the thirty-one
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-12 afternoon**: 18,714 cells, **$132.94**, **zero errored cells**, (2026-09-11 read 18,303 / $115.87; the WT adaptive-feedback replication adds 200 cells / $8.26, its two fix attempts 211 cells / $8.81)
+**Corpus as of 2026-09-12 evening**: 18,804 cells, **$145.10**, **zero errored cells**, (2026-09-11 read 18,303 / $115.87; the WT adaptive-feedback replication adds 200 cells / $8.26, its two fix attempts 211 / $8.81, the LT effect-feedback contrast 90 / $12.16)
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
 LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The table below is
@@ -46,6 +46,7 @@ the arithmetic of record.)
 | `runs/m7-adaptive-lt.parquet` | 60 | $6.15 | `adaptive_feedback` vs same-sweep `llm_pc`, LT k=30, n=30 each (pre-registered, spec §8.7 row 7) |
 | `runs/m7-adaptive-wt.parquet` | 200 | $8.26 | `adaptive_feedback` vs same-sweep `llm_pc`, WT k=14/21, n=50 each (pre-registered 2026-09-11; P1/P3 refuted, P2 held); re-scored at 300/1500 rows in `runs/rescored-adaptive-wt-rows{300,1500}*.parquet` |
 | `runs/m7-adaptive-wt2.parquet` (+ `wt3`, killed at 11 cells) | 211 | $8.81 | the two summariser fixes (register §36): disclosure changed the `osr_ambient` buy rate by 0 points; exclusion-on-drops cannot fire at feedback time |
+| `runs/m7-effect-lt.parquet` | 90 | $12.16 | `effect_feedback` vs `adaptive_feedback` vs `llm_pc`, LT k=30, n=30 each, same day (pre-registered; E1 refuted, coverage − loop replicates); re-scored in `runs/rescored-effect-lt-rows{300,1500}*` |
 | `runs/m7-oneshot-shuffle-lt.parquet` | 90 | $0.57 | `one_shot_shuffle`, LT k=6/30/45: menu order per seed does not diversify k=30 |
 | `runs/m7-oneshot-k6-control.parquet` | 60 | $0.17 | same-day `one_shot` + `one_shot_shuffle` at LT k=6, interleaved |
 | `runs/m7-loop-k6-control.parquet` | 30 | $0.59 | same-day `llm_pc` at LT k=6; the 30 Aug single-call loss does not replicate |
@@ -161,6 +162,95 @@ and overrides the model's prior, which was right about `osr_ambient` on
 WT and wrong about the apparatus settings on LT. A feedback that could
 tell the two apart has to report what each experiment CHANGED, not what
 the estimate has not connected — the "what varied" arm, still unbuilt.
+
+---
+
+## EFFECT FEEDBACK LOSES TO COVERAGE FEEDBACK (2026-09-12 afternoon, VPS/OpenBLAS, `runs/m7-effect-lt.parquet`): a feedback that reports true effects steers the arm toward the regimes that hurt the judge
+
+Pre-registered (next section). 90/90 ok, $12.16 (the effect arm reasons
+2.2× longer: 152k output tokens per cell vs 68k coverage, 78k loop; 636 s
+vs 289 / 343), three arms interleaved, drift r=0.01, fallbacks ≤ 0.02 of
+picks. Re-scored at 9 seeds at 300 and 1500 rows
+(`runs/rescored-effect-lt-rows{300,1500}*`), 30 distinct designs per arm.
+
+**Predictions scored:**
+
+| | 300 rows, directed | skeleton | core-20 | 1500 rows, directed |
+|---|---|---|---|---|
+| E1 effect − coverage (pred. +0.010) | **−0.033** [0.014] R−, CI [−0.043, −0.023] **REFUTED** | −0.034 R− | −0.006 tie | −0.046 [0.017] R− |
+| effect − loop | −0.019 [0.015] R− | −0.018 R− | −0.011 tie | −0.007 tie |
+| coverage − loop (9 Sep: +0.027) | **+0.015** [0.012] R+ — replicates | +0.015 R+ | −0.005 tie | +0.039 R+ |
+| E2 vs the rule (0.437) | effect −0.037 R−; coverage −0.004 tie; loop −0.018 R− | | | |
+
+E1 refuted the other way round: the effect arm is resolved BELOW the
+coverage arm and below the loop on directed and skeleton F1 at 300 rows,
+and below coverage by more at 1500. E2 held. **The coverage arm's LT gain
+replicated on a second day** (+0.015 [0.012] vs +0.027 [0.013] on 9 Sep;
+core-20 tie both days) — the §35 rule applied, and it passes.
+
+**E3 (mechanism) — the effect arm buys what its summary praises, and
+that is the wrong thing.** Purchases on the oracle scale: effect **8.4
+×10⁻³, the first LLM arm on LT resolved BELOW random** (9.7, −1.3 [0.8]);
+coverage 10.0, loop 9.6 (ties). Per cell of 30 buys: strong light-source
+entries effect **18.6**, loop 16.3, coverage 17.4; `osr_*` 4.0 / 3.6 /
+5.8; `v_*` 4.1 / 3.2 / 2.9. The effect summary is CORRECT on every line
+checked: `t_ir_1_strong: shifted ir_1`, `osr_c_strong: changed nothing
+else measurable`, and a strong red-light experiment shifts a dozen sensors
+— so the model buys more strong light and fewer `osr`. Both are the wrong
+call for a judge that pools regimes: strong light regimes are exactly the
+pooled-regime harm ("WHY STRONG INTERVENTIONS HURT"), and the `osr`/`v`
+apparatus settings are exactly what the coverage rule and the 300-row
+oracle reward. **The data-driven signal is right about the chamber and
+wrong about the estimator** — the same sentence as UT-IGSP's verdict on
+the models' prior (register §34), now reached from the agent side.
+
+**What this closes.** Three feedback signals have now been tried on the
+same loop: coverage of the estimate (helps on LT, hurts on WT; §36),
+coverage plus disclosure of the estimator's drops (no change), and true
+per-experiment effects (hurts on LT, resolved). None beats the coverage
+rule anywhere. The LT coverage gain is real, replicated, and small
+(+0.015 / +0.027), and it comes from nudging the loop toward unbought
+apparatus settings — which is what the rule does with no model at all.
+"Feedback from the data" is not a lever on this task under this judge;
+what pays is agreement with the judge's blind spots, and no
+ground-truth-free signal knows them. Learnability of the oracle headroom:
+closed, negative, three ways.
+
+---
+
+## PRE-REGISTERED (2026-09-12 afternoon, before launch): the EFFECT-feedback arm on LT — coverage feedback vs effect feedback vs the loop, same day
+
+**Design.** `effect_feedback` (`summarize_effects`: every five purchases,
+per bought experiment, which variables it shifted ≥ 0.5 sd or whose noise
+it changed ≥ 2×, judged pairwise against more than half of the other
+bought experiments; no estimator in the loop; the experiment's own target
+excluded) vs `adaptive_feedback` (coverage feedback, unchanged) vs `llm_pc`,
+LT k=30, n=30 each, interleaved (90 cells), `flash-0731`, VPS, four
+workers; `runs/m7-effect-lt.parquet`. Replayed on real recorded LT cells
+before launch: the summary reads `t_ir_1_strong: shifted ir_1`,
+`osr_c_strong: changed nothing else measurable`, `reference: changed
+nothing` — correct on every line checked. Same analysis as before (9-seed
+re-score at 300 and 1500 rows, design-clustered, unequal-n bound, oracle
+scale).
+
+**Predictions, written before any cell ran:**
+
+- **E1 (the designed contrast).** effect − coverage ≥ 0 at 300 rows; point
+  prediction **+0.010**, interval rule. Both feedback arms above the
+  same-sweep loop (coverage +0.027 on 9 Sep; effect predicted **+0.030**).
+- **E2 (vs the rule).** Neither feedback arm resolves above the coverage
+  rule (0.437 at fresh seeds).
+- **E3 (mechanism).** The effect arm buys MORE of the entries its own
+  summary calls "changed nothing" (`osr_*`, `v_*`, `reference`) than the
+  loop only if the model ignores the line; prediction: it buys them at or
+  below the loop's rate, and its distinct-variable count sits between the
+  loop's and the coverage arm's.
+- **WT (not launched; register §37).** On WT the summary is expected to
+  report the six low-day entries as shifting every pressure, so the
+  prediction there is "fooled the same way as PC": `osr_ambient` bought at
+  or above the loop's rate, no gain. Held pending a decision on whether to
+  spend $8 confirming a predicted failure or on a session-corrected
+  variant.
 
 ---
 

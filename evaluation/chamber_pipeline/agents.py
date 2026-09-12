@@ -38,6 +38,7 @@ import re
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import pandas as pd
 
 from .inference import pool_experiment_data, run_pc
@@ -1143,6 +1144,154 @@ def adaptive_feedback_agent(
             last["text"] = summarize_estimate(
                 estimate, menu, chosen, nodes, collinear_dropped=dropped.get("collinear", ())
             )
+        return last["text"]
+
+    _chosen, dfs = _llm_select_loop(
+        adapter,
+        llm,
+        model,
+        seed,
+        prompt_builder=build_feedback_select_prompt,
+        temperature=temperature,
+        feedback_fn=feedback,
+    )
+    if not dfs:
+        return _empty_adjacency(nodes)
+    return run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
+
+
+_EFFECT_SHIFT_D = 0.5  # |mean_i - mean_rest| / pooled sd
+_EFFECT_NOISE_RATIO = 2.0  # var_i / var_rest, either direction
+
+
+def summarize_effects(
+    dfs: list[pd.DataFrame],
+    names: list[str],
+    nodes: list[str],
+    menu: list[str],
+    chosen: list[str],
+    *,
+    shift_d: float = _EFFECT_SHIFT_D,
+    noise_ratio: float = _EFFECT_NOISE_RATIO,
+    max_listed: int = 12,
+) -> str | None:
+    """What each bought experiment CHANGED, against the other bought ones.
+
+    Register §36's answer to coverage-shaped feedback. `summarize_estimate`
+    reports which variables the running estimate has not connected, which
+    is every unbought variable, and the model buys them against its prior.
+    This reports, per bought experiment, which variables moved relative to
+    the other bought experiments — pairwise, and only where the experiment
+    differs from MORE THAN HALF of them: a standardised mean shift of at
+    least `shift_d`, or a variance ratio outside [1/`noise_ratio`,
+    `noise_ratio`]. (There is no observational reference on WT, and a
+    comparison against the pooled others flags an inert experiment on every
+    variable some other experiment perturbed.) The rule's limit: once most
+    bought experiments perturb the same downstream variable, no single
+    experiment is credited with it — which is itself information about
+    the buy. No estimator runs in the loop, so nothing here inherits
+    PC's column drops, and an inert experiment reads as "changed nothing" —
+    the fact the poison pill lacked. The experiment's own target variable
+    is excluded from its lists (it moves by construction).
+
+    Names variables (nodes), unlike the coverage summary, because that is
+    the content: the data the agent bought, not the menu. Unbought entries
+    are never mentioned — nothing is known about them. Returns None with
+    fewer than two experiments (no comparison pool).
+    """
+    if len(dfs) < 2:
+        return None
+    mats = [df[nodes].to_numpy(dtype=float) for df in dfs]
+    means = np.array([m.mean(axis=0) for m in mats])
+    varis = np.array([m.var(axis=0, ddof=1) for m in mats])
+    k = len(mats)
+    # Pairwise, then majority: there is no observational reference on WT, and
+    # "against the pool of the others" flags an inert experiment on every
+    # variable some OTHER experiment perturbed. Experiment i changed v only if
+    # it differs from MORE THAN HALF of the other experiments on v; the ones
+    # that perturbed v are a minority unless the buy is already lopsided.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pooled_sd = np.sqrt((varis[:, None, :] + varis[None, :, :]) / 2.0)
+        d = np.where(
+            pooled_sd > 1e-12, np.abs(means[:, None, :] - means[None, :, :]) / pooled_sd, 0.0
+        )
+        ratio = np.where(
+            varis[None, :, :] > 1e-12,
+            varis[:, None, :] / varis[None, :, :],
+            np.where(varis[:, None, :] > 1e-12, np.inf, 1.0),
+        )
+    shift_pair = d >= shift_d
+    noise_pair = ((ratio >= noise_ratio) | (ratio <= 1.0 / noise_ratio)) & ~shift_pair
+    need = (k - 1) / 2.0
+    lines: list[str] = []
+    inert: list[str] = []
+    for i, name in enumerate(names):
+        others = [j for j in range(k) if j != i]
+        target = _experiment_target(name, nodes)
+        shifted = [
+            n for c, n in enumerate(nodes) if shift_pair[i, others, c].sum() > need and n != target
+        ]
+        noisy = [
+            n
+            for c, n in enumerate(nodes)
+            if noise_pair[i, others, c].sum() > need and n != target and n not in shifted
+        ]
+
+        def cut(xs: list[str]) -> str:
+            return ", ".join(xs[:max_listed]) + (
+                f", ... ({len(xs) - max_listed} more)" if len(xs) > max_listed else ""
+            )
+
+        if not shifted and not noisy:
+            lines.append(f"- {name}: changed nothing else measurable")
+            inert.append(name)
+        else:
+            parts = []
+            if shifted:
+                parts.append(f"shifted {cut(shifted)}")
+            if noisy:
+                parts.append(f"changed only the noise of {cut(noisy)}")
+            lines.append(f"- {name}: " + "; ".join(parts))
+    head = (
+        f"Effects measured on the {len(chosen)} experiments bought so far, each against the "
+        f"others (mean shift >= {shift_d:g} sd, or noise ratio >= {noise_ratio:g}x):"
+    )
+    tail = "Experiments that changed nothing measurable: " + (
+        ", ".join(inert) if inert else "(none)"
+    )
+    return "\n".join([head, *lines, tail])
+
+
+def effect_feedback_agent(
+    adapter: ContractedChamberAgent,
+    model: str = "openrouter/deepseek/deepseek-v4-flash",
+    seed: int = 0,
+    pc_alpha: float = 0.05,
+    *,
+    llm: LLMCallable | None = None,
+    temperature: float | None = _DEFAULT_TEMPERATURE,
+    feedback_interval: int = 5,
+) -> pd.DataFrame:
+    """The loop, plus what each experiment CHANGED in every prompt.
+
+    `adaptive_feedback_agent` with `summarize_effects` in place of the PC
+    summary: same budget, contract, call count, interval and final
+    inference; no estimator inside the loop. Register §36: the designed
+    contrast between coverage feedback and effect feedback.
+    """
+    nodes = _node_names(adapter)
+    budget = _intervention_budget(adapter)
+    menu = list(adapter.available_experiments())
+
+    if budget <= 0 or not menu:
+        return _empty_adjacency(nodes)
+
+    llm = llm or _default_llm()
+    last: dict[str, str | None] = {"text": None}
+
+    def feedback(chosen: list[str], dfs: list[pd.DataFrame]) -> str | None:
+        if dfs and len(dfs) % feedback_interval == 0:
+            last["text"] = summarize_effects(dfs, list(chosen), nodes, menu, chosen)
         return last["text"]
 
     _chosen, dfs = _llm_select_loop(
