@@ -308,6 +308,7 @@ def run_pc(
     max_rows: int | None = DEFAULT_MAX_ROWS,
     seed: int = 0,
     collinearity_threshold: float | None = DEFAULT_COLLINEARITY_THRESHOLD,
+    dropped_out: dict[str, list[str]] | None = None,
     **pc_kwargs: Any,
 ) -> pd.DataFrame:
     """Run PC on pooled chamber data, return directed-adjacency DataFrame.
@@ -336,6 +337,16 @@ def run_pc(
             (padded back with zeros). Pass None to disable and restore the
             pre-2026-08-25 behaviour, where a numerically duplicate pair
             aborted the whole run. See `DEFAULT_COLLINEARITY_THRESHOLD`.
+        dropped_out: If given, filled in place with the columns this call
+            removed before inference — `{"zero_variance": [...],
+            "collinear": [...]}`, both lists in node order and both present
+            (empty) even when nothing was dropped. Register §36: a feedback
+            signal computed on the returned estimate inherits these drops,
+            and a variable whose only child was removed can never be
+            "connected"; the caller that builds such a signal needs the
+            list. The log lines stay — the orchestrator's per-cell counters
+            scrape them — so this is a second, structured channel for the
+            same fact, not a replacement.
         **pc_kwargs: Forwarded to `causallearn.search.ConstraintBased.PC.pc`.
 
     Returns:
@@ -383,6 +394,9 @@ def run_pc(
     # untraceable degradation this warning exists to eliminate.
     kept_set = set(valid_cols)
     zero_variance = [n for n in node_names if n not in kept_set]
+    if dropped_out is not None:
+        dropped_out["zero_variance"] = list(zero_variance)
+        dropped_out["collinear"] = []
     if zero_variance:
         # Logged for the same reason as the collinear drop below: this is a
         # degradation path whose RATE TRACKS THE INDEPENDENT VARIABLE. The
@@ -432,6 +446,8 @@ def run_pc(
         valid_cols, collinear_dropped = select_noncollinear_columns(
             pooled_data, valid_cols, collinearity_threshold
         )
+        if dropped_out is not None:
+            dropped_out["collinear"] = list(collinear_dropped)
         if collinear_dropped:
             # Logged, not merely returned, because the orchestrator scrapes
             # this per cell (`_PcCollinearHandler`). A degradation path whose

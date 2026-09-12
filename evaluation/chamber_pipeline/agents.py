@@ -35,7 +35,7 @@ from __future__ import annotations
 import contextlib
 import random as _random
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -993,19 +993,36 @@ def summarize_estimate(
     nodes: list[str],
     *,
     max_listed: int = 25,
+    collinear_dropped: Sequence[str] = (),
 ) -> str:
     """Render the current PC estimate as feedback keyed by MENU entries.
 
     Three facts the loop otherwise never sees: how many edges the estimate
     holds, which still-selectable entries perturb a variable no edge has
     reached, and which perturb a variable already connected. Node names
-    appear only through the menu entries that encode them.
+    appear only through the menu entries that encode them — except on the
+    fourth line, which exists only when the estimator removed columns.
+
+    `collinear_dropped` (register §36): variables `run_pc` removed as
+    near-duplicates of another sensor. Without it the summary reported
+    every such variable, and every setting whose only child is one, as
+    "no edge has reached yet" on every round — the WT arm bought
+    `osr_ambient` in 78-100% of cells on that signal, at -0.05 to -0.09 F1
+    per buy. With it, entries that perturb a removed variable leave the
+    "unreached" list and the removed variables are named, with what that
+    means for the buyer. Empty (the LT case) renders byte-identically to
+    the pre-fix text, so the LT result needs no re-run.
     """
     n_edges = int(adjacency.values.sum())
     connected = {n for n in nodes if adjacency.loc[n].sum() > 0 or adjacency[n].sum() > 0}
+    removed = set(collinear_dropped)
     unspent = [m for m in menu if m not in chosen]
-    unreached = [m for m in unspent if (t := _experiment_target(m, nodes)) and t not in connected]
-    reached = [m for m in unspent if (t := _experiment_target(m, nodes)) and t in connected]
+    targets = {m: _experiment_target(m, nodes) for m in unspent}
+    unreached = [
+        m for m in unspent if (t := targets[m]) and t not in connected and t not in removed
+    ]
+    reached = [m for m in unspent if (t := targets[m]) and t in connected and t not in removed]
+    perturbs_removed = [m for m in unspent if (t := targets[m]) and t in removed]
 
     def render(names: list[str]) -> str:
         if not names:
@@ -1015,12 +1032,21 @@ def summarize_estimate(
             f", ... ({len(names) - max_listed} more)" if len(names) > max_listed else ""
         )
 
-    return (
+    text = (
         f"PC on the {len(chosen)} experiments bought so far finds {n_edges} directed "
         f"edge(s) among {len(connected)} of {len(nodes)} variables.\n"
         f"Menu entries that perturb a variable NO edge has reached yet: {render(unreached)}\n"
         f"Menu entries that perturb a variable already connected: {render(reached)}"
     )
+    if removed:
+        kept_order = [n for n in nodes if n in removed]
+        text += (
+            "\nVariables REMOVED from the estimate as near-duplicates of another sensor "
+            f"(no edge can reach them, and a setting that only affects one of them cannot "
+            f"be connected either): {', '.join(kept_order)}; menu entries that perturb one "
+            f"of them: {render(perturbs_removed)}"
+        )
+    return text
 
 
 def adaptive_feedback_agent(
@@ -1060,8 +1086,17 @@ def adaptive_feedback_agent(
 
     def feedback(chosen: list[str], dfs: list[pd.DataFrame]) -> str | None:
         if dfs and len(dfs) % feedback_interval == 0:
-            estimate = run_pc(pool_experiment_data(dfs, nodes), nodes, alpha=pc_alpha, seed=seed)
-            last["text"] = summarize_estimate(estimate, menu, chosen, nodes)
+            dropped: dict[str, list[str]] = {}
+            estimate = run_pc(
+                pool_experiment_data(dfs, nodes),
+                nodes,
+                alpha=pc_alpha,
+                seed=seed,
+                dropped_out=dropped,
+            )
+            last["text"] = summarize_estimate(
+                estimate, menu, chosen, nodes, collinear_dropped=dropped.get("collinear", ())
+            )
         return last["text"]
 
     _chosen, dfs = _llm_select_loop(

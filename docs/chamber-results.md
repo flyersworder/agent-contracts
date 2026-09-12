@@ -111,6 +111,57 @@ P2 held, P3 refuted at k=14 and undecided at k=21.**
 
 ---
 
+## PRE-REGISTERED (2026-09-12, before launch): the WT feedback arm re-run with the summariser told what PC dropped (register §36 fix)
+
+**The fix** (`feat/feedback-dropped-columns`): `run_pc` now reports the
+columns it removed (`dropped_out`), and `summarize_estimate` receives the
+collinear-dropped set. Entries that perturb a removed variable leave the
+"no edge has reached yet" list, and a fourth line names the removed
+variables with what that means for the buyer ("no edge can reach them, and
+a setting that only affects one of them cannot be connected either"). When
+nothing was dropped the text is byte-identical to the pre-fix summary
+(tested), so the LT result needs no re-run: 58 of its 60 cells never had a
+collinear drop and the other two had one drop in one PC run.
+
+**Not changed, deliberately:** `osr_ambient` stays on the menu (removing it
+would change the task for every arm and hide the lesson); the collinearity
+policy stays (without it PC returns all-zeros on WT); the fix does NOT
+hard-code the `osr_ambient → pressure_ambient` link — the model is told
+which sensors were removed and has to make that inference itself. So this
+tests whether *telling* the agent about the estimator's preprocessing is
+enough, not whether excluding the entry helps (that we already know:
+−0.086/−0.050 per buy).
+
+**Design:** identical to the 11 Sep run — `adaptive_feedback` vs a
+same-sweep `llm_pc` control, WT `standard`, k=14/21, n=50 per arm per
+budget, seeds 0–49, `flash-0731`, VPS, four workers; output
+`runs/m7-adaptive-wt2.parquet`. Same analysis (9-seed re-score at 300 and
+1500 rows, design-clustered, unequal-n bound, oracle scale at 300).
+
+**Predictions, written before any cell ran:**
+
+- **M (mechanism, the primary check).** The fixed arm buys `osr_ambient`
+  at no more than the same-sweep loop's rate at each budget (11 Sep: arm
+  78% / 100% vs loop 18% / 58%). Fails if the arm's rate is still above the
+  loop's by more than 15 points at either budget — that would mean the
+  model reads the line and buys anyway, and the next step is exclusion, not
+  more text.
+- **P3′ (vs the same-sweep loop, 300 rows, directed).** The k=14 loss
+  closes: point prediction **0.000 at k=14 and +0.010 at k=21**, interval
+  rule as before (contains prediction / excludes zero). A resolved win over
+  the loop is NOT predicted; the LT prior is "small or nothing" and WT
+  compresses effects ~2×.
+- **P2′ (vs the rule).** Still not above `wt_coverage_max` at either
+  budget. At 1500 rows, ties the rule as on 12 Sep.
+- **P1′ (oracle scale, 300).** Purchases no longer resolved BELOW the
+  loop's; a tie with the loop is the prediction. Above random is not
+  predicted.
+- Also reported: fallback rate, tokens per call, drift audit, and the 11 Sep
+  arm as a third comparator (same regime? — check arm means of the two loops
+  agree before pooling anything).
+
+---
+
 ## THE ADAPTIVE-FEEDBACK ARM ON THE WIND TUNNEL (2026-09-12, VPS/OpenBLAS, `runs/m7-adaptive-wt.parquet`): at the cap of record the LT gain does NOT transfer; at 1500 rows the arm beats the loop at k=21 — and the root cause of both is one poison-pill menu entry the feedback always buys
 
 The pre-registered replication (section above, written before launch).
