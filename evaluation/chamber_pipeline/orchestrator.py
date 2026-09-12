@@ -587,7 +587,7 @@ _FLASH_PROVIDER_ORDER: tuple[str, ...] = (
 # Precision: Relace is **fp4** on this model AND on deepseek-v4-flash-0731,
 # and at $0.071/$0.237 per M it is among the cheapest endpoints -- so
 # price-first routing selects it. Excluded below, declared fp4 in
-# PROVIDER_PRECISION.
+# PROVIDER_PRECISION_BY_MODEL.
 #
 # Reasoning: with NO `reasoning` parameter the endpoints diverge 130x on one
 # identical prompt (Z.AI 6,889 tokens, GMICloud 2,600, DeepInfra 52). That is
@@ -596,11 +596,18 @@ _FLASH_PROVIDER_ORDER: tuple[str, ...] = (
 # -- and with it pinned the same four endpoints land at 0-163 tokens on `low`
 # and 1,605-2,450 on `high`. The order below is therefore safe to rotate
 # across, PROVIDED the caller pins effort as the agents do.
+# Re-pinned 2026-09-12 for the cross-vendor run, by PRICE among probed fp8
+# endpoints (GET /models/z-ai/glm-5.3-flash/endpoints): GMICloud $0.375/M
+# out, Novita $0.440, Z.AI $0.500. DeepInfra had drifted to fp4 (removed);
+# StreamLake ($0.374, fp8) is cheaper but unprobed, same rule as for flash;
+# Reka reports fp8 for GLM but fp4 for deepseek, and `PROVIDER_PRECISION_BY_MODEL` is
+# was keyed by provider alone when this was written; the table is now
+# (provider, model)-keyed and Reka reads fp8 for GLM, but it stays out as
+# unprobed for throughput.
 _GLM_PROVIDER_ORDER: tuple[str, ...] = (
-    "Z.AI",
-    "DeepInfra",
-    "Novita",
     "GMICloud",
+    "Novita",
+    "Z.AI",
 )
 
 
@@ -707,33 +714,91 @@ class _CountingLLM:
     # fp4-touched cells differs at p<1e-4, but that is entirely arm x budget
     # composition. Residualised on arm x budget it is -0.004 vs +0.000,
     # Welch p=0.61. Reported as a limitation, not a correction.)
-    PROVIDER_PRECISION: ClassVar[dict[str, str]] = {
-        # fp8 — eligible for DEFAULT_PROVIDER_ORDER
+    # Precision belongs to the (provider, MODEL) pair, never to the provider.
+    # Measured 2026-09-12 from GET /models/{id}/endpoints: DeepInfra serves
+    # deepseek-v4-flash-0731 at fp8 and glm-5.3-flash at fp4; GMICloud the
+    # reverse; Reka fp4 for deepseek, fp8 for GLM. The earlier provider-keyed
+    # table could not hold that and the register (§25) said to fix it before
+    # a third model ran. Each model's pinned order is checked against ITS OWN
+    # table by `test_every_declared_provider_order_is_precision_homogeneous`,
+    # and the two measured disagreements are pinned by
+    # `test_precision_tables_disagree_across_models_where_measured`.
+    # `unknown` = quantization undeclared; ineligible.
+    _FLASH_PRECISION: ClassVar[dict[str, str]] = {
+        "OpenInference": "fp8",
+        "Baidu": "fp8",
+        "DeepInfra": "fp8",
+        "StreamLake": "fp8",
+        "BaseTen": "fp8",
+        "CoreWeave": "fp8",
         "Parasail": "fp8",
         "SiliconFlow": "fp8",
-        "Baidu": "fp8",
-        "CoreWeave": "fp8",
-        "DeepInfra": "fp8",
-        # GLM's endpoints, all fp8 at one price.
-        "Z.AI": "fp8",
-        "GMICloud": "fp8",
-        "StreamLake": "fp8",
+        "NextBit": "fp8",
         "Novita": "fp8",
-        # fp4 — INELIGIBLE, different numerics
-        "AtlasCloud": "fp4",
-        "Reka": "fp4",
-        # Cheapest glm-5.3-flash endpoint, hence the one price-first routing
-        # picks. Declared here so it can never enter an order by accident.
         "Relace": "fp4",
-        # unquantised/undeclared — INELIGIBLE, precision class unknown
+        "Inceptron": "fp4",
+        "Sail Research": "fp4",
+        "Reka": "fp4",
+        "GMICloud": "fp4",
+        "AtlasCloud": "fp4",
+        "Morph": "bf16",
         "Together": "unknown",
-        "DeepSeek": "unknown",
-        "Cloudflare": "unknown",
-        "Fireworks": "unknown",
-        "Alibaba": "unknown",
-        "Venice": "unknown",
-        "Phala": "unknown",
+        "Makora": "unknown",
         "Wafer": "unknown",
+        "DigitalOcean": "unknown",
+        "Venice": "unknown",
+        "Alibaba": "unknown",
+        "Fireworks": "unknown",
+        "Phala": "unknown",
+        "Cloudflare": "unknown",
+        "DeepSeek": "unknown",
+    }
+    PROVIDER_PRECISION_BY_MODEL: ClassVar[dict[str, dict[str, str]]] = {
+        "deepseek-v4-flash-0731": _FLASH_PRECISION,
+        "deepseek-v4-flash": _FLASH_PRECISION,
+        "deepseek-v4-pro": {
+            "StreamLake": "fp8",
+            "Baidu": "fp8",
+            "GMICloud": "fp8",
+            "DeepInfra": "fp8",
+            "Alibaba": "fp8",
+            "SiliconFlow": "fp8",
+            "Novita": "fp8",
+            "Parasail": "fp8",
+            "AtlasCloud": "fp4",
+            "BaseTen": "fp4",
+            "DigitalOcean": "unknown",
+            "Venice": "unknown",
+            "Azure": "unknown",
+        },
+        "glm-5.3-flash": {
+            "Morph": "fp8",
+            "StreamLake": "fp8",
+            "GMICloud": "fp8",
+            "Reka": "fp8",
+            "Novita": "fp8",
+            "CoreWeave": "fp8",
+            "Sail Research": "fp8",
+            "Phala": "fp8",
+            "SiliconFlow": "fp8",
+            "Parasail": "fp8",
+            "BaseTen": "fp8",
+            "Io Net": "fp8",
+            "Z.AI": "fp8",
+            "NextBit": "fp8",
+            "Modal": "fp8",
+            "DeepInfra": "fp4",
+            "Crusoe": "fp4",
+            "Relace": "unknown",
+            "Wafer": "unknown",
+            "Makora": "unknown",
+            "Fireworks": "unknown",
+            "Friendli": "unknown",
+            "DigitalOcean": "unknown",
+            "Together": "unknown",
+            "Venice": "unknown",
+            "Cloudflare": "unknown",
+        },
     }
 
     # OpenRouter's `provider.order` preference for `deepseek-v4-flash`.
@@ -773,7 +838,7 @@ class _CountingLLM:
     # Parasail is the CHEAPEST fp8 endpoint for flash and the MOST EXPENSIVE
     # one for pro. Running the flash order on pro would overpay 2.2x -- the
     # register §3-4 defect on a different model. Every provider listed here is
-    # fp8 and present in `PROVIDER_PRECISION`; the homogeneity test walks all
+    # fp8 in `PROVIDER_PRECISION_BY_MODEL` for that model; the homogeneity test walks all
     # declared orders, not just the default.
     PROVIDER_ORDER_BY_MODEL: ClassVar[dict[str, tuple[str, ...]]] = {
         # Every model the pipeline may run, named explicitly. The flash
@@ -809,7 +874,7 @@ class _CountingLLM:
         constraint, so an unlisted model gets four endpoints chosen and
         price/precision-verified for deepseek-v4-flash-0731 and nothing else.
         If none serve it every cell errors; if some do, it runs on a precision
-        class `PROVIDER_PRECISION` never certified for it -- and the
+        class `PROVIDER_PRECISION_BY_MODEL` never certified for it -- and the
         homogeneity test still passes, because it checks the pin, not the
         model. Same policy as `_ladder_calibration`: measure it, do not
         extrapolate from a neighbouring configuration.
@@ -824,7 +889,7 @@ class _CountingLLM:
                 "is False, so the order is a hard constraint and borrowing "
                 "another model's endpoints either fails every cell or runs on "
                 "an uncertified precision. Add the model to "
-                "PROVIDER_ORDER_BY_MODEL (and PROVIDER_PRECISION) after "
+                "PROVIDER_ORDER_BY_MODEL (and PROVIDER_PRECISION_BY_MODEL) after "
                 "probing which endpoints serve it."
             ) from None
 
@@ -907,10 +972,10 @@ class _CountingLLM:
         # providers we list. It was True until 2026-08-26, and the 750-cell
         # WT sweep showed what that costs: 22 cells (2.9%) were served by
         # OpenInference, Relace or DigitalOcean -- none pinned, none in
-        # `PROVIDER_PRECISION`, quantization unknown. Impact on that sweep
+        # `PROVIDER_PRECISION_BY_MODEL`, quantization unknown. Impact on that sweep
         # was nil (residualised on arm x budget, +0.0095 vs -0.0003, Welch
         # p=0.55), but the guarantee was the point: with fallbacks on,
-        # `PROVIDER_PRECISION` and its homogeneity test certify what we
+        # `PROVIDER_PRECISION_BY_MODEL` and its homogeneity test certify what we
         # REQUEST, not what ran. That is the fp4/AtlasCloud lesson one layer
         # down -- there a pinned provider had drifted precision, here routing
         # left the pinned set entirely.
