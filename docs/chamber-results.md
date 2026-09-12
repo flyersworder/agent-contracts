@@ -165,6 +165,51 @@ the estimate has not connected — the "what varied" arm, still unbuilt.
 
 ---
 
+## PRE-REGISTERED (2026-09-12 night, before launch): cross-vendor replication on `glm-5.3-flash`, and the `shared_blackboard` k=6 control
+
+**Cross-vendor (`runs/xv-glm-lt.parquet`, `runs/xv-glm-wt.parquet`).**
+`openrouter/z-ai/glm-5.3-flash`, provider order re-pinned by price among
+probed fp8 endpoints (GMICloud, Novita, Z.AI; the precision table is now
+keyed by (provider, model) because DeepInfra serves this model at fp4 and
+DeepSeek's at fp8). One-cell smoke: 6 calls, 0 fallbacks, GMICloud, ~24
+output tokens per call at the pipeline's `low` selection effort (DeepSeek
+emits thousands) — a vendor difference that is part of what is being
+replicated, not a confound to remove. LT k=30 × {`llm_pc`, `team`,
+`team_varsplit`, `one_shot`} × n=50 (200 cells); WT k=14 × {`llm_pc`,
+`team`} × n=50 (100 cells); interleaved; VPS, four workers. MDEs from
+GLM's OWN cells (reasoning length is a variance multiplier; DeepSeek's
+bounds do not transfer — register §26). Re-scored at 9 seeds at 300 and
+1500 rows as usual; `team`'s conservation grants stay DeepSeek-calibrated
+and its certification rate is reported as a second-vendor H-C measurement.
+
+Decision rule per contrast, keyed on GLM's 95 % CI against DeepSeek's
+point estimate: *replicates* if the CI excludes zero on DeepSeek's side;
+*consistent* if it contains DeepSeek's estimate and zero; *fails* if it
+excludes DeepSeek's estimate on the far side of zero.
+
+- **C1** `team` − `llm_pc`, LT k=30: DeepSeek −0.048 (resolved). Predict
+  negative.
+- **C2** `team_varsplit` − `team`, LT k=30: DeepSeek +0.043 (resolved).
+  Predict positive.
+- **C3** `one_shot` − `llm_pc`, LT k=30: DeepSeek tie (+0.003 at 300
+  rows). Predict tie; selection-level analysis (distinct designs) as §24.
+- **C4** No GLM arm resolves above the coverage rule (0.437 at LT k=30,
+  fresh seeds).
+- **C5** `team` − `llm_pc`, WT k=14: DeepSeek −0.047 (resolved). Predict
+  negative.
+- **C6** `team` conservation certified ≥ 67 % (DeepSeek's WT rate) — no
+  prediction beyond that; the grant was sized on DeepSeek's reasoning.
+
+**`shared_blackboard` k=6 control (`runs/m7-blackboard-k6-control.parquet`).**
+The one resolved n=30 LT verdict the text still leans on that never got
+its §35 re-run: `shared_blackboard` − `llm_pc` at LT k=6 = −0.057 (30 Aug,
+cell level). DeepSeek `flash-0731`, LT k=6, n=30 each, same sweep as a fresh
+loop. Prediction: negative; *replicates* if the 9-seed design-clustered CI
+excludes zero on the negative side, *did not replicate* (and the sentence
+goes) if the CI excludes −0.057 and contains zero.
+
+---
+
 ## THE SESSION INDICATOR CHANGES NO WT VERDICT (2026-09-12 night, VPS/OpenBLAS, `runs/rescored-wt-jci-{var,session}-rows300*.parquet`): JCI's per-entry indicators already absorb the day shift; plain PC does not, and every arm faced the same menu
 
 Pre-registered (next section). 1,637 distinct designs from the seven WT
