@@ -803,11 +803,19 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   [0.020] at k=21 (skeleton too), ties the rule on directed at both.
   ROOT CAUSE (register §36, three $0 probes the same morning): not the buy
   order (shuffled designs identical at both caps); ONE ENTRY,
-  `validate_osr_ambient`, which the feedback arm buys in 78%/100% of cells
-  (loop 18%/58%) because its only true child `pressure_ambient` is a
-  collinear-dropped barometer so the estimate can never "connect" it —
-  and ADDING it to a loop design costs −0.086 at 300 rows / −0.050 at
-  1500 (it makes PC drop `pot_2` as a fourth collinear column). The
+  `validate_osr_ambient`, which the feedback arm buys in 78–90%/98–100%
+  of cells (loop 18–26%/58–74%) because coverage-shaped feedback nominates
+  EVERY unbought variable and overrides the model's prior against `osr`
+  entries — and ADDING it to a loop design costs −0.086 at 300 rows /
+  −0.050 at 1500 (it makes PC drop `pot_2` as a fourth collinear column;
+  its only child `pressure_ambient` is a barometer PC often drops at
+  scoring). **NOT fixable by disclosure or by exclusion-on-drops (three
+  runs, 12 Sep): telling the model the sensors were removed changed the
+  buy rate by 0 points (run 2, $8.44, arm a replicate of itself to
+  ±0.005); excluding settings of dropped sensors cannot fire because at
+  feedback time the barometers are NOT collinear (min |r| 0.79 — run 3
+  killed at 11 cells). Rule: reconstruct what a prompt fix renders on
+  real cells offline BEFORE buying a sweep on it.** The
   "invariance" is that tax paid at a lower rate while the loop's
   preferred entries (`pot_1`, `load_out_pressure_intake`) lose value with
   rows; the k=21 win says the loop is cap-fragile, not that feedback is
