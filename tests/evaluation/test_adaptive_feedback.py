@@ -7,7 +7,11 @@ import pandas as pd
 import pytest
 
 from agent_contracts.integrations.causalchamber import create_contracted_chamber_agent
-from evaluation.chamber_pipeline.agents import adaptive_feedback_agent, summarize_estimate
+from evaluation.chamber_pipeline.agents import (
+    adaptive_feedback_agent,
+    sensor_configured_by,
+    summarize_estimate,
+)
 from evaluation.chamber_pipeline.inference import run_pc
 from evaluation.chamber_pipeline.llm_planner import FEEDBACK_HEADER, build_feedback_select_prompt
 from evaluation.chamber_pipeline.orchestrator import get_spec
@@ -132,3 +136,43 @@ def test_agent_feeds_the_dropped_columns_into_the_prompt_on_wt() -> None:
     assert all("REMOVED from the estimate" not in b for b in bodies[:3])
     assert all("REMOVED from the estimate" in b for b in bodies[3:])
     assert "pressure_" in bodies[3].split("REMOVED from the estimate")[1].split("\n")[0]
+
+
+# --- register §36, second fix: a setting that configures a removed sensor is excluded ---
+
+
+@pytest.mark.parametrize("chamber", ["lt", "wt"])
+def test_sensor_configured_by_matches_the_manual_and_the_truth(chamber: str) -> None:
+    # The rule is name-based (the chamber manual: `osr_X` is the oversampling
+    # rate and `v_X` the reference voltage of sensor X). The test, not the
+    # agent, checks it against the ground truth: every such setting has
+    # exactly one child and the rule names it.
+    adapter = create_contracted_chamber_agent(chamber=chamber, intervention_budget=1)
+    truth = adapter.ground_truth()
+    nodes = list(truth.index)
+    settings = [n for n in nodes if n.startswith(("osr_", "v_"))]
+    assert settings
+    for s in settings:
+        children = list(truth.columns[truth.loc[s] > 0])
+        assert len(children) == 1, (s, children)
+        assert sensor_configured_by(s, nodes) == children[0], s
+    # non-settings map to nothing
+    assert sensor_configured_by(nodes[-1], nodes) is None
+    assert sensor_configured_by("hatch" if chamber == "wt" else "red", nodes) is None
+
+
+def test_summary_excludes_settings_that_configure_a_removed_sensor() -> None:
+    adapter = create_contracted_chamber_agent(chamber="wt", intervention_budget=1)
+    nodes = list(adapter.ground_truth().index)
+    menu = list(adapter.available_experiments())
+    est = adapter.ground_truth().copy() * 0
+    text = summarize_estimate(
+        est, menu, [], nodes, collinear_dropped=["pressure_ambient", "pressure_intake"]
+    )
+    unreached = text.split("NO edge has reached yet: ")[1].split("\n")[0]
+    removed = text.split("REMOVED from the estimate")[1].split("\n")[0]
+    for entry in ("validate_osr_ambient", "validate_osr_intake"):
+        assert entry not in unreached, entry
+        assert entry in removed, entry
+    # a setting of a KEPT sensor is still a legitimate unexplored buy
+    assert "validate_osr_upwind" in unreached

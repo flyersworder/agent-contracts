@@ -111,6 +111,51 @@ P2 held, P3 refuted at k=14 and undecided at k=21.**
 
 ---
 
+## PRE-REGISTERED (2026-09-12, before launch): third WT feedback run — settings of removed sensors EXCLUDED from the feedback, not merely named
+
+**Why a third run.** The second run (section below, `m7-adaptive-wt2`)
+told the model which sensors PC removed and what that implies; at 38 cells
+the fixed arm was still buying `osr_ambient` in 17 of 18 cells (loop 4 of
+20). Its pre-registered mechanism check M fails; the pre-registration said
+the next step is exclusion, not more text.
+
+**The fix** (same branch): `sensor_configured_by(setting, nodes)` maps an
+`osr_X`/`v_X` setting to the sensor it configures by the chamber manual's
+naming (suffix match, with the manual's table for `c`→`current`,
+`1`/`2`→`signal_N`, `in`/`out`→`current_in/out`); the test checks every
+such setting against the ground truth on both chambers (each has exactly
+one child and the rule names it). `summarize_estimate` now treats an entry
+as dead if its target is a removed variable OR a setting that configures
+one, moves it out of "unreached", and lists it on the removed line marked
+"do not buy". On WT that excludes `osr_ambient`, `osr_downwind`,
+`osr_intake` (settings of the three dropped barometers) whenever those are
+dropped — and `pot_2`'s entry when it is. Nothing changes when nothing is
+dropped (LT).
+
+**Design:** identical to the two previous runs; output
+`runs/m7-adaptive-wt3.parquet`.
+
+**Predictions, written before any cell ran:**
+
+- **M″ (mechanism).** The arm buys `osr_ambient` in ≤ 25% of cells at
+  k=14 and ≤ 65% at k=21 — i.e. at or below the loop's own rate (18%/58%
+  on 11 Sep, 20% on 12 Sep at k=14) — and the same for `osr_downwind` and
+  `osr_intake`. Residual buys can only come from the first five purchases
+  (no feedback yet) and from the model buying an entry the line says not
+  to. Fails if any of the three is more than 15 points above the loop's
+  rate at either budget.
+- **P3″ (vs the same-sweep loop, 300 rows, directed).** Point prediction
+  **+0.010 at k=14 and +0.010 at k=21**; interval rule (contains prediction
+  / excludes zero). No resolved win predicted. If M″ holds and P3″ still
+  comes out below zero, the LT gain does not transfer for a reason beyond
+  the poison pill, and that is the answer.
+- **P2″ (vs the rule).** Not above `wt_coverage_max` at either budget.
+- **P1″ (oracle scale, 300).** Tie with the loop; not above random.
+- Also reported: tokens per call, fallbacks, drift, and the three loops'
+  (11 Sep, wt2, wt3) agreement before any pooling.
+
+---
+
 ## PRE-REGISTERED (2026-09-12, before launch): the WT feedback arm re-run with the summariser told what PC dropped (register §36 fix)
 
 **The fix** (`feat/feedback-dropped-columns`): `run_pc` now reports the

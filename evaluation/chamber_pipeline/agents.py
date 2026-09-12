@@ -986,6 +986,47 @@ def _experiment_target(name: str, nodes: list[str]) -> str | None:
         return None
 
 
+# The chamber manual's naming for sensor-configuration settings: `osr_X` is
+# the oversampling rate and `v_X` the reference voltage of sensor X. On WT
+# `X` is the sensor's suffix (`osr_upwind` -> `pressure_upwind`, `osr_in` ->
+# `current_in`, `osr_1` -> `signal_1`) or its full name (`osr_mic` -> `mic`);
+# Where the suffix is not the sensor's own name the manual's table decides:
+# LT abbreviates the current sensor (`osr_c`, `v_c` -> `current`); on WT the
+# numbered sensors read as `signal_N` (`pot_N` is a potentiometer) and
+# `in`/`out` are the fans' current sensors (`current_in`/`current_out`, not
+# `load_*`, `res_*` or `rpm_*`, which share the suffix).
+_SETTING_PREFIXES = ("osr_", "v_")
+_SENSOR_ALIASES = {
+    "c": "current",
+    "1": "signal_1",
+    "2": "signal_2",
+    "in": "current_in",
+    "out": "current_out",
+}
+
+
+def sensor_configured_by(setting: str, nodes: list[str]) -> str | None:
+    """The sensor a configuration setting acts on, by the manual's naming.
+
+    Register §36: instrument semantics, not the ground-truth graph — the
+    same knowledge a human reading the chamber manual has, and the test
+    checks it against the truth so the rule cannot drift. Returns None for
+    anything that is not an `osr_`/`v_` setting or whose sensor is not a
+    node.
+    """
+    for prefix in _SETTING_PREFIXES:
+        if setting.startswith(prefix):
+            suffix = setting[len(prefix) :]
+            break
+    else:
+        return None
+    suffix = _SENSOR_ALIASES.get(suffix, suffix)
+    candidates = [n for n in nodes if n != setting and (n == suffix or n.endswith("_" + suffix))]
+    # Exclude other settings that share the suffix (`v_1` is not `osr_1`'s sensor).
+    candidates = [n for n in candidates if not n.startswith(_SETTING_PREFIXES)]
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def summarize_estimate(
     adjacency: pd.DataFrame,
     menu: list[str],
@@ -1008,21 +1049,26 @@ def summarize_estimate(
     every such variable, and every setting whose only child is one, as
     "no edge has reached yet" on every round — the WT arm bought
     `osr_ambient` in 78-100% of cells on that signal, at -0.05 to -0.09 F1
-    per buy. With it, entries that perturb a removed variable leave the
-    "unreached" list and the removed variables are named, with what that
-    means for the buyer. Empty (the LT case) renders byte-identically to
-    the pre-fix text, so the LT result needs no re-run.
+    per buy. With it, entries that perturb a removed variable — or a
+    setting that configures a removed sensor (`sensor_configured_by`; the
+    first version only named the sensors, and the model bought
+    `osr_ambient` in 17 of 18 cells anyway) — leave the "unreached" list
+    and the removed variables are named, with what that means for the
+    buyer. Empty (the LT case) renders byte-identically to the pre-fix
+    text, so the LT result needs no re-run.
     """
     n_edges = int(adjacency.values.sum())
     connected = {n for n in nodes if adjacency.loc[n].sum() > 0 or adjacency[n].sum() > 0}
     removed = set(collinear_dropped)
     unspent = [m for m in menu if m not in chosen]
     targets = {m: _experiment_target(m, nodes) for m in unspent}
-    unreached = [
-        m for m in unspent if (t := targets[m]) and t not in connected and t not in removed
-    ]
-    reached = [m for m in unspent if (t := targets[m]) and t in connected and t not in removed]
-    perturbs_removed = [m for m in unspent if (t := targets[m]) and t in removed]
+
+    def dead(t: str) -> bool:
+        return t in removed or sensor_configured_by(t, nodes) in removed
+
+    unreached = [m for m in unspent if (t := targets[m]) and t not in connected and not dead(t)]
+    reached = [m for m in unspent if (t := targets[m]) and t in connected and not dead(t)]
+    perturbs_removed = [m for m in unspent if (t := targets[m]) and dead(t)]
 
     def render(names: list[str]) -> str:
         if not names:
@@ -1044,7 +1090,7 @@ def summarize_estimate(
             "\nVariables REMOVED from the estimate as near-duplicates of another sensor "
             f"(no edge can reach them, and a setting that only affects one of them cannot "
             f"be connected either): {', '.join(kept_order)}; menu entries that perturb one "
-            f"of them: {render(perturbs_removed)}"
+            f"of them or a setting of one of them (do not buy): {render(perturbs_removed)}"
         )
     return text
 
