@@ -815,7 +815,23 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   ±0.005); excluding settings of dropped sensors cannot fire because at
   feedback time the barometers are NOT collinear (min |r| 0.79 — run 3
   killed at 11 cells). Rule: reconstruct what a prompt fix renders on
-  real cells offline BEFORE buying a sweep on it.** The
+  real cells offline BEFORE buying a sweep on it.** **AND THE SESSION SHIFT
+  (register §37): six of WT's 28 entries were recorded on a different day
+  2.3 kPa of ambient pressure apart; `osr_ambient` is the one with no
+  actuator change, so pooling it injects a pure day-shift regime —
+  correcting its barometers halves the 300-row harm and removes the
+  1500-row harm. Tabulate per-experiment means of uncontrolled sensors
+  and timestamps before pooling any released dataset.** **EFFECT FEEDBACK
+  (`effect_feedback`, `summarize_effects`: what each buy shifted, judged
+  pairwise vs the majority of other buys, no estimator in the loop) LOSES
+  on LT (2026-09-12, 90 cells / $12.16, three arms same day): −0.033
+  [0.014] vs coverage feedback, −0.019 vs the loop, purchases BELOW random
+  on the oracle scale (8.4 vs 9.7) — it buys MORE strong light (18.6 vs
+  16.3 per cell) because the summary truthfully says strong light shifts a
+  dozen sensors, and that is the pooled-regime harm. Coverage − loop
+  replicated (+0.015 [0.012]). Learnability of the headroom is closed,
+  negative, three ways; no feedback signal beats the rule. Costs 2.2× the
+  tokens of the loop.** The
   "invariance" is that tax paid at a lower rate while the loop's
   preferred entries (`pot_1`, `load_out_pressure_intake`) lose value with
   rows; the k=21 win says the loop is cap-fragile, not that feedback is
@@ -1478,6 +1494,16 @@ that document's final section. Harness defects stay in
   are 3.1 Pro results of which three reproduce) — the failure is not
   deterministic, so being right once is not grounds for trusting it. That page
   is also gzip served under an `.html` name: `gunzip -c` before parsing.
+  `2026-09-12-google-scaling-agent-systems.md` (Kim et al., arXiv
+  2512.08296) is the **closest contemporaneous result**: under matched
+  tokens across six benchmarks, multi-agent coordination degrades
+  sequential tasks by 39–70 % — our sign, independently. Cite it; then
+  say where ours differs: budgets contract-certified not assumed (H-C
+  fails 35 % even when matched by design), the mechanism on our task is
+  redundancy + a coverage plateau, NOT their budget fragmentation
+  (`one_shot` ties the loop), and their 260 configurations are single
+  passes with no repeat runs. The blog's 180 / four benchmarks / R² 0.513
+  are v1 figures; quote the paper's 260 / six / 0.373.
 - **Harness validity register**: `docs/chamber-harness-validity-register.md`
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`
@@ -1488,7 +1514,7 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-12 (WT adaptive-feedback replication reversed; root cause = `osr_ambient` poison pill under the collinearity policy, register §36)*
+*Last Updated: 2026-09-12 evening (WT feedback reversal traced to a session shift, register §36/§37; effect feedback loses on LT; learnability closed)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
