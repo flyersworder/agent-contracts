@@ -4,7 +4,7 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the twenty-nine
+**Companions.** `docs/chamber-harness-validity-register.md` records the thirty
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
@@ -111,7 +111,7 @@ P2 held, P3 refuted at k=14 and undecided at k=21.**
 
 ---
 
-## THE ADAPTIVE-FEEDBACK ARM ON THE WIND TUNNEL (2026-09-12, VPS/OpenBLAS, `runs/m7-adaptive-wt.parquet`): at the cap of record the LT gain does NOT transfer; at 1500 rows the arm is the only cap-invariant arm and beats the loop at k=21
+## THE ADAPTIVE-FEEDBACK ARM ON THE WIND TUNNEL (2026-09-12, VPS/OpenBLAS, `runs/m7-adaptive-wt.parquet`): at the cap of record the LT gain does NOT transfer; at 1500 rows the arm beats the loop at k=21 — and the root cause of both is one poison-pill menu entry the feedback always buys
 
 The pre-registered replication (section above, written before launch).
 `adaptive_feedback` vs a same-sweep `llm_pc` control, WT `standard`, k=14
@@ -178,14 +178,51 @@ are a bigger version of the LT result. This is the two-cap corpus finding
 (10 of 39 verdicts flip with the cap) landing on the one arm whose selection
 is cap-robust.
 
-**What makes the arm cap-invariant is NOT established.** The obvious
-candidates fail: across all four arms' designs the 300→1500 drop correlates
-with buying oracle-top entries (r +0.33 at k=21) and against oracle-bottom
-ones (−0.25), but `random` buys as many bottom entries as the feedback arm
-(7.6 vs 7.6 at k=21) and drops 0.043; the rule buys as many `osr_*` entries
-(9.0 vs 8.7) and drops 0.040; within either LLM arm the correlations are
-≤0.36. The family and oracle-rank composition of the buy do not carry it.
-Open, and worth a probe before the paper leans on it.
+**Root cause, found the same morning by three offline probes ($0).**
+
+1. *Not the buy order.* Every design of both arms re-scored with its
+   sequence permuted (two permutations, 400 designs,
+   `runs/order-probe-wt-rows{300,1500}*.parquet`): shuffled − original is
+   a tie on every cell of the table (|Δ| ≤ 0.008, MDE ≥ 0.011) and the
+   300→1500 drops are identical (0.014 vs 0.006, 0.011 vs 0.010 for the
+   arm; 0.046 vs 0.053, 0.054 vs 0.054 for the loop). The invariance is a
+   property of the SET.
+2. *One entry carries it: `validate_osr_ambient`.* A ridge fit of
+   per-entry marginal value on all 433/425 WT designs at each cap gives
+   `osr_ambient` the largest cap shift on the menu (value −0.016 → +0.016
+   at k=14, −0.051 → −0.003 at k=21) and the feedback arm buys it in **78%
+   / 100%** of cells against the loop's 18% / 58%. The additive model
+   reproduces both arms' drops (arm 0.009 / 0.014 predicted vs 0.006 /
+   0.010 measured; loop 0.040 / 0.049 vs 0.053 / 0.054). Within every arm
+   the split agrees: loop cells that happen to contain it score −0.041 /
+   −0.075 at 300 rows (k=14 / 21) and drop 0.027 / 0.031 instead of 0.059
+   / 0.086; the feedback arm's 11 k=14 cells without it drop 0.038 like a
+   loop.
+3. *It is a poison pill, and the observational split UNDER-states it.*
+   Adding `osr_ambient` as a 22nd buy to six same-sweep loop designs
+   (nothing removed, 9 seeds, both caps): **−0.086 at 300 rows and −0.050
+   at 1500**, every design negative at 300 and four of six at 1500;
+   adding `osr_intake` instead, the other inert `osr` entry, gives −0.022
+   / +0.005. Buying it makes PC drop **`pot_2` as a fourth collinear
+   column** beside the three barometers, at both caps — one of the
+   highest-value entries on the menu leaves the graph — and adds a node
+   whose only true child (`pressure_ambient`) is already collinear-dropped,
+   so every edge PC hangs on it is false. (The swap version of this probe
+   is confounded — removing `pot_2` or `v_out` costs at both caps — and is
+   not the evidence; the add version is.)
+
+So the mechanism has one more step than "breadth on inert variables":
+**the feedback reports coverage of the running estimate; a variable whose
+only child has been dropped from the graph can never be connected; so the
+feedback nominates it every time, the model buys it, and the buy is not
+merely inert but destructive under this harness's collinearity policy.**
+That is the 300-row loss. The "cap invariance" is the same tax paid at a
+lower rate at 1500 rows (−0.05 vs −0.09) while the loop's preferred
+entries — `pot_1` (bought 100% vs 16%), `load_out_pressure_intake` (68%
+vs 4%), `load_in_current_out` (98% vs 0%) — lose their value with rows
+(fitted 0.018 → 0.002, −0.014 → −0.030, unchanged). The k=21 win at 1500
+rows is the loop's selection being cap-fragile, not feedback being right:
+the arm reaches only the rule's level there (tie, +0.008). Register §36.
 
 **Why it loses at the cap of record — the feedback buys breadth on the
 variables the 300-row estimator cannot see.** The summary reports, per menu entry, whether the variable it perturbs has
@@ -230,7 +267,7 @@ loops (this sweep vs the earlier WT files) agree within their bound
 not the anomaly.
 
 **What the paper says now.** Report it at both caps, as for every arm
-contrast since the two-cap re-score. At 300 rows, the configuration of
+contrast since the two-cap re-score — and name the poison pill. At 300 rows, the configuration of
 record: the adaptive-feedback result is **one chamber, one budget** — LT
 k=30, +0.027 vs the loop, resolved, not above the rule; on WT resolved
 *below* the loop at k=14, a tie at k=21, below the rule at both, purchases
@@ -240,9 +277,11 @@ directed and skeleton), and tie the rule on directed F1 at both. "Feedback
 from the data moves an LLM arm off the random line" is withdrawn as a
 cap-free claim and replaced by: *coverage-of-the-estimate feedback steers
 selection toward whatever the estimator has not connected; at the 300-row
-cap that is informative on LT and inert on WT, and at 1500 rows it is the
-only selection whose score does not degrade with rows — in neither chamber
-at either cap does it resolve above the coverage rule.* The per-experiment
+cap that is informative on LT and, on WT, a menu entry that this harness's
+collinearity policy turns destructive — and in neither chamber at either
+cap does it resolve above the coverage rule.* The 1500-row k=21 win over
+the loop is reported with its cause: the loop's concentrated buys lose
+value with rows, and the arm only reaches the rule. The per-experiment
 "what varied" feedback the headroom section asked for is still the unbuilt
 arm; this one reported coverage, and coverage is what it bought.
 

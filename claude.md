@@ -800,10 +800,20 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   both (−0.030/−0.023, resolved). **AT 1500 ROWS IT INVERTS: the arm is
   the only cap-invariant arm on WT (300→1500 drop 0.006/0.010 vs 0.04–0.05
   for loop, rule and random), ties the loop at k=14 and beats it +0.047
-  [0.020] at k=21 (skeleton too), ties the rule on directed at both. Why
-  its buys are cap-robust is NOT established — family and oracle-rank
-  composition do not carry it (random buys as many bottom-ranked entries
-  and drops 0.043). Report both caps.** MECHANISM AT 300 ROWS: the feedback
+  [0.020] at k=21 (skeleton too), ties the rule on directed at both.
+  ROOT CAUSE (register §36, three $0 probes the same morning): not the buy
+  order (shuffled designs identical at both caps); ONE ENTRY,
+  `validate_osr_ambient`, which the feedback arm buys in 78%/100% of cells
+  (loop 18%/58%) because its only true child `pressure_ambient` is a
+  collinear-dropped barometer so the estimate can never "connect" it —
+  and ADDING it to a loop design costs −0.086 at 300 rows / −0.050 at
+  1500 (it makes PC drop `pot_2` as a fourth collinear column). The
+  "invariance" is that tax paid at a lower rate while the loop's
+  preferred entries (`pot_1`, `load_out_pressure_intake`) lose value with
+  rows; the k=21 win says the loop is cap-fragile, not that feedback is
+  right. Test a suspect entry by ADDING it to fixed designs, never by
+  swapping (confounded) or observational splits (understate 2.5×).
+  Report both caps.** MECHANISM AT 300 ROWS: the feedback
   lists which variables the running estimate has not connected and the
   model buys them — +1.4/+2.0 more distinct variables than the loop — and on
   WT those are the `osr_*` settings the oracle ranks last (over-buys
@@ -813,8 +823,8 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   they are unconnected BECAUSE uninformative (WT). Not cheaper on WT (1,935
   vs 1,601 tokens/call). **At the cap of record say "one chamber, one
   budget"; "feedback moves an arm off the random line" is withdrawn as a
-  cap-free claim (seventh retraction); at 1500 rows it is the one selection
-  that survives more rows, and it still beats the rule nowhere.** Rule: a feedback signal that reports COVERAGE of the
+  cap-free claim (seventh retraction); at 1500 rows it reaches the rule and
+  no further, and it beats the rule nowhere.** Rule: a feedback signal that reports COVERAGE of the
   estimate reproduces the coverage rule's blind spot; the unbuilt arm is
   per-experiment "what varied". Scheduling note: budgets ran in blocks
   (k=14 then k=21) with arms interleaved within each — within-budget
@@ -1470,7 +1480,7 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-12 morning (WT adaptive-feedback replication — reversed; the LT gain is one chamber, one budget)*
+*Last Updated: 2026-09-12 (WT adaptive-feedback replication reversed; root cause = `osr_ambient` poison pill under the collinearity policy, register §36)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*

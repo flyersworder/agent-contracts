@@ -2102,3 +2102,50 @@ withdrawn. The single-call arm ties the loop at every budget on both chambers
 in the best-controlled reading; the record-survival axis buys nothing at any
 budget on LT. Sixth retraction. `shared_blackboard`'s k=6 loss (−0.057) was
 NOT re-run and keeps its 30 Aug status with this entry cited beside it.
+
+## 36. A menu entry is a poison pill under the collinearity policy, and coverage feedback buys it every time (2026-09-12)
+
+**What looked like a finding.** The adaptive-feedback arm's WT replication
+reversed at 300 rows (−0.049 vs the loop at k=14, resolved) and then looked
+like the only cap-invariant arm at 1500 rows (its 300→1500 drop 0.006/0.010
+against 0.04–0.05 for the loop, the rule and random), beating the loop
++0.047 at k=21. Read naively: "feedback finds a cap-robust selection".
+
+**What it was.** One entry, `validate_osr_ambient`. Three offline probes
+(results doc "THE ADAPTIVE-FEEDBACK ARM ON THE WIND TUNNEL", root-cause
+list): (1) permuting every design's buy order changes nothing at either cap,
+so the effect is a property of the set; (2) a per-entry ridge fit across all
+WT designs gives `osr_ambient` the largest cap shift on the menu and the
+feedback arm buys it in 78%/100% of cells (loop 18%/58%); (3) ADDING it as a
+22nd buy to six loop designs costs **−0.086 F1 at 300 rows and −0.050 at
+1500** (the other inert `osr` entry, `osr_intake`: −0.022 / +0.005). The
+mechanism is in the PC log: with `osr_ambient` intervened, PC drops
+**`pot_2` as a fourth collinear column** beside `pressure_{downwind,
+ambient, intake}` (entry 8's local-drop policy), removing one of the
+highest-value entries' variable from the graph; and `osr_ambient` itself
+becomes a node whose only true child, `pressure_ambient`, is already
+dropped, so every edge PC hangs on it is false.
+
+The feedback arm buys it because the summary reports which menu entries
+perturb a variable the running estimate has NOT connected — and a variable
+whose child has been dropped from the graph can never be connected. The
+signal nominates the poison pill on every feedback round.
+
+**What it changes.** The WT reversal is explained and is a harness
+interaction (collinearity policy × coverage-of-the-estimate feedback), not
+"the wind tunnel is different". The "cap invariance" is the same tax paid at
+a lower rate at 1500 rows while the loop's preferred entries (`pot_1`,
+`load_out_pressure_intake`, `load_in_current_out`) lose value with rows; the
+k=21 1500-row win over the loop says the loop's selection is cap-fragile,
+not that feedback is right — the arm only reaches the rule there. The LT
++0.027 stands as an LT result; the paper says the feedback design reproduces
+the coverage rule's blind spot and adds one of its own.
+
+**Two rules.** (a) An observational with/without split understates a toxic
+entry — within-arm splits read −0.02 at 1500 rows where the add probe reads
+−0.05 — because arms that buy it differ in other ways; **test an entry's
+effect by ADDING it to fixed designs, never by swapping it in** (the swap
+removes a valuable entry and confounds at both caps). (b) Any feedback
+signal defined on the estimator's OUTPUT inherits the estimator's column
+drops: check what the collinearity and zero-variance policies remove before
+letting an agent condition on "unconnected".
