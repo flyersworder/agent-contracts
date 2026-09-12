@@ -10,7 +10,7 @@ before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-11**: 18,303 cells, **$115.87**, **zero errored cells**, (2026-09-09 read 18,123 / $114.54; the menu-shuffle sweep and the two k=6 controls add 180 cells and $1.33)
+**Corpus as of 2026-09-12**: 18,503 cells, **$124.13**, **zero errored cells**, (2026-09-11 read 18,303 / $115.87; the WT adaptive-feedback replication adds 200 cells and $8.26)
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
 LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The table below is
@@ -44,6 +44,7 @@ the arithmetic of record.)
 | `runs/m7-coverage-wt.parquet` | 300 | $0.00 | WT random at 3 budgets; the LT-only coverage arm correctly skipped |
 | `runs/m7-coverage-wt2.parquet` | 300 | $0.00 | the WT coverage arms, breadth and depth, 3 budgets x 50 seeds |
 | `runs/m7-adaptive-lt.parquet` | 60 | $6.15 | `adaptive_feedback` vs same-sweep `llm_pc`, LT k=30, n=30 each (pre-registered, spec §8.7 row 7) |
+| `runs/m7-adaptive-wt.parquet` | 200 | $8.26 | `adaptive_feedback` vs same-sweep `llm_pc`, WT k=14/21, n=50 each (pre-registered 2026-09-11; P1/P3 refuted, P2 held); re-scored at 300/1500 rows in `runs/rescored-adaptive-wt-rows{300,1500}*.parquet` |
 | `runs/m7-oneshot-shuffle-lt.parquet` | 90 | $0.57 | `one_shot_shuffle`, LT k=6/30/45: menu order per seed does not diversify k=30 |
 | `runs/m7-oneshot-k6-control.parquet` | 60 | $0.17 | same-day `one_shot` + `one_shot_shuffle` at LT k=6, interleaved |
 | `runs/m7-loop-k6-control.parquet` | 30 | $0.59 | same-day `llm_pc` at LT k=6; the 30 Aug single-call loss does not replicate |
@@ -104,6 +105,146 @@ Predictions, written before any cell ran:
   RESOLVED result is not expected and its absence is not a failure.
 - **Also reported, not predicted:** the fallback rate (LT: 1.8% of picks),
   tokens per call vs the loop (LT: cheaper), and the 1500-row reading.
+
+**SCORED 2026-09-12 — next section. P1 refuted at both budgets (reversed),
+P2 held, P3 refuted at k=14 and undecided at k=21.**
+
+---
+
+## THE ADAPTIVE-FEEDBACK ARM ON THE WIND TUNNEL (2026-09-12, VPS/OpenBLAS, `runs/m7-adaptive-wt.parquet`): at the cap of record the LT gain does NOT transfer; at 1500 rows the arm is the only cap-invariant arm and beats the loop at k=21
+
+The pre-registered replication (section above, written before launch).
+`adaptive_feedback` vs a same-sweep `llm_pc` control, WT `standard`, k=14
+and k=21, n=50 per arm per budget, 200/200 ok, $8.26, `flash-0731`, four
+workers on the VPS. Re-scored at 9 PC seeds at 300 and 1500 rows
+(`runs/rescored-adaptive-wt-rows{300,1500}*.parquet`, together with
+`m7-coverage-wt`, `m7-coverage-wt2` and `m7-p2-wt` so every comparator sits
+on one backend); clustered by distinct design (50 of 50 for both arms at
+both budgets — the loop and the feedback arm never re-pick a design on WT);
+unequal-n bound. Purchases scored on the WT oracle marginal-gain scale.
+One scheduling note: arms were interleaved within a budget but **k=14 ran
+to completion before k=21 started** (the sidecar order), so the two budgets
+are different windows. Every contrast below is within a budget, so nothing
+rests on the cross-budget comparison. Drift audit inside the sweep is
+clean: tokens per call residualised on arm×budget vs launch order r=−0.01
+(threshold 0.21).
+
+**All three pre-registered predictions scored, at 300 rows:**
+
+| prediction | k | measured | MDE | verdict |
+|---|---|---|---|---|
+| P1: purchases above the same-sweep loop's on the oracle scale (×10⁻³) | 14 | adaptive **0.4** vs loop **3.2** (random 1.0) | 0.8 | **REFUTED — resolved the other way**, Δ −2.9; and not above random (−0.6, MDE 0.8) |
+| | 21 | adaptive **0.6** vs loop **2.0** (random 1.0) | 0.4 | **REFUTED**, Δ −1.4; not above random (−0.4, MDE 0.4) |
+| P2: does not resolve above `wt_coverage_max`; at k=21 at or below the rule | 14 | 0.212 vs 0.241, Δ **−0.030** | 0.019 | as predicted, but stronger: resolved BELOW the rule |
+| | 21 | 0.267 vs 0.289, Δ **−0.023** | 0.013 | as predicted: resolved BELOW the rule |
+| P3: adaptive − same-sweep loop = **+0.012 / +0.010**, interval rule | 14 | 0.212 vs 0.261, Δ **−0.049**, 95% CI [−0.064, −0.035] | 0.021 | **REFUTED** — the interval excludes the prediction and zero; resolved the wrong way, 2.4× the bound |
+| | 21 | 0.267 vs 0.264, Δ **+0.003**, 95% CI [−0.013, +0.018] | 0.022 | consistent-but-underpowered (contains prediction and zero) |
+
+Scorecard at the cap of record: **P1 refuted at both budgets, P2 held (the
+conservative half of the prediction), P3 refuted at k=14 and undecided at
+k=21.** The LT result (+0.027 vs the loop, resolved) does not replicate on
+the second chamber at 300 rows; at the smaller budget it reverses.
+
+**Skeleton, at 300 rows.** The k=14 loss shrinks to a tie (−0.007, MDE
+0.017) and k=21 stays a tie (+0.006); the arm is above random on the
+skeleton at both budgets (+0.023 / +0.024, resolved) and below the rule at
+k=21 (−0.035, resolved). So the resolved directed loss at k=14 is mostly
+orientation — but it is a loss on the metric the pillar reports, and the
+purchase-scale result, which has no orientation in it, is the cleaner
+refutation.
+
+**At 1500 rows the picture inverts — and the arm is the only one that
+does not move.** Every comparator loses 0.04–0.05 F1 going from 300 to
+1500 rows on WT (the pooled-regime harm that grows with rows, section "WHY
+STRONG INTERVENTIONS HURT"); the feedback arm loses 0.006 / 0.010:
+
+| 300 → 1500 rows, directed F1 | k=14 | k=21 |
+|---|---|---|
+| `adaptive_feedback` | 0.212 → **0.206** (−0.006) | 0.267 → **0.256** (−0.010) |
+| `llm_pc` same sweep | 0.261 → 0.208 (−0.053) | 0.264 → 0.210 (−0.054) |
+| `wt_coverage_max` | 0.241 → 0.205 (−0.036) | 0.289 → 0.249 (−0.040) |
+| `random` | 0.218 → 0.178 (−0.040) | 0.233 → 0.190 (−0.043) |
+
+So at 1500 rows: vs the same-sweep loop **−0.002 [0.017] tie at k=14,
++0.047 [0.020] RESOLVED at k=21** (CI [+0.032, +0.061]; skeleton +0.040
+[0.018], also resolved — not orientation); vs the rule **+0.001 / +0.008,
+ties** on directed (skeleton: tie at k=14, −0.050 resolved below at k=21);
+vs random **+0.028 / +0.067, resolved**. Under the pre-registered interval
+rule P3 is still "refuted" at 1500 rows at both budgets — the k=14 interval
+excludes the prediction on the low side, the k=21 interval on the HIGH side
+(+0.047 vs +0.010 predicted) — which is the §-lesson about point
+predictions again: the rule scores a miss, the direction and size at k=21
+are a bigger version of the LT result. This is the two-cap corpus finding
+(10 of 39 verdicts flip with the cap) landing on the one arm whose selection
+is cap-robust.
+
+**What makes the arm cap-invariant is NOT established.** The obvious
+candidates fail: across all four arms' designs the 300→1500 drop correlates
+with buying oracle-top entries (r +0.33 at k=21) and against oracle-bottom
+ones (−0.25), but `random` buys as many bottom entries as the feedback arm
+(7.6 vs 7.6 at k=21) and drops 0.043; the rule buys as many `osr_*` entries
+(9.0 vs 8.7) and drops 0.040; within either LLM arm the correlations are
+≤0.36. The family and oracle-rank composition of the buy do not carry it.
+Open, and worth a probe before the paper leans on it.
+
+**Why it loses at the cap of record — the feedback buys breadth on the
+variables the 300-row estimator cannot see.** The summary reports, per menu entry, whether the variable it perturbs has
+been connected by the running estimate. On LT that steered the model
+toward under-covered *apparatus* settings, which are exactly the informative
+buys. On WT the under-connected variables are the oversampling-rate
+settings (`osr_*`) — and the oracle ranks them last, because varying them
+moves nothing PC can see. Measured over 50 cells per arm:
+
+| | k=14 adaptive | loop | k=21 adaptive | loop |
+|---|---|---|---|---|
+| distinct variables per cell | **13.3** | 11.8 | **19.0** | 17.0 |
+| mean oracle rank of buys (1 = best of 28) | 15.0 | **12.7** | 14.9 | **13.6** |
+
+The feedback arm covers MORE variables than the loop (+1.4 / +2.0 per
+cell; the LLM-free exchange rate of 0.011 F1 per variable would predict
++0.016 / +0.022) and scores lower, because of *which* variables: at k=14
+it over-buys `osr_intake` (+35 of 50 cells, oracle rank 21), `osr_ambient`
+(+30, rank 28 of 28), `osr_downwind` (+25, rank 20), and under-buys `pot_1`
+(−38, rank 5), `osr_2` (−22, rank 1), `load_out_current_in` (−27, rank 10),
+`load_in_current_out` (−18, rank 8). At k=21 the same pattern:
+`load_in_current_out` −49, `pot_1` −42, `load_out_current_in` −40. **The
+summary tells the model which variables have no edges yet, and the model
+buys them; on WT those are the variables whose interventions have no
+visible effect, so the arm is uncertainty sampling — the LT learner that
+bought exactly the spurious-edge makers (section "WHAT THE HEADROOM IS"),
+rebuilt inside the loop.** The LT gain and the WT loss have one mechanism
+with opposite signs: "buy what the estimate has not connected" pays when
+the unconnected variables are informative and unbought, and costs when
+they are unconnected *because* they are uninformative. And "uninformative"
+here is the 300-row oracle's verdict (register §34: the oracle is an oracle
+for the harness) — which is consistent with the same buys being harmless,
+and the arm cap-invariant, at 1500 rows.
+
+**Costs and hygiene.** The arm is NOT cheaper on WT: output tokens 27.1k
+vs 22.4k at k=14 (1,935 vs 1,601 per call) and 36.2k vs 34.9k at k=21;
+wall 130 s vs 113 s and 178 vs 179. Input 5.5k vs 3.8k and 8.3k vs 5.7k.
+Selection fallbacks 0.4% of picks in 3 of 50 cells for BOTH arms at k=14
+(loop 5 cells at k=21) — no parse penalty on the shorter WT prompt. Both
+loops (this sweep vs the earlier WT files) agree within their bound
+(+0.018 / +0.010 at k=14/21, MDE 0.024 / 0.026), so the comparator is
+not the anomaly.
+
+**What the paper says now.** Report it at both caps, as for every arm
+contrast since the two-cap re-score. At 300 rows, the configuration of
+record: the adaptive-feedback result is **one chamber, one budget** — LT
+k=30, +0.027 vs the loop, resolved, not above the rule; on WT resolved
+*below* the loop at k=14, a tie at k=21, below the rule at both, purchases
+below the loop's on the (300-row) oracle scale at both. At 1500 rows the
+same WT cells tie the loop at k=14, beat it by +0.047 at k=21 (resolved on
+directed and skeleton), and tie the rule on directed F1 at both. "Feedback
+from the data moves an LLM arm off the random line" is withdrawn as a
+cap-free claim and replaced by: *coverage-of-the-estimate feedback steers
+selection toward whatever the estimator has not connected; at the 300-row
+cap that is informative on LT and inert on WT, and at 1500 rows it is the
+only selection whose score does not degrade with rows — in neither chamber
+at either cap does it resolve above the coverage rule.* The per-experiment
+"what varied" feedback the headroom section asked for is still the unbuilt
+arm; this one reported coverage, and coverage is what it bought.
 
 ---
 
@@ -1072,7 +1213,9 @@ knows. Two things to carry into the write-up:
 **Not yet done, and the order to do it in:** WT replication (the only
 chamber where an existing arm, the loop, already beats random on the oracle
 scale — if feedback stacks on top of that, the learnability claim gets a
-second chamber); the small and large LT budgets (the middle budget is where
+second chamber) — **RUN 2026-09-12: it does not stack, it reverses; see
+"THE ADAPTIVE-FEEDBACK ARM ON THE WIND TUNNEL" near the top of this doc.
+This LT result is one chamber, one budget;** the small and large LT budgets (the middle budget is where
 skill peaks, so k=30 is the friendliest test, and a k=6 result would say
 whether feedback helps where selection variance is largest); and a
 feedback-interval ablation (5 was a guess). None of these is required for
