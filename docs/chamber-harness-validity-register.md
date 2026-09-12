@@ -2149,3 +2149,29 @@ removes a valuable entry and confounds at both caps). (b) Any feedback
 signal defined on the estimator's OUTPUT inherits the estimator's column
 drops: check what the collinearity and zero-variance policies remove before
 letting an agent condition on "unconnected".
+
+**Correction, same day (runs 2 and 3).** The trigger stated above — "a
+variable whose child has been dropped can never be connected, so the
+feedback nominates it every time" — is wrong about the trigger, though
+right about the damage. Reconstructing the feedback text of the run-3
+cells offline shows that at the feedback rounds (5 and 10 experiments
+bought) PC drops NO barometer: the four pressures have min |r| 0.79 once
+load experiments are pooled, and the collinear drop happens only at final
+scoring on other designs. `osr_ambient` is nominated because it is
+UNBOUGHT (zero-variance, like every unbought variable), and the model buys
+it because coverage-shaped feedback overrides its own prior against `osr`
+entries (the loop buys it 18–26% at k=14; the arm 78–90%). So: the poison
+pill is real and causal (the add probe stands); the buy is plain
+coverage-seeking, not a dropped-column artefact. Consequences: (a) an
+exclusion keyed on dropped columns cannot fire at feedback time — run 3
+(settings of removed sensors excluded) was a no-op replicate of run 2 in
+3 of 3 reconstructed cells and was killed at 11 cells, $0.37; (b) telling
+the model the sensors were removed (run 2, $8.44) changed the buy rate by
+zero points, so disclosure is not a fix either; (c) a ground-truth-free
+exclusion would have to be "do not nominate sensor-configuration
+settings", which on LT would exclude exactly the informative buys. The
+feedback design is what fails, not its plumbing. **Rule (c): reconstruct
+what a prompt fix actually renders on real cells BEFORE buying a sweep on
+it — two minutes offline would have saved run 3.** `run_pc(dropped_out=)`
+and the summariser's removed-sensor line stay (correct, tested, and
+byte-identical when nothing is dropped), documented as not sufficient.

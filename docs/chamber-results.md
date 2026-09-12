@@ -10,7 +10,7 @@ before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-12**: 18,503 cells, **$124.13**, **zero errored cells**, (2026-09-11 read 18,303 / $115.87; the WT adaptive-feedback replication adds 200 cells and $8.26)
+**Corpus as of 2026-09-12 afternoon**: 18,714 cells, **$132.94**, **zero errored cells**, (2026-09-11 read 18,303 / $115.87; the WT adaptive-feedback replication adds 200 cells / $8.26, its two fix attempts 211 cells / $8.81)
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
 LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The table below is
@@ -45,6 +45,7 @@ the arithmetic of record.)
 | `runs/m7-coverage-wt2.parquet` | 300 | $0.00 | the WT coverage arms, breadth and depth, 3 budgets x 50 seeds |
 | `runs/m7-adaptive-lt.parquet` | 60 | $6.15 | `adaptive_feedback` vs same-sweep `llm_pc`, LT k=30, n=30 each (pre-registered, spec §8.7 row 7) |
 | `runs/m7-adaptive-wt.parquet` | 200 | $8.26 | `adaptive_feedback` vs same-sweep `llm_pc`, WT k=14/21, n=50 each (pre-registered 2026-09-11; P1/P3 refuted, P2 held); re-scored at 300/1500 rows in `runs/rescored-adaptive-wt-rows{300,1500}*.parquet` |
+| `runs/m7-adaptive-wt2.parquet` (+ `wt3`, killed at 11 cells) | 211 | $8.81 | the two summariser fixes (register §36): disclosure changed the `osr_ambient` buy rate by 0 points; exclusion-on-drops cannot fire at feedback time |
 | `runs/m7-oneshot-shuffle-lt.parquet` | 90 | $0.57 | `one_shot_shuffle`, LT k=6/30/45: menu order per seed does not diversify k=30 |
 | `runs/m7-oneshot-k6-control.parquet` | 60 | $0.17 | same-day `one_shot` + `one_shot_shuffle` at LT k=6, interleaved |
 | `runs/m7-loop-k6-control.parquet` | 30 | $0.59 | same-day `llm_pc` at LT k=6; the 30 Aug single-call loss does not replicate |
@@ -108,6 +109,163 @@ Predictions, written before any cell ran:
 
 **SCORED 2026-09-12 — next section. P1 refuted at both budgets (reversed),
 P2 held, P3 refuted at k=14 and undecided at k=21.**
+
+---
+
+## TELLING THE MODEL WAS NOT ENOUGH (2026-09-12, VPS/OpenBLAS, `runs/m7-adaptive-wt2.parquet`): the second WT feedback run, summariser naming the removed sensors
+
+Pre-registered (section "…re-run with the summariser told what PC
+dropped"). 200/200 ok, $8.44, same design as 11 Sep; re-scored at 9 seeds
+at 300 and 1500 rows (`runs/rescored-adaptive-wt2-rows{300,1500}*`),
+design-clustered (50 distinct designs per arm per budget again).
+
+**M (mechanism, primary) FAILS.** With the line "Variables REMOVED from the
+estimate as near-duplicates of another sensor (no edge can reach them, and
+a setting that only affects one of them cannot be connected either):
+pressure_downwind, pressure_ambient, pressure_intake" in every prompt
+after the first feedback round, the arm bought `osr_ambient` in **90% /
+98%** of cells (loop 26% / 74%), `osr_downwind` 72% / 100% (16% / 84%),
+`osr_intake` 80% / 100% (12% / 42%). Unchanged from 11 Sep (78% / 100%).
+The model does not make the `osr_ambient → pressure_ambient` inference
+from the line, or makes it and buys anyway; `osr_ambient` still sat in
+the "no edge has reached yet" list, and that list is what it acts on.
+
+**The arm is a replicate of itself.** Arm run 2 − arm run 1: +0.002 /
++0.003 at 300 rows, +0.003 / −0.005 at 1500 — the tightest cross-day
+agreement of any arm in the corpus, because the feedback makes its buy
+nearly deterministic (the same poison pill and the same coverage-shaped
+set every time). The loop moved −0.020 / −0.015 between days (ties).
+
+**Predictions scored, 300 rows:**
+
+| | k=14 | k=21 |
+|---|---|---|
+| P1′ purchases vs loop on the oracle scale (×10⁻³) | 0.1 vs 3.0, −2.9 [0.8] **refuted** (and below random, −0.9 [0.7]) | 0.9 vs 1.8, −0.9 [0.4] **refuted**; random tie |
+| P2′ not above the rule | −0.028 [0.018] R− **held** | −0.020 [0.013] R− **held** |
+| P3′ vs same-sweep loop (pred. 0.000 / +0.010) | 0.214 vs 0.241, **−0.027** [0.020], CI [−0.042, −0.013] **refuted** | 0.269 vs 0.249, **+0.021** [0.019] R+, CI [+0.007, +0.034] **supported** |
+
+The k=21 "support" is the loop's day, not the arm's: the arm scored 0.267
+on 11 Sep and 0.269 today; the loop scored 0.264 and 0.249. Skeleton:
+tie at both budgets. At 1500 rows the pattern of 12 Sep repeats — tie at
+k=14 (+0.017 [0.020]), +0.041 [0.020] R+ at k=21, tie with the rule at
+both — for the reason already established (the loop's entries lose value
+with rows; the arm reaches the rule and no further).
+
+**What it adds to §36.** A practitioner cannot fix this by disclosure.
+Naming the removed sensors, stating the implication in one sentence, and
+leaving the entry in the candidate list changes the buy rate by zero
+points. And the exclusion cannot be keyed on the estimator's drops either
+(run 3, killed: nothing is dropped at feedback time). What is left is the
+design itself: coverage-shaped feedback nominates every unbought variable
+and overrides the model's prior, which was right about `osr_ambient` on
+WT and wrong about the apparatus settings on LT. A feedback that could
+tell the two apart has to report what each experiment CHANGED, not what
+the estimate has not connected — the "what varied" arm, still unbuilt.
+
+---
+
+## PRE-REGISTERED (2026-09-12, before launch): third WT feedback run — settings of removed sensors EXCLUDED from the feedback, not merely named
+
+**Why a third run.** The second run (section below, `m7-adaptive-wt2`)
+told the model which sensors PC removed and what that implies; at 38 cells
+the fixed arm was still buying `osr_ambient` in 17 of 18 cells (loop 4 of
+20). Its pre-registered mechanism check M fails; the pre-registration said
+the next step is exclusion, not more text.
+
+**The fix** (same branch): `sensor_configured_by(setting, nodes)` maps an
+`osr_X`/`v_X` setting to the sensor it configures by the chamber manual's
+naming (suffix match, with the manual's table for `c`→`current`,
+`1`/`2`→`signal_N`, `in`/`out`→`current_in/out`); the test checks every
+such setting against the ground truth on both chambers (each has exactly
+one child and the rule names it). `summarize_estimate` now treats an entry
+as dead if its target is a removed variable OR a setting that configures
+one, moves it out of "unreached", and lists it on the removed line marked
+"do not buy". On WT that excludes `osr_ambient`, `osr_downwind`,
+`osr_intake` (settings of the three dropped barometers) whenever those are
+dropped — and `pot_2`'s entry when it is. Nothing changes when nothing is
+dropped (LT).
+
+**Design:** identical to the two previous runs; output
+`runs/m7-adaptive-wt3.parquet`.
+
+**KILLED at 11 cells ($0.37).** The first three arm cells bought
+`osr_ambient` at positions 7, 13 and 14 — post-feedback. Rebuilding their
+feedback text offline: at every round `collinear=[]` (or `['pot_2']`),
+`pressure_ambient` was neither collinear- nor zero-variance-dropped, and
+`osr_ambient` sat in "unreached" as before. The barometers are NOT
+collinear at feedback time (min |r| 0.79 after five load experiments); the
+drop happens only at final scoring on some designs. The exclusion cannot
+fire, so the run would have replicated run 2. Register §36 correction.
+
+**Predictions, written before any cell ran:**
+
+- **M″ (mechanism).** The arm buys `osr_ambient` in ≤ 25% of cells at
+  k=14 and ≤ 65% at k=21 — i.e. at or below the loop's own rate (18%/58%
+  on 11 Sep, 20% on 12 Sep at k=14) — and the same for `osr_downwind` and
+  `osr_intake`. Residual buys can only come from the first five purchases
+  (no feedback yet) and from the model buying an entry the line says not
+  to. Fails if any of the three is more than 15 points above the loop's
+  rate at either budget.
+- **P3″ (vs the same-sweep loop, 300 rows, directed).** Point prediction
+  **+0.010 at k=14 and +0.010 at k=21**; interval rule (contains prediction
+  / excludes zero). No resolved win predicted. If M″ holds and P3″ still
+  comes out below zero, the LT gain does not transfer for a reason beyond
+  the poison pill, and that is the answer.
+- **P2″ (vs the rule).** Not above `wt_coverage_max` at either budget.
+- **P1″ (oracle scale, 300).** Tie with the loop; not above random.
+- Also reported: tokens per call, fallbacks, drift, and the three loops'
+  (11 Sep, wt2, wt3) agreement before any pooling.
+
+---
+
+## PRE-REGISTERED (2026-09-12, before launch): the WT feedback arm re-run with the summariser told what PC dropped (register §36 fix)
+
+**The fix** (`feat/feedback-dropped-columns`): `run_pc` now reports the
+columns it removed (`dropped_out`), and `summarize_estimate` receives the
+collinear-dropped set. Entries that perturb a removed variable leave the
+"no edge has reached yet" list, and a fourth line names the removed
+variables with what that means for the buyer ("no edge can reach them, and
+a setting that only affects one of them cannot be connected either"). When
+nothing was dropped the text is byte-identical to the pre-fix summary
+(tested), so the LT result needs no re-run: 58 of its 60 cells never had a
+collinear drop and the other two had one drop in one PC run.
+
+**Not changed, deliberately:** `osr_ambient` stays on the menu (removing it
+would change the task for every arm and hide the lesson); the collinearity
+policy stays (without it PC returns all-zeros on WT); the fix does NOT
+hard-code the `osr_ambient → pressure_ambient` link — the model is told
+which sensors were removed and has to make that inference itself. So this
+tests whether *telling* the agent about the estimator's preprocessing is
+enough, not whether excluding the entry helps (that we already know:
+−0.086/−0.050 per buy).
+
+**Design:** identical to the 11 Sep run — `adaptive_feedback` vs a
+same-sweep `llm_pc` control, WT `standard`, k=14/21, n=50 per arm per
+budget, seeds 0–49, `flash-0731`, VPS, four workers; output
+`runs/m7-adaptive-wt2.parquet`. Same analysis (9-seed re-score at 300 and
+1500 rows, design-clustered, unequal-n bound, oracle scale at 300).
+
+**Predictions, written before any cell ran:**
+
+- **M (mechanism, the primary check).** The fixed arm buys `osr_ambient`
+  at no more than the same-sweep loop's rate at each budget (11 Sep: arm
+  78% / 100% vs loop 18% / 58%). Fails if the arm's rate is still above the
+  loop's by more than 15 points at either budget — that would mean the
+  model reads the line and buys anyway, and the next step is exclusion, not
+  more text.
+- **P3′ (vs the same-sweep loop, 300 rows, directed).** The k=14 loss
+  closes: point prediction **0.000 at k=14 and +0.010 at k=21**, interval
+  rule as before (contains prediction / excludes zero). A resolved win over
+  the loop is NOT predicted; the LT prior is "small or nothing" and WT
+  compresses effects ~2×.
+- **P2′ (vs the rule).** Still not above `wt_coverage_max` at either
+  budget. At 1500 rows, ties the rule as on 12 Sep.
+- **P1′ (oracle scale, 300).** Purchases no longer resolved BELOW the
+  loop's; a tie with the loop is the prediction. Above random is not
+  predicted.
+- Also reported: fallback rate, tokens per call, drift audit, and the 11 Sep
+  arm as a third comparator (same regime? — check arm means of the two loops
+  agree before pooling anything).
 
 ---
 
@@ -212,10 +370,13 @@ is cap-robust.
    not the evidence; the add version is.)
 
 So the mechanism has one more step than "breadth on inert variables":
-**the feedback reports coverage of the running estimate; a variable whose
-only child has been dropped from the graph can never be connected; so the
-feedback nominates it every time, the model buys it, and the buy is not
-merely inert but destructive under this harness's collinearity policy.**
+**the feedback reports coverage of the running estimate; every unbought
+variable is "unreached"; the model, told to cover, buys `osr_ambient`
+against its own prior (the loop buys it 18–26% at k=14, the arm 78–90%);
+and the buy is not merely inert but destructive under this harness's
+collinearity policy.** (Corrected the same day: an earlier version of this
+sentence said the feedback nominates it because its child was dropped;
+at feedback time nothing is dropped — register §36 correction.)
 That is the 300-row loss. The "cap invariance" is the same tax paid at a
 lower rate at 1500 rows (−0.05 vs −0.09) while the loop's preferred
 entries — `pot_1` (bought 100% vs 16%), `load_out_pressure_intake` (68%
