@@ -60,6 +60,7 @@ from .agents import (
     coverage_min_agent,
     coverage_min_ms_agent,
     critique_agents,
+    effect_feedback_agent,
     fan_in_agents,
     greedy_ig_lite_agent,
     llm_only_agent,
@@ -300,6 +301,15 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
     AgentSpec(
         name="adaptive_feedback",
         run=adaptive_feedback_agent,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_single",
+    ),
+    # Register §36: the same loop told what each experiment CHANGED instead
+    # of what the estimate has not reached. No estimator in the loop.
+    AgentSpec(
+        name="effect_feedback",
+        run=effect_feedback_agent,
         chambers=("lt", "wt"),
         accepts_llm=True,
         kind="llm_single",

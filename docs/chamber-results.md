@@ -4,7 +4,7 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the thirty
+**Companions.** `docs/chamber-harness-validity-register.md` records the thirty-one
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
@@ -161,6 +161,42 @@ and overrides the model's prior, which was right about `osr_ambient` on
 WT and wrong about the apparatus settings on LT. A feedback that could
 tell the two apart has to report what each experiment CHANGED, not what
 the estimate has not connected — the "what varied" arm, still unbuilt.
+
+---
+
+## PRE-REGISTERED (2026-09-12 afternoon, before launch): the EFFECT-feedback arm on LT — coverage feedback vs effect feedback vs the loop, same day
+
+**Design.** `effect_feedback` (`summarize_effects`: every five purchases,
+per bought experiment, which variables it shifted ≥ 0.5 sd or whose noise
+it changed ≥ 2×, judged pairwise against more than half of the other
+bought experiments; no estimator in the loop; the experiment's own target
+excluded) vs `adaptive_feedback` (coverage feedback, unchanged) vs `llm_pc`,
+LT k=30, n=30 each, interleaved (90 cells), `flash-0731`, VPS, four
+workers; `runs/m7-effect-lt.parquet`. Replayed on real recorded LT cells
+before launch: the summary reads `t_ir_1_strong: shifted ir_1`,
+`osr_c_strong: changed nothing else measurable`, `reference: changed
+nothing` — correct on every line checked. Same analysis as before (9-seed
+re-score at 300 and 1500 rows, design-clustered, unequal-n bound, oracle
+scale).
+
+**Predictions, written before any cell ran:**
+
+- **E1 (the designed contrast).** effect − coverage ≥ 0 at 300 rows; point
+  prediction **+0.010**, interval rule. Both feedback arms above the
+  same-sweep loop (coverage +0.027 on 9 Sep; effect predicted **+0.030**).
+- **E2 (vs the rule).** Neither feedback arm resolves above the coverage
+  rule (0.437 at fresh seeds).
+- **E3 (mechanism).** The effect arm buys MORE of the entries its own
+  summary calls "changed nothing" (`osr_*`, `v_*`, `reference`) than the
+  loop only if the model ignores the line; prediction: it buys them at or
+  below the loop's rate, and its distinct-variable count sits between the
+  loop's and the coverage arm's.
+- **WT (not launched; register §37).** On WT the summary is expected to
+  report the six low-day entries as shifting every pressure, so the
+  prediction there is "fooled the same way as PC": `osr_ambient` bought at
+  or above the loop's rate, no gain. Held pending a decision on whether to
+  spend $8 confirming a predicted failure or on a session-corrected
+  variant.
 
 ---
 

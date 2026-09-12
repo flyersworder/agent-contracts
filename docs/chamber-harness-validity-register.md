@@ -2175,3 +2175,54 @@ what a prompt fix actually renders on real cells BEFORE buying a sweep on
 it — two minutes offline would have saved run 3.** `run_pc(dropped_out=)`
 and the summariser's removed-sensor line stay (correct, tested, and
 byte-identical when nothing is dropped), documented as not sufficient.
+
+## 37. Six of WT's 28 menu entries were recorded on a different day, 2.3 kPa of weather apart — the poison pill is a session shift (2026-09-12)
+
+**What looked like a finding.** `osr_ambient` is destructive to pool
+(§36: −0.086 F1 at 300 rows, −0.050 at 1500 when added to a loop design),
+which read as a property of the oversampling setting and the collinearity
+policy.
+
+**What it was.** `wt_validate_v1`'s `standard` experiments carry a
+`timestamp` column, and the 28 menu entries fall in two sessions: 22 at
+t≈425k–437k with `pressure_ambient` ≈ 96.7 kPa, and six at t≈4k–151k with
+≈ 94.4 kPa — `osr_ambient`, `hatch_mic`, `load_out_mic`,
+`load_in_current_out`, `load_out_current_in`, `load_out_pressure_intake`.
+A 2.3 kPa difference in ambient pressure is a weather system, not an
+intervention, and it lands identically on all four barometers (offsets
+2,288–2,299 Pa). `osr_ambient` is the only low-day entry with NO actuator
+change, so pooling it injects a pure session-shift regime: every
+barometer column gains a 2.3 kPa step correlated with nothing the chamber
+did. The signal channel differs too (`signal_1` mean 0.22 in that
+session vs 2.7).
+
+**Measured.** Adding `osr_ambient` to six loop designs with its four
+barometer columns shifted by the day offset: 300 rows −0.086 → **−0.043**,
+1500 rows −0.050 → **+0.010**. Half the 300-row harm and all of the
+1500-row harm is the barometer step; the rest is consistent with the other
+session differences, not corrected here.
+
+**What it changes.** (1) The WT poison pill is a DATA property, not an
+estimator or agent property: any estimator that pools regimes, and any
+feedback computed from the pooled data, sees a day shift as the largest
+effect in the frame. The effect summariser (`summarize_effects`, built the
+same afternoon) correctly reports that buying `osr_ambient` "shifted"
+every pressure, current and rpm — which is true of the data and false of
+the chamber — so a "what changed" feedback is fooled on WT for the same
+reason PC is. (2) Every WT arm that bought a low-day entry pooled a
+session shift; the coverage rule buys all six at k=21. Arm contrasts stand
+(every arm faces the same menu) but WT absolute F1 carries this, and the
+oracle's bottom ranks (`osr_ambient` 28, `hatch_mic` 25,
+`load_out_pressure_intake` 22) are partly session, not physics. (3) A
+session covariate is exactly what a JCI context variable absorbs —
+`rescore.py --estimator jci_pc --context regime` already exists; a
+"session" context is the principled correction and is NOT run. (4) The
+chamber authors' own WT case study uses a time-series method on one
+continuous recording and never pools sessions; our pooled-i.i.d. reduction
+is where the day enters.
+
+**Rule.** Before pooling experiments from a released dataset, tabulate
+per-experiment means of every sensor that nothing in the menu controls
+(here: ambient pressure) and the timestamps; two clusters mean two
+sessions, and a session is a regime you did not buy. Register entries 8
+(collinear barometers) and 36 both sit downstream of this one.

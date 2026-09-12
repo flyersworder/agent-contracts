@@ -74,6 +74,7 @@ VARIANT_COLORS: dict[str, str] = {
     "critique": "#393b79",  # indigo — executor-evaluator
     "shared_blackboard": "#00838f",  # teal — two voices, one record
     "adaptive_feedback": "#ad1457",  # magenta — the loop told what it has learned
+    "effect_feedback": "#e65100",  # burnt orange — the loop told what each buy changed
     # M7 coverage manipulation. Not agents anyone would deploy: the two ends
     # of a controlled variable-coverage span, drawn as a matched pair.
     "coverage_max": "#2b8a3e",  # deep green — widest portfolio
@@ -102,6 +103,7 @@ VARIANT_LABELS: dict[str, str] = {
     "critique": "Critique (executor-evaluator)",
     "shared_blackboard": "Shared blackboard (two voices)",
     "adaptive_feedback": "Adaptive feedback (loop + PC summary)",
+    "effect_feedback": "Effect feedback (loop + what each buy changed)",
     "coverage_max": "Coverage-max (30 variables)",
     "coverage_min": "Coverage-min (11 variables)",
     "coverage_max_ms": "Coverage-max, no weak (30 variables)",
@@ -129,6 +131,7 @@ VARIANT_MARKERS: dict[str, str] = {
     "critique": "h",
     "shared_blackboard": "8",
     "adaptive_feedback": "X",
+    "effect_feedback": "P",
     "coverage_max": "^",
     "coverage_min": "v",
     "coverage_max_ms": "1",
@@ -154,6 +157,7 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "critique": "dotted",
     "shared_blackboard": (0, (5, 1, 1, 1)),
     "adaptive_feedback": (0, (1, 1)),
+    "effect_feedback": (0, (2, 1)),
     "coverage_max": (0, (6, 2)),
     "coverage_min": (0, (2, 2, 6, 2)),
     "coverage_max_ms": (0, (4, 2)),
@@ -187,6 +191,7 @@ VARIANT_ORDER: tuple[str, ...] = (
     "critique",
     "shared_blackboard",
     "adaptive_feedback",
+    "effect_feedback",
     # M7 coverage manipulation, last: bounds rather than rungs.
     "coverage_max",
     "coverage_min",
