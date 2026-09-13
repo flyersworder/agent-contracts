@@ -945,6 +945,108 @@ Reprioritised because the oracle changed what the marginal dollar buys.
 | 6′ | ~~Lagged-estimator variant~~ **SUPERSEDED 2026-09-09 by the oracle probe** | $0, done | No lagged ground truth ships with the chambers, so a temporal estimator has nothing to score against. Instead `oracle_probe.py` MEASURED the threat: a ground-truth oracle sits +0.02–0.07 above every arm by ranking (5 of 6 resolved) and +0.10–0.15 by set on WT, in the core-20 subgraph on LT; on LT no LLM arm's purchases beat random on the oracle's marginal-gain scale, on WT only the loop does (~27% of the range). **Threat 6 is withdrawn as a scope limit and reported as a result**: coverage is the plateau uninformed selection reaches, not the ceiling. See `docs/chamber-results.md` "THE ORACLE PROBE". |
 | 7 | **Adaptive-feedback arm** (3d) — PROMOTED from optional; **RUN 2026-09-09, $6.15, 60/60 ok. Outcome: P1 SUPPORTED on the boundary (10.6 vs 9.7 ×10⁻³, MDE 0.79, Welch p=0.0065), P2 NOT supported (+0.008 vs rule, MDE 0.017); resolves above the same-sweep loop +0.027 (MDE 0.013). Covers 10% of random→oracle, 17% of rule→oracle. See results doc "THE ADAPTIVE-FEEDBACK ARM".** **WT replication pre-registered 2026-09-11 (k=14/21, n=50, interleaved loop control; P1 stacks on the loop's oracle-scale lead, P2 not above the rule, P3 +0.012/+0.010 vs loop, interval-keyed) — see results doc "PRE-REGISTERED ... adaptive-feedback arm on the wind tunnel". RUN 2026-09-12, $8.26, 200/200 ok: P1 REFUTED at both budgets (purchases BELOW the loop on the oracle scale, −2.9/−1.4 ×10⁻³, resolved; not above random), P2 held (resolved BELOW the rule, −0.030/−0.023), P3 REFUTED at k=14 (−0.049 vs loop, CI [−0.064, −0.035]) and undecided at k=21 (+0.003). Mechanism: the coverage-style feedback steers buys to the unconnected `osr_*` settings the oracle ranks last. At 1500 rows it inverts: the arm is the only cap-invariant arm on WT and beats the loop +0.047 at k=21, ties the rule. One chamber, one budget, one cap; see results doc "THE ADAPTIVE-FEEDBACK ARM ON THE WIND TUNNEL".** | engineering + ~$3–5 (actual $6.15) | the only design whose success would show the oracle headroom is learnable WITHOUT ground truth; its failure bounds it. Pre-register: loop + current adjacency estimate, LT k=30, n=30, prediction = moves the arm's mean oracle-gain above random's (9.7×10⁻³) and F1 above the coverage rule. |
 
+### 8.8 The framing after the cross-vendor replication (2026-09-13) — supersedes 8.6's lead and 8.4's contribution list
+
+Written the morning after `runs/xv-glm-{lt,wt}.parquet` landed. Two things
+changed since 8.6: the record axis is dead on two vendors (§35 and C3), and
+the topology contrasts turned out to be **cap- and model-dependent in a
+way the two-factor model predicts** (results doc "THE CROSS-VENDOR
+REPLICATION"). 8.6 led with the reference policy; the reference policy is
+now what makes the negatives legible, and the *law* is the lead.
+
+**Thesis (title level).** Coordination is coverage: under
+contract-certified intervention budgets, the effect of an agent topology
+is predictable from how much it changes what gets bought.
+
+> An arm's accuracy is set by how many distinct variables its purchases
+> perturb. The difference between two topologies at the same intervention
+> budget is `ΔF1 ≈ r · Δ(distinct variables)`, where `r` is an exchange
+> rate measured with no model in the loop and depends only on the chamber
+> and the judge's row cap (LT 0.0045 per variable at 300 rows, 0.0131 at
+> 1500; WT 0.011), and `Δvariables` is the coverage gap the topology
+> creates, read off the purchase logs. Eleven predictions, 8 close / 3
+> miss, across two chambers, two vendors and two caps, two of them
+> pre-registered out of sample.
+
+**Contributions, in order.**
+
+1. **A benchmark where budgets are certified, not assumed** — and the
+   contract is a floor as well as a ceiling. Delegation contracts conserve
+   the intervention budget across a team and `verify()` certifies it; 35 %
+   of matched-by-design DeepSeek cells fail certification (caught
+   over-spend), 100 % of GLM cells pass under the same grants. Without a
+   contract the WT agent stops at 12.8 of 28 on its own; mandating the
+   budget beats it by +0.058 (p = 0.0007); on LT it stops at the knee and
+   loses nothing. **This is §3 of the paper, not a late result** — the
+   floor and the ceiling are the two halves of what the instrument does,
+   and they answer "do you actually set equal budgets" where the reader
+   asks it: **equal in experiments by construction (every arm buys exactly
+   k; scout budgets solve to exact integers), tokens governed, reported and
+   unequal** (team spends 1.37× the loop's tokens on DeepSeek and loses;
+   `one_shot` ties the loop at 5 % of its tokens). Never write "matched
+   budgets" without "intervention" beside it.
+2. **A computable reference policy and a ground-truth oracle above it.**
+   Round-robin coverage, ten lines, ties or beats every LLM arm at both
+   caps on both chambers and both vendors; the oracle sits 0.02–0.07 above
+   it, so the plateau is not the ceiling, and no topology or feedback
+   signal (coverage, disclosure, true effects) reaches the headroom.
+   Every arm is reported as distance from the rule.
+3. **The law** (above), with the rate re-fitted per cap and the record
+   stated as 8 close / 3 miss, the misses being DeepSeek's 300-row
+   coordination residual.
+4. **What survives it, on two vendors:** no fan-in beats a loop; no LLM
+   arm beats the rule; the single call ties the loop at the cap of record
+   (record inert; its 1500-row directed verdict flips sign with the
+   vendor, skeleton and core-20 agree); a cheaper model with a smaller
+   coverage gap shows *no* topology effect at the cap of record. "Topology
+   is at least as large a lever as model choice" is withdrawn as stated:
+   model choice sets the gap, the judge sets the rate.
+5. **Method:** the harness register (38 entries, 32 that changed or could
+   have changed a result), seven public retractions, timestamped
+   pre-registrations, and the rule that a resolved n=30 verdict is re-run
+   on another day before it is written.
+
+**Outline and page budget (8.0 + references).**
+
+| § | title | p | carries |
+|---|---|---|---|
+| 1 | Introduction | 1.0 | the confound (Anthropic 12.7 % on 4.2× tokens; Google Teamwork across a model change; Kim et al. 2026 same sign, assumed budgets); thesis; contributions; **scope sentence up front**: one task family, one estimator family, effects reported at two caps |
+| 2 | Related work | 0.5 | loop-vs-graph discourse; Kim et al. as the complement (matched tokens, single passes, fragmentation mechanism); causal chambers; budget conservation in delegation |
+| 3 | The instrument: ceiling and floor | 1.0 | delegation graph + conservation; provisioning; certification outcomes; the floor result; "equal in experiments, tokens reported" |
+| 4 | Testbed, judge and reference policy | 1.0 | **Fig. 1 setup**; chambers and menu; PC at two caps, core-20, design-level 9-seed re-scoring, unequal-n MDE; the rule; the oracle |
+| 5 | Topologies | 0.5 | loop, ensemble, roles, chain, team, varsplit, blackboard, one_shot, feedback arms; one table with calls per cell and distinct designs |
+| 6 | Results | 2.5 | 6.1 the instrument discriminates; 6.2 distance from the rule (Fig. 2); 6.3 no fan-in beats a loop; 6.4 the law (Fig. 3); 6.5 the rate is a property of the judge — both caps, cross-vendor tie-then-replicate (Fig. 4); 6.6 record and feedback are inert |
+| 7 | Threats and method | 1.0 | estimator scope (PC-on-pooled-data at a cap; GES / UT-IGSP / JCI in one paragraph, tables in the supplement); power beside every tie; task family; the register |
+| 8 | Conclusion | 0.5 | |
+
+**Figures (5).** (1) Setup, §4, before any result: menu → k identical
+budget slots filled under a contract (team inset: two scouts filling k/2
+each with the overlap shaded) → pooled data → PC at a cap → graph scored
+against truth with the rule and the oracle marked on the same axis. The
+one thing it must make visible: every arm buys exactly k and only *which*
+k differs. (2) Distance from the rule per arm, both chambers, MDE bars.
+(3) Two-factor prediction vs measurement, 11 points, two vendors, two
+caps. (4) Cross-vendor contrasts at both caps. (5) Certification rate and
+token spend per arm ("tokens are not the currency"). (4) and (5) merge
+into one two-panel figure if pages get tight.
+
+**Supplementary.** Full contrast tables at both caps and three metrics;
+GES / UT-IGSP / JCI tables; register excerpt; AI-use disclosure (required
+by the CFP); pre-registration commit hashes; anonymised code pointer.
+
+**Process.** Abstract, §3 and §4 first (they carry the framing and the
+figure); each section committed with `make` passing and reviewed at the
+boundary; §6 next; §1 last, once the results prose has settled what the
+claims are. `paper/` stays untracked (double-blind); the spec is the
+tracked record of the framing.
+
+**What this supersedes.** 8.6's "lead with the reference policy" (now
+contribution 2); 8.4 item 1's scoping sentence; the skeleton's
+contribution list of 2026-09-09 (six items, floor as co-headline in §6);
+the claim in the results doc's readiness section that cross-vendor was
+the highest-value remaining work — it ran, for $0.48, and its value was
+the law's third test, not a generality checkbox.
+
 ## 7. Non-goals
 
 - Not a causal-discovery methods paper. PC on pooled interventional data stays
