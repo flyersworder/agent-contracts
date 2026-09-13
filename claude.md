@@ -1560,6 +1560,19 @@ that document's final section. Harness defects stay in
   (`one_shot` ties the loop), and their 260 configurations are single
   passes with no repeat runs. The blog's 180 / four benchmarks / R² 0.513
   are v1 figures; quote the paper's 260 / six / 0.373.
+  `2026-09-13-tran-kiela-equal-thinking-budgets.md` (arXiv 2604.02460) is
+  the **second** independent matched-budget result with our sign — thinking
+  tokens held constant, single agent matches or beats every team, and
+  API-level budget controls carry artefacts (our §25/§32 from the other
+  side). Three denominators (total tokens, thinking tokens, certified
+  experiments), one sign; three mechanisms offered (fragmentation, context
+  utilisation, duplicated coverage) — `one_shot` tying the loop rules the
+  first two out on OUR task, say no more than that.
+  `2026-09-13-causalab-interactive-causal-discovery.md` (arXiv 2605.26029)
+  is the closest published TASK: an LLM agent intervenes under a budget on
+  a sampled SCM and is scored on the recovered mechanism. Cite it as the
+  causal-discovery benchmark our coordination benchmark is not. Both notes
+  are abstract-level only; read the bodies before quoting a number.
 - **Harness validity register**: `docs/chamber-harness-validity-register.md`
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`
