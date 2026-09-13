@@ -2237,3 +2237,29 @@ variable indicators already absorb the step; against plain PC the number
 of low-session buys correlates with JCI's per-design gain (r = 0.44 at
 k=21). Scope note, not retraction: absolute WT F1 under plain PC carries
 the session; contrasts do not.
+
+## 38. Provider precision drifted under an unchanged provider name — and it drifted differently per model (2026-09-12, caught before any cell ran)
+
+**What it would have looked like.** A clean cross-vendor replication on
+`glm-5.3-flash`, precision-homogeneous by the table.
+
+**What it was.** `PROVIDER_PRECISION` was keyed by provider alone (§25
+warned this was unsound in principle and said to fix it before a third
+model ran). Re-probing `GET /models/{id}/endpoints` the evening the GLM
+sweep was to launch: **DeepInfra serves `deepseek-v4-flash-0731` at fp8
+and `glm-5.3-flash` at fp4; GMICloud the reverse; Reka fp4 / fp8.** The
+pinned GLM order at the time led with DeepInfra, so the first GLM cell
+would have run at fp4 under a table that said fp8, and the homogeneity
+test would have passed because it walked one table for every model.
+
+**Fix (`7c0790d`).** `PROVIDER_PRECISION_BY_MODEL`, one table per model
+id, each pinned order checked against its own model's table; the two
+measured disagreements are asserted by a test so a future refactor that
+re-merges the tables fails. GLM order re-pinned to (GMICloud, Novita,
+Z.AI) by price among probed fp8 endpoints. Outcome: 300 GLM cells, all on
+GMICloud with rotation to Novita on error, 0 stray endpoints.
+
+**Rule.** Quantization is a property of the (provider, model) pair and
+it changes without notice; re-probe the endpoints for EACH model the day
+a sweep launches, and key every precision assertion by both. §3 was the
+provider-only instance of this; this is the model-crossed one.
