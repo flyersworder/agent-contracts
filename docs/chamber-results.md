@@ -4,13 +4,13 @@ The canonical record of every chamber-pillar experiment and what it showed.
 Results live here rather than in `claude.md`, which is project memory loaded
 into every session and should stay instructions plus status.
 
-**Companions.** `docs/chamber-harness-validity-register.md` records the thirty-one
+**Companions.** `docs/chamber-harness-validity-register.md` records the thirty-two
 harness defects that each changed or could have changed a result — read it
 before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-12 evening**: 18,804 cells, **$145.10**, **zero errored cells**, (2026-09-11 read 18,303 / $115.87; the WT adaptive-feedback replication adds 200 cells / $8.26, its two fix attempts 211 / $8.81, the LT effect-feedback contrast 90 / $12.16)
+**Corpus as of 2026-09-13**: 19,164 cells, **$145.69**, **zero errored cells**, (2026-09-12 evening read 18,804 / $145.10; the GLM cross-vendor replication adds 300 cells / $0.48 and the `shared_blackboard` k=6 control 60 / $0.11)
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
 LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The table below is
@@ -47,6 +47,9 @@ the arithmetic of record.)
 | `runs/m7-adaptive-wt.parquet` | 200 | $8.26 | `adaptive_feedback` vs same-sweep `llm_pc`, WT k=14/21, n=50 each (pre-registered 2026-09-11; P1/P3 refuted, P2 held); re-scored at 300/1500 rows in `runs/rescored-adaptive-wt-rows{300,1500}*.parquet` |
 | `runs/m7-adaptive-wt2.parquet` (+ `wt3`, killed at 11 cells) | 211 | $8.81 | the two summariser fixes (register §36): disclosure changed the `osr_ambient` buy rate by 0 points; exclusion-on-drops cannot fire at feedback time |
 | `runs/m7-effect-lt.parquet` | 90 | $12.16 | `effect_feedback` vs `adaptive_feedback` vs `llm_pc`, LT k=30, n=30 each, same day (pre-registered; E1 refuted, coverage − loop replicates); re-scored in `runs/rescored-effect-lt-rows{300,1500}*` |
+| `runs/xv-glm-lt.parquet` | 200 | $0.42 | cross-vendor, `glm-5.3-flash`: LT k=30 × {`llm_pc`, `team`, `team_varsplit`, `one_shot`} × n=50 (pre-registered C1–C4; C1/C2 fail at 300 rows and replicate at 1500, C4 holds); re-scored in `runs/rescored-xv-glm-lt-rows{300,1500}*` |
+| `runs/xv-glm-wt.parquet` | 100 | $0.06 | cross-vendor, `glm-5.3-flash`: WT k=14 × {`llm_pc`, `team`} × n=50 (C5 tie on both vendors, C6 100 % certified); re-scored in `runs/rescored-xv-glm-wt-rows{300,1500}*` |
+| `runs/m7-blackboard-k6-control.parquet` | 60 | $0.11 | same-day `shared_blackboard` + `llm_pc` at LT k=6, DeepSeek flash-0731: the 30 Aug −0.057 replicates (−0.055 / −0.043 at 300 / 1500 rows) |
 | `runs/m7-oneshot-shuffle-lt.parquet` | 90 | $0.57 | `one_shot_shuffle`, LT k=6/30/45: menu order per seed does not diversify k=30 |
 | `runs/m7-oneshot-k6-control.parquet` | 60 | $0.17 | same-day `one_shot` + `one_shot_shuffle` at LT k=6, interleaved |
 | `runs/m7-loop-k6-control.parquet` | 30 | $0.59 | same-day `llm_pc` at LT k=6; the 30 Aug single-call loss does not replicate |
@@ -162,6 +165,197 @@ and overrides the model's prior, which was right about `osr_ambient` on
 WT and wrong about the apparatus settings on LT. A feedback that could
 tell the two apart has to report what each experiment CHANGED, not what
 the estimate has not connected — the "what varied" arm, still unbuilt.
+
+---
+
+## THE CROSS-VENDOR REPLICATION ON `glm-5.3-flash` (2026-09-13, VPS/OpenBLAS, `runs/xv-glm-lt.parquet`, `runs/xv-glm-wt.parquet`): the topology contrasts are a coverage effect whose size is set by the estimator's cap and the model's coverage gap, not by the vendor — and the `shared_blackboard` k=6 control replicates
+
+Pre-registered the night before (section below). 300 cells / $0.48, 0
+errors; LT k=30 × {`llm_pc`, `team`, `team_varsplit`, `one_shot`} × n=50
+and WT k=14 × {`llm_pc`, `team`} × n=50, interleaved, four workers,
+`openrouter/z-ai/glm-5.3-flash` on GMICloud with rotation to Novita
+(132/200 LT cells touched both; both probed fp8 that evening, register
+§38). Re-scored at 9 PC seeds at 300 and 1500 rows
+(`runs/rescored-xv-glm-{lt,wt}-rows{300,1500}*`); DeepSeek's reference
+estimates below are the design-level values from
+`runs/rescored-vps-rows{300,1500}` (the `m7-varsplit` sweep for C1/C2/C5,
+`m7-p2` for C3), not the cell-level numbers in the pre-registration, so
+both vendors are scored the same way. MDEs and CIs are GLM's own.
+
+**Vendor facts first, because they are part of what is replicated.** GLM
+emits **75 output tokens per selection call** at the pipeline's `low`
+effort (DeepSeek flash-0731: ~2,200) and ~1,170 per negotiate call at
+`high` (DeepSeek: ~4,100); cells cost $0.0025–0.0031 (LT) and $0.0005–0.0008
+(WT), 6–8x cheaper than DeepSeek. **1.1–1.5 % of LT picks and 3.1 % of WT
+loop picks fell back to `rng.choice`** (DeepSeek loop: 0; the feedback arm:
+1.8 %) — no truncation (`n_claim_truncated` 0), so these are off-menu or
+empty answers; a bias against every GLM arm equally, reported not
+corrected. Drift audit clean (residual r = +0.11 LT, −0.11 WT, thresholds
+0.21 / 0.31). `one_shot` gave **44 distinct designs from 50 cells**
+(DeepSeek: 6 from 30) — GLM's single call is not a canonical answer.
+
+### The verdicts, design-clustered, 9 seeds
+
+Interval rule as pre-registered: *replicates* if GLM's 95 % CI excludes
+zero on DeepSeek's side; *consistent* if it contains DeepSeek's estimate
+and zero; *fails* if it excludes DeepSeek's estimate.
+
+| contrast | cap | GLM Δ [MDE] verdict, 95 % CI | DeepSeek Δ (design-level) | rule |
+|---|---|---|---|---|
+| C1 `team` − `llm_pc`, LT k=30 | 300 | −0.009 [0.017] tie, [−0.021, +0.004] | −0.051 R− | **fails** |
+| | 1500 | **−0.035 [0.021] R−**, [−0.049, −0.020] | −0.049 R− | **replicates** |
+| C2 `team_varsplit` − `team`, LT k=30 | 300 | +0.007 [0.016] tie, [−0.004, +0.019] | +0.044 R+ | **fails** |
+| | 1500 | **+0.029 [0.020] R+**, [+0.015, +0.043] | +0.061 R+ | **replicates** |
+| C3 `one_shot` − `llm_pc`, LT k=30 | 300 | −0.005 [0.022] tie, [−0.021, +0.011] | +0.005 tie | consistent |
+| | 1500 | −0.037 [0.028] R−, [−0.057, −0.016] | +0.040 R+ | **fails (sign)** |
+| C5 `team` − `llm_pc`, WT k=14 | 300 | +0.006 [0.019] tie, [−0.008, +0.019] | −0.022 tie | fails vs the estimate; both vendors tie |
+| | 1500 | +0.003 [0.021] tie | −0.002 tie | consistent |
+| C4 any GLM arm above the rule, LT k=30 | 300 | all four **resolved below** (−0.028 to −0.036; rule 0.424) | — | **holds** |
+| | 1500 | all four resolved below (−0.047 to −0.083; rule 0.447) | — | **holds** |
+| C6 `team` certified ≥ 67 % | — | **150/150 = 100 %** (LT and WT) | WT 67 % | **holds** |
+
+Skeleton F1 gives the same rows (C1/C2 replicate at 1500 only, C3 fails
+at 1500, C5 tie), with one addition: on the skeleton C3 replicates at 1500
+(both vendors below or tied). Core-20: `one_shot` is **resolved ABOVE the
+loop on both vendors at both caps** (GLM +0.045 / +0.034; DeepSeek −0.007
+tie at 300, +0.042 at 1500) and above the rule at 300 (+0.038, resolved)
+— GLM's single call buys apparatus settings (`t_ir_*`, `t_vis_*` mid, 94 %
+of cells) and 9.1 strong-light entries against the loop's 14.6, which is
+the oracle's own preference (results doc "WHAT THE HEADROOM IS"); it pays
+on the core edges and loses on the 18 apparatus source edges it covers
+least (21.2 distinct variables vs the loop's 25.2).
+
+### Why it fails at 300 and replicates at 1500: the two-factor model, with a cap-specific rate
+
+`predicted gain = coverage exchange rate × variables recovered`
+(`analyze_headroom.py`, first used for the WT `team_varsplit` prediction).
+Re-fitting the rate on the single-backend re-score at each cap
+(LLM-free arms, budget as a fixed effect): **LT 0.0045 ± 0.0003 per
+distinct variable at 300 rows, 0.0131 ± 0.0004 at 1500** — a variable is
+worth 2.9x more once the estimator has enough rows to use it (WT 0.0111 →
+0.0093, flat). Variable gaps per arm (cell level, ± 95 %):
+
+| gap | GLM | DeepSeek (`m7-varsplit`) |
+|---|---|---|
+| `team` − `llm_pc`, LT k=30 | −2.82 ± 0.61 | −4.80 ± 0.74 |
+| `team_varsplit` − `team`, LT k=30 | +2.44 ± 0.67 | +5.47 ± 0.78 |
+| `team` − `llm_pc`, WT k=14 | −0.20 ± 0.41 | — |
+
+Predicted vs measured (design-level, directed F1):
+
+| contrast | cap | predicted | measured | in CI? |
+|---|---|---|---|---|
+| GLM C1 | 300 | −0.013 | −0.009 | yes |
+| GLM C1 | 1500 | −0.037 | −0.035 | yes |
+| GLM C2 | 300 | +0.011 | +0.007 | yes |
+| GLM C2 | 1500 | +0.032 | +0.029 | yes |
+| GLM C5 | 300 / 1500 | −0.002 / −0.002 | +0.006 / +0.003 | yes / yes |
+| DeepSeek C1 | 300 / 1500 | −0.022 / −0.063 | −0.051 / −0.049 | no / yes |
+| DeepSeek C2 | 300 / 1500 | +0.025 / +0.072 | +0.044 / +0.061 | no / yes |
+
+**Six of six GLM predictions land inside the measured CI, at both caps.**
+DeepSeek's two 300-row misses are the residual already reported in M7
+Phase 1 (about a third of `team`'s deficit is coordination, not
+redundancy); at 1500 rows coverage accounts for all of it on both vendors.
+So the non-replication at the cap of record is not a vendor disagreement:
+GLM's loop covers fewer variables (25.2 vs 27.5), its `team` gives up
+fewer (−2.8 vs −4.8) and its `team_varsplit` recovers fewer (+2.4 vs
++5.5), and at 0.0045 per variable those gaps are 0.01 — inside a 0.017
+MDE. At 1500 rows the same gaps are worth 0.03 and resolve, in DeepSeek's
+direction, at 60–70 % of DeepSeek's magnitude. Model record for the
+two-factor model: **8 close, 3 miss** (was 2 close, 1 miss).
+
+### What the paper says now
+
+1. **"Topology is at least as large a lever as model choice" is withdrawn
+   as stated.** The topology contrasts are coverage contrasts; their size
+   is `rate(cap) × gap(model)`. Model choice sets the gap, the estimator
+   sets the rate, and at the cap of record a cheaper model with a smaller
+   gap shows no topology effect at all. State the result as "where a
+   topology changes what gets bought, its effect is predictable from how
+   much it changes coverage, on two vendors at two caps" — and report the
+   cap-of-record ties on GLM in the same table as the DeepSeek verdicts.
+2. **Breadth-beats-depth, rule-beats-every-arm and rule-beats-random are
+   vendor-independent** (C4 at both caps, all four arms resolved below the
+   rule; the rule's lead over the loop on GLM at 300 rows, −0.028, is
+   larger than on DeepSeek, −0.001).
+3. **The record claim survives on a second vendor** at the cap of record
+   (C3 tie) and is a **cap-and-vendor-sensitive** directed-F1 verdict at
+   1500 (DeepSeek +0.040, GLM −0.037). The skeleton and core-20 agree
+   across vendors; the directed disagreement is orientation on the 18
+   apparatus edges `one_shot` covers least. Say "ties at the cap of record
+   on both vendors; the 1500-row directed verdict flips sign with the
+   vendor".
+4. **H-C on a second vendor: 100 %.** The grant was sized on DeepSeek's
+   reasoning (register §33); GLM negotiates at 28 % of the tokens, so the
+   same grant certifies every cell. Report it as: the conservation
+   mechanism is vendor-independent, the calibration is not — a grant
+   sized for one model is loose on a cheaper one and would be tight on a
+   dearer one.
+5. **A cheap replication is not a weak one.** $0.48 for 300 cells with
+   n=50 per arm; the MDEs (0.016–0.022) are tighter than DeepSeek's n=30.
+   Reasoning length as a variance multiplier (register §26) cuts the other
+   way for a short-reasoning model.
+
+### The `shared_blackboard` k=6 control (`runs/m7-blackboard-k6-control.parquet`, DeepSeek flash-0731, 60 cells / $0.11)
+
+Same sweep, same day, n=30 each, re-scored at 9 seeds:
+
+| cap | blackboard − loop | 30 Aug (design-level) | rule |
+|---|---|---|---|
+| 300 | **−0.055 [0.024] R−**, CI [−0.072, −0.038] | −0.058 R− | **replicates** |
+| 1500 | **−0.043 [0.028] R−**, CI [−0.063, −0.023] | −0.047 R− | **replicates** |
+
+Skeleton −0.028 / −0.028 (300 resolved, 1500 on the bound), core-20
+−0.041 / −0.039 (both resolved). The one remaining n=30 LT verdict the
+text leaned on now has its second-day re-run (§35's rule); the sentence
+stays. Blackboard cells cost 1.17x the loop's tokens at k=6 (15,581 vs
+13,296 output tokens) for −0.05 F1.
+
+---
+
+## PRE-REGISTERED (2026-09-12 night, before launch): cross-vendor replication on `glm-5.3-flash`, and the `shared_blackboard` k=6 control
+
+**Cross-vendor (`runs/xv-glm-lt.parquet`, `runs/xv-glm-wt.parquet`).**
+`openrouter/z-ai/glm-5.3-flash`, provider order re-pinned by price among
+probed fp8 endpoints (GMICloud, Novita, Z.AI; the precision table is now
+keyed by (provider, model) because DeepInfra serves this model at fp4 and
+DeepSeek's at fp8). One-cell smoke: 6 calls, 0 fallbacks, GMICloud, ~24
+output tokens per call at the pipeline's `low` selection effort (DeepSeek
+emits thousands) — a vendor difference that is part of what is being
+replicated, not a confound to remove. LT k=30 × {`llm_pc`, `team`,
+`team_varsplit`, `one_shot`} × n=50 (200 cells); WT k=14 × {`llm_pc`,
+`team`} × n=50 (100 cells); interleaved; VPS, four workers. MDEs from
+GLM's OWN cells (reasoning length is a variance multiplier; DeepSeek's
+bounds do not transfer — register §26). Re-scored at 9 seeds at 300 and
+1500 rows as usual; `team`'s conservation grants stay DeepSeek-calibrated
+and its certification rate is reported as a second-vendor H-C measurement.
+
+Decision rule per contrast, keyed on GLM's 95 % CI against DeepSeek's
+point estimate: *replicates* if the CI excludes zero on DeepSeek's side;
+*consistent* if it contains DeepSeek's estimate and zero; *fails* if it
+excludes DeepSeek's estimate on the far side of zero.
+
+- **C1** `team` − `llm_pc`, LT k=30: DeepSeek −0.048 (resolved). Predict
+  negative.
+- **C2** `team_varsplit` − `team`, LT k=30: DeepSeek +0.043 (resolved).
+  Predict positive.
+- **C3** `one_shot` − `llm_pc`, LT k=30: DeepSeek tie (+0.003 at 300
+  rows). Predict tie; selection-level analysis (distinct designs) as §24.
+- **C4** No GLM arm resolves above the coverage rule (0.437 at LT k=30,
+  fresh seeds).
+- **C5** `team` − `llm_pc`, WT k=14: DeepSeek −0.047 (resolved). Predict
+  negative.
+- **C6** `team` conservation certified ≥ 67 % (DeepSeek's WT rate) — no
+  prediction beyond that; the grant was sized on DeepSeek's reasoning.
+
+**`shared_blackboard` k=6 control (`runs/m7-blackboard-k6-control.parquet`).**
+The one resolved n=30 LT verdict the text still leans on that never got
+its §35 re-run: `shared_blackboard` − `llm_pc` at LT k=6 = −0.057 (30 Aug,
+cell level). DeepSeek `flash-0731`, LT k=6, n=30 each, same sweep as a fresh
+loop. Prediction: negative; *replicates* if the 9-seed design-clustered CI
+excludes zero on the negative side, *did not replicate* (and the sentence
+goes) if the CI excludes −0.057 and contains zero.
 
 ---
 

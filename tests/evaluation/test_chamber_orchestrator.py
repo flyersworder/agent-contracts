@@ -938,21 +938,37 @@ class TestCountingLLM:
         exist precisely because the endpoint ranking differs by model, so a
         new one is exactly where an unchecked precision class would enter.
         """
-        precision = _CountingLLM.PROVIDER_PRECISION
-        orders = {"<default>": _CountingLLM.DEFAULT_PROVIDER_ORDER}
-        orders.update(_CountingLLM.PROVIDER_ORDER_BY_MODEL)
-        for label, order in orders.items():
+        # Precision belongs to the (provider, MODEL) pair: on 2026-09-12
+        # DeepInfra served deepseek-v4-flash at fp8 and glm-5.3-flash at fp4,
+        # GMICloud the reverse. A provider-keyed table cannot hold both, so
+        # every model's order is checked against that model's own table.
+        by_model = _CountingLLM.PROVIDER_PRECISION_BY_MODEL
+        orders = dict(_CountingLLM.PROVIDER_ORDER_BY_MODEL)
+        assert _CountingLLM.DEFAULT_PROVIDER_ORDER in orders.values()
+        for model, order in orders.items():
+            assert model in by_model, f"{model} has a pinned order but no precision table"
+            precision = by_model[model]
             classes = set()
             for provider in order:
                 assert provider in precision, (
-                    f"{provider} is pinned for {label} but has no recorded "
-                    "precision class; add it to PROVIDER_PRECISION from "
-                    "GET /models/{id}/endpoints"
+                    f"{provider} is pinned for {model} but has no recorded "
+                    "precision class for that model; add it to "
+                    "PROVIDER_PRECISION_BY_MODEL from GET /models/{id}/endpoints"
                 )
                 classes.add(precision[provider])
-            assert len(classes) == 1, (
-                f"order for {label} mixes precision classes: { {p: precision[p] for p in order} }"
+            assert classes == {"fp8"}, (
+                f"order for {model} is not all-fp8: { {p: precision[p] for p in order} }"
             )
+
+    def test_precision_tables_disagree_across_models_where_measured(self) -> None:
+        """The reason the table is model-keyed: the same provider serves two
+        models at different precisions. Pins the two measured cases so a
+        future 'simplification' back to a provider-keyed table fails here."""
+        by_model = _CountingLLM.PROVIDER_PRECISION_BY_MODEL
+        assert by_model["deepseek-v4-flash-0731"]["DeepInfra"] == "fp8"
+        assert by_model["glm-5.3-flash"]["DeepInfra"] == "fp4"
+        assert by_model["deepseek-v4-flash-0731"]["GMICloud"] == "fp4"
+        assert by_model["glm-5.3-flash"]["GMICloud"] == "fp8"
 
     def test_a_dated_snapshot_does_not_inherit_its_family_pin(self) -> None:
         """`deepseek-v4-pro-0813` is not served by Baidu at all, and

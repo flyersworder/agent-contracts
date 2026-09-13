@@ -1287,6 +1287,33 @@ two models. Headlines, with the detail and the caveats in the results doc:
   loop degrades — the loop saturates at F1 ≈ 0.42 by k=30.
 - **The contract is a floor on effort, not only a ceiling on spend.**
 - **Topology is at least as large a lever as model choice, and cheaper.**
+  **WITHDRAWN AS STATED 2026-09-13 (cross-vendor replication on
+  `glm-5.3-flash`, 300 cells / $0.48, results doc "THE CROSS-VENDOR
+  REPLICATION").** At the cap of record NONE of the three DeepSeek topology
+  contrasts resolves on GLM (team − loop −0.009, varsplit − team +0.007, WT
+  team − loop +0.006; all ties, CIs exclude DeepSeek's estimates); at 1500
+  rows C1/C2 REPLICATE (−0.035 / +0.029, resolved, DeepSeek's direction at
+  60–70 % of its size). The two-factor model explains both: the coverage
+  exchange rate is CAP-SPECIFIC (LT 0.0045 per distinct variable at 300
+  rows, **0.0131 at 1500**, single-backend re-fit) and GLM's coverage gaps
+  are smaller (team − loop −2.8 variables vs DeepSeek's −4.8; varsplit −
+  team +2.4 vs +5.5) — rate × gap lands inside the measured CI for **all
+  six GLM predictions at both caps**. So the topology effect is
+  `rate(estimator cap) × gap(model)`; a cheaper model with a smaller gap
+  shows none at the cap of record. What IS vendor-independent: no LLM arm
+  beats the coverage rule (C4, all four GLM arms resolved below at both
+  caps), `one_shot` ties the loop at the cap of record (C3; its 1500-row
+  directed verdict flips sign with the vendor, +0.040 vs −0.037, skeleton
+  and core-20 agree — GLM's single call gives 44 distinct designs in 50
+  cells, DeepSeek's 6 in 30), and conservation certifies **100 %** on GLM
+  under DeepSeek-sized grants (GLM negotiates at 28 % of the tokens: the
+  mechanism is vendor-independent, the calibration is not). GLM facts: 75
+  output tokens per selection call at `low` effort, 1–3 % of picks fall
+  back to `rng.choice` (DeepSeek 0), drift clean, 6–8x cheaper per cell,
+  MDEs tighter than DeepSeek's at n=50. The `shared_blackboard` k=6
+  control (60 cells, same day) replicates the 30 Aug −0.057 at both caps
+  (−0.055 / −0.043, resolved). Register §38: provider precision drifted
+  per (provider, model) and was caught the evening before launch.
 - The aggregator is **inert by measurement**, not by omission (30/30 cells).
 - **The running record is not load-bearing** (M7 Phase 2, 2026-08-31, 960
   cells). `one_shot` — ONE call picking all k experiments, no record at all —
@@ -1520,9 +1547,9 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-12 evening (WT feedback reversal traced to a session shift, register §36/§37; effect feedback loses on LT; learnability closed)*
+*Last Updated: 2026-09-13 (cross-vendor replication on GLM: topology contrasts are rate(cap) × gap(model); blackboard k=6 control replicates; register §38)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
-*Chamber corpus: two chambers, two models, ~12.5k cells — see `docs/chamber-results.md`*
-*Next: AAMAS 2027 main track (abstract 1 Oct, paper 8 Oct 2026; skeleton in `paper/aamas2027/`, untracked). Adaptive-feedback arm run at LT k=30 and replicated-in-reverse on WT (spec §8.7 row 7); cross-vendor replication (~$25) and the LT budget ends are the remaining optional experiments*
+*Chamber corpus: two chambers, three models, 19,164 cells / $145.69 — see `docs/chamber-results.md`*
+*Next: AAMAS 2027 main track (abstract 1 Oct, paper 8 Oct 2026; skeleton in `paper/aamas2027/`, untracked). Adaptive-feedback arm run at LT k=30 and replicated-in-reverse on WT (spec §8.7 row 7); cross-vendor replication DONE 13 Sep ($0.48); the LT budget ends remain optional; next is the draft*
