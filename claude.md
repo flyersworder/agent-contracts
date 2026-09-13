@@ -1321,7 +1321,9 @@ two models. Headlines, with the detail and the caveats in the results doc:
   rows, **0.0131 at 1500**, single-backend re-fit) and GLM's coverage gaps
   are smaller (team − loop −2.8 variables vs DeepSeek's −4.8; varsplit −
   team +2.4 vs +5.5) — rate × gap lands inside the measured CI for **all
-  six GLM predictions at both caps**. So the topology effect is
+  six GLM predictions at both caps** (full record over eleven: 8
+  inside, 1 on the bound, 2 outside — the 13 Sep correction from the
+  unrounded intervals; on point estimates WT k=14 is a third miss). So the topology effect is
   `rate(estimator cap) × gap(model)`; a cheaper model with a smaller gap
   shows none at the cap of record. What IS vendor-independent: no LLM arm
   beats the coverage rule (C4, all four GLM arms resolved below at both
