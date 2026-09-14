@@ -314,6 +314,62 @@ stays. Blackboard cells cost 1.17x the loop's tokens at k=6 (15,581 vs
 
 ---
 
+## PRE-REGISTERED (2026-09-14, before launch): `blackboard_feedback` — the co-author's ring, LT k=30
+
+**Why.** On 14 Sep a co-author sketched the multi-agent design they expected
+to beat a single agent: two agents in a ring, each selecting against the
+remaining budget and passing its output plus state (budget used, an accuracy
+signal) to the other. Every piece exists across two arms — the ring with a
+shared record is `shared_blackboard`, the state passed back is
+`adaptive_feedback` — but the two were never combined. `blackboard_feedback`
+is the combination: two role voices alternating over ONE record and ONE PC
+estimate of the pooled data, recomputed every 5 purchases and read by both.
+The board now holds picks *and* the current conclusion. Implemented as
+`shared_blackboard_agents(feedback_interval=5)`; with the interval unset the
+arm is byte-identical to the 30 Aug blackboard (tests pin both).
+
+**Design.** `runs/m7-blackboard-feedback-lt.parquet`. LT `standard`, k=30,
+DeepSeek `flash-0731`, n=30 per arm, four arms interleaved in one sweep on
+the VPS (four workers, 5400 s timeout): `blackboard_feedback`,
+`shared_blackboard`, `adaptive_feedback`, `llm_pc`. The coverage rule needs
+no LLM and is re-scored on the same backend at the same seeds. Re-scored at
+9 PC seeds, clustered by distinct design, at 300 and 1500 rows; directed,
+skeleton and core-20. About 120 cells, ~$13 at 12 Sep prices (loop $0.108,
+feedback $0.096 per cell; the "$2" quoted to the co-authors was a GLM-era
+figure and is withdrawn here).
+
+**Predictions, from the coverage law** (rate × gap: the state the ring shares
+is coverage, so it can reach the coverage optimum and no further):
+
+- **B1** `blackboard_feedback` − coverage rule, directed F1: **≤ 0** at both
+  caps (95 % CI contains zero or lies below it). *Falsified* if the CI
+  excludes zero on the positive side at either cap — that would be the first
+  arm to beat the rule, and the headline would change.
+- **B2** feedback is additive over topology: `blackboard_feedback` −
+  `shared_blackboard` ≈ `adaptive_feedback` − `llm_pc` measured in the same
+  sweep (the 12 Sep values were +0.012 at 300 rows, +0.032 at 1500). *Holds*
+  if the CI of the first contrast contains the point estimate of the second.
+- **B3** topology cost is additive over feedback: `blackboard_feedback` −
+  `adaptive_feedback` ≈ `shared_blackboard` − `llm_pc` in the same sweep
+  (12 Sep / 30 Aug: −0.019 at 300 rows, tie at 1500). Same rule.
+- **B4** the ring buys at least as many distinct variables as
+  `adaptive_feedback` (cell level, mean), because the feedback nominates every
+  unbought variable to both voices.
+
+Decision rules are keyed on intervals, never on a significance threshold
+(the 2 Sep lesson). Every outcome is reported: B1 holding is the paper's
+prediction confirmed on the co-author's own design; B1 failing is a better
+paper.
+
+**Threats.** Same-day controls guard against reasoning drift (§32); the
+arm's per-call tokens are unmeasured, so no conservation figure is quoted
+for it (it runs under `_maybe_node`, no delegation graph, as the blackboard
+does). Temperature unpinned, as everywhere. n=30 resolves ~0.012 at LT k=30
+design level; a true additive gain of +0.012 (B2) sits on that bound, so B2
+may read "consistent" rather than "holds" — reported as such.
+
+---
+
 ## PRE-REGISTERED (2026-09-12 night, before launch): cross-vendor replication on `glm-5.3-flash`, and the `shared_blackboard` k=6 control
 
 **Cross-vendor (`runs/xv-glm-lt.parquet`, `runs/xv-glm-wt.parquet`).**
