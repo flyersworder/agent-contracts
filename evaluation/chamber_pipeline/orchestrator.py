@@ -337,6 +337,18 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         # accordingly, exactly as `critique` does.
         kind="llm_multi",
     ),
+    # Pre-registered 2026-09-14: the blackboard whose board also carries the
+    # current PC estimate, read by both voices -- shared picks AND shared
+    # conclusions, the ring a co-author proposed. Same interval as the
+    # single-agent feedback arm so the two are comparable.
+    AgentSpec(
+        name="blackboard_feedback",
+        run=shared_blackboard_agents,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_multi",
+        static_kwargs=MappingProxyType({"feedback_interval": 5}),
+    ),
     AgentSpec(
         name="fan_in_homog",
         run=fan_in_agents,

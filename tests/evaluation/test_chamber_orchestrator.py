@@ -109,7 +109,7 @@ class TestAgentRegistry:
         the two shared-record arms, the two coverage-manipulation arms, the
         adaptive-feedback arm (spec §8.7 row 7) and the menu-shuffled
         single-call arm (register §24)."""
-        assert len(AGENT_REGISTRY) == 23
+        assert len(AGENT_REGISTRY) == 24
 
     def test_registry_names_are_unique(self) -> None:
         names = [s.name for s in AGENT_REGISTRY]
@@ -145,6 +145,7 @@ class TestAgentRegistry:
                 "shared_blackboard",
                 "adaptive_feedback",
                 "effect_feedback",
+                "blackboard_feedback",
                 "one_shot_shuffle",
             ]
         )

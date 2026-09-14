@@ -1845,8 +1845,18 @@ def shared_blackboard_agents(
     pc_alpha: float = 0.05,
     *,
     llm: LLMCallable | None = None,
+    feedback_interval: int | None = None,
 ) -> pd.DataFrame:
     """Two voices alternating over ONE complete shared record — the axis's top.
+
+    With ``feedback_interval`` set this is the ``blackboard_feedback`` arm
+    (pre-registered 2026-09-14): the board also carries the current PC
+    estimate of the pooled data, recomputed every ``feedback_interval``
+    purchases exactly as `adaptive_feedback_agent` does, and BOTH voices read
+    it. Two agents sharing their picks and their current conclusion in real
+    time is the ring a co-author proposed; the coverage law predicts it lands
+    on the coverage rule and not above it, because the state it shares is
+    coverage. ``None`` leaves the arm byte-identical to the 30 Aug version.
 
     The ladder orders its rungs by how much of the loop's running record
     survives the partition. Every multi-agent rung until now destroys some of
@@ -1902,12 +1912,45 @@ def shared_blackboard_agents(
         return _empty_adjacency(nodes)
     llm = llm or _default_llm()
 
-    voices = (
-        ("voice_a", build_scout_broad_prompt),
-        ("voice_b", build_scout_targeted_prompt),
-    )
     record: list[str] = []
     dfs: list[pd.DataFrame] = []
+    feedback_fn: FeedbackFn | None = None
+    voices: tuple[tuple[str, PromptBuilder], tuple[str, PromptBuilder]]
+    if feedback_interval is not None:
+        from evaluation.chamber_pipeline.llm_planner import with_feedback_block
+
+        voices = (
+            ("voice_a", with_feedback_block(build_scout_broad_prompt)),
+            ("voice_b", with_feedback_block(build_scout_targeted_prompt)),
+        )
+        last_text: list[str | None] = [None]
+        last_at: list[int] = [0]
+
+        def _board_feedback(_chosen: list[str], _dfs: list[pd.DataFrame]) -> str | None:
+            # Each turn is its own one-pick `_llm_select_loop`, whose own
+            # `chosen`/`dfs` are empty; the estimate is of the SHARED board.
+            if dfs and len(dfs) % feedback_interval == 0 and last_at[0] != len(dfs):
+                dropped: dict[str, list[str]] = {}
+                estimate = run_pc(
+                    pool_experiment_data(dfs, nodes),
+                    nodes,
+                    alpha=pc_alpha,
+                    seed=seed,
+                    dropped_out=dropped,
+                )
+                last_text[0] = summarize_estimate(
+                    estimate, menu, record, nodes, collinear_dropped=dropped.get("collinear", ())
+                )
+                last_at[0] = len(dfs)
+            return last_text[0]
+
+        feedback_fn = _board_feedback
+    else:
+        voices = (
+            ("voice_a", build_scout_broad_prompt),
+            ("voice_b", build_scout_targeted_prompt),
+        )
+    builder: PromptBuilder
     for step in range(min(budget, len(menu))):
         node, builder = voices[step % 2]
         with _maybe_node(adapter, node):
@@ -1923,6 +1966,7 @@ def shared_blackboard_agents(
                 spend=1,
                 starting_chosen=record,
                 prompt_builder=builder,
+                feedback_fn=feedback_fn,
             )
         if not picked:
             # The menu is exhausted, or the adapter refused the purchase. Either

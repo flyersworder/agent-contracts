@@ -32,10 +32,13 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # Maximum number of menu entries to pretty-print in the selection prompt
 # before truncating with an ellipsis note. LT's menu is 59 entries, well
@@ -217,14 +220,39 @@ def build_feedback_select_prompt(
     exclusive (this prompt contains the select marker), and the arm issues
     no other kind of call, so per-arm attribution loses nothing.
     """
-    base = build_select_prompt(menu, remaining_budget, already_chosen)
-    block = (
-        f"{FEEDBACK_HEADER}:\n{feedback.strip()}\n\n"
-        if feedback
-        else f"{FEEDBACK_HEADER}: (no estimate yet)\n\n"
+    return with_feedback_block(build_select_prompt)(
+        menu, remaining_budget, already_chosen, feedback
     )
-    base[1] = {"role": "user", "content": block + base[1]["content"]}
-    return base
+
+
+def with_feedback_block(
+    builder: Callable[[list[str], int, list[str] | None], list[dict[str, str]]],
+) -> Callable[[list[str], int, list[str] | None, str | None], list[dict[str, str]]]:
+    """Give any selection prompt builder the feedback arm's `feedback=` slot.
+
+    The block is prepended to the USER message and the system message is left
+    alone, so a role prompt (`build_scout_broad_prompt`, ...) keeps its brief
+    and its call-kind marker while gaining the estimate. `feedback=None`
+    renders the "(no estimate yet)" header, exactly as the single-agent
+    feedback arm does before its first interval.
+    """
+
+    def build(
+        menu: list[str],
+        remaining_budget: int,
+        already_chosen: list[str] | None = None,
+        feedback: str | None = None,
+    ) -> list[dict[str, str]]:
+        base = builder(menu, remaining_budget, already_chosen)
+        block = (
+            f"{FEEDBACK_HEADER}:\n{feedback.strip()}\n\n"
+            if feedback
+            else f"{FEEDBACK_HEADER}: (no estimate yet)\n\n"
+        )
+        base[1] = {"role": "user", "content": block + base[1]["content"]}
+        return base
+
+    return build
 
 
 # ---------------------------------------------------------------------------
