@@ -409,6 +409,22 @@ and at the higher cap it subtracted.
 feedback 0.83 (2.8 %), loop 0.03, blackboard 0. Biases against the feedback
 arms; not corrected.
 
+**Under the never-pooled estimator the ring is nothing (same night, $0,
+`runs/rescored-bbfb-lt-utigsp*.parquet`, VPS, alpha 1e-4, 1,000-row cap,
+3 seeds, core-20).** All four arms of the sweep sit at 0.637–0.641 and the
+rule at 0.642: ring − loop −0.0015 [MDE 0.0039], ring − feedback −0.0025
+[0.0034], ring − blackboard +0.0022 [0.0053], ring − rule −0.0030 [0.0031],
+every one a tie. So the ring's +0.018 at 300 rows and its −0.052 at 1500
+are both properties of PC on pooled data: what the ring buys differently
+(fewer distinct variables, fewer strong regimes, more repeats) only matters
+to a judge that pools regimes, and a judge that does not pool cannot tell
+the co-author's design from one loop or from the ten-line rule. (A first
+pass at the default alpha 0.05 read every arm at 0.50–0.52 against a 0.64
+rule scored at 1e-4 — a settings mismatch, not a result; UT-IGSP's alpha is
+a nuisance parameter and the calibrated value is 1e-4, results doc "the
+estimator that never pools".) GES at 1500 rows is running and will be
+appended.
+
 **Open ($0, not done tonight):** which of the three composition differences
 (strength mix, `osr` share, repeats) carries the 1500-row loss — an
 add-one-entry probe on fixed designs, as for `osr_ambient` in register §36.
