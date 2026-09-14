@@ -1321,7 +1321,9 @@ two models. Headlines, with the detail and the caveats in the results doc:
   rows, **0.0131 at 1500**, single-backend re-fit) and GLM's coverage gaps
   are smaller (team − loop −2.8 variables vs DeepSeek's −4.8; varsplit −
   team +2.4 vs +5.5) — rate × gap lands inside the measured CI for **all
-  six GLM predictions at both caps**. So the topology effect is
+  six GLM predictions at both caps** (full record over eleven: 8
+  inside, 1 on the bound, 2 outside — the 13 Sep correction from the
+  unrounded intervals; on point estimates WT k=14 is a third miss). So the topology effect is
   `rate(estimator cap) × gap(model)`; a cheaper model with a smaller gap
   shows none at the cap of record. What IS vendor-independent: no LLM arm
   beats the coverage rule (C4, all four GLM arms resolved below at both
@@ -1560,6 +1562,19 @@ that document's final section. Harness defects stay in
   (`one_shot` ties the loop), and their 260 configurations are single
   passes with no repeat runs. The blog's 180 / four benchmarks / R² 0.513
   are v1 figures; quote the paper's 260 / six / 0.373.
+  `2026-09-13-tran-kiela-equal-thinking-budgets.md` (arXiv 2604.02460) is
+  the **second** independent matched-budget result with our sign — thinking
+  tokens held constant, single agent matches or beats every team, and
+  API-level budget controls carry artefacts (our §25/§32 from the other
+  side). Three denominators (total tokens, thinking tokens, certified
+  experiments), one sign; three mechanisms offered (fragmentation, context
+  utilisation, duplicated coverage) — `one_shot` tying the loop rules the
+  first two out on OUR task, say no more than that.
+  `2026-09-13-causalab-interactive-causal-discovery.md` (arXiv 2605.26029)
+  is the closest published TASK: an LLM agent intervenes under a budget on
+  a sampled SCM and is scored on the recovered mechanism. Cite it as the
+  causal-discovery benchmark our coordination benchmark is not. Both notes
+  are abstract-level only; read the bodies before quoting a number.
 - **Harness validity register**: `docs/chamber-harness-validity-register.md`
 - **Whitepaper**: `docs/whitepaper.md`
 - **Testing Strategy**: `docs/testing-strategy.md`

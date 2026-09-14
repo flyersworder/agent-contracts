@@ -251,20 +251,29 @@ Predicted vs measured (design-level, directed F1):
 | GLM C2 | 300 | +0.011 | +0.007 | yes |
 | GLM C2 | 1500 | +0.032 | +0.029 | yes |
 | GLM C5 | 300 / 1500 | −0.002 / −0.002 | +0.006 / +0.003 | yes / yes |
-| DeepSeek C1 | 300 / 1500 | −0.022 / −0.063 | −0.051 / −0.049 | no / yes |
+| DeepSeek C1 | 300 / 1500 | −0.022 / −0.063 | −0.051 / −0.049 | no / on the bound |
 | DeepSeek C2 | 300 / 1500 | +0.025 / +0.072 | +0.044 / +0.061 | no / yes |
 
 **Six of six GLM predictions land inside the measured CI, at both caps.**
 DeepSeek's two 300-row misses are the residual already reported in M7
 Phase 1 (about a third of `team`'s deficit is coordination, not
 redundancy); at 1500 rows coverage accounts for all of it on both vendors.
+**Correction (2026-09-13, while drawing the paper's Fig. 3 from the
+unrounded intervals):** DeepSeek C1 at 1500 rows is predicted −0.0629
+against a lower bound of −0.0628 — on the boundary, not inside; and the
+pre-registered WT k=14 point (+0.010 predicted, −0.000 measured) IS
+inside its ±0.016 interval, a miss on the point estimate only. Full
+record under the interval rule over eleven predictions: **8 inside, 1 on
+the bound, 2 outside** (DeepSeek LT k=30 at 300 rows, both contrasts).
 So the non-replication at the cap of record is not a vendor disagreement:
 GLM's loop covers fewer variables (25.2 vs 27.5), its `team` gives up
 fewer (−2.8 vs −4.8) and its `team_varsplit` recovers fewer (+2.4 vs
 +5.5), and at 0.0045 per variable those gaps are 0.01 — inside a 0.017
 MDE. At 1500 rows the same gaps are worth 0.03 and resolve, in DeepSeek's
 direction, at 60–70 % of DeepSeek's magnitude. Model record for the
-two-factor model: **8 close, 3 miss** (was 2 close, 1 miss).
+two-factor model over eleven predictions: **8 inside the interval, 1 on
+its bound, 2 outside** (see the correction above; on point estimates the
+pre-registered WT k=14 zero is a third miss).
 
 ### What the paper says now
 
