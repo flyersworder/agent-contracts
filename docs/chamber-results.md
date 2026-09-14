@@ -10,7 +10,7 @@ before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-13**: 19,164 cells, **$145.69**, **zero errored cells**, (2026-09-12 evening read 18,804 / $145.10; the GLM cross-vendor replication adds 300 cells / $0.48 and the `shared_blackboard` k=6 control 60 / $0.11)
+**Corpus as of 2026-09-14**: 19,284 cells, **$158.58**, **zero errored cells**, (2026-09-13 read 19,164 / $145.69; 2026-09-12 evening read 18,804 / $145.10; the GLM cross-vendor replication adds 300 cells / $0.48 and the `shared_blackboard` k=6 control 60 / $0.11)
 across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
 LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The table below is
@@ -49,6 +49,7 @@ the arithmetic of record.)
 | `runs/m7-effect-lt.parquet` | 90 | $12.16 | `effect_feedback` vs `adaptive_feedback` vs `llm_pc`, LT k=30, n=30 each, same day (pre-registered; E1 refuted, coverage − loop replicates); re-scored in `runs/rescored-effect-lt-rows{300,1500}*` |
 | `runs/xv-glm-lt.parquet` | 200 | $0.42 | cross-vendor, `glm-5.3-flash`: LT k=30 × {`llm_pc`, `team`, `team_varsplit`, `one_shot`} × n=50 (pre-registered C1–C4; C1/C2 fail at 300 rows and replicate at 1500, C4 holds); re-scored in `runs/rescored-xv-glm-lt-rows{300,1500}*` |
 | `runs/xv-glm-wt.parquet` | 100 | $0.06 | cross-vendor, `glm-5.3-flash`: WT k=14 × {`llm_pc`, `team`} × n=50 (C5 tie on both vendors, C6 100 % certified); re-scored in `runs/rescored-xv-glm-wt-rows{300,1500}*` |
+| `runs/m7-blackboard-feedback-lt.parquet` | 120 | $12.89 | `blackboard_feedback` (the co-author's ring: two voices, one record, one shared PC estimate) vs same-sweep `shared_blackboard`, `adaptive_feedback`, `llm_pc`, LT k=30, n=30, flash-0731 (pre-registered 2026-09-14; B1 fails at 300 rows on the CI rule and holds at 1500; B2/B3 hold at 300, fail at 1500; B4 fails); re-scored in `runs/rescored-bbfb-lt-rows{300,1500}*` |
 | `runs/m7-blackboard-k6-control.parquet` | 60 | $0.11 | same-day `shared_blackboard` + `llm_pc` at LT k=6, DeepSeek flash-0731: the 30 Aug −0.057 replicates (−0.055 / −0.043 at 300 / 1500 rows) |
 | `runs/m7-oneshot-shuffle-lt.parquet` | 90 | $0.57 | `one_shot_shuffle`, LT k=6/30/45: menu order per seed does not diversify k=30 |
 | `runs/m7-oneshot-k6-control.parquet` | 60 | $0.17 | same-day `one_shot` + `one_shot_shuffle` at LT k=6, interleaved |
@@ -311,6 +312,106 @@ Skeleton −0.028 / −0.028 (300 resolved, 1500 on the bound), core-20
 text leaned on now has its second-day re-run (§35's rule); the sentence
 stays. Blackboard cells cost 1.17x the loop's tokens at k=6 (15,581 vs
 13,296 output tokens) for −0.05 F1.
+
+---
+
+## THE CO-AUTHOR'S RING IS THE BEST ARM AT THE CAP OF RECORD AND THE WORST LLM ARM AT 1500 ROWS (2026-09-14, VPS/OpenBLAS, `runs/m7-blackboard-feedback-lt.parquet`, 120 cells / $12.89, pre-registered below)
+
+**What ran.** `blackboard_feedback` — two role voices alternating over one
+shared record AND one shared PC estimate of the pooled data, recomputed every
+5 purchases (`shared_blackboard_agents(feedback_interval=5)`) — against
+same-sweep `shared_blackboard`, `adaptive_feedback` and `llm_pc`. LT k=30,
+DeepSeek `flash-0731`, n=30 per arm, four arms interleaved, four workers,
+3.8 h, 120/120 ok, 0 PC degeneracies, drift audit CLEAN (arms overlap in
+time 0.99, residual r −0.048). Re-scored at 9 PC seeds, design-clustered
+(30 distinct designs per arm), at 300 and 1500 rows. The coverage rule is
+the `rescored-vps` designs at the same cap (0.4243 / 0.4475).
+
+**Arm means, design level (directed / skeleton / core-20):**
+
+| arm | 300 rows | 1500 rows | distinct variables | strong light buys | `osr` buys | repeated variables | tokens/cell |
+|---|---|---|---|---|---|---|---|
+| loop | 0.419 / 0.469 / 0.221 | 0.411 / 0.525 / 0.221 | 27.8 | 2.4 | 3.7 | 2.2 | 101k |
+| shared blackboard | 0.431 / 0.489 / 0.229 | 0.404 / 0.498 / 0.235 | 27.1 | 1.3 | 4.0 | 2.9 | 119k |
+| coverage feedback | 0.435 / 0.488 / 0.219 | **0.442** / **0.546** / **0.250** | 26.4 | 1.7 | 5.6 | 3.6 | 95k |
+| **ring** (`blackboard_feedback`) | **0.437** / **0.500** / 0.222 | 0.396 / 0.510 / 0.239 | **25.0** | 1.2 | 5.9 | 5.0 | 104k |
+| coverage rule | 0.424 / 0.474 / 0.218 | 0.447 / 0.526 / 0.249 | 30 | 0 | — | 0 | 0 |
+
+**The pre-registered verdicts** (directed F1 unless stated; 95 % Welch CI;
+MDE = 2.8·pooled sd·√(1/n_a+1/n_b)):
+
+- **B1 (ring − rule ≤ 0).** 300 rows: **+0.0131 [MDE 0.0138], CI [+0.003,
+  +0.023]** — the CI excludes zero on the positive side, so **B1 FAILS by the
+  registered rule** at the cap of record; under the pillar's 2.8σ bar it is
+  a tie by 0.0007, and on the skeleton it is **resolved above the rule
+  (+0.027, MDE 0.019)**. Core-20 tie (+0.004). 1500 rows: **−0.052 [0.019],
+  resolved below** — **B1 HOLDS**, and the ring is the lowest LLM arm at that
+  cap. Both are reported; the registered rule was the interval, so the
+  record is one fail (300) and one hold (1500).
+- **B2 (feedback additive over topology).** 300: ring − blackboard +0.006
+  [−0.007, +0.019] contains feedback − loop (+0.016): **holds**. 1500: −0.008
+  [−0.026, +0.010] does NOT contain +0.031: **fails** — at 1500 rows the
+  feedback that lifts the loop by +0.031 lifts the blackboard by nothing.
+- **B3 (topology cost additive over feedback).** 300: ring − feedback +0.003
+  [−0.007, +0.012] contains blackboard − loop (+0.012): **holds** (on the
+  bound). 1500: **−0.046 [−0.061, −0.031]** does not contain −0.007:
+  **fails** — the ring pays a topology cost the plain blackboard does not.
+- **B4 (ring buys ≥ feedback's distinct variables).** **Fails, resolved:**
+  25.0 vs 26.4 (−1.4, MDE 0.8); the ring also buys 2.8 fewer than the loop.
+  Two voices reading one coverage summary do NOT raise coverage; they
+  converge on depth (5.0 repeated variables vs 2.2).
+
+**What the ring buys differently** (cell level, per 30 picks): fewer strong
+light-source experiments than the loop (1.2 vs 2.4), fewer strong entries of
+any kind (14.6 vs 17.5), more `osr` settings (5.9 vs 3.7), more repeats of a
+variable already bought (5.0 vs 2.2). That composition is why it wins at 300
+rows and loses at 1500: fewer strong pooled regimes is the mechanism of
+"WHY STRONG INTERVENTIONS HURT", and depth on sensor settings is the shape
+of the 300-row oracle; but the coverage exchange rate nearly triples at 1500
+(0.0045 → 0.0131 per variable) and 2.8 fewer distinct variables than the
+loop then costs more than the strength mix returns.
+
+**The coverage law does NOT cover this arm, and the paper must say so.**
+Rate × gap for its three contrasts: ring − loop predicted −0.013 / −0.037,
+measured **+0.018 [+0.009, +0.028] / −0.015 [−0.030, +0.001]** (outside,
+outside); ring − feedback −0.006 / −0.018, measured +0.003 [−0.007, +0.012]
+/ **−0.046 [−0.061, −0.031]** (inside, outside); ring − blackboard −0.009 /
+−0.027, measured +0.006 [−0.007, +0.019] / −0.008 [−0.026, +0.010] (inside,
+outside by 0.001). **2 of 6 inside.** The law was fitted on LLM-free arms
+that differ in coverage only, and every prediction in the paper's Table 4
+is a topology contrast between arms with the same feedback (none). A
+feedback signal changes the strength mix and the repeat rate as well as
+the coverage, and the law has no term for either. Scope sentence for the
+paper: *the law predicts topology contrasts at fixed information; it does
+not predict what a feedback signal does, because feedback changes what is
+bought along more than one axis.* The eleven-prediction record in Table 4
+is unchanged; these six are not topology contrasts and are not added to it.
+
+**Replications inside the sweep.** coverage feedback − loop: +0.016 [0.011]
+at 300 (12 Sep: +0.012), **+0.031 [0.018] at 1500** (12 Sep: +0.032) —
+replicates a third time. coverage feedback − rule: +0.010 [0.011] at 300
+(CI excludes zero, p = 0.011; 9 Sep read +0.008), −0.006 tie at 1500, and
+**+0.020 resolved above the rule on the skeleton at 1500** — the first arm
+resolved above the rule on any metric at the high cap; directed and core-20
+tie. blackboard − loop: +0.012 tie at 300, −0.007 tie at 1500 (30 Aug: −0.019
+resolved at 300; the middle-budget blackboard loss did not replicate on this
+day — third same-day re-run to move a resolved n=30 verdict to a tie).
+
+**For the co-authors, in one sentence.** The design they proposed is the best
+arm we have at the cap of record and edges the ten-line rule there
+(resolved on the skeleton, on the bound on directed), and it is the worst
+LLM arm at 1500 rows, 0.05 below the rule; the single-agent feedback loop is
+at least as good at both caps for fewer tokens, so real-time sharing between
+two agents added nothing the estimate-in-the-prompt had not already added —
+and at the higher cap it subtracted.
+
+**Fallbacks.** ring 0.23 random picks per 30 calls (0.8 %), coverage
+feedback 0.83 (2.8 %), loop 0.03, blackboard 0. Biases against the feedback
+arms; not corrected.
+
+**Open ($0, not done tonight):** which of the three composition differences
+(strength mix, `osr` share, repeats) carries the 1500-row loss — an
+add-one-entry probe on fixed designs, as for `osr_ambient` in register §36.
 
 ---
 

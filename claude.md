@@ -859,6 +859,29 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   per-experiment "what varied". Scheduling note: budgets ran in blocks
   (k=14 then k=21) with arms interleaved within each — within-budget
   contrasts are protected, cross-budget ones are not.
+- **A CO-AUTHOR'S RING (two voices, one record, one shared estimate) IS THE
+  BEST ARM AT THE CAP OF RECORD AND THE WORST LLM ARM AT 1500 ROWS — 2026-09-14,
+  `runs/m7-blackboard-feedback-lt.parquet`, 120 cells / $12.89, pre-registered
+  B1–B4 (results doc "THE CO-AUTHOR'S RING").** `blackboard_feedback` =
+  `shared_blackboard_agents(feedback_interval=5)`. LT k=30, n=30, same-sweep
+  loop / blackboard / coverage-feedback controls. 300 rows: ring − rule
+  +0.013 (CI excludes zero, MDE tie by 0.0007; skeleton +0.027 resolved) — B1
+  fails on the registered CI rule; 1500 rows: −0.052 resolved below — B1
+  holds. Additivity (B2/B3) holds at 300, fails at 1500 (ring − feedback
+  −0.046 resolved). **B4 fails resolved: the ring buys FEWER distinct
+  variables (25.0 vs feedback 26.4 vs loop 27.8)** and instead fewer strong
+  light (1.2 vs 2.4), more `osr` (5.9 vs 3.7), more repeats (5.0 vs 2.2).
+  **The coverage law does not cover feedback arms (2 of 6 rate × gap
+  predictions inside the CI)** — it predicts topology contrasts at fixed
+  information; a feedback signal moves the strength mix and the repeat rate
+  as well as coverage. Say so in the paper; Table 4's eleven-prediction
+  record is topology-only and unchanged. Coverage feedback − loop replicates
+  a third time (+0.016 / +0.031); coverage feedback is resolved above the
+  rule on the skeleton at 1500 (+0.020), the first arm above the rule on any
+  metric at the high cap. The 30 Aug blackboard − loop loss at LT k=30
+  (−0.019) did not replicate same-day (+0.012 / −0.007, ties). Cost per LT
+  k=30 cell in Sep 2026 is $0.09–0.13, not the $0.01 of the GLM run: quote
+  the arm's own vendor before promising a price.
 - **THE ORACLE WAS AN ORACLE FOR THE HARNESS — register §34, 2026-09-09
   night, supersedes the two bullets below it as TASK claims.** The best
   selection depends on PC's row cap: at `max_rows=300` (configuration of
@@ -1547,9 +1570,9 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-13 (cross-vendor replication on GLM: topology contrasts are rate(cap) × gap(model); blackboard k=6 control replicates; register §38)*
+*Last Updated: 2026-09-14 (blackboard_feedback, the co-author's ring: best arm at 300 rows, worst LLM arm at 1500; the coverage law does not cover feedback arms)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
-*Chamber corpus: two chambers, three models, 19,164 cells / $145.69 — see `docs/chamber-results.md`*
+*Chamber corpus: two chambers, three models, 19,284 cells / $158.58 — see `docs/chamber-results.md`*
 *Next: AAMAS 2027 main track (abstract 1 Oct, paper 8 Oct 2026; skeleton in `paper/aamas2027/`, untracked). Adaptive-feedback arm run at LT k=30 and replicated-in-reverse on WT (spec §8.7 row 7); cross-vendor replication DONE 13 Sep ($0.48); the LT budget ends remain optional; next is the draft*
