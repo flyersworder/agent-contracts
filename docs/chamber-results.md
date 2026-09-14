@@ -422,8 +422,17 @@ the co-author's design from one loop or from the ten-line rule. (A first
 pass at the default alpha 0.05 read every arm at 0.50–0.52 against a 0.64
 rule scored at 1e-4 — a settings mismatch, not a result; UT-IGSP's alpha is
 a nuisance parameter and the calibrated value is 1e-4, results doc "the
-estimator that never pools".) GES at 1500 rows is running and will be
-appended.
+estimator that never pools".) **Under GES (score-based, pools like PC; 1500 rows, 9 seeds,
+`runs/rescored-bbfb-lt-ges-rows1500*.parquet`, local/Accelerate as the 11 Sep
+GES subset) the ring is the worst arm by a wide margin:** directed 0.518 vs
+loop 0.647, rule 0.644 — ring − loop **−0.129 [MDE 0.045]**, ring − rule
+**−0.126 [0.046]**, both resolved on all three metrics; blackboard − loop
+−0.077 [0.054] and feedback − loop −0.081 [0.052] also resolved, while the
+loop ties the rule (+0.003). GES penalises every arm that departs from the
+loop's purchases, and the ring departs most. So three pooled judges give
+three answers (best arm at PC-300, worst LLM arm at PC-1500, worst arm by
+0.13 under GES) and the never-pooled judge gives none. The paper's sentence
+stands: every selection claim is a claim about the judge.
 
 **Open ($0, not done tonight):** which of the three composition differences
 (strength mix, `osr` share, repeats) carries the 1500-row loss — an
