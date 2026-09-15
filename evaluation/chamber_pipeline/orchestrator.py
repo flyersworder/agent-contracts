@@ -1894,8 +1894,8 @@ def run_cell(
             # `verify()` judges.
             scouts = sorted({e.target for e in cell_graph.edges() if e.target.startswith("scout_")})
             scout_spend = {n: int(cell_graph.monitor_for(n).usage.tokens) for n in scouts}
-            scout_a_tokens = scout_spend["scout_a"]
-            scout_b_tokens = scout_spend["scout_b"]
+            scout_a_tokens = scout_spend.get("scout_a")
+            scout_b_tokens = scout_spend.get("scout_b")
             scout_tokens_json = json.dumps(scout_spend)
             n_scouts = len(scouts)
             frag = max_tree_fragment(cell_graph, "aggregator")
