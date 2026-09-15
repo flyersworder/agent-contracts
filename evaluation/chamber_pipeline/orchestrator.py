@@ -36,6 +36,7 @@ Design (resolves the four open questions from M3 final review):
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import threading
 import time
@@ -130,7 +131,7 @@ class AgentSpec:
     # silent fallthrough to the plain-role budget -- which would under-fund a
     # targeted scout 6.5x and produce conservation violations that read as
     # real overruns -- it simply is not a ladder arm.
-    scout_roles: tuple[str, str] | None = None
+    scout_roles: tuple[str, ...] | None = None
     negotiation_rounds: int = 0
     # True for the UNCONTRACTED control: the adapter is built with the menu
     # size as its intervention cap instead of `k`. That is a physical limit
@@ -411,6 +412,44 @@ AGENT_REGISTRY: tuple[AgentSpec, ...] = (
         # provisioning must not differ either.
         scout_roles=("plain", "plain"),
         negotiation_rounds=2,
+    ),
+    # ---- three-agent ablation (2026-09-15) -----------------------------
+    # A coauthor asked whether diversifying the search space pays once there
+    # are more than two agents. The BLIND fan-in family is the one that
+    # generalises without a design decision (the team's negotiation is
+    # pairwise with an A-wins-ties rule). `fan_in_varsplit` is the two-scout
+    # blind counterpart of `team_varsplit`, so the 2-vs-3 contrast within
+    # each family is one change; `team_varsplit` itself is the bridge to the
+    # paper's arm. LT only: the WT variable partition needs the node list and
+    # is not generalised here.
+    AgentSpec(
+        name="fan_in_homog3",
+        run=fan_in_agents,
+        chambers=("lt", "wt"),
+        accepts_llm=True,
+        kind="llm_multi",
+        extra_kwargs=("scout_budgets",),
+        scout_roles=("plain", "plain", "plain"),
+    ),
+    AgentSpec(
+        name="fan_in_varsplit",
+        run=fan_in_agents,
+        chambers=("lt",),
+        accepts_llm=True,
+        kind="llm_multi",
+        extra_kwargs=("scout_budgets",),
+        scout_roles=("plain", "plain"),
+        static_kwargs=MappingProxyType({"partition": "variable"}),
+    ),
+    AgentSpec(
+        name="fan_in_varsplit3",
+        run=fan_in_agents,
+        chambers=("lt",),
+        accepts_llm=True,
+        kind="llm_multi",
+        extra_kwargs=("scout_budgets",),
+        scout_roles=("plain", "plain", "plain"),
+        static_kwargs=MappingProxyType({"partition": "variable"}),
     ),
 )
 
@@ -1427,7 +1466,27 @@ def is_provisional_calibration(chamber: str, budget_k: int, *, negotiates: bool 
 # time. Reporting a bare compliance rate conflates "the framework enforces
 # conservation" (it does, 100%) with "our provisioning predicted cost" (at k=6
 # it cannot). Report the two separately.
-_LADDER_NODES = ("scout_a", "scout_b", "aggregator")
+def _ladder_nodes(spec: AgentSpec) -> tuple[str, ...]:
+    """Graph node names for a ladder arm: one lettered scout per role, then the aggregator."""
+    from evaluation.chamber_pipeline.coordination import scout_names
+
+    if spec.scout_roles is None:
+        raise ValueError(f"{spec.name!r} is not a ladder arm")
+    return (*scout_names(len(spec.scout_roles)), "aggregator")
+
+
+def _scout_c95s(spec: AgentSpec, chamber: str = "lt") -> tuple[int, ...]:
+    """One per-call c95 per declared scout role, in scout order."""
+    if spec.scout_roles is None:
+        raise ValueError(f"{spec.name!r} is not a ladder arm")
+    for role in spec.scout_roles:
+        if (chamber, role) not in _ROLE_C95:
+            raise ValueError(
+                f"scout role {role!r} is not calibrated for chamber={chamber!r}; "
+                f"measured roles are "
+                f"{sorted(r for c, r in _ROLE_C95 if c == chamber)}"
+            )
+    return tuple(_ROLE_C95[(chamber, role)] for role in spec.scout_roles)
 
 
 def _ladder_calibration(
@@ -1467,7 +1526,7 @@ def _ladder_calibration(
             "silently, yielding conservation numbers that are really "
             "statements about provisioning."
         )
-    role_a, role_b = spec.scout_roles
+    c95s = _scout_c95s(spec, chamber)
     if spec.negotiation_rounds and chamber not in _C95_NEGOTIATE_BY_CHAMBER:
         raise SweepConfigurationError(
             f"negotiation cost is not calibrated for chamber={chamber!r}; "
@@ -1479,19 +1538,9 @@ def _ladder_calibration(
     overhead = spec.negotiation_rounds * (
         _PROVISION_MULTIPLE * _C95_NEGOTIATE_BY_CHAMBER.get(chamber, 0)
     )
-    for role in (role_a, role_b):
-        if (chamber, role) not in _ROLE_C95:
-            raise ValueError(
-                f"scout role {role!r} is not calibrated for chamber={chamber!r}; "
-                f"measured roles are "
-                f"{sorted(r for c, r in _ROLE_C95 if c == chamber)}"
-            )
-    return (
-        _ROLE_C95[(chamber, role_a)],
-        _ROLE_C95[(chamber, role_b)],
-        _A95_RECONCILE_BY_K[(chamber, budget_k)],
-        overhead,
-    )
+    # The first two scouts, for the two-scout callers; `run_cell` reads every
+    # scout's figure through `_scout_c95s` when it builds the graph.
+    return (c95s[0], c95s[1], _A95_RECONCILE_BY_K[(chamber, budget_k)], overhead)
 
 
 def _build_agent_kwargs(
@@ -1537,6 +1586,14 @@ def _build_agent_kwargs(
         # convention above so the ladder's rungs stay budget-comparable.
         kwargs["scout_b_budget"] = budget_k // 2
         kwargs["scout_a_budget"] = budget_k - budget_k // 2
+
+    if "scout_budgets" in spec.extra_kwargs:
+        # n scouts (three-agent ablation): same convention, remainder to the
+        # earlier scouts; `split_budget(k, 2)` is the pair above.
+        from evaluation.chamber_pipeline.coordination import split_budget
+
+        assert spec.scout_roles is not None
+        kwargs["scout_budgets"] = split_budget(budget_k, len(spec.scout_roles))
 
     kwargs.update(spec.static_kwargs)
 
@@ -1690,10 +1747,11 @@ def run_cell(
                 a95=a95,
                 c95_b=c95_b,
                 fixed_overhead=overhead,
+                scout_c95s=_scout_c95s(spec, chamber),
             )
             meter = counting_llm
             extra = {
-                "node_monitors": {n: graph.monitor_for(n) for n in _LADDER_NODES},
+                "node_monitors": {n: graph.monitor_for(n) for n in _ladder_nodes(spec)},
                 # No aggregate token cap: `as_node` charges node monitors, so
                 # the adapter's own `usage.tokens` stays 0 and any constraint
                 # on it would be unreachable. Token budgets live on the graph,
@@ -1815,6 +1873,8 @@ def run_cell(
         agg_tokens: int | None = None
         scout_a_tokens: int | None = None
         scout_b_tokens: int | None = None
+        scout_tokens_json: str | None = None
+        n_scouts: int | None = None
         frag: int | None = None
         refuse: bool | None = None
         certified: bool | None = None
@@ -1829,8 +1889,15 @@ def run_cell(
             # SCOUTS overran as well. `c95` is still budget-invariant and that
             # is unverified at k=45; without these fields the question is
             # unanswerable after the fact.
-            scout_a_tokens = cell_graph.monitor_for("scout_a").usage.tokens
-            scout_b_tokens = cell_graph.monitor_for("scout_b").usage.tokens
+            # Read the scouts off the GRAPH, not the spec: a test arm may
+            # attach a graph without declaring roles, and the graph is what
+            # `verify()` judges.
+            scouts = sorted({e.target for e in cell_graph.edges() if e.target.startswith("scout_")})
+            scout_spend = {n: int(cell_graph.monitor_for(n).usage.tokens) for n in scouts}
+            scout_a_tokens = scout_spend["scout_a"]
+            scout_b_tokens = scout_spend["scout_b"]
+            scout_tokens_json = json.dumps(scout_spend)
+            n_scouts = len(scouts)
             frag = max_tree_fragment(cell_graph, "aggregator")
             # Only score a cell whose aggregator actually spent. On an
             # early-return cell (zero budget, empty menu) it spends nothing,
@@ -1915,6 +1982,8 @@ def run_cell(
             aggregator_tokens=agg_tokens,
             scout_a_tokens=scout_a_tokens,
             scout_b_tokens=scout_b_tokens,
+            scout_tokens_json=scout_tokens_json,
+            n_scouts=n_scouts,
             # None, not 0, for a cell that issued no LLM call: an unrecorded
             # measurement must not average in as a cheap one. A cell that DID
             # call the model but never negotiated correctly records 0 -- that

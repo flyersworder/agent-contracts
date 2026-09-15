@@ -217,6 +217,40 @@ def partition_pools_by_variable(
     return pool_a, pool_b
 
 
+def partition_pools_by_variable_n(
+    menu: list[str],
+    budgets: tuple[int, ...],
+    seed: int,
+) -> tuple[set[str], ...]:
+    """`partition_pools_by_variable` for n BLIND scouts (no claims).
+
+    Same seeded shuffle, same greedy deal of each variable to the pool with
+    the fewest ENTRIES (ties to the earlier scout), same feasibility check.
+    With empty claims and two budgets it returns exactly what the two-pool
+    function returns, which is what makes the blind two-scout varsplit the
+    clean control for the three-scout one.
+    """
+    n = len(budgets)
+    groups = group_by_variable(menu)
+    free = list(groups)
+    _random.Random(f"varsplit:{seed}").shuffle(free)
+    owner: dict[str, int] = {}
+    size = [0] * n
+    for variable in free:
+        i = min(range(n), key=lambda j: (size[j], j))
+        owner[variable] = i
+        size[i] += len(groups[variable])
+    pools = tuple({m for v, o in owner.items() if o == i for m in groups[v]} for i in range(n))
+    for i, (pool, budget) in enumerate(zip(pools, budgets, strict=True)):
+        if len(pool) <= budget:
+            raise ValueError(
+                f"variable partition left scout_{chr(ord('a') + i)} a pool of "
+                f"{len(pool)} entries against a budget of {budget}; at or below "
+                "budget the selection loop is inert because every name gets queried"
+            )
+    return pools
+
+
 __all__ = [
     "STRENGTHS",
     "coverage_ordered",
@@ -224,4 +258,5 @@ __all__ = [
     "experiment_variable",
     "group_by_variable",
     "partition_pools_by_variable",
+    "partition_pools_by_variable_n",
 ]

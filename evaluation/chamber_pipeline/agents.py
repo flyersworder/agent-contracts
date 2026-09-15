@@ -52,7 +52,11 @@ from .llm_planner import (
     parse_selection_response,
     summarize_experiments,
 )
-from .menu_taxonomy import coverage_ordered, partition_pools_by_variable
+from .menu_taxonomy import (
+    coverage_ordered,
+    partition_pools_by_variable,
+    partition_pools_by_variable_n,
+)
 from .wt_menu_taxonomy import (
     coverage_ordered as wt_coverage_ordered,
 )
@@ -1526,67 +1530,100 @@ def fan_in_agents(
     seed: int = 0,
     pc_alpha: float = 0.05,
     *,
-    scout_a_budget: int,
-    scout_b_budget: int,
+    scout_a_budget: int | None = None,
+    scout_b_budget: int | None = None,
+    scout_budgets: tuple[int, ...] | None = None,
     differentiate: bool = False,
     honor_aggregator: bool = False,
+    partition: str = "experiment",
     llm: LLMCallable | None = None,
 ) -> pd.DataFrame:
-    """Two blind scouts fund one aggregator — ladder rungs 1 and 2.
+    """Blind scouts fund one aggregator — ladder rungs 1 and 2, and the n-scout ablation.
 
     ``differentiate=False`` is rung 1, a homogeneous ensemble whose only
     source of divergence is sampling temperature. ``differentiate=True`` is
-    rung 2, where the scouts carry distinct role framings. Neither scout is
-    told the other exists: that blindness is what makes the pair isolate role
+    rung 2, where the two scouts carry distinct role framings. No scout is
+    told the others exist: that blindness is what makes the arm isolate role
     differentiation rather than communication, which is rung 4's business.
+
+    ``scout_budgets`` (three-agent ablation, 2026-09-15) runs one plain scout
+    per entry; ``scout_a_budget``/``scout_b_budget`` is the two-scout call
+    every existing arm makes. ``partition="variable"`` deals the menu's
+    variables into disjoint pools, one per scout, with no negotiation -- the
+    blind counterpart of `team_varsplit`, LT only.
 
     Budget flows through a :class:`DelegationGraph` whose scout and aggregator
     nodes carry real monitors; the adapter routes each chamber call to the
     monitor of whichever node is acting, additively with the aggregate cap.
     """
-    from evaluation.chamber_pipeline.coordination import overlap_fraction
+    from evaluation.chamber_pipeline.coordination import (
+        mean_pairwise_overlap,
+        scout_names,
+    )
     from evaluation.chamber_pipeline.llm_planner import (
         build_reconcile_prompt,
         build_scout_broad_prompt,
         build_scout_targeted_prompt,
     )
 
+    if scout_budgets is None:
+        if scout_a_budget is None or scout_b_budget is None:
+            raise TypeError("pass scout_budgets or both scout_a_budget and scout_b_budget")
+        scout_budgets = (scout_a_budget, scout_b_budget)
+    elif scout_a_budget is not None or scout_b_budget is not None:
+        raise TypeError("scout_budgets and scout_a_budget/scout_b_budget are exclusive")
+    n = len(scout_budgets)
+    names = scout_names(n)
+    if differentiate and n != 2:
+        raise ValueError("role differentiation is defined for exactly two scouts")
+
     nodes = _node_names(adapter)
     # Set on EVERY path, including the early returns below. Task 8's scorer
     # reads this in `run_cell`; an attribute that exists only on the happy
     # path raises AttributeError on empty-menu and zero-budget cells.
-    adapter.coordination_stats = {"overlap_frac": None, "n_experiments_distinct": 0}
+    adapter.coordination_stats = {
+        "overlap_frac": None,
+        "n_experiments_distinct": 0,
+        "n_scouts": n,
+    }
     if _intervention_budget(adapter) <= 0 or not adapter.available_experiments():
         return _empty_adjacency(nodes)
     llm = llm or _default_llm()
 
-    prompt_a = build_scout_broad_prompt if differentiate else build_select_prompt
-    prompt_b = build_scout_targeted_prompt if differentiate else build_select_prompt
+    if differentiate:
+        builders: list[PromptBuilder] = [build_scout_broad_prompt, build_scout_targeted_prompt]
+    else:
+        builders = [build_select_prompt] * n
 
-    # 2*seed and 2*seed+1, never seed and seed+1: M4b seeds are contiguous
-    # 0..29, so seed+1 would collide with the next cell's scout_a.
-    with adapter.as_node("scout_a"):
-        chosen_a, dfs_a = _llm_select_loop(
-            adapter,
-            llm,
-            model,
-            2 * seed,
-            spend=scout_a_budget,
-            starting_chosen=None,
-            prompt_builder=prompt_a,
-            temperature=_SCOUT_TEMPERATURE,
-        )
-    with adapter.as_node("scout_b"):
-        chosen_b, dfs_b = _llm_select_loop(
-            adapter,
-            llm,
-            model,
-            2 * seed + 1,
-            spend=scout_b_budget,
-            starting_chosen=None,
-            prompt_builder=prompt_b,
-            temperature=_SCOUT_TEMPERATURE,
-        )
+    excludes: list[set[str] | None] = [None] * n
+    if partition == "variable":
+        if getattr(adapter, "chamber", "lt") != "lt":
+            raise ValueError("the blind variable partition is implemented for LT only")
+        menu = list(adapter.available_experiments())
+        pools = partition_pools_by_variable_n(menu, scout_budgets, seed)
+        excludes = [set(menu) - pool for pool in pools]
+    elif partition != "experiment":
+        raise ValueError(f"partition must be 'experiment' or 'variable', got {partition!r}")
+
+    # n*seed + i, never seed + i: M4b seeds are contiguous 0..29, so seed+1
+    # would collide with the next cell's scout_a.
+    chosen_by: list[list[str]] = []
+    dfs_by: list[list[pd.DataFrame]] = []
+    for i, (name, budget) in enumerate(zip(names, scout_budgets, strict=True)):
+        with adapter.as_node(name):
+            chosen_i, dfs_i = _llm_select_loop(
+                adapter,
+                llm,
+                model,
+                n * seed + i,
+                spend=budget,
+                starting_chosen=None,
+                prompt_builder=builders[i],
+                temperature=_SCOUT_TEMPERATURE,
+                exclude=excludes[i],
+            )
+        chosen_by.append(chosen_i)
+        dfs_by.append(dfs_i)
 
     # The aggregator's reconciliation call. REQUIRED, not decorative: PC is
     # not an LLM call, so without it the aggregator consumes nothing, the
@@ -1596,16 +1633,18 @@ def fan_in_agents(
     with adapter.as_node("aggregator"):
         agg_response = llm(
             model=model,
-            messages=build_reconcile_prompt(chosen_a, chosen_b),
+            messages=build_reconcile_prompt(*chosen_by),
             max_tokens=_RECONCILE_MAX_TOKENS,
             extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
         )
 
+    all_chosen = [c for chosen in chosen_by for c in chosen]
+    all_dfs = [d for dfs in dfs_by for d in dfs]
     # Duplicates still COST budget — each query_intervention was metered — but
     # are dropped before pooling so PC does not see an inflated n.
     seen: set[str] = set()
     dfs: list[pd.DataFrame] = []
-    for name, frame in zip(chosen_a + chosen_b, dfs_a + dfs_b, strict=True):
+    for name, frame in zip(all_chosen, all_dfs, strict=True):
         if name not in seen:
             seen.add(name)
             dfs.append(frame)
@@ -1626,7 +1665,7 @@ def fan_in_agents(
     # name an experiment nobody ran. Pooling that would fabricate data.
     agg_diag: dict[str, int] = {}
     if honor_aggregator:
-        bought = dict(zip(chosen_a + chosen_b, dfs_a + dfs_b, strict=True))
+        bought = dict(zip(all_chosen, all_dfs, strict=True))
         named = _parse_name_list(agg_response, list(adapter.available_experiments()))
         kept = [n for n in named if n in bought]
         agg_diag = {
@@ -1643,8 +1682,10 @@ def fan_in_agents(
             agg_diag["agg_fallback"] = 1
 
     adapter.coordination_stats = {
-        "overlap_frac": overlap_fraction(chosen_a, chosen_b),
+        "overlap_frac": mean_pairwise_overlap(chosen_by),
         "n_experiments_distinct": len(seen),
+        "n_scouts": n,
+        "picks_by_scout": chosen_by,
         **agg_diag,
     }
     if not dfs:

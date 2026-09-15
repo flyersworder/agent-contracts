@@ -86,6 +86,10 @@ VARIANT_COLORS: dict[str, str] = {
     "wt_coverage_min": "#e8590c",  # burnt orange — WT depth (real drivers)
     "coverage_min_ms": "#f03e3e",  # light red — narrowest, mid+strong only
     "team_varsplit": "#c2255c",  # deep pink — team, split by variable
+    # Three-agent ablation (2026-09-15): blind fan-in with n scouts.
+    "fan_in_homog3": "#5f3dc4",  # violet — ensemble, three scouts
+    "fan_in_varsplit": "#e64980",  # pink — blind variable split, two scouts
+    "fan_in_varsplit3": "#a61e4d",  # dark pink — blind variable split, three
 }
 
 VARIANT_LABELS: dict[str, str] = {
@@ -113,6 +117,9 @@ VARIANT_LABELS: dict[str, str] = {
     "wt_coverage_min": "WT coverage-min (depth, real drivers)",
     "coverage_min_ms": "Coverage-min, no weak (15 variables)",
     "team_varsplit": "Team (variable-wise split)",
+    "fan_in_homog3": "Ensemble (three scouts)",
+    "fan_in_varsplit": "Blind variable split (two scouts)",
+    "fan_in_varsplit3": "Blind variable split (three scouts)",
 }
 
 # Marker + linestyle per variant so curves stay distinguishable when the
@@ -142,6 +149,9 @@ VARIANT_MARKERS: dict[str, str] = {
     "wt_coverage_min": "2",
     "coverage_min_ms": "2",
     "team_varsplit": "p",
+    "fan_in_homog3": "H",
+    "fan_in_varsplit": "d",
+    "fan_in_varsplit3": "D",
 }
 
 VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
@@ -169,6 +179,9 @@ VARIANT_LINESTYLES: dict[str, str | tuple[int, tuple[int, ...]]] = {
     "wt_coverage_min": (0, (1, 1)),
     "coverage_min_ms": (0, (1, 2, 4, 2)),
     "team_varsplit": (0, (3, 2, 1, 2)),
+    "fan_in_homog3": (0, (5, 1)),
+    "fan_in_varsplit": (0, (2, 2)),
+    "fan_in_varsplit3": (0, (4, 2)),
 }
 
 # Variant rendering order in legend (matches plan §5.3 description top-to-bottom).
@@ -190,6 +203,10 @@ VARIANT_ORDER: tuple[str, ...] = (
     "fan_in_agg",
     "team",
     "team_varsplit",
+    # Three-agent ablation, beside the arms it extends.
+    "fan_in_homog3",
+    "fan_in_varsplit",
+    "fan_in_varsplit3",
     "one_shot",
     "one_shot_shuffle",
     "critique",

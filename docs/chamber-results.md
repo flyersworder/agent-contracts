@@ -84,6 +84,79 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## PRE-REGISTERED (2026-09-15, before launch): the three-agent ablation — does diversifying the search space pay once there are more than two scouts? LT k=30, `glm-5.3-flash`
+
+**Why.** A co-author asked whether the corpus holds any arm with more than
+two agents, on the reasoning that if the gain from a team is search-space
+diversity, it should become visible as the count grows. It does not: every
+multi-agent arm to date is two scouts (plus an aggregator measured inert),
+hard-wired in the delegation graph, the spec, the calibration, the record
+and the reconcile prompt. This run adds a third scout to the BLIND fan-in
+family, the one that generalises without a design decision (`team`'s
+negotiation is pairwise with an A-wins-ties rule and stays so).
+Implemented as `fan_in_agents(scout_budgets=...)` with lettered nodes
+(`scout_c`), `build_fan_in_graph(scout_c95s=...)` forwarding `1.5·a95/n`
+per scout so the reconcile call stays inside P2's window at any n, and
+`partition="variable"` dealing the menu's variables into n disjoint pools
+with no negotiation. Two-scout allocations are byte-identical to before
+(tests pin it).
+
+**Design.** `runs/m7-three-scouts-lt.parquet`. LT `standard`, k=30,
+`openrouter/z-ai/glm-5.3-flash` (price-pinned order, GMICloud first), n=50
+per arm, six arms interleaved in one sweep, four workers: `llm_pc` (loop
+control), `fan_in_homog` (ensemble, 2), `fan_in_homog3` (ensemble, 3),
+`fan_in_varsplit` (blind variable split, 2), `fan_in_varsplit3` (blind
+variable split, 3), `team_varsplit` (the paper's negotiated arm, the bridge).
+The coverage rule needs no LLM and is re-scored on the same backend. Re-scored
+at 9 PC seeds, clustered by distinct design, at 300 and 1500 rows; directed,
+skeleton and core-20. 300 cells; at the 13 Sep GLM prices ($0.0025–0.0031
+per cell, 106–158 s median wall) about $1 and three hours.
+
+GLM was chosen to save money, with the caveat the cross-vendor run
+established: at the cap of record NONE of the two-scout topology contrasts
+resolved on GLM (its coverage gaps are smaller), and they replicated only at
+1500 rows. A tie at 300 rows is therefore expected rather than informative;
+the 1500-row scoring is the one that can move, and a DeepSeek replication
+(~$10) is the follow-up if it does.
+
+**Predictions, from the coverage law** (rate × gap; each scout of n holds
+k/n, so an ensemble duplicates more coverage as n grows, and a variable split
+removes cross-scout duplication but cannot cross the coverage plateau):
+
+- **T1** `fan_in_homog3` buys FEWER distinct variables than `fan_in_homog`
+  (cell mean, 95 % CI of the difference below zero) and scores at or below it
+  on directed F1 at both caps (CI contains zero or lies below). *Falsified*
+  if the CI excludes zero on the positive side at either cap.
+- **T2** `fan_in_varsplit3` buys at least as many distinct variables as
+  `fan_in_varsplit` (CI contains zero or lies above) and scores no higher
+  than the coverage rule at either cap (CI of arm − rule contains zero or
+  lies below).
+- **T3** No three-scout arm resolves above the rule at either cap. *This is
+  the headline test of the co-author's hypothesis*: falsified if either
+  three-scout arm's CI against the rule excludes zero on the positive side.
+- **T4** The blind two-scout split ties the negotiated one:
+  `fan_in_varsplit` − `team_varsplit` CI contains zero at both caps (the
+  negotiation over disjoint pools contests nothing, so it should buy
+  nothing).
+- **T5** Reported, not predicted: the fraction of `fan_in_varsplit3` cells
+  that raise on partition infeasibility (a pool at or below its budget). The
+  mock dry run found none at k=30 on the live menu; the real rate is
+  recorded from `status`.
+
+Decision rules are keyed on intervals, never on a significance threshold
+(the 2 Sep lesson). Every outcome is reported. T3 failing is a better paper
+than T3 holding, and would be the first arm above the rule.
+
+**Threats.** Same-sweep, interleaved arms guard against reasoning drift
+(§32). GLM falls back to `rng.choice` on 1–3 % of picks (13 Sep); reported
+per arm. Three-scout arms run under DeepSeek-sized grants as the 13 Sep GLM
+run did (calibration is vendor-specific, the mechanism is not); conservation
+is reported but a failure there is a provisioning statement. The variable
+partition is LT-only. n=50 at GLM's spread resolves about 0.010 at the
+design level.
+
+---
+
 ## PRE-REGISTERED (2026-09-11, before launch): the adaptive-feedback arm on the wind tunnel
 
 `adaptive_feedback` vs a same-sweep `llm_pc` control, WT `standard`, k=14 and
