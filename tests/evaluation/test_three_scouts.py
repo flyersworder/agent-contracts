@@ -149,6 +149,26 @@ def test_ladder_nodes_follow_the_role_count():
     )
 
 
+def test_calibration_rejects_a_single_role_with_the_scout_count_error():
+    from dataclasses import replace
+
+    from evaluation.chamber_pipeline.orchestrator import _ladder_calibration
+
+    lone = replace(get_spec("fan_in_homog"), name="lone", scout_roles=("plain",))
+    with pytest.raises(ValueError, match=r"2\.\.26"):
+        _ladder_calibration(lone, 30, chamber="lt")
+
+
+def test_blind_varsplit_refuses_an_adapter_without_a_chamber(make_three_scout_adapter, fake_llm):
+    from evaluation.chamber_pipeline.agents import fan_in_agents
+
+    adapter = make_three_scout_adapter(fake_llm)
+    if hasattr(adapter, "chamber"):
+        del adapter.chamber
+    with pytest.raises(ValueError, match="LT only"):
+        fan_in_agents(adapter, seed=0, scout_budgets=(2, 2, 2), llm=fake_llm, partition="variable")
+
+
 def test_scout_c95s_are_one_per_role():
     assert _scout_c95s(get_spec("fan_in_homog3"), "lt") == (2205, 2205, 2205)
     assert _scout_c95s(get_spec("fan_in_spec"), "lt") == (3003, 10379)

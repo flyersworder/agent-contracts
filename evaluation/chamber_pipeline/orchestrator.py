@@ -1477,8 +1477,11 @@ def _ladder_nodes(spec: AgentSpec) -> tuple[str, ...]:
 
 def _scout_c95s(spec: AgentSpec, chamber: str = "lt") -> tuple[int, ...]:
     """One per-call c95 per declared scout role, in scout order."""
+    from evaluation.chamber_pipeline.coordination import scout_names
+
     if spec.scout_roles is None:
         raise ValueError(f"{spec.name!r} is not a ladder arm")
+    scout_names(len(spec.scout_roles))  # raises on fewer than two roles
     for role in spec.scout_roles:
         if (chamber, role) not in _ROLE_C95:
             raise ValueError(

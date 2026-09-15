@@ -1576,6 +1576,12 @@ def fan_in_agents(
     names = scout_names(n)
     if differentiate and n != 2:
         raise ValueError("role differentiation is defined for exactly two scouts")
+    # Checked before anything touches the chamber, and with NO default: an
+    # adapter without `.chamber` must not pass as LT.
+    if partition == "variable" and getattr(adapter, "chamber", None) != "lt":
+        raise ValueError("the blind variable partition is implemented for LT only")
+    if partition not in ("experiment", "variable"):
+        raise ValueError(f"partition must be 'experiment' or 'variable', got {partition!r}")
 
     nodes = _node_names(adapter)
     # Set on EVERY path, including the early returns below. Task 8's scorer
@@ -1597,13 +1603,9 @@ def fan_in_agents(
 
     excludes: list[set[str] | None] = [None] * n
     if partition == "variable":
-        if getattr(adapter, "chamber", "lt") != "lt":
-            raise ValueError("the blind variable partition is implemented for LT only")
         menu = list(adapter.available_experiments())
         pools = partition_pools_by_variable_n(menu, scout_budgets, seed)
         excludes = [set(menu) - pool for pool in pools]
-    elif partition != "experiment":
-        raise ValueError(f"partition must be 'experiment' or 'variable', got {partition!r}")
 
     # n*seed + i, never seed + i: M4b seeds are contiguous 0..29, so seed+1
     # would collide with the next cell's scout_a.
