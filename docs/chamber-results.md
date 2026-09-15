@@ -50,6 +50,8 @@ the arithmetic of record.)
 | `runs/xv-glm-lt.parquet` | 200 | $0.42 | cross-vendor, `glm-5.3-flash`: LT k=30 × {`llm_pc`, `team`, `team_varsplit`, `one_shot`} × n=50 (pre-registered C1–C4; C1/C2 fail at 300 rows and replicate at 1500, C4 holds); re-scored in `runs/rescored-xv-glm-lt-rows{300,1500}*` |
 | `runs/xv-glm-wt.parquet` | 100 | $0.06 | cross-vendor, `glm-5.3-flash`: WT k=14 × {`llm_pc`, `team`} × n=50 (C5 tie on both vendors, C6 100 % certified); re-scored in `runs/rescored-xv-glm-wt-rows{300,1500}*` |
 | `runs/m7-blackboard-feedback-lt.parquet` | 120 | $12.89 | `blackboard_feedback` (the co-author's ring: two voices, one record, one shared PC estimate) vs same-sweep `shared_blackboard`, `adaptive_feedback`, `llm_pc`, LT k=30, n=30, flash-0731 (pre-registered 2026-09-14; B1 fails at 300 rows on the CI rule and holds at 1500; B2/B3 hold at 300, fail at 1500; B4 fails); re-scored in `runs/rescored-bbfb-lt-rows{300,1500}*` |
+| `runs/ring-probe-*.parquet` | 110 designs, $0 | add-one-entry probes on the ring sweep's designs (P-osr, P-repeat, P-ref, P-strong), 9 PC seeds, both caps, Accelerate; the ring's 1500-row loss is the dropped observational baseline (+0.054 when added back) — register §39 |
+| `runs/lt-baseline-{granted,ungranted}-rows{300,1500}*.parquet` | 1,432 designs × 2 policies, $0 | every LT M7-era design re-scored with `uniform_reference` granted outside the budget vs as bought, same run, 9 seeds, both caps (pre-registered G1–G5 2026-09-14, all hold; four resolved verdicts become ties incl. the loop's k=6 win over the rule) — register §40 |
 | `runs/m7-blackboard-k6-control.parquet` | 60 | $0.11 | same-day `shared_blackboard` + `llm_pc` at LT k=6, DeepSeek flash-0731: the 30 Aug −0.057 replicates (−0.055 / −0.043 at 300 / 1500 rows) |
 | `runs/m7-oneshot-shuffle-lt.parquet` | 90 | $0.57 | `one_shot_shuffle`, LT k=6/30/45: menu order per seed does not diversify k=30 |
 | `runs/m7-oneshot-k6-control.parquet` | 60 | $0.17 | same-day `one_shot` + `one_shot_shuffle` at LT k=6, interleaved |
@@ -417,6 +419,221 @@ and at the higher cap it subtracted.
 **Fallbacks.** ring 0.23 random picks per 30 calls (0.8 %), coverage
 feedback 0.83 (2.8 %), loop 0.03, blackboard 0. Biases against the feedback
 arms; not corrected.
+
+### Pre-registration: which composition shift carries the ring's 1500-row loss (2026-09-14 evening, $0, `runs/ring-probe-*.parquet`)
+
+**Question.** The ring loses to the loop by −0.015 and to the rule by
+−0.052 at 1500 rows while buying a different mix, not a worse order (it is
+strictly sequential; every pick sees the whole shared record). Which
+component of the mix carries the loss? Cell-level profiling of the same
+sweep (this evening) adds one fact the table above omits: the ring drops
+the observational entry `uniform_reference` in **28 of 30** cells (loop:
+0 of 30). The other shifts, per cell vs the loop: −1.2 strong light-source
+entries (`red`/`green`/`blue` `_strong`), +2.2 `osr` entries, +2.8
+second-strength entries of an already-bought variable.
+
+**Method** (register §36's rule: test an entry by ADDING it to fixed
+designs, never by swapping). Four probes, every design re-scored with
+`rescore.py` at 9 PC seeds, `pc_alpha` 0.05, both caps, one backend
+(Accelerate), joined on `design_key` to the existing baselines in
+`rescored-bbfb-lt-rows{300,1500}-bykey.parquet`. The added entry goes LAST
+in the buy order (the 31st purchase), matching the §36 probe.
+
+- **P-osr** — to each of the 30 LOOP designs, add the first of
+  `osr_angle_2_mid, osr_c_weak, osr_angle_1_mid, osr_c_mid, osr_angle_1_weak`
+  (the ring's largest `osr` over-buys, in that order) that the design lacks.
+- **P-repeat** — to each LOOP design, add the first of
+  `diode_vis_3_mid, t_vis_2_mid, t_vis_1_mid, diode_vis_1_mid` whose
+  VARIABLE the design already covers at another strength and whose entry it
+  lacks (a second-strength repeat, the ring's other over-buy).
+- **P-ref** — to each of the 28 RING designs lacking it, add
+  `uniform_reference`.
+- **P-strong** — to each RING design, add the first of
+  `red_strong, blue_strong, green_strong` that it lacks (the light-source
+  entries the ring under-buys).
+
+**Predictions** (directed F1, ΔF1 = probe − its own baseline, paired over
+designs, 95 % CI; "resolved" = |mean| > MDE of the paired difference):
+
+- **H1 (osr is inert-to-harmful):** P-osr ≤ 0 at both caps; the LT oracle
+  ranks `osr` last, and the law predicts +0.0045/+0.0131 for a NEW variable,
+  which an `osr` entry usually is not here. FALSIFIED if P-osr resolves
+  above +0.005 at either cap.
+- **H2 (a repeat buys nothing):** |P-repeat| < MDE at 300 rows (no new
+  variable, so the law says zero) and ≤ 0 at 1500 (one more pooled regime
+  with no new variable). FALSIFIED if P-repeat resolves above zero at 1500.
+- **H3 (the dropped reference is the carrier at 1500):** P-ref > 0 at
+  1500, resolved, with a point estimate ≥ +0.015 (the ring − loop gap);
+  at 300 rows undecided either way. FALSIFIED if P-ref ≤ 0 at 1500 or
+  resolves below +0.005 — then the reference is not the carrier and the
+  loss sits in the `osr`/repeat shifts (H1/H2).
+- **H4 (fewer strong light is a gain, not the loss):** P-strong < 0 at
+  1500 (the pooled-regime harm of "WHY STRONG INTERVENTIONS HURT"), so the
+  ring's under-buying of strong light OFFSETS part of its loss rather than
+  causing it. FALSIFIED if P-strong ≥ 0 at 1500.
+
+**Accounting rule, stated before the numbers.** The per-entry effects times
+the ring's per-cell excess counts (+2.2 `osr`, +2.8 repeats, −0.93
+reference, −1.2 strong light) are summed and compared with the measured
+ring − loop of −0.015 at 1500 / +0.018 at 300. A component is "the carrier"
+if it alone accounts for more than half of the gap at 1500; if no single
+term does, the sentence in the paper stays "a composition shift" and names
+the two largest terms. Effects are additive only to first order, and the
+probe adds a 31st entry to a 30-entry design, so the sum is a first-order
+estimate, not a decomposition.
+
+**RESULT (same evening, `runs/ring-probe-rows{300,1500}{,-bykey}.parquet`,
+110 designs × 9 seeds × 2 caps, Accelerate, $0). One entry carries it:
+the observational baseline.** Paired ΔF1 = probe − own baseline (directed /
+skeleton / core-20; R = resolved against the paired MDE):
+
+| probe | n | 300 rows | 1500 rows |
+|---|---|---|---|
+| P-osr (loop + `osr`) | 30 | −0.007 / −0.005 / −0.007, all ties | +0.004 / +0.002 / +0.007, all ties |
+| P-repeat (loop + second strength) | 27 | −0.002 / +0.001 / +0.000, ties | +0.006 / −0.002 / +0.012, ties |
+| **P-ref (ring + `uniform_reference`)** | 28 | −0.005 tie / **−0.018 R** / +0.003 tie | **+0.054 R [+0.045, +0.062] / +0.035 R / +0.019 R** |
+| P-strong (ring + strong light) | 25 | −0.001 tie / **−0.016 R** / +0.001 tie | +0.008 tie / **−0.020 R** / +0.003 tie |
+
+- **H3 HOLDS, and it is the whole story.** Adding the reference back to the
+  ring's designs recovers +0.054 at 1500 rows — more than the ring − rule
+  gap (−0.052) and 3.6× the ring − loop gap (−0.015). Accounting: −0.93
+  reference/cell × +0.054 = **−0.050**, against the other three terms
+  summed at |0.02| or less. At 300 rows the same addition is neutral on
+  directed and *costs* 0.018 on the skeleton — which is why the ring WINS
+  at the cap of record: dropping the baseline is free-to-good at 300 and
+  ruinous at 1500. Same shape as WT's `osr_ambient` (§36): one entry whose
+  price flips with the row cap.
+- **H1 holds** (`osr` inert: nothing resolves, point estimates −0.007 /
+  +0.004). **H2 holds** (a repeat buys nothing: all ties, |Δ| ≤ 0.012).
+- **H4 is half-falsified**: strong light added to a ring design costs
+  −0.020 on the skeleton at 1500 (as predicted) but +0.008, a tie, on
+  directed. The pooled-regime harm is real on the skeleton and washed out
+  by orientation noise on directed at this n. The ring's under-buying of
+  strong light is not the carrier either way.
+
+**Why the ring drops it, and the loop does not.** Reference buy rate and
+mean position: loop 100 % at pick 2.9, coverage feedback 100 % at pick 1.2,
+shared blackboard 40 % at pick 18, ring 7 %. The plain loop prompt buys a
+baseline first; both role briefs ask for an intervention ("a target no
+earlier pick has touched" / "disambiguates variables"), so neither voice
+has a reason to buy an experiment that perturbs nothing, and the coverage
+summary never nominates it because it perturbs nothing. Feedback cannot
+restore what the feedback signal cannot name. So the ring's 1500-row loss
+is `role briefs × coverage feedback × pooled estimator`, three design
+choices each defensible alone; not the topology, not the sharing, and not
+"two agents converge on depth" as the table above says (that composition
+shift is real but inert — H2).
+
+### Pre-registration: the LT corpus with the observational baseline GRANTED to every arm (2026-09-14 night, $0, `runs/lt-baseline-granted-*.parquet`)
+
+**Why.** The baseline-dropping is not the ring's alone. LT reference buy
+rate by arm (every M7 file with recorded purchases): loop / team /
+varsplit / critique / coverage rule 0.87–1.00 at every budget; single call
+0.43–0.63 at k=6, 1.00 above; **shared blackboard 0.03–0.10 at k=6, 0.40–0.70
+at k=30, 1.00 at k=45**; ring 0.07 at k=30. Every arm built on the two role
+briefs skips the baseline, worst at small budgets. The briefs and the
+budget disagree about whether the baseline is an intervention: we charge
+it against k, the chamber authors' estimator takes it as given, and a
+brief written to pick interventions never spends on it. The blackboard's
+k=6 loss (−0.057 DeepSeek, −0.055/−0.043 GLM, our most replicated topology
+loss) is therefore suspect for the same reason as the ring's.
+
+**Policy under test.** Grant `uniform_reference` to every arm outside the
+budget, which is what UT-IGSP already does. Implementation: every distinct
+LT design in the 15 M7-era files (1,442 designs; 352 lack the entry) is
+re-scored with the entry PREPENDED where missing (position 0, the
+estimator sees the observational data first) and unchanged where present.
+So a design that bought it inside the budget keeps k−1 interventions +
+baseline; one that did not gets k interventions + baseline — one extra
+regime for the non-buyers, stated, not corrected. 9 PC seeds, alpha 0.05,
+both caps, Accelerate, `rescore.py`. M6 ladder files predate recorded
+purchase lists and cannot be re-scored: ensemble/roles/chain verdicts
+carry a stated caveat instead.
+
+**Predictions** (design-clustered, unequal-n MDE, both caps):
+
+- **G1.** Contrasts between arms that already buy the baseline (team − loop,
+  varsplit − team, coverage feedback − loop, effect feedback − loop,
+  critique − loop at k=30/45, rule − loop at k=30/45) move by **< 0.005**
+  and no verdict flips. FALSIFIED if any flips.
+- **G2.** ring − rule and ring − coverage feedback at 1500 rows go from
+  resolved losses (−0.052 / −0.046) to **ties**; at 300 rows the ring's
+  +0.013 over the rule shrinks toward zero. FALSIFIED if either 1500-row
+  loss stays resolved.
+- **G3.** blackboard − loop at LT k=6 (−0.057 resolved at 300 in
+  `m7-blackboard-k6-control`) shrinks by **at least half at 1500 rows**;
+  at 300 rows undecided (the probe read the entry as neutral-to-negative
+  at 300 on 30-entry designs, but at k=6 it is one regime in seven, so no
+  prediction is registered). FALSIFIED if the 1500-row contrast is
+  unchanged within 0.01.
+- **G4 (the headline survives).** After granting, **no LLM arm resolves
+  above the rule** at either cap on directed F1, and no fan-in arm resolves
+  above the loop. FALSIFIED if either happens — then it goes in the paper
+  as a correction, not a footnote.
+- **G5.** single call − loop at k=6 (−0.006 tie on 11 Sep; −0.059 in the
+  original Phase 2) stays a tie.
+
+**Decision rule.** If G1–G5 hold, the paper adds one sentence to §7
+(the baseline is charged against the budget and brief-driven arms skip it;
+granting it moves only the arms that skipped it) and the ring/blackboard
+small-budget losses are reported with and without the grant. If G4 fails,
+the granted scoring becomes the configuration of record and every table
+is regenerated.
+
+**RESULT (2026-09-15, 00:40; `runs/lt-baseline-{granted,ungranted}-rows{300,1500}{,-bykey}.parquet`, 1,432 designs × 9 seeds × 2 caps × 2 policies, Accelerate, $0; both policies scored in the same run so every delta is paired; unchanged designs move by exactly 0.0). G1–G5 all hold, and the ring's story inverts.**
+
+| contrast | 300 before → granted | 1500 before → granted |
+|---|---|---|
+| **ring − rule** (k30) | +0.013 tie → +0.004 tie | **−0.052 R → −0.006 tie** |
+| **ring − coverage feedback** | +0.003 tie → −0.006 tie | **−0.046 R → −0.000 tie** |
+| ring − loop | +0.018 R → +0.009 tie | −0.015 tie → **+0.031 R** (= feedback − loop +0.038) |
+| shared blackboard − loop, k6 (control file) | −0.055 R → −0.023 R | **−0.043 R → −0.015 tie** |
+| shared blackboard − loop, k6 (Phase 2 file) | −0.058 R → −0.037 R | **−0.047 R → −0.014 tie** |
+| single call − loop, k6 (Phase 2 file) | −0.047 R → −0.015 tie | −0.042 R → −0.014 tie |
+| **loop − rule, k6** | **+0.037 R → +0.000 tie** | +0.026 tie → −0.010 tie |
+| **loop − random, k6** | **+0.036 R → −0.002 tie** | +0.018 tie → −0.022 tie |
+| rule − random, k30 | +0.065 R → +0.067 R | +0.099 R → +0.082 R |
+| team − loop, varsplit − team, feedback − loop, effect − loop, critique − loop (k30/45), loop − rule (k30/45), all four GLM contrasts | unchanged to 3 dp | unchanged to 3 dp |
+
+- **G1 holds** exactly (every arm in those contrasts buys the entry).
+- **G2 holds**: both 1500-row ring losses become ties. And more: the ring
+  is now **resolved above the loop at 1500 (+0.031, MDE 0.019)** — but
+  ring − feedback is −0.000, so that gain is the coverage feedback's
+  (+0.038 over the loop in the same sweep), not the second agent's.
+  Two agents sharing picks and estimate = one agent with the estimate.
+- **G3 holds**: blackboard − loop at k=6 shrinks by two-thirds at 1500 and
+  becomes a tie in both files; at 300 it shrinks by a third to a half and
+  stays resolved. So the most replicated topology loss in the corpus is
+  ~two-thirds "the briefs do not buy the baseline" and ~one-third
+  something else at the cap of record.
+- **G4 holds**: no LLM arm above the rule at either cap (ring −0.006,
+  feedback −0.006 at 1500; +0.004 / +0.010 ties at 300).
+- **G5 holds**; the original Phase 2 single-call k=6 loss (−0.047 /
+  −0.042 R) becomes a tie under the grant at both caps, consistent with
+  the 11 Sep non-replication.
+- **NOT registered, and the largest correction: the loop's k=6 win over the
+  rule (+0.037 R) and over random (+0.036 R) at 300 rows both go to
+  zero.** At k=6 the loop buys the baseline in 87–100 % of cells, the
+  rule in 13 %, random in 10 %. The paper's "the one regime in which the
+  loop's knowledge of the chamber is worth something" was the loop
+  knowing to buy the observational baseline first. Core-20 scoring had
+  already taken it below MDE (+0.014); this names why. **Retraction the
+  eighth, and the second time this claim has shrunk.**
+
+**Decision.** Per the registered rule, G1–G5 hold, so the charged
+scoring stays the configuration of record; §7 gains a paragraph; §4/§6
+mark the k=6 exception and the ring's verdicts; supplement S2 carries the
+before/after numbers. The ring paragraph for the co-authors changes from
+"worst LLM arm at 1500" to "ties the single-agent feedback loop and the
+rule once it is allowed a baseline; the second agent adds nothing".
+
+**What changes in the write-up.** The ring paragraph in §6.6 now names the
+entry instead of "a composition shift". The claim "fewer strong
+interventions and more repeats pay at 300 and cost at 1500" is withdrawn
+(both are ties at both caps, H1/H2). The design property stated for the
+co-authors stands with a sharper cause: two intervention-seeking briefs
+over one shared gap list drop the one entry the estimator needs most at
+high row counts.
 
 **Under the never-pooled estimator the ring is nothing (same night, $0,
 `runs/rescored-bbfb-lt-utigsp*.parquet`, VPS, alpha 1e-4, 1,000-row cap,

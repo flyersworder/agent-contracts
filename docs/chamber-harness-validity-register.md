@@ -2263,3 +2263,83 @@ GMICloud with rotation to Novita on error, 0 stray endpoints.
 it changes without notice; re-probe the endpoints for EACH model the day
 a sweep launches, and key every precision assertion by both. §3 was the
 provider-only instance of this; this is the model-crossed one.
+
+## 39. The ring's cap-flipping verdict is one dropped entry, the observational baseline (2026-09-14)
+
+**What looked like a finding.** `blackboard_feedback` is the best arm at
+300 rows and the worst LLM arm at 1500 (results doc "THE CO-AUTHOR'S
+RING"), and the first write-up attributed the flip to a composition shift:
+fewer strong interventions, more `osr`, more second-strength repeats.
+
+**What it was.** The ring buys `uniform_reference` in 2 of 30 cells (loop
+30 of 30). Adding it back as a 31st entry to the ring's own designs
+recovers **+0.054 directed F1 at 1500 rows** (paired, resolved on all
+three metrics) and is neutral-to-negative at 300 (skeleton −0.018). The
+three composition terms are ties at both caps (`osr` +0.004, repeat
++0.006, strong light +0.008 on directed at 1500). Cause: both role briefs
+ask for an intervention and the coverage summary lists only variables the
+estimate has not connected, so an entry that perturbs nothing is never
+nominated by either the brief or the signal.
+
+**What it changes.** The ring's 1500-row loss is a harness interaction
+(`intervention-seeking briefs × coverage-of-the-estimate feedback × pooled
+PC`), not evidence about sharing an estimate between agents. The 300-row
+win stands as measured but is the same entry's absence being free at that
+cap. Paper §6.6 names the entry; the composition sentence is withdrawn.
+
+**Rule (third instance of §36's).** When an arm's verdict flips with the
+row cap, tabulate per-entry buy rates against the comparator BEFORE
+describing a "composition shift"; a single entry with a cap-dependent
+price has now explained every cap flip we have chased (§34, §36, §39).
+Second rule: a feedback signal defined on the estimate's coverage can
+never nominate the observational entry — any arm whose briefs do not buy
+it by prior will drop it, and a pooled estimator will charge for that at
+high row counts only.
+
+## 40. The observational baseline is charged against the budget, and every arm that skips it pays a cap-dependent price (2026-09-15)
+
+**What looked like a finding.** Four resolved verdicts, three of them in
+the paper: the loop beats the coverage rule and random at LT k=6 (+0.037 /
++0.036, "the one regime where the LLM's knowledge is worth something");
+the shared blackboard loses to the loop at k=6 (−0.055 / −0.058,
+replicated same-day and on GLM); the single call loses at k=6 (−0.047,
+Phase 2); the ring loses to the rule and to coverage feedback at 1500 rows
+(−0.052 / −0.046).
+
+**What it was.** `uniform_reference` is one of the 59 menu entries and is
+charged as one of the k purchases. Whether an arm buys it is a property of
+its prompt, not its topology: the plain loop prompt buys it at pick ~2 in
+87–100 % of cells; the two role briefs ("perturb a target no earlier pick
+has touched" / "disambiguate variables") buy it in 3–10 % at k=6 and 40–70 %
+at k=30; coverage feedback never nominates it (it perturbs nothing); the
+LLM-free rule and random reach it only when the budget is large enough to
+cycle to it (13 % / 10 % at k=6, 100 % / 70–80 % at k≥30). A pooled
+estimator prices the unperturbed regime at +0.018 (300 rows) to +0.039
+(1500) per design on average, and more at small k where it is one regime
+in seven. Every LT design with a recorded purchase list (1,432) was
+re-scored with the entry granted outside the budget (prepended where
+absent), both caps, both policies in the same run (results doc, "the LT
+corpus with the observational baseline GRANTED", pre-registered G1–G5,
+all hold). All four verdicts above become ties; every contrast between
+arms that already buy the entry is unchanged to three decimals; no LLM
+arm resolves above the rule.
+
+**What it changes.** (1) The loop's k=6 advantage on the full graph is
+withdrawn as a knowledge claim — what the loop knows is to buy a baseline
+(retraction the eighth). (2) The blackboard k=6 loss is two-thirds this
+entry at 1500 rows and one-third to one-half at 300; the residual at 300
+stays resolved. (3) The ring ties the single-agent feedback loop and the
+rule once granted, at both caps: two agents sharing an estimate equal one
+agent with it. (4) The M6 ladder (ensemble, roles, chain, team at LT k=6)
+cannot be re-scored (no purchase lists recorded) and the roles/blackboard
+family shares the briefs, so the LT k=6 rungs carry a stated caveat.
+Charged scoring stays the configuration of record because it is what
+every arm ran under; the grant is reported beside each affected verdict.
+
+**Rules.** (a) Before charging a menu entry against a budget, ask whether
+every arm's prompt can name it; an entry only some prompts can reach is a
+prompt effect wearing a topology's clothes. (b) Tabulate per-entry buy
+rates by arm × budget as a standing column in every results table — the
+same table would have caught §36 and §39 on the day. (c) Any "the LLM
+knows something the rule does not" claim must survive granting the
+cheapest thing the LLM buys first.

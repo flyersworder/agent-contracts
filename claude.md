@@ -871,6 +871,31 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   −0.046 resolved). **B4 fails resolved: the ring buys FEWER distinct
   variables (25.0 vs feedback 26.4 vs loop 27.8)** and instead fewer strong
   light (1.2 vs 2.4), more `osr` (5.9 vs 3.7), more repeats (5.0 vs 2.2).
+  **ROOT CAUSE, same evening ($0, register §39): ONE ENTRY. The ring buys
+  the observational baseline `uniform_reference` in 2 of 30 cells (loop
+  30/30) because both role briefs ask for an intervention and the coverage
+  summary never nominates an entry that perturbs nothing; adding it back to
+  the ring's designs recovers +0.054 at 1500 rows (resolved, all metrics)
+  and is neutral-to-negative at 300. The `osr`/repeat/strong-light shifts
+  are all ties at both caps. Third cap-flip explained by a single entry
+  (§34, §36, §39): tabulate per-entry buy rates BEFORE writing
+  "composition shift".**
+  **AND IT IS CORPUS-WIDE (register §40, 2026-09-15, $0): the baseline is
+  charged against k, the role briefs and the coverage-feedback signal
+  cannot name it, and the rule/random reach it only at large k. Granting
+  it to every LT design (1,432, both caps, pre-registered G1–G5, all
+  hold) turns FOUR resolved verdicts into ties: the loop's k=6 win over
+  the rule and random (+0.037/+0.036 → 0; "the one regime where the LLM
+  knows something" = it buys the baseline first — retraction the eighth),
+  the blackboard's k=6 loss (two-thirds of it at 1500; residual at 300
+  still resolved), the single call's Phase 2 k=6 loss, and the ring's
+  1500-row losses (ring = feedback = rule once granted; +0.031 over the
+  loop is the feedback's gain). Every k=30/45 contrast between arms that
+  buy it, and every GLM contrast, unchanged to 3 dp; no arm above the
+  rule. Charged scoring stays the configuration of record. RULE: before
+  charging a menu entry against a budget, check that every arm's prompt
+  can name it; put per-entry buy rates by arm × budget in every results
+  table.**
   **The coverage law does not cover feedback arms (2 of 6 rate × gap
   predictions inside the CI)** — it predicts topology contrasts at fixed
   information; a feedback signal moves the strength mix and the repeat rate
@@ -1585,7 +1610,7 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-14 (blackboard_feedback, the co-author's ring: best arm at 300 rows, worst LLM arm at 1500; the coverage law does not cover feedback arms)*
+*Last Updated: 2026-09-15 (the observational baseline is charged against the budget and only some prompts buy it — register §39/§40; four verdicts become ties under the grant, incl. the loop's k=6 win over the rule; 'judge' → 'estimator' in the draft)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
