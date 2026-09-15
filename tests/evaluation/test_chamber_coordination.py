@@ -180,6 +180,16 @@ def test_scout_names_are_lettered_in_order():
     assert scout_names(3) == ("scout_a", "scout_b", "scout_c")
 
 
+def test_fewer_than_two_scouts_is_rejected_before_any_budget_is_spent():
+    """The reconcile prompt, calibration and record all read `scout_b`."""
+    import pytest
+
+    with pytest.raises(ValueError, match=r"2\.\.26"):
+        scout_names(1)
+    with pytest.raises(ValueError, match=r"2\.\.26"):
+        build_fan_in_graph(k=30, c95=2303, a95=38752, scout_c95s=(2303,))
+
+
 def test_three_scout_graph_has_three_scouts_holding_exactly_k():
     graph = build_fan_in_graph(k=30, c95=2303, a95=38752, scout_c95s=(2303, 2303, 2303))
     assert graph.is_sealed

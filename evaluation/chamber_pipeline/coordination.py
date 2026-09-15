@@ -58,9 +58,14 @@ def mean_pairwise_overlap(chosen: list[list[str]]) -> float | None:
 
 
 def scout_names(n: int) -> tuple[str, ...]:
-    """``("scout_a", "scout_b", ...)`` -- lettered so two-scout columns keep their names."""
-    if n < 1 or n > 26:
-        raise ValueError(f"n_scouts must be in 1..26, got {n}")
+    """``("scout_a", "scout_b", ...)`` -- lettered so two-scout columns keep their names.
+
+    At least two: a fan-in with one scout is a loop, and the reconcile
+    prompt, the calibration and the record all read `scout_b`. Rejected here
+    so it fails before any budget is spent, not after.
+    """
+    if n < 2 or n > 26:
+        raise ValueError(f"n_scouts must be in 2..26, got {n}")
     return tuple(f"scout_{chr(ord('a') + i)}" for i in range(n))
 
 
