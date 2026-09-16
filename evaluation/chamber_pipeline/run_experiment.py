@@ -30,6 +30,7 @@ this flag and let agents lazy-import `litellm.completion`.
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import sys
 from dataclasses import replace
@@ -59,6 +60,7 @@ socket.setdefaulttimeout(_DEFAULT_SOCKET_TIMEOUT_SECONDS)
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+from .agents import SELECTION_EFFORT_ENV  # noqa: E402 (intentional: after socket.setdefaulttimeout)
 from .checkpoint import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
     append_record_jsonl,
     done_cell_keys,
@@ -287,6 +289,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--selection-effort",
+        choices=("low", "medium", "high"),
+        default=None,
+        help=(
+            "Override the `reasoning.effort` sent on every SELECTION call "
+            "(the loop, the single call, the scouts). The corpus ran at 'low'; "
+            "coordination calls stay at 'high' regardless. Recorded per cell "
+            "in `reasoning_effort`."
+        ),
+    )
+    parser.add_argument(
         "--max-workers",
         type=int,
         default=None,
@@ -446,6 +459,18 @@ def _format_record_summary(records: list[RunRecord]) -> str:
     )
 
 
+def apply_selection_effort(effort: str | None) -> None:
+    """Publish the selection-effort override to this process and its workers.
+
+    Set BEFORE the process pool exists so every worker inherits it; None
+    leaves the module default ("low") in force.
+    """
+    if effort is None:
+        os.environ.pop(SELECTION_EFFORT_ENV, None)
+    else:
+        os.environ[SELECTION_EFFORT_ENV] = effort
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point. Returns process exit code (0 success / 1 error)."""
     parser = build_arg_parser()
@@ -596,6 +621,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         sys.stdout.flush()
 
+    apply_selection_effort(args.selection_effort)
     new_records = run_sweep(
         sweep,
         llm=llm,

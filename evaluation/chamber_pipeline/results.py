@@ -249,6 +249,11 @@ class RunRecord:
     aggregator_tokens: int | None = None
     scout_a_tokens: int | None = None
     scout_b_tokens: int | None = None
+    # Every scout's spend as a JSON object keyed by node name, for arms with
+    # other than two scouts (three-agent ablation, 2026-09-15). The a/b
+    # columns stay filled so every existing analysis keeps working.
+    scout_tokens_json: str | None = None
+    n_scouts: int | None = None
     negotiate_tokens: int | None = None
     n_negotiate_calls: int | None = None
     max_tree_fragment: int | None = None

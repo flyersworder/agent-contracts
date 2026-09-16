@@ -108,8 +108,9 @@ class TestAgentRegistry:
         """Five M4b variants, three ladder arms, one ablation, one control,
         the two shared-record arms, the two coverage-manipulation arms, the
         adaptive-feedback arm (spec §8.7 row 7) and the menu-shuffled
-        single-call arm (register §24)."""
-        assert len(AGENT_REGISTRY) == 24
+        single-call arm (register §24), plus the three blind n-scout arms of
+        the three-agent ablation (2026-09-15)."""
+        assert len(AGENT_REGISTRY) == 27
 
     def test_registry_names_are_unique(self) -> None:
         names = [s.name for s in AGENT_REGISTRY]
@@ -147,6 +148,10 @@ class TestAgentRegistry:
                 "effect_feedback",
                 "blackboard_feedback",
                 "one_shot_shuffle",
+                # Three-agent ablation (2026-09-15).
+                "fan_in_homog3",
+                "fan_in_varsplit",
+                "fan_in_varsplit3",
             ]
         )
         assert actual == expected
@@ -1574,6 +1579,10 @@ class TestLadderSelfDescription:
             "fan_in_agg",
             "team",
             "team_varsplit",
+            # Three-agent ablation (2026-09-15): blind fan-in with n scouts.
+            "fan_in_homog3",
+            "fan_in_varsplit",
+            "fan_in_varsplit3",
         }
 
     def test_calibration_refuses_a_non_ladder_arm(self) -> None:

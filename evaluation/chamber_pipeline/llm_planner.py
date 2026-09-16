@@ -390,7 +390,7 @@ def build_scout_targeted_prompt(
 
 
 _RECONCILE_SYSTEM_MESSAGE = (
-    "You are aggregating the experiment selections of two independent "
+    "You are aggregating the experiment selections of several independent "
     "designers who worked without knowledge of each other. Their lists "
     "may overlap or conflict. Produce a single deduplicated ordering of "
     "the experiments to run, most informative first, keeping every "
@@ -401,19 +401,25 @@ _RECONCILE_SYSTEM_MESSAGE = (
 def build_reconcile_prompt(
     chosen_a: list[str],
     chosen_b: list[str],
+    *more: list[str],
 ) -> list[dict[str, str]]:
-    """Aggregator prompt: merge two scouts' selections into one ordering.
+    """Aggregator prompt: merge the scouts' selections into one ordering.
 
     This is the aggregator's single indivisible call -- the one whose size
     makes whitepaper §4.6 P2's fragmentation penalty concrete, since it
-    cannot be split across the two scouts' separate grants.
+    cannot be split across the scouts' separate grants.
+
+    Two lists is every ladder arm; the three-agent ablation passes a third.
+    Designers are lettered in scout order, so "Designer C" is `scout_c`.
     """
-    user = (
-        "Designer A selected:\n"
-        + ("\n".join(chosen_a) if chosen_a else "(nothing)")
-        + "\n\nDesigner B selected:\n"
-        + ("\n".join(chosen_b) if chosen_b else "(nothing)")
-        + "\n\nRespond with the deduplicated experiment names, one per line, "
+    blocks = []
+    for i, chosen in enumerate((chosen_a, chosen_b, *more)):
+        letter = chr(ord("A") + i)
+        blocks.append(
+            f"Designer {letter} selected:\n" + ("\n".join(chosen) if chosen else "(nothing)")
+        )
+    user = "\n\n".join(blocks) + (
+        "\n\nRespond with the deduplicated experiment names, one per line, "
         "most informative first, and no other commentary."
     )
     return [

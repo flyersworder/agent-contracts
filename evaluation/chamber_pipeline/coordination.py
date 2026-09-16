@@ -38,6 +38,47 @@ def overlap_fraction(chosen_a: list[str], chosen_b: list[str]) -> float | None:
     return shared / min(len(set(chosen_a)), len(set(chosen_b)))
 
 
+def mean_pairwise_overlap(chosen: list[list[str]]) -> float | None:
+    """`overlap_fraction` averaged over every pair of scouts.
+
+    Reduces to `overlap_fraction` at two scouts. ``None`` if any scout has
+    no picks, for the same reason as the pairwise version: a degenerate cell
+    must not read as perfect divergence.
+    """
+    if len(chosen) < 2:
+        return None
+    pairs: list[float] = []
+    for i in range(len(chosen)):
+        for j in range(i + 1, len(chosen)):
+            o = overlap_fraction(chosen[i], chosen[j])
+            if o is None:
+                return None
+            pairs.append(o)
+    return sum(pairs) / len(pairs)
+
+
+def scout_names(n: int) -> tuple[str, ...]:
+    """``("scout_a", "scout_b", ...)`` -- lettered so two-scout columns keep their names.
+
+    At least two: a fan-in with one scout is a loop, and the reconcile
+    prompt, the calibration and the record all read `scout_b`. Rejected here
+    so it fails before any budget is spent, not after.
+    """
+    if n < 2 or n > 26:
+        raise ValueError(f"n_scouts must be in 2..26, got {n}")
+    return tuple(f"scout_{chr(ord('a') + i)}" for i in range(n))
+
+
+def split_budget(k: int, n: int) -> tuple[int, ...]:
+    """Near-equal split of ``k`` over ``n`` scouts, remainder to the earlier ones.
+
+    ``(ceil(k/2), k//2)`` at ``n=2``, which is the convention every two-scout
+    arm and the planner/reasoner split already use.
+    """
+    base, rem = divmod(k, n)
+    return tuple(base + (1 if i < rem else 0) for i in range(n))
+
+
 def build_fan_in_graph(
     k: int,
     c95: int,
@@ -45,6 +86,8 @@ def build_fan_in_graph(
     c95_b: int | None = None,
     fixed_overhead: int = 0,
     multiple: int = 2,
+    *,
+    scout_c95s: tuple[int, ...] | None = None,
 ) -> DelegationGraph:
     """Budget graph for the fan-in rungs: two scouts feeding one aggregator.
 
@@ -69,9 +112,14 @@ def build_fan_in_graph(
         multiple: Provisioning margin over the per-call figure, applied
             uniformly to every role. A single stated rule, never tuned per
             arm: tuning until every arm certifies would make H-C vacuous.
+        scout_c95s: One c95 per scout, for arms with other than two scouts
+            (the three-agent ablation). When given it defines the scout
+            count and ``c95``/``c95_b`` are ignored; ``(c95, c95_b)`` is
+            the legacy two-scout call, byte-identical in its allocations.
 
     Returns:
-        A sealed graph with nodes ``scout_a``, ``scout_b``, ``aggregator``.
+        A sealed graph with nodes ``scout_a``, ``scout_b``, ...,
+        ``aggregator``.
     """
     # Each scout forwards 0.75*a95, so the aggregator holds 1.5*a95 -- a 50%
     # margin over the 95th-percentile aggregation call -- while NEITHER scout
@@ -85,22 +133,31 @@ def build_fan_in_graph(
     # call it has to make -- a tree encoding would have succeeded, the arm
     # would have demonstrated nothing about P2, and the aggregator would have
     # been over-provisioned 2x besides.
-    forward = math.ceil(0.75 * a95)
-    c95_b = c95 if c95_b is None else c95_b
-    tokens_a = math.ceil(multiple * c95 * math.ceil(k / 2)) + forward + fixed_overhead
-    tokens_b = math.ceil(multiple * c95_b * (k // 2)) + forward + fixed_overhead
-    # The root must fund whichever scout is dearer, twice over, or sealing
+    if scout_c95s is None:
+        scout_c95s = (c95, c95 if c95_b is None else c95_b)
+    n = len(scout_c95s)
+    names = scout_names(n)
+    budgets = split_budget(k, n)
+    # The aggregator holds 1.5*a95 however many scouts feed it; each forwards
+    # an equal share, so at n=2 this is the ceil(0.75*a95) of the original
+    # design and at any n every single fragment stays below the call.
+    forward = math.ceil(1.5 * a95 / n)
+    tokens = tuple(
+        math.ceil(multiple * c * b) + forward + fixed_overhead
+        for c, b in zip(scout_c95s, budgets, strict=True)
+    )
+    # The root must fund whichever scout is dearer, n times over, or sealing
     # fails before a single cell runs.
-    scout_tokens = max(tokens_a, tokens_b)
+    scout_tokens = max(tokens)
     root = Contract(
         id=f"m6-root-k{k}",
         name="M6 root",
         resources=ResourceConstraints(
-            tokens=2 * scout_tokens, per_tool_limits={"intervene": k, "observe": 0}
+            tokens=n * scout_tokens, per_tool_limits={"intervene": k, "observe": 0}
         ),
     )
     graph = DelegationGraph(root)
-    for name in ("scout_a", "scout_b", "aggregator"):
+    for name in (*names, "aggregator"):
         graph.add_node(name)
 
     # `tool_invocations` MUST be explicit on every edge. `allocate()` defaults
@@ -112,21 +169,15 @@ def build_fan_in_graph(
     # execution: without this, a freshly sealed graph reports
     # `monitor_for("scout_a").can_use_tool("intervene") is False`, every cell
     # returns empty, and H-C inverts from 100% compliance to 100% failure.
-    graph.allocate(
-        DelegationGraph.ROOT,
-        "scout_a",
-        tokens=tokens_a,
-        tool_invocations=math.ceil(k / 2),
-        per_tool={"intervene": math.ceil(k / 2), "observe": 0},
-    )
-    graph.allocate(
-        DelegationGraph.ROOT,
-        "scout_b",
-        tokens=tokens_b,
-        tool_invocations=k // 2,
-        per_tool={"intervene": k // 2, "observe": 0},
-    )
-    for scout in ("scout_a", "scout_b"):
+    for name, t, b in zip(names, tokens, budgets, strict=True):
+        graph.allocate(
+            DelegationGraph.ROOT,
+            name,
+            tokens=t,
+            tool_invocations=b,
+            per_tool={"intervene": b, "observe": 0},
+        )
+    for scout in names:
         graph.allocate(
             scout,
             "aggregator",

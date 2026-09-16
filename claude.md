@@ -907,6 +907,29 @@ and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
   (−0.019) did not replicate same-day (+0.012 / −0.007, ties). Cost per LT
   k=30 cell in Sep 2026 is $0.09–0.13, not the $0.01 of the GLM run: quote
   the arm's own vendor before promising a price.
+- **THE SELECTION EFFORT IS PART OF THE CONFIGURATION OF RECORD — 2026-09-16,
+  `runs/m7-effort-lt.parquet`, 150 cells / $2.17, pre-registered E1–E4,
+  two of four FAIL resolved (results doc "MORE REASONING LIFTS THE LOOP TO
+  THE RULE").** Every selection call in the corpus ran at `reasoning.effort
+  = low`. On GLM at `high` (`--selection-effort`, env-carried so workers
+  inherit it, recorded per cell) the loop buys **3.3 more distinct
+  variables (28.6 of 30)** and scores **+0.029 / +0.031** above the `low`
+  loop at 300 / 1500 rows — against TWO independent `low` days that agree
+  to 0.003 — reaching a TIE with the coverage rule at the cap of record
+  and +0.018 above it on the skeleton at 1500. Still below the rule on
+  directed F1 at 1500. Coverage law: +0.015 / +0.043 predicted. **More
+  reasoning buys coverage; it does not buy anything the rule lacks.** And
+  it makes identical scouts LESS diverse (distinct experiments 22.2→21.2,
+  19.7→17.2), so the three-scout penalty GROWS (−0.049 / −0.056). Within
+  the `high` sweep tokens-per-call predicts nothing (r 0.00): effort is a
+  regime switch, not a dial — consistent with §32. **Rules:** quote the
+  effort beside every absolute LLM-arm F1; check a cross-sweep contrast
+  against a SECOND same-setting day before buying a same-day replication
+  (two `low` days at 0.003 apart made the $1 re-run unnecessary); and do
+  not predict a null from "the drift moved nothing" — a within-regime
+  token drift and a regime change are different manipulations. The
+  prediction that effort would not lift the loop was wrong (ninth
+  retraction).
 - **THE ORACLE WAS AN ORACLE FOR THE HARNESS — register §34, 2026-09-09
   night, supersedes the two bullets below it as TASK claims.** The best
   selection depends on PC's row cap: at `max_rows=300` (configuration of
@@ -1610,7 +1633,7 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-15 (the observational baseline is charged against the budget and only some prompts buy it — register §39/§40; four verdicts become ties under the grant, incl. the loop's k=6 win over the rule; 'judge' → 'estimator' in the draft)*
+*Last Updated: 2026-09-16 (selection effort is part of the configuration of record: `high` lifts the GLM loop +0.03 to a tie with the rule via +3.3 variables; identical scouts converge; three-agent ablation T1–T5 hold; previous: the observational baseline is charged against the budget and only some prompts buy it — register §39/§40; four verdicts become ties under the grant, incl. the loop's k=6 win over the rule; 'judge' → 'estimator' in the draft)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
