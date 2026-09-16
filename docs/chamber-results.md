@@ -52,6 +52,7 @@ the arithmetic of record.)
 | `runs/m7-blackboard-feedback-lt.parquet` | 120 | $12.89 | `blackboard_feedback` (the co-author's ring: two voices, one record, one shared PC estimate) vs same-sweep `shared_blackboard`, `adaptive_feedback`, `llm_pc`, LT k=30, n=30, flash-0731 (pre-registered 2026-09-14; B1 fails at 300 rows on the CI rule and holds at 1500; B2/B3 hold at 300, fail at 1500; B4 fails); re-scored in `runs/rescored-bbfb-lt-rows{300,1500}*` |
 | `runs/ring-probe-*.parquet` | 110 designs, $0 | add-one-entry probes on the ring sweep's designs (P-osr, P-repeat, P-ref, P-strong), 9 PC seeds, both caps, Accelerate; the ring's 1500-row loss is the dropped observational baseline (+0.054 when added back) — register §39 |
 | `runs/lt-baseline-{granted,ungranted}-rows{300,1500}*.parquet` | 1,432 designs × 2 policies, $0 | every LT M7-era design re-scored with `uniform_reference` granted outside the budget vs as bought, same run, 9 seeds, both caps (pre-registered G1–G5 2026-09-14, all hold; four resolved verdicts become ties incl. the loop's k=6 win over the rule) — register §40 |
+| `runs/m7-effort-lt.parquet` | 150 | $2.17 | the reasoning-effort probe, `glm-5.3-flash` with selection at `high`, LT k=30, n=50 × {`llm_pc`, `fan_in_homog`, `fan_in_homog3`} interleaved (pre-registered E1–E4 2026-09-16; E1 and E2 FAIL resolved, E3 holds); re-scored in `runs/rescored-effort-lt-rows{300,1500}*` |
 | `runs/m7-three-scouts-lt.parquet` | 300 | $0.95 | the three-agent ablation, `glm-5.3-flash`, LT k=30, n=50 × six arms interleaved (`llm_pc`, `fan_in_homog`, `fan_in_homog3`, `fan_in_varsplit`, `fan_in_varsplit3`, `team_varsplit`; pre-registered T1–T5 2026-09-15, all hold at both caps); re-scored in `runs/rescored-3s-lt-rows{300,1500}*` |
 | `runs/m7-blackboard-k6-control.parquet` | 60 | $0.11 | same-day `shared_blackboard` + `llm_pc` at LT k=6, DeepSeek flash-0731: the 30 Aug −0.057 replicates (−0.055 / −0.043 at 300 / 1500 rows) |
 | `runs/m7-oneshot-shuffle-lt.parquet` | 90 | $0.57 | `one_shot_shuffle`, LT k=6/30/45: menu order per seed does not diversify k=30 |
@@ -82,6 +83,96 @@ cross-backend gap is ΔF1 = 0.055, larger than most effects reported below.
 Chambers: light tunnel (LT) 38 nodes / 57 edges / 59-experiment menu; wind
 tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
+
+---
+
+## MORE REASONING LIFTS THE LOOP TO THE RULE AND MAKES IDENTICAL SCOUTS LESS DIVERSE (2026-09-16, VPS/OpenBLAS, `runs/m7-effort-lt.parquet`, 150 cells / $2.17 / 5.2 h, pre-registered E1–E4 below — E1 and E2 FAIL, both resolved; E3 holds)
+
+**The question.** The three-agent ablation found GLM near-deterministic at
+the corpus's `low` selection effort. Is the corpus's "no arm beats the
+rule" an artefact of thinking too little? Same three arms (`llm_pc`,
+`fan_in_homog`, `fan_in_homog3`), same vendor, same budget, selection
+calls at `high` (new `--selection-effort` flag, recorded per cell in
+`reasoning_effort`; coordination calls were already `high`). n=50 per
+arm, interleaved, four workers; 150/150 ok; drift audit CLEAN
+(`window_overlap` 0.98, no trending block). Re-scored at 9 PC seeds,
+clustered by design, both caps, three metrics. Reference arms are the
+`low` cells of the 15 Sep sweep, and — for the loop — the 13 Sep
+cross-vendor sweep as a second `low` day.
+
+**Verdicts (design level, Welch 95 % CI, MDE in brackets):**
+
+| contrast | 300 rows | 1500 rows | prediction | outcome |
+|---|---|---|---|---|
+| E1 distinct experiments, `fan_in_homog` high − low (cell) | −1.02 CI [−1.78, −0.26] | | > 0 | **FAILS** (opposite sign) |
+| E1 distinct experiments, `fan_in_homog3` high − low (cell) | −2.52 CI [−3.26, −1.78] | | > 0 | **FAILS** (opposite sign) |
+| E2 loop high − loop low (15 Sep), directed | **+0.029** [0.013] CI [+0.020, +0.038] | **+0.031** [0.020] CI [+0.016, +0.045] | tie | **FAILS** (resolved above) |
+| E2 loop high − loop low (13 Sep), directed | **+0.032** [0.014] | **+0.028** [0.019] | | second `low` day agrees |
+| E2 skeleton / core-20 | +0.024 R+ / +0.013 R+ | +0.021 R+ / +0.016 tie | | |
+| E2 loop high − rule, directed | +0.004 [0.011] **tie** | −0.018 [0.017] R− | below | tie at the cap of record |
+| E2 loop high − rule, skeleton | +0.001 tie | **+0.018** [0.013] R+ | | above the rule on the skeleton at 1500 |
+| E3 `fan_in_homog3` − loop, both `high` | −0.146 [0.020] | −0.148 [0.022] | < 0 | holds |
+| E3 `fan_in_homog3` − `fan_in_homog`, both `high` | −0.049 [0.024] | −0.056 [0.023] | ≤ 0 | holds (gap GROWS from −0.037 / −0.031) |
+| ref `fan_in_homog` − loop, both `high` | −0.097 [0.016] | −0.092 [0.018] | | |
+| ref `fan_in_homog` high − low | **+0.032** [0.018] | **+0.028** [0.019] | | the two-scout ensemble gains too |
+| ref `fan_in_homog3` high − low | +0.020 [0.022] tie | +0.004 tie | | the three-scout one does not |
+
+**Mechanism: coverage, again.** The `high` loop buys **28.6 distinct
+variables of 30 against 25.3** (Δ +3.28, CI [+2.63, +3.93]; the two
+`low` days read 25.2 and 25.3), one fewer light-source entry per cell,
+and the same `osr`/baseline/repeat counts. The coverage law prices that
+gap at +0.015 (300 rows) / +0.043 (1500) against the measured +0.029 /
++0.031: right sign, right order, the usual under/over on either side of
+the fitted range. So thinking longer moves the loop TOWARD the coverage
+rule — nearly full coverage — not past it: tie on directed at the cap of
+record, still below at 1500, above only on the skeleton at 1500. The
+two-scout ensemble gains +0.03 with +1.0 variable per cell (law +0.004 /
++0.013 — under-predicted; it also stops repeating whole experiments less
+often, which the law does not price); the three-scout one gains nothing
+because its scouts converge further (E1).
+
+**E1's failure is a mechanism finding.** Longer reasoning makes identical
+scouts MORE alike, not less: distinct experiments fall 22.2 → 21.2 and
+19.7 → 17.2. Register §26's model — a chaotic branch point early in a long
+trace — predicted the opposite for DeepSeek; on GLM at `high` the trace
+converges on the model's canonical answer. Diversity from noise is not
+something effort buys on this vendor.
+
+**Confounders, checked before writing this ($0).** (1) *Day effect*: the
+two independent `low` days agree to +0.003 / −0.002 (ties on every
+metric) while the `high` day sits +0.03 above both — not a day. (2)
+*Endpoint mix*: `low` cells touched Novita in 39–40/50 cells, `high` in
+4/50, but within every sweep Novita-touched cells score identically
+(0.399 vs 0.399; 0.425 vs 0.429). (3) *Fallback picks*: `low` 0.34–0.42
+per cell vs `high` 0.28; `low` cells with ZERO fallbacks score 0.405 and
+the `high` loop still beats them +0.023 [0.014] — fallbacks are at most a
+quarter of the effect. (4) *Dose response within the `high` sweep*:
+corr(tokens per call, distinct variables) = 0.00, corr(tokens, F1) =
++0.05 — effort acts as a regime switch, not a dial, which is consistent
+with §32 (a 2.4x token drift within one regime moved nothing). A same-day
+interleaved `low`/`high` loop pair (~$1) would be the cleanest form and
+is optional; the two-day agreement is the evidence of record.
+
+**Secondary metrics (loop, mean per cell):** output tokens per call 1,409
+at `high` vs 75–130 at `low` (10–19x); wall 535 s vs 119 s; cost $0.016
+vs $0.003 (5x). The whole sweep: $2.17.
+
+**Consequences.** (1) "No LLM arm beats the coverage rule" STANDS at the
+cap of record and on directed F1 at 1500; add "on the skeleton at 1500
+rows the high-effort loop is +0.018 above it" as the first exception on
+any metric on GLM. (2) The claim in yesterday's coauthor note — that more
+reasoning would not lift the loop — was WRONG and is withdrawn (ninth
+retraction; the note goes out corrected). What survives is narrower:
+more reasoning buys coverage, and coverage is what the rule already
+gives for free. (3) Every corpus contrast ran at `low`; absolute LLM-arm
+F1 on GLM is a `low`-effort figure, and the paper should say the effort
+setting is part of the configuration of record, like the row cap. (4) The
+three-agent verdicts are effort-independent: the ensemble's loss to the
+loop is −0.10 at both settings; the third scout's penalty grows with
+effort. (5) DeepSeek's selection calls at `low` already emitted 2–11k
+reasoning tokens (the vendor loosely honours the tier), so the GLM effort
+gap is not evidence that DeepSeek's arms would move; that is a separate
+$10 question, not bought.
 
 ---
 
