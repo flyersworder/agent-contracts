@@ -52,6 +52,7 @@ the arithmetic of record.)
 | `runs/m7-blackboard-feedback-lt.parquet` | 120 | $12.89 | `blackboard_feedback` (the co-author's ring: two voices, one record, one shared PC estimate) vs same-sweep `shared_blackboard`, `adaptive_feedback`, `llm_pc`, LT k=30, n=30, flash-0731 (pre-registered 2026-09-14; B1 fails at 300 rows on the CI rule and holds at 1500; B2/B3 hold at 300, fail at 1500; B4 fails); re-scored in `runs/rescored-bbfb-lt-rows{300,1500}*` |
 | `runs/ring-probe-*.parquet` | 110 designs, $0 | add-one-entry probes on the ring sweep's designs (P-osr, P-repeat, P-ref, P-strong), 9 PC seeds, both caps, Accelerate; the ring's 1500-row loss is the dropped observational baseline (+0.054 when added back) — register §39 |
 | `runs/lt-baseline-{granted,ungranted}-rows{300,1500}*.parquet` | 1,432 designs × 2 policies, $0 | every LT M7-era design re-scored with `uniform_reference` granted outside the budget vs as bought, same run, 9 seeds, both caps (pre-registered G1–G5 2026-09-14, all hold; four resolved verdicts become ties incl. the loop's k=6 win over the rule) — register §40 |
+| `runs/m7-three-scouts-lt.parquet` | 300 | $0.95 | the three-agent ablation, `glm-5.3-flash`, LT k=30, n=50 × six arms interleaved (`llm_pc`, `fan_in_homog`, `fan_in_homog3`, `fan_in_varsplit`, `fan_in_varsplit3`, `team_varsplit`; pre-registered T1–T5 2026-09-15, all hold at both caps); re-scored in `runs/rescored-3s-lt-rows{300,1500}*` |
 | `runs/m7-blackboard-k6-control.parquet` | 60 | $0.11 | same-day `shared_blackboard` + `llm_pc` at LT k=6, DeepSeek flash-0731: the 30 Aug −0.057 replicates (−0.055 / −0.043 at 300 / 1500 rows) |
 | `runs/m7-oneshot-shuffle-lt.parquet` | 90 | $0.57 | `one_shot_shuffle`, LT k=6/30/45: menu order per seed does not diversify k=30 |
 | `runs/m7-oneshot-k6-control.parquet` | 60 | $0.17 | same-day `one_shot` + `one_shot_shuffle` at LT k=6, interleaved |
@@ -81,6 +82,162 @@ cross-backend gap is ΔF1 = 0.055, larger than most effects reported below.
 Chambers: light tunnel (LT) 38 nodes / 57 edges / 59-experiment menu; wind
 tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
+
+---
+
+## PRE-REGISTERED (2026-09-16, before launch): the reasoning-effort probe — does more thinking per selection call diversify near-deterministic scouts, and does it lift the loop? LT k=30, `glm-5.3-flash`, selection at `high`
+
+**Why.** The three-agent ablation (below) found GLM at the corpus's
+`low` selection effort near-deterministic: identical scouts make the same
+first pick 96 % of the time and duplicate whole experiments (7.8 of 30 with
+two scouts, 10.3 with three), which is why the three-scout ensemble loses
+more than the coverage law predicts. A co-author's natural question is
+whether the result is an artefact of thinking too little. The record says
+more reasoning does not move the ceiling (DeepSeek's 2.4x reasoning drift
+moved arm means +0.005 / +0.000, register §32; the WT blackboard's halving
+moved −0.004; v4 Pro did not change the ordering), but no sweep has ever
+run SELECTION at `high` on one vendor with a same-day `low` reference. This
+buys that number.
+
+**Design.** `runs/m7-effort-lt.parquet`. LT `standard`, k=30,
+`openrouter/z-ai/glm-5.3-flash`, `--selection-effort high` (coordination
+calls already run at `high`; the new flag reaches only the selection
+calls and is recorded per cell in `reasoning_effort`), n=50 per arm, three
+arms interleaved, four workers: `llm_pc`, `fan_in_homog`, `fan_in_homog3`.
+150 cells. Reference arms are the same three at `low` from
+`runs/m7-three-scouts-lt.parquet` (15 Sep, same vendor and price-pinned
+endpoint order); that is a cross-sweep contrast one day apart, so the drift
+probe runs on both files and any block that flags is reported beside the
+verdict. Re-scored at 9 PC seeds, clustered by distinct design, both caps,
+three metrics; the coverage rule re-scored on the same backend. Expected
+cost: GLM at `high` emits 1.6–2.5k reasoning tokens per call against 0–163
+at `low` (register §25), so roughly 10–20x the output tokens: about
+$0.03–0.06 per cell, $5–10 total, 4–8 h on four workers.
+
+**Predictions** (interval rules; design-level Welch 95 % CIs; each holds
+or fails at each cap):
+
+- **E1 (diversity)** More reasoning diversifies identical scouts: the
+  three-scout ensemble at `high` reaches MORE distinct experiments per cell
+  than at `low` (cell-level CI of the difference above zero; `low` mean
+  19.7), and so does the two-scout ensemble (`low` mean 22.2).
+- **E2 (ceiling)** The loop at `high` TIES the loop at `low` on directed F1
+  at both caps (CI contains zero) and stays resolved below the coverage
+  rule at both caps. *Falsified* if the `high` loop's CI against the `low`
+  loop excludes zero on the positive side at either cap — that would be the
+  first evidence in the corpus that thinking longer over the same prompt
+  buys selection quality.
+- **E3 (the ablation survives)** At `high`, `fan_in_homog3` − `llm_pc` is
+  resolved below zero at both caps, and `fan_in_homog3` − `fan_in_homog` has
+  a CI at or below zero at both caps. The T1 gap is expected to SHRINK in
+  magnitude toward DeepSeek's two-scout figure as duplication falls; its
+  size is reported, not predicted.
+- **E4 (reported)** Reasoning tokens per selection call, fallback rate,
+  first-pick agreement between scouts, wall and cost per cell, and the
+  drift probe on both sweeps.
+
+Decision rules key on intervals. E2 failing is the more interesting paper
+and would change §6's claim that no arm we built beats the rule for
+reasons other than knowledge; E1 failing would mean GLM's determinism is
+not a function of trace length, which register §26's mechanism predicts it
+is.
+
+**Threats.** Cross-sweep reference (one day apart, same endpoint order;
+drift probe on both). GLM's `high` may route to a different endpoint mix
+than `low` under the price-pinned order; `providers_used` is recorded and
+the contrast is reported per endpoint if the mix differs. DeepSeek-sized
+grants as before; a conservation failure is a provisioning statement.
+
+---
+
+## THE THREE-AGENT ABLATION: A THIRD SCOUT BUYS LESS COVERAGE, NOT MORE, AND NO THREE-SCOUT ARM REACHES THE RULE (2026-09-16, VPS/OpenBLAS, `runs/m7-three-scouts-lt.parquet`, 300 cells / $0.95 / 2 h 56 min, pre-registered T1–T5 below — all five hold)
+
+**The question.** A co-author asked whether the gain from a team would
+become visible once there are more than two agents, on the reasoning that
+the search space is what a team diversifies. The blind fan-in family was
+generalised to n scouts (`scout_names`, `split_budget`,
+`build_fan_in_graph(scout_c95s=...)`, `fan_in_agents(scout_budgets=...,
+partition="variable")`; two-scout allocations byte-identical, tests pin
+it) and run at LT k=30 on `glm-5.3-flash`, six arms interleaved, n=50 per
+arm, four workers. 300/300 ok, zero errors, zero infeasible partitions.
+Re-scored at 9 PC seeds, clustered by distinct design, at 300 and 1500 rows;
+directed, skeleton and core-20. The coverage rule is re-scored on the same
+backend (30 designs). Design-level MDEs 0.013–0.023.
+
+**Verdicts, directed F1 (design level, Welch 95 % CI; MDE in brackets):**
+
+| contrast | 300 rows | 1500 rows | prediction | holds |
+|---|---|---|---|---|
+| T1 `fan_in_homog3` − `fan_in_homog` | **−0.037** [0.016] CI [−0.049, −0.026] | **−0.031** [0.018] CI [−0.044, −0.019] | ≤ 0 | yes |
+| T1 distinct variables, cell level | Δv = **−2.36** CI [−2.83, −1.89] | — | < 0 | yes |
+| T2 `fan_in_varsplit3` − `fan_in_varsplit` | +0.005 [0.014] tie | +0.006 [0.021] tie | — | — |
+| T2 distinct variables, cell level | Δv = −0.58 CI [−1.36, +0.20] | — | ≥ 0 (CI contains 0) | yes |
+| T2 `fan_in_varsplit3` − rule | **−0.019** [0.015] | **−0.052** [0.022] | ≤ rule | yes |
+| T3 `fan_in_homog3` − rule | **−0.162** [0.016] | **−0.170** [0.017] | not above | yes |
+| T3 `fan_in_varsplit3` − rule (core-20) | +0.008 [0.014] tie | −0.011 [0.024] tie | not above | yes |
+| T4 `fan_in_varsplit` − `team_varsplit` | −0.003 [0.013] tie | −0.005 [0.021] tie | tie | yes |
+| T5 infeasible partitions | 0 / 50 | | reported | — |
+| ref `fan_in_homog` − loop | **−0.100** [0.016] | **−0.090** [0.021] | | |
+| ref `fan_in_homog3` − loop | **−0.137** [0.016] | **−0.121** [0.021] | | |
+| ref `fan_in_varsplit3` − loop | +0.006 tie (core-20 **+0.017** [0.013], resolved) | −0.003 tie (skeleton **−0.022** [0.021]) | | |
+| ref `team_varsplit` − loop | +0.004 tie | −0.005 tie | | |
+| ref loop − rule | **−0.025** [0.016] | **−0.049** [0.023] | | |
+| ref `fan_in_varsplit` − rule | **−0.023** [0.014] | **−0.058** [0.019] | | |
+
+Skeleton agrees with directed on every row (T1 −0.042 / −0.038, T3 homog3
+−0.169 / −0.151, varsplit3 − rule −0.017 / −0.025). Core-20 shrinks T1 to
+−0.016 / −0.009 (resolved / tie) because the apparatus edges carry most of
+the ensemble's loss, and puts `fan_in_varsplit3` a resolved **+0.017**
+above the loop at 300 rows — the only positive resolved contrast in the
+sweep, on one metric at one cap, and still a tie against the rule (+0.008).
+
+**What the answer is.** Adding a scout to the ensemble makes it *worse*:
+2.4 fewer distinct variables and −0.03 to −0.04 F1 at either cap, on top of
+the two-scout ensemble's −0.09 to −0.10 against the loop. Adding a scout to
+the variable split changes nothing: variables tie, F1 ties at both caps,
+and both splits sit resolved below the rule on directed F1 (−0.02 / −0.05).
+No arm with three agents resolves above the rule on any metric at any cap
+(T3). The negotiated split and the blind split are indistinguishable (T4),
+so `team_varsplit`'s contest over disjoint pools buys nothing — the
+partition is the whole arm. More agents diversify the search space only in
+the sense that the pool is dealt into more hands; the plateau is the same.
+
+**Why the ensemble loses more with three (mechanism, $0).** GLM at `low`
+effort is near-deterministic: identical scouts given the same menu make
+the same first pick 96 % of the time and duplicate whole *experiments*, not
+just variables — 7.8 of 30 buys are duplicates with two scouts (22.2 distinct
+experiments) and 10.3 with three (19.7). The coverage law (0.0045 per
+distinct variable at 300 rows) predicts only −0.011 for T1's −2.36-variable
+gap against the measured −0.037. The law was fitted on arms that always
+reached 30 distinct experiments and priced a lost variable; a lost
+experiment also loses rows and a regime, which the law does not price. On
+DeepSeek the two-scout ensemble reached 25–27 distinct experiments; GLM's
+determinism is what makes the three-scout loss legible on a vendor where
+the two-scout topology contrasts did not resolve at the cap of record (13
+Sep). Note the ensemble's `n_selection_fallbacks` 0.6–0.7 per cell (loop
+0.4, splits 0.4): the 1–3 % `rng.choice` rate biases *toward* diversity,
+so it understates the duplication.
+
+**Secondary metrics (median per cell):** calls 30 (loop) / 31 (fan-in) /
+35 (`team_varsplit`); wall 96 s / 128 s (homog) / 98 s (homog3) / 86 s /
+83 s / 153 s; output tokens 2.2k / 3.5k / 2.7k / 2.2k / 1.9k / 5.7k; cost
+$0.003 / $0.004 / $0.004 / $0.002 / $0.002 / $0.004. A three-way split is
+the cheapest LLM arm in the sweep. The whole sweep cost less than eight
+DeepSeek cells.
+
+**Drift.** Interleaved; `window_overlap` 1.0 for every arm pair, so no
+between-arm exposure; one of six per-arm blocks flags on the
+reasoning-per-call probe, within the corpus's rate (register §32).
+
+**Consequences.** (1) The co-author's hypothesis is answered in the
+negative on the only family that generalises without a design decision:
+the count of agents is not a lever on this task. (2) The coverage law is a
+topology law at fixed experiment coverage; once an arm loses distinct
+experiments it under-predicts, which is the same limit that excluded the
+feedback arms. (3) A DeepSeek replication (~$10) was to be bought only if
+diversification showed something; it did not, so it is not bought. (4) In
+the paper this is one sentence in §6.3 and a row in S7; the table above is
+the record.
 
 ---
 

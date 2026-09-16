@@ -33,6 +33,7 @@ their oriented direction.
 from __future__ import annotations
 
 import contextlib
+import os
 import random as _random
 import re
 from collections.abc import Callable, Sequence
@@ -129,6 +130,26 @@ _SELECTION_MAX_TOKENS = 32768
 # "low" (475 tokens) is the closest match to M4b's observed profile, which is
 # what keeps the reused rung-0 and rung-3 cells comparable.
 _SELECTION_REASONING_EFFORT = "low"
+
+# Run-level override of the selection effort, carried in the environment so
+# that `--max-workers` worker processes (forked or spawned) see the same value
+# without any agent signature changing. Every selection call in the corpus ran
+# at "low"; the first use is the 16 Sep probe of whether more reasoning
+# diversifies near-deterministic scouts on GLM. Recorded per cell in
+# `reasoning_effort`, so a sweep documents its own setting.
+SELECTION_EFFORT_ENV = "CHAMBER_SELECTION_REASONING_EFFORT"
+_REASONING_EFFORTS = ("low", "medium", "high")
+
+
+def selection_reasoning_effort() -> str:
+    """The `reasoning.effort` sent on every selection call for this process."""
+    value = os.environ.get(SELECTION_EFFORT_ENV, _SELECTION_REASONING_EFFORT)
+    if value not in _REASONING_EFFORTS:
+        raise ValueError(
+            f"{SELECTION_EFFORT_ENV}={value!r} is not one of {'/'.join(_REASONING_EFFORTS)}"
+        )
+    return value
+
 
 # Per-LLM-call output cap for the adjacency-emission step in
 # `llm_only_agent`. Larger because the response is a JSON object
@@ -806,7 +827,7 @@ def _llm_select_loop(
         # responses routinely exceed it and still finish with `stop`, so
         # effort -- not max_tokens -- is the real cost control.
         extra: dict[str, Any] = {
-            "extra_body": {"reasoning": {"effort": _SELECTION_REASONING_EFFORT}}
+            "extra_body": {"reasoning": {"effort": selection_reasoning_effort()}}
         }
         if temperature is not None:
             extra["temperature"] = temperature
@@ -1865,7 +1886,7 @@ def one_shot_agent(
         model=model,
         messages=build_batch_select_prompt(prompt_menu, budget),
         max_tokens=_SELECTION_MAX_TOKENS,
-        extra_body={"reasoning": {"effort": _SELECTION_REASONING_EFFORT}},
+        extra_body={"reasoning": {"effort": selection_reasoning_effort()}},
     )
     chosen, n_over, n_short = _resolve_batch_selection(
         _parse_name_list(response, menu), menu, budget, seed, "one_shot"
@@ -2068,7 +2089,7 @@ def critique_agents(
 
     llm = llm or _default_llm()
     budget = min(budget, len(menu))
-    extra: dict[str, Any] = {"extra_body": {"reasoning": {"effort": _SELECTION_REASONING_EFFORT}}}
+    extra: dict[str, Any] = {"extra_body": {"reasoning": {"effort": selection_reasoning_effort()}}}
 
     with _maybe_node(adapter, "proposer"):
         first = llm(
