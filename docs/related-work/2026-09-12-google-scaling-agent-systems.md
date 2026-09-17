@@ -4,6 +4,23 @@ Read 2026-09-12 from the Google Research blog post and the arXiv v3 HTML.
 Every figure below was checked against the source text; figures the blog
 and the paper disagree on are quarantined at the end.
 
+**PUBLISHED VERSION (checked 2026-09-17) — cite this, not the arXiv:**
+Kim, Gu, Park, … Liu, "Capable language models can outgrow the benefits of
+collaboration", *Nature Machine Intelligence* 8(7):1157–1172, July 2026,
+DOI 10.1038/s42256-026-01268-y. The title changed. Two of this note's
+original readings were wrong against the published text and are corrected
+inline below: the budget match is on **reasoning tokens plus tool access**,
+not total tokens ("matched per-system compute ceilings (matched
+reasoning-token budgets and identical tool-call access)", mean ≈ 4,800
+reasoning tokens); and the paper's own mechanism words are **"information
+fragmentation"** and a **"coordination tax"**, not "budget fragmentation" —
+it describes splitting the per-system budget across agents as an allocation
+rule, not as the mechanism. Confirmed unchanged in the published version:
+260 configurations, six benchmarks, PlanCraft "from −70% to −39%",
+R² = 0.373, capability-saturation threshold (≈45%, predicts 94% of
+validation configurations, "a practical selection rule rather than a
+universal scaling principle").
+
 ## What they did (verified against the paper text)
 
 - Five architectures: single-agent (SAS) and four multi-agent (independent,
@@ -12,12 +29,15 @@ and the paper disagree on are quarantined at the end.
   SWE-bench Verified, Terminal-Bench), three model families (OpenAI, Google,
   Anthropic); 260 configurations in v3; 50–100 instances per configuration
   (20 for the two Docker benchmarks).
-- **"Fixed computational budgets (matched total tokens across MAS and
-  SAS)"** — the comparison is budget-matched by design, with identical
-  tools, prompts and truncation policies.
+- ~~"Fixed computational budgets (matched total tokens across MAS and
+  SAS)"~~ — arXiv v3 wording. **Published: matched reasoning-token budgets
+  and identical tool-call access**, with identical prompts and truncation
+  policies. Budget-matched by design either way.
 - Headline: +80.8 % over SAS on decomposable financial reasoning
   (centralized), −39.0 % to −70.0 % on sequential planning (PlanCraft) for
-  every multi-agent variant. Mechanism stated as budget fragmentation:
+  every multi-agent variant. Mechanism (published wording: information
+fragmentation and a coordination tax; "budget fragmentation" was our
+paraphrase):
   "intra-agent reasoning for constraint verification and state tracking
   consumes most available tokens before communication can occur; subsequent
   inter-agent messages then compress reasoning quality."
@@ -39,7 +59,7 @@ and the paper disagree on are quarantined at the end.
 
 **Same sign, same axis, independently.** Their "sequential penalty" — every
 multi-agent variant below the single agent on a task with sequential
-dependencies, under matched tokens — is our M6/M7 headline on a
+dependencies, under matched reasoning tokens — is our M6/M7 headline on a
 sequential experiment-selection task: of 24 topology-vs-loop contrasts, 10
 resolve and 9 favour the loop; no fan-in topology beats the sequential loop
 where the comparison resolves. Two groups, different tasks, different
@@ -48,14 +68,15 @@ as the field-level context our single-task depth complements.
 
 **Where ours is sharper, and the paper should say so:**
 
-1. *Budget matching is enforced, not assumed.* They match total tokens by
-   design parameter. Our matching is a contract with a certified
+1. *Budget matching is enforced, not assumed.* They match reasoning tokens
+   (and tool access) by design parameter. Our matching is a contract with a certified
    conservation check, and H-C shows the design-time forecast FAILS in
    35 % of graph cells even when matched by design (register, WT `team`
    67 % certified). "Matched by construction" is a claim their method
    cannot verify after the fact; ours can, and the failures are reported.
 2. *Their mechanism is not ours.* They attribute the sequential penalty to
-   cognitive-budget fragmentation (communication eats the token budget).
+   information fragmentation and a coordination tax (reasoning eats the
+   token budget before communication can occur).
    On our task the record is not load-bearing (`one_shot`, one call and no
    record, ties the loop at every budget on both chambers; register §35),
    the loop saturates at F1 ≈ 0.42 while random catches up, and two-thirds
@@ -95,12 +116,12 @@ reason to run the cross-vendor replication before submission; our depth is
 the reason it is worth reporting at all.
 
 **One sentence for the related-work paragraph:** Kim et al. (2026) find,
-under matched tokens across six benchmarks, that multi-agent coordination
+under matched reasoning-token budgets across six benchmarks, that multi-agent coordination
 helps decomposable tasks and degrades sequential ones by 39–70 %; we
 reproduce the sequential-task sign on a physical testbed with
 contract-certified budgets, and show that the degradation there is
-redundancy and a coverage plateau, not the budget fragmentation they
-propose — and that it persists under three different feedback signals.
+redundancy and a coverage plateau, not the information fragmentation
+they propose — and that it persists under three different feedback signals.
 
 ## Quarantined: blog vs paper disagreements
 

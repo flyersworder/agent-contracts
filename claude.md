@@ -1600,13 +1600,18 @@ that document's final section. Harness defects stay in
   are 3.1 Pro results of which three reproduce) — the failure is not
   deterministic, so being right once is not grounds for trusting it. That page
   is also gzip served under an `.html` name: `gunzip -c` before parsing.
-  `2026-09-12-google-scaling-agent-systems.md` (Kim et al., arXiv
+  `2026-09-12-google-scaling-agent-systems.md` (Kim et al., published as
+  "Capable language models can outgrow the benefits of collaboration",
+  *Nat. Mach. Intell.* 8:1157–1172, 2026 — cite that, not arXiv
   2512.08296) is the **closest contemporaneous result**: under matched
-  tokens across six benchmarks, multi-agent coordination degrades
-  sequential tasks by 39–70 % — our sign, independently. Cite it; then
+  **reasoning-token** budgets and tool access (NOT total tokens — the
+  arXiv wording, corrected 2026-09-17 against the published text) across
+  six benchmarks, multi-agent coordination degrades sequential tasks by
+  39–70 % — our sign, independently. Cite it; then
   say where ours differs: budgets contract-certified not assumed (H-C
   fails 35 % even when matched by design), the mechanism on our task is
-  redundancy + a coverage plateau, NOT their budget fragmentation
+  redundancy + a coverage plateau, NOT their information fragmentation /
+  coordination tax (their words; "budget fragmentation" was our paraphrase)
   (`one_shot` ties the loop), and their 260 configurations are single
   passes with no repeat runs. The blog's 180 / four benchmarks / R² 0.513
   are v1 figures; quote the paper's 260 / six / 0.373.
@@ -1614,8 +1619,8 @@ that document's final section. Harness defects stay in
   the **second** independent matched-budget result with our sign — thinking
   tokens held constant, single agent matches or beats every team, and
   API-level budget controls carry artefacts (our §25/§32 from the other
-  side). Three denominators (total tokens, thinking tokens, certified
-  experiments), one sign; three mechanisms offered (fragmentation, context
+  side). Two kinds of denominator (reasoning tokens in both prior studies,
+  certified experiments here), one sign; three mechanisms offered (fragmentation, context
   utilisation, duplicated coverage) — `one_shot` tying the loop rules the
   first two out on OUR task, say no more than that.
   `2026-09-13-causalab-interactive-causal-discovery.md` (arXiv 2605.26029)

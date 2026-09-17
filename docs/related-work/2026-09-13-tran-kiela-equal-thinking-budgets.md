@@ -28,12 +28,14 @@ and the arXiv BibTeX endpoint). **The body of the paper has not been read.**
 
 **Second independent matched-budget result with our sign**, after Kim et
 al. (`2026-09-12-google-scaling-agent-systems.md`). Their budget is
-*thinking tokens*; Kim et al.'s is *total tokens*; ours is *experiments*,
-certified by contract. Three different denominators, one sign. That is the
-sentence for §1/§2 of the paper.
+*thinking tokens*; Kim et al.'s is *reasoning tokens plus tool access*
+(corrected 2026-09-17 against the published NMI version; this note first
+said total tokens, the arXiv wording); ours is *experiments*, certified by
+contract. Two kinds of denominator — reasoning tokens (both prior studies)
+and a task resource (ours) — one sign. That is the sentence for §1/§2.
 
 Their mechanism (context utilisation, DPI) is the third distinct mechanism
-offered for the same sign: Kim et al. say budget fragmentation, we say
+offered for the same sign: Kim et al. say information fragmentation and a coordination tax, we say
 duplicated coverage. On our task theirs and Kim's are both ruled out by the
 same fact: `one_shot`, a single call with no context accumulation and no
 fragmentation, ties the loop. Say that rather than adjudicating their
