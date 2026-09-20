@@ -10,11 +10,12 @@ before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-14**: 19,284 cells, **$158.58**, **zero errored cells**, (2026-09-13 read 19,164 / $145.69; 2026-09-12 evening read 18,804 / $145.10; the GLM cross-vendor replication adds 300 cells / $0.48 and the `shared_blackboard` k=6 control 60 / $0.11)
-across two chambers and two models. (The 2026-08-30 line read "2,221 / $94.05";
+**Corpus as of 2026-09-20**: **19,284 orchestrator cells, $158.58, zero errored cells** across two chambers and three arm models (`deepseek-v4-flash-0731`, `deepseek-v4-pro`, `glm-5.3-flash`). Unchanged since 2026-09-14 — the 2026-09-20 System-One probe (`typesafe/jev-1.13`, $0.07) ran through the direct Decisions API and produced designs, not cells, so it is listed below but deliberately NOT added to that count. (2026-09-13 read 19,164 / $145.69; 2026-09-12 evening 18,804 / $145.10; the GLM cross-vendor replication adds 300 cells / $0.48 and the `shared_blackboard` k=6 control 60 / $0.11.)
+Two further models appear in prior-elicitation probes only, never as arms:
+`gpt-5.6-sol` and `typesafe/jev-1.13`. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
-LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The table below is
-the arithmetic of record.)
+LLM-free variance probes and re-scorings, which add 14,622 cells at no cost. The
+table below is the arithmetic of record.)
 
 | dataset | cells | cost | what it establishes |
 |---|---|---|---|
@@ -62,6 +63,8 @@ the arithmetic of record.)
 | `runs/rescored-vps-{rows300,rows1500,jci-rows1500}.parquet` (+`-bykey`) | 2,206 designs | $0.00 | the corpus under PC at two caps and JCI-PC at 1500, 9 seeds |
 | `runs/rescored-vps-utigsp-lt.parquet` (+`-bykey`) | 769 designs | $0.00 | the LT corpus under UT-IGSP, never pooled, core-20 |
 | `runs/rescored-vps-ges-rows1500-subset.parquet` (+`-bykey`) | 1,190 designs | $0.00 | LT k=30/45 + WT k=21 under GES at 1500 rows, 3 seeds — the cross-family check |
+| `runs/jev-probe-lt.parquet` | 30 designs | $0.02 | `typesafe/jev-1.13` selection arms at LT k=30 (general prompt, coverage-in-prompt, fan-out, in-rule) scored at both caps; NOT orchestrator cells — a direct-API probe |
+| `runs/jev-probe-edges.json` | — | $0.02 | the same model's edge prior over all 1,406 LT node pairs, 5 order-shuffled draws (AUC 0.879 source→sink) |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -85,6 +88,206 @@ tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
+
+## A SYSTEM-ONE DECISION MODEL KNOWS THE CHAMBER AND NOT THE ESTIMATOR (2026-09-20, local/Accelerate, `runs/jev-probe-lt.parquet`, `runs/jev-probe-edges.json`, ~750 LLM calls / **$0.074**): `typesafe/jev-1.13` scores AUC 0.879 on which variables are connected and rho -0.44 on which experiment to buy
+
+Exploratory probe, prompted by the release of `typesafe/jev-1.13` (TypeSafe,
+2026-09-18) — the first "System One" model: it returns typed decisions with
+calibrated probabilities and **never generates text**. The question was whether
+it belongs in the AAMAS resubmission. **It does not**, for a structural reason,
+but the probe produced one result worth keeping and three retractions worth
+recording.
+
+**Model facts, verified against the vendor page and docs, not a summary.**
+$0.042/M input, **$0/M output**, 64k context (32k for `state` plus the longest
+question), **max 255 options per `Choice`** (LT's menu is 59, WT's 28), returns
+a probability for every option plus a calibrated `confidence`. Reached at
+`POST /api/alpha/decisions` on OpenRouter — **not** the chat-completions
+endpoint, so it is invisible to `GET /api/v1/models` and unreachable through
+LiteLLM. 0.26-0.6 s per call. Nondeterministic on byte-identical input
+(confidence 0.17-0.23 over five repeats), so §21's menu-shuffling remedy
+applies to it exactly as to DeepSeek.
+
+**Why no arm above `loop` is constructible.** Every rung of the ladder above
+the loop passes prose between agents — role briefs, the shared record,
+negotiation, reconcile, the feedback summary. A model that emits only typed
+decisions cannot occupy any of them, and cannot emit `llm_only`'s adjacency
+matrix either. Whatever else is true, the topology benchmark cannot host it.
+
+### The two priors come apart
+
+This is the finding. **Which experiment to buy** and **which variables are
+connected** are different questions, and the model is good at exactly one.
+
+| what was asked | metric | value | chance |
+|---|---|---|---|
+| rank the 59-entry menu by informativeness (data-free) | Spearman rho vs the PC marginal-gain oracle | **-0.443 +/- 0.029** (8 order-draws) | 0.00 |
+| does `i` directly cause `j`? all 1,406 ordered pairs | AUC / AP | 0.844 +/- 0.009 / 0.150 +/- 0.005 | 0.500 / 0.041 |
+| same, restricted to true-source x true-sink pairs | **AUC / AP** | **0.879 +/- 0.012 / 0.718 +/- 0.032** | 0.500 / 0.218 |
+| for a true edge, is P(i->j) > P(j->i)? (within one call) | direction correct | **67.7% +/- 5.6%** (p=0.0075) | 50% |
+
+Five order-shuffled draws each. The source->sink stratum is the informative
+one: the bipartite split (register §29) is granted, and the only remaining
+question is **which** sensors a given setting drives. A 3.3x lift in average
+precision says it knows the physics.
+
+**This independently corroborates the UT-IGSP withdrawal.** That result reached
+"the models' prior was right about the chamber and wrong about our judge" by
+changing the estimator. This reaches the same place by asking the model about
+the graph directly and never touching an estimator. Two unrelated routes, one
+conclusion.
+
+**Scope, and it is decisive against using it.** AUC 0.879 from variable names
+alone means the knowledge is *lexical*, and on a bipartite depth-1 graph lexical
+knowledge is most of the answer. Feeding it to GES as an edge prior would encode
+the ground truth rather than discover it. The direction figure sharpens this:
+67.7% on a graph where the answer is always "the actuator causes the sensor"
+is far from the near-certainty the question deserves, and the underlying
+probabilities are low and close (mean 0.215 forward vs 0.186 reverse). **It
+knows the skeleton; it barely knows the DAG.** Do not compare 0.879 to PC's
+F1 — an AUC is a ranking metric with the full pairwise ordering in hand, and
+F1 is a thresholded decision made from data.
+
+### Selection: four call shapes, both caps, seven verdicts, zero cap flips
+
+`coverage_rule` and `random` are LLM-free controls at n=10; all arms scored at
+9 PC seeds on one backend.
+
+| arm | calls/design | F1@300 | F1@1500 | distinct vars |
+|---|---|---|---|---|
+| `coverage_rule` (no LLM) | 0 | **0.4373** | **0.4597** | 30.0 |
+| `jev_in_rule_F2` — coverage round-robin in CODE, one call picks each variable's strength | **1** | 0.4241 | 0.4417 | 30.0 |
+| `jev_loop_v2` — coverage heuristic written INTO the prompt | 30 | 0.4233 | 0.4428 | 30.0 |
+| `jev_loop_v1` — the corpus's general `build_select_prompt` | 30 | 0.3764 | 0.3672 | 19.8 |
+| `jev_fanout_F1` — 59 Nouls in one call, top-30 by probability | 1 | 0.3732 | 0.3204 | 20.4 |
+| `random` (no LLM) | 0 | 0.3686 | 0.3090 | 20.7 |
+
+| contrast | @300 | @1500 | verdict |
+|---|---|---|---|
+| `jev_loop_v1` - `coverage_rule` | -0.0609 | -0.0925 | **resolved below, both** |
+| `jev_in_rule_F2` - `jev_loop_v2` | +0.0009 | -0.0011 | tie, both |
+| `jev_in_rule_F2` - `coverage_rule` | -0.0132 | -0.0180 | below MDE, both |
+| `jev_loop_v2` - `coverage_rule` | -0.0140 | -0.0169 | below MDE, both |
+| `jev_fanout_F1` - `random` | +0.0046 | +0.0113 | tie, both |
+| `jev_fanout_F1` - `coverage_rule` | -0.0642 | -0.1393 | resolved below, both |
+| `jev_loop_v1` - `jev_fanout_F1` | +0.0032 | +0.0468 | below MDE / resolved |
+
+**Every verdict is identical at both caps** — against the corpus baseline where
+10 of 39 headline verdicts move with the cap (the two-cap re-score).
+
+Three readings:
+
+1. **C4 holds in a new model class.** Under the corpus's general prompt the
+   model is resolved below the LLM-free coverage rule at both caps. No LLM arm
+   beats the rule; this is now four models across three vendors and two model
+   classes.
+2. **One call reproduces thirty, within this model.** `F2` ties `v2` to
+   +0.0009 / -0.0011. But `F1` — the same model, also one call, without the
+   coverage wrapper — collapses to random. **What is load-bearing is coverage,
+   not the call count and not the record.** This sharpens rather than
+   contradicts the `one_shot` finding, and it is a within-model contrast, so it
+   is immune to the cross-model prompt-fit confound below.
+3. **`v2` is the coverage rule in disguise, not a better-wired model.** Its
+   instruction contained *"Do not pick an experiment whose variable already
+   appears in `already_purchased`"* — the rule as an imperative. It reaches
+   30/30 variables because it was told to, and it lands within 0.001 of `F2`,
+   which implements the same algorithm in code. Only `v1` and `F1` are
+   protocol-consistent measurements of the model.
+
+### Verifier: it detects coverage and nothing else
+
+Pairwise design judging — show it two finished 30-experiment designs, ask which
+recovers the graph better.
+
+| pair type | accuracy | order-consistent pairs only | p |
+|---|---|---|---|
+| coverage DIFFERENT | 19/25 = 76.0% | 14/16 = **87.5%** | 0.0042 |
+| coverage MATCHED | 6/18 = 33.3% | 3/7 = 42.9% | 1.0000 |
+
+Across the design pool `spearman(distinct_variables, F1) = +0.856`, so "which
+design is better" is largely readable off the surface of the list. Match the
+coverage and the signal goes. **Report the matched row as undetermined, not as
+a null** — it rests on 7 order-consistent pairs, which is almost no power. What
+makes it credible is that `F2` probed the same quantity by an unrelated route
+(30 per-pick judgments inside an already-optimal generator, both caps) and also
+found <= 0.
+
+**So a model-based verifier has no room here**, and the reason is the pillar's
+own thesis: a verifier pays when it catches errors the score punishes; the error
+here is under-coverage; coverage is `len({experiment_variable(x) for x in d})`;
+and the code version *is* the coverage rule, which beats every LLM arm.
+
+### Three retractions, and what caused each
+
+1. **"`jev_loop_v1` - `coverage_rule` resolves even at n=5" — WRONG.** The five
+   designs shared 27-30 of 30 entries and one pair was identical. The sd was
+   measuring PC noise on nearly the same input, so the MDE answered the wrong
+   question. §24 again. **The distinct-design count would NOT have caught it**
+   (4/5 = 0.80 looks healthy); mean pairwise overlap would (0.95 against a
+   pigeonhole floor of 0.03). Corpus check run in response: 50 arm x budget
+   groups, median distinct ratio 1.00, and only `one_shot` falls below — already
+   known and already re-analysed. **No existing result changes.**
+2. **"A non-reasoning model matches the DeepSeek loop at 1/700th the cost" —
+   WRONG.** It paired a measured cost ratio with an unmeasured capability
+   equality across two model classes, two API shapes and asymmetric tuning. The
+   protocol-consistent arm is `v1`, which sits ~0.045 *below* the DeepSeek loop
+   at 300 rows.
+3. **"The `v1`-vs-`F1` gap at 1500 rows threatens the `one_shot` claim" —
+   WRONG.** `F1` is not a `one_shot` analogue: `one_shot` is one generative call
+   picking a *set*, while `F1` is 59 *independent* Nouls ranked in code, which
+   structurally cannot reason about the set. The contrast confounds "has a
+   record" with "can consider the set at all," and the two arms' coverage is
+   nearly identical (19.8 vs 20.4), so the assumed mechanism is absent. **The
+   record axis is not testable in this model class.**
+
+A fourth prediction failed honestly and is kept for the record: pairwise
+discrimination was pre-registered at or below chance and came in at 70%
+(p=0.0066). The stated reason — that rho = -0.44 makes its criterion run
+opposite to the score — was wrong in an instructive way: rho measures
+*per-experiment* informativeness, while judging a finished list exposes
+coverage as a surface feature. The follow-up prediction, that the 70% would
+vanish at matched coverage, held.
+
+A fifth correction, method rather than result: the first direction control
+compared P(i->j) and P(j->i) drawn from **different calls** and returned 57.9%
+(p=0.29, indistinguishable from chance). Asked inside one call it is 67.7%.
+**Cross-call probability comparisons carry per-call variation; put both
+directions in the same request.**
+
+### Where it could still be used, and it is not here
+
+`evaluation/indeterminacy_evaluator.py` builds `MultiLabelScore.omega` — a
+probability vector over a response set — by ensembling chat judges and reading
+their disagreement. This model emits that vector natively, with a calibrated
+`confidence`, in one call at ~$0.0001. Incidental support from the probe: the
+14 highest-confidence pairs in the discrimination test were **100%** correct,
+so its confidence carries information where its point judgment does not.
+**Caveat that decides the design:** Guerdan et al.'s omega is *rating
+indeterminacy* estimated from disagreement **between** judges, while this is
+**one** model's calibrated uncertainty. They are different objects. The
+defensible use is as one judge in the ensemble that returns a response set
+natively rather than through prompt gymnastics — not as a replacement for the
+ensemble. Its jaggedness note warns against numeric representations, so the
+0-10 dimensions would need descriptive `Score` levels.
+
+### Reusable lessons
+
+- **Mean pairwise overlap, measured against the pigeonhole floor
+  `max(0, 2k-M)/k`, is a better pre-flight than the distinct-design count** —
+  and it costs no PC run and no LLM call. Compute it when the designs exist,
+  before any F1 does.
+- **A prompt transplanted across API *shapes* is a defect, not a tuning
+  difference.** Leaving `criteria` descriptions null on a typed-decision API
+  cost 0.047 F1 at 300 rows and 0.076 at 1500 — larger than most topology
+  contrasts in this corpus, and it *grows* with rows, so a single-cap read
+  would have been more confidently wrong. Chat models have no analogue of this
+  failure, so it does **not** generalise to the DeepSeek/GLM comparison.
+- **Before asking whether a model can help, ask what the oracle looks like.**
+  The coverage oracle is computable, so no model can beat it; the orientation
+  oracle is lexical, so any model that helps is leaking. A task has room for a
+  model only where the best achievable rule is neither computable nor a
+  restatement of the label.
+
 
 ## MORE REASONING LIFTS THE LOOP TO THE RULE AND MAKES IDENTICAL SCOUTS LESS DIVERSE (2026-09-16, VPS/OpenBLAS, `runs/m7-effort-lt.parquet`, 150 cells / $2.17 / 5.2 h, pre-registered E1–E4 below — E1 and E2 FAIL, both resolved; E3 holds)
 
@@ -2418,6 +2621,13 @@ setting) — documentation, not the answer:
 |---|---|---|---|---|
 | `deepseek-v4-flash-0731` | 2 of 5 (3 empty) | −0.15 (−0.19…−0.12) | 9.4 | 0.446 |
 | `gpt-5.6-sol` | 5 of 5 | **+0.32** (+0.06…+0.68) | 11.9 (two draws at 15.4) | 0.446 ± 0.021 |
+
+**Reading these files: filter on `n_parsed == 59` before averaging.** The
+Parquet retains the unparsed draws, and an empty response scores an identical
+ρ = +0.0857 every time — the degenerate fallback ranking, not a measurement.
+Averaging all five deepseek rows gives −0.01 and reverses the conclusion of
+this table; the two rows with parsed content give −0.15. (Caught 2026-09-20
+after the naive mean was quoted in a spec.)
 
 sol's rationale flips to the correct one — "fixed-setting interventions
 rank highest because those variables otherwise have no variance" — in 3

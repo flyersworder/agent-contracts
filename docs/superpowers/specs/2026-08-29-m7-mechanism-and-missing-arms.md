@@ -968,6 +968,31 @@ is predictable from how much it changes what gets bought.
 > miss, across two chambers, two vendors and two caps, two of them
 > pre-registered out of sample.
 
+**Scope on the second factor: `Δvariables` is measured under one fixed,
+model-neutral prompt, so it is a coverage gap *under this prompt*, not a
+property of the model.** Every selection arm shares `build_select_prompt`'s
+user message, role variants override only the system message, the feedback
+arms additionally prepend an estimate block to the user message
+(`with_feedback_block`), and no prompt was ever tuned to a vendor. That is
+what makes the cross-vendor comparison fair, and it is also the limit of
+what it licenses:
+if the fixed prompt happens to suit one model better than another, the
+difference lands inside the `Δvariables` we measure rather than beside it.
+The law is unharmed — `Δvariables` is read off the purchase logs and then
+predicted from, never inferred from model identity — but the sentence
+"topology is at least as large a lever as model choice" must not be
+re-derived from it, and a reader coming from Tran & Kiela will ask. Two
+measurements bound how large this can be, and they show the sensitivity is
+itself model-dependent: the SAME README protocol paragraph flips
+gpt-5.6-sol's data-free prior from rho -0.28 to **+0.32** (5 of 5 draws
+parsed) while moving deepseek-v4-flash's only from -0.37 to **-0.15** (2 of
+5 parsed), with its rationale merely restating the document's own words --
+the frontier model derives the knowledge, the flash model does not; and
+`--selection-effort low -> high` moves the GLM loop +0.029/+0.031 F1 via
++3.3 distinct variables (2026-09-16). So no arm here sits at its ceiling,
+which is the same reason the effort is quoted beside every absolute
+LLM-arm F1.
+
 **Contributions, in order.**
 
 1. **A benchmark where budgets are certified, not assumed** — and the

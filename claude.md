@@ -503,1078 +503,232 @@ agent-contracts/
 
 ## Next Steps
 
-**M4b PILOT: COMPLETE (May 18, 20:44). M4 acceptance criteria PASS.**
-- 450/450 cells, 442 ok / 8 timeouts (1.8% error rate, all planner_reasoner k=59)
-- LLM-only dominates Pareto (SHD=26, F1=0.75 at k/M=1.00); 4× better than next variant
-- Figures at `runs/m4-pilot-figs/`; sidecar `runs/m4-pilot.jsonl` kept for audit
+**Active: M7 Phase 3.** The plan is **§8 of
+`docs/superpowers/specs/2026-08-29-m7-mechanism-and-missing-arms.md`**;
+`docs/chamber-results.md` holds the results and
+`docs/chamber-harness-validity-register.md` the defects.
 
-**Active: M7 Phase 3 (2026-09-05). M5 and M6 are COMPLETE; the M5 text below
-is kept for the reasoning that shaped the sweeps, not as a to-do list.**
+Where the pillar stands: two chambers, four models, M6's ladder run on both, M7
+Phases 1-3, the coverage oracle found, the WT `team_varsplit` prediction
+confirmed, the corpus re-scored on one BLAS backend at two row caps with every
+headline verdict holding, and the cross-vendor replication complete.
 
-Where the pillar actually stands: 3,441+ cells over two chambers and two
-models, M6's ladder run on both, M7 Phase 1 and Phase 2 complete, the coverage
-oracle found, the WT `team_varsplit` prediction confirmed, and the whole M7
-corpus re-scored on one BLAS backend with every headline verdict holding. The
-current plan is **§8 of `docs/superpowers/specs/2026-08-29-m7-mechanism-and-
-missing-arms.md`**; `docs/chamber-results.md` holds the results and
-`docs/chamber-harness-validity-register.md` the defects. Remaining work is
-the AAMAS 2027 write-up (`paper/aamas2027/`, untracked like the rest of
-`paper/`; abstract 1 Oct, paper 8 Oct 2026) and, first among experiments,
-the adaptive-feedback arm (spec §8.7 row 7).
+**Remaining work is the AAMAS 2027 write-up** (`paper/aamas2027/`, untracked
+like the rest of `paper/`). Hard dates: **abstract 1 Oct 2026, paper 8 Oct
+2026** (AoE), 8 pages + unlimited references, `aamas.cls` unmodified, double
+blind, every author on OpenReview. Area: **GAAI**. The AI-use disclosure is
+mandatory and this project qualifies. See `paper/aamas2027/README.md` for the
+verified rule table and the open items (S5 tool/version confirmation, S6
+anonymised mirror).
 
-**Historical, from 2026-05-18 — the M5 scoping that produced those sweeps:**
+**Optional, post-deadline:** the LT budget ends; a distinct-design /
+overlap guard in the analyzer (fires only on `one_shot`, which is already
+re-analysed, so it changes nothing retroactively); a System-One judge inside
+`evaluation/indeterminacy_evaluator.py`'s ensemble.
 
-Scope revised post-M4b: skip 5-budget expansion (keep 3: 0.10, 0.50, 1.00).
-M4b's dramatic effect at 3 budgets makes intermediate budgets curve-shape
-refinement rather than headline material. Essentials below are non-negotiable.
+**Other tracks (independent):** AutoGen and CrewAI integrations; audit
+dashboards, policy management UI, cost attribution; **OR/optimization research
+ideas** — stochastic/robust budget allocation in delegation, an OR-backed
+chamber selection baseline, a heuristic-vs-optimum validation oracle
+(`docs/or_optimization_research_ideas.md`).
 
-1. **WT chamber sweep** — 360 CONTRACTED cells (1 chamber × 3 budgets × 4
-   variants × 30 seeds; variant 2 / GreedyIG-lite is LT-only per plan §5.1).
-   Establishes external validity beyond LT's 38-node graph.
-   `uv run python -m evaluation.chamber_pipeline.run_experiment --chambers wt --budgets 0.10,0.50,1.00 --seeds 30 --cell-timeout-seconds 1800 --out runs/m5-wt.parquet`
-2. **UNCONTRACTED baselines** — 270 cells across both chambers (essential for
-   the framework paper's "contracting helps" claim; without these the chamber
-   pillar is a causal-discovery benchmark, not a contracting validation).
-3. **DeepSeek v4 Pro robustness sweep** — 270 cells (tests whether Flash
-   dominance generalizes across model scale). Per plan §6.7.
-4. Run on VPS (`173.212.217.40`, provisioned 2026-05-18). Total new work:
-   ~900 cells vs original M5 plan's 1620. ~33% wall-time savings vs original.
-5. Optional: re-run the 8 timed-out `planner_reasoner k=59` cells from M4b
-   to recover full 30-seed coverage (checkpoint pattern: re-run the pilot
-   command; the sidecar skips the 442 ok cells and only re-attempts the 8
-   errors). Worth doing before declaring M5 complete.
+## Operational rules (chamber pillar)
 
-**M6 REVISED (2026-07-25): loop-vs-graph topology benchmark (plan §7.7)**
+Rules only. **Every measurement that produced them is in
+`docs/chamber-results.md`; every harness defect is in
+`docs/chamber-harness-validity-register.md`.** Read the register before
+trusting any number.
 
-The deferred choice between "§7 cross-pillar" and "skip §7" was resolved by
-an external trigger: **loop engineering** (named 2026-06-07, Addy Osmani) and
-**graph engineering** (named ~2026-07-18) put multi-agent topology on the
-field's agenda, and critical reviews of both note there is **no comparative
-benchmark**. We already hold two of the three arms.
+### Running a sweep
 
-M6 is now a **five-rung coordination ladder** (respecified 2026-08-23; the
-three-arm description below is superseded by
-`docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`, which is
-authoritative): loop (`llm_pc`), ensemble, parallel-roles, chain
-(`planner_reasoner`), and team (negotiation), at k ∈ {6, 30, 45}.
-Arms 1-2 are already in `runs/m4-pilot.parquet`, so new compute is **90 cells
-(~$1-2)**. Cross-pillar transfer (§7.1-7.6) becomes the journal extension.
-**Both figures were wrong** (corrected 2026-08-23): M4b actually cost **$5.11**
-for 450 cells, and M6 as respecified is **~417 cells, 65–90h, $9–14** — see
-`docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md` §3. The
-per-cell basis matters: M4b LLM cells averaged **7.2 min**, `planner_reasoner`
-**8.7 min / $0.0196**; the 4.7 min/cell implied by the headline is contaminated
-by 180 non-LLM cells averaging 0.15s. Estimate from LLM cells only.
+- **`socket.setdefaulttimeout(30)` at `run_experiment.py` module load is
+  load-bearing** — without it `litellm.completion(timeout=N)` never reaches the
+  SSL socket and a stuck call hangs the process forever.
+- **Never use `with ThreadPoolExecutor(...)` for cell timeouts.** `__exit__`
+  calls `shutdown(wait=True)` and blocks on a worker stuck in a non-cancellable
+  C call. Use a daemon `threading.Thread` + `join(timeout)` and let it leak.
+- **Size `max_tokens` against the WORST call in a loop, not the first.**
+  Reasoning grows with the prompt, and the prompt grows one spent-experiment
+  line per step. Mis-sized twice (200, then 2048). Selection, reconcile and
+  negotiate are all 32768; `llm_only`'s adjacency is 32768. A cap is a ceiling,
+  not a reservation — generosity is free.
+- **Pin `reasoning.effort` on every call.** Endpoint defaults diverge 130x;
+  pinned they land at 0-163 (`low`) and 1,605-2,450 (`high`). **When probing,
+  replicate the production call path** or the most dramatic number will be an
+  artifact of what you omitted.
+- **Re-probe provider order before any multi-hour sweep** — per-provider
+  throughput and price drift day to day, and precision drifts per
+  (provider, model). `PROVIDER_PRECISION_BY_MODEL` must be keyed by both.
+- **Never schedule arms in blocks of time.** `iter_sweep_cells` interleaves
+  (`2c7c598`); the old `for spec: for seed:` put each arm in its own window, so
+  provider drift landed on one arm and no post-hoc analysis recovers it.
+- **Re-measure cell cost before estimating any sweep's wall time**, and estimate
+  from the ARM'S OWN call count. Never reuse yesterday's figure.
+- **The JSONL sidecar is the only thing between you and a lost overnight run.**
+  Parquet flushes at sweep end; re-running the same `--out` skips done cells.
+- **Size workers by END-of-run memory, not the launch reading** — per-worker
+  memory grows over a run. `rescore.py` has no checkpoint, so add a per-design
+  sidecar before any pass longer than a few hours.
+- Flags: `--max-workers` (process-parallel), `--model`, `--selection-effort`
+  (env-carried, recorded per cell), `--cell-timeout-seconds`, `--no-resume`.
+- **VPS** `173.212.217.40`: `ssh root@173.212.217.40 'cd /root/agent-contracts
+  && export PATH="$HOME/.local/bin:$PATH" && tmux new -d -s pilot "uv run python
+  -m evaluation.chamber_pipeline.run_experiment ... > runs/x.log 2>&1"'`;
+  pull with `rsync -av root@173.212.217.40:/root/agent-contracts/runs/ ./runs-vps/`.
 
-Pre-registered: **H-A chain underperforms loop — OPEN, not supported**
-(corrected 2026-08-23); **H-B fan-in recovers delegation cost via exploration
-diversity — open, this is the experiment**; H-C conservation compliance 100%.
+### Before trusting a contrast
 
-**H-A correction (2026-08-23).** This line previously read "already supported:
-F1 0.397 vs 0.75". That compared the chain against **`llm_only`**, which is
-**not a rung on the ladder** — spec §10.3 replaced it with `llm_pc` precisely
-because it confounds topology with inference. Against the actual loop rung,
-measured on `runs/m4-pilot.parquet` via `analyze_results --ladder`:
+- **Never pool rows whose `blas_backend` differs.** macOS/Accelerate and
+  Linux/OpenBLAS produce different graphs from byte-identical inputs; PC turns a
+  1e-10 divergence into a structural one. Run every arm of a comparison on one
+  machine. (Gone at the DESIGN level: 2,202/2,207 nine-seed design means agree.)
+- **Report every arm contrast at BOTH row caps and BOTH metrics** (directed and
+  skeleton). 10 of 39 headline verdicts flip with the cap on directed F1.
+- **Never quote an absolute LLM-arm F1 without the core-20 figure and the
+  selection effort beside it.** Core-20 is LT-only.
+- **Use the unequal-n MDE form** `2.8 * pooled_sd * sqrt(1/n_a + 1/n_b)`.
+  Substituting `min(n_a, n_b)` inflates it 1.23x and flips verdicts. Clustering
+  by design breaks equal-n, so coverage arms always hit this.
+- **Cluster by distinct design before computing anything**, and put
+  distinct-selection counts in every results table. A single-call arm re-picks:
+  6 distinct designs across 30 cells at LT k=30.
+- **Pre-flight the design pool with MEAN PAIRWISE OVERLAP against the pigeonhole
+  floor `max(0, 2k-M)/k`, not the distinct-design count** — the count misses
+  designs that differ by one entry. Costs no PC run and no LLM call; compute it
+  when the designs exist, before any F1 does.
+- **Report equivalences with their bound and their power, never as nulls.**
+  Most of the MDE is PC noise, not arm variability: identical selections would
+  still give MDE 0.031 (LT k=30, n=30).
+- **Key a pre-registered decision rule on the INTERVAL** (contains prediction /
+  excludes zero), never on a significance threshold — a threshold branch can
+  fire while the estimate matches the prediction to 0.001.
+- **Only an independent replication at pre-specified n buys power.** Neither
+  bootstrapping nor more PC seeds does; both were measured.
+- **Re-score offline before believing a contrast** (`rescore.py`, `$0`). Key the
+  work by the ORDERED buy — pooling concatenates in sequence, so `[a,b]` and
+  `[b,a]` score differently. A frame without `design_key` predates the fix.
+- **Never read a shape off a partial sweep**, and **never pool across a regime
+  change** without checking arm means agree. A pinned model id does not pin the
+  computation: DeepSeek changed reasoning 2.4x mid-sweep under an unchanged
+  model string.
+- **A resolved n=30 verdict the paper rests on gets re-run on another day with
+  its comparator** before it is written as resolved.
+- **Check a cross-sweep contrast against a SECOND same-setting day** before
+  buying a same-day replication.
+- **Do not reuse one vendor's MDEs for another** — reasoning length is a
+  variance multiplier. Measure each arm's sd in the replication.
+- **Filter an archived probe on its parse-success column before averaging.**
+  Prior-elicitation Parquets retain unparsed draws, and an empty response
+  scores an identical value every time, so a naive mean pools non-measurements
+  and can reverse the conclusion.
 
-| k | chain (`planner_reasoner`) | loop (`llm_pc`) | delta | pooled MDE | verdict |
-|---|---|---|---|---|---|
-| 6 | 0.190 | 0.218 | −0.028 | 0.036 | below MDE |
-| 30 | 0.386 | 0.379 | **+0.007** | 0.036 | below MDE |
-| 59 | 0.398 | 0.425 | −0.027 | 0.036 | below MDE |
+### Designing an arm or a probe
 
-All three below the minimum detectable effect at n=30, under both the per-arm
-and pooled-SD bounds, and k=30 points the wrong way. `llm_only` really does
-reach F1 0.746 at k=59 — that M4b finding stands — but it is a statement about
-inference, not about coordination topology. **At the observed SD, resolving a
-~0.03 gap needs n≈55 per arm; M6 at n=30 will report "below MDE" for H-A
-however it runs.** That is a reportable equivalence bound, not a null, and the
-analyzer prints the MDE beside every delta so it cannot be read as one.
+- **Verify the consumer before calling something a blocker for it.** The chamber
+  pipeline calls `litellm.completion` directly via its own `_CountingLLM` and
+  never touches a `ResourceMonitor`.
+- **Reconstruct what a prompt fix renders on REAL cells offline before buying a
+  sweep on it.** A unit test and one hand-picked cell are not evidence.
+- **A prompt transplanted across API SHAPES is a defect, not a tuning
+  difference** — leaving a required field null on a typed-decision API cost
+  0.047 F1 at 300 rows and 0.076 at 1500, and it grows with rows. Chat-to-chat
+  transplants have no analogue of this.
+- **Tabulate per-entry buy rates BEFORE writing "composition shift."** Three
+  cap-flips were each explained by ONE menu entry.
+- **Before charging a menu entry against a budget, check that every arm's prompt
+  can name it.** The observational baseline was charged while most prompts could
+  not nominate it; granting it turned four resolved verdicts into ties.
+- **Tabulate per-experiment means of uncontrolled sensors and timestamps before
+  pooling any released dataset** — six WT entries were recorded on a different
+  day 2.3 kPa apart.
+- **Grant explicit per-tool zeros.** An omitted key means *unconstrained*, not
+  zero, and `_require_per_tool_propagation` short-circuits on `granted == 0`, so
+  a zero on an unknown key raises nothing. The keys are `"intervene"` and
+  `"observe"`.
+- **Classifier guards must test EXCLUSIVITY, not correctness** — assert exactly
+  one rule matches each input and that no marker is a substring of another.
+- **Where design diversity is needed, shuffle the menu order per seed.** Pinning
+  temperature is a dead end: temperature 0.0 is itself nondeterministic here,
+  and unset/1.0/0.0 are indistinguishable in diversity. Reproducibility exists
+  at the level of ARM MEANS over n seeds, never at the cell.
+- **Put both directions of a probability comparison in the SAME request** —
+  across calls, per-call variation swamps the effect and manufactures a null.
+- **A voided verdict may be recoverable — check before buying a re-run.**
+  `verify()` is a pure function of recorded per-node spend, so `recertify.py`
+  rebuilds the graph and calls the REAL `verify()`. Valid only when the
+  correction ENLARGES the grant.
+- **Before asking whether a model can help, ask what the ORACLE looks like.** A
+  computable oracle leaves no room; a lexical oracle means any help is leakage.
 
-Prerequisite shipped in **v0.4.0** (`core/delegation_graph.py`). **No open
-blockers.** When building the fan-in arm, grant the aggregator an explicit
-`per_tool={"intervene": 0, "observe": 0}` — an omitted key means *unconstrained*,
-not zero, so
-the matched-budget control would otherwise be unenforceable rather than merely
-detectable after the fact. **The key is `"intervene"`** (the tool name
-`ContractedChamberAgent.query_intervention` meters), not `"exp"`; an earlier
-note here said `"exp"`, which fails *silently* — `DelegationGraph.
-_require_per_tool_propagation` short-circuits on `granted == 0`, so a
-zero-grant on an unknown key raises nothing while `"intervene"` stays
-unconstrained. The adapter's aggregate monitor still caps total spend, so the
-matched budget holds; what is lost is the per-role control. **`"observe"` needs
-the same explicit zero**: `create_contracted_chamber_agent` inserts that key only
-when `observation_budget > 0`, so without it the aggregator can call
-`query_observation` without bound and acquire data outside the certified budget.
+### Open harness items
 
-**Retracted (2026-07-25): the `add_iteration()` "gap" was a phantom.** An
-earlier note here claimed M6 was blocked on wiring `ResourceUsage.add_iteration()`.
-Wrong twice over. The chamber pipeline calls `litellm.completion` directly via
-its own `_CountingLLM` (`orchestrator.py:239`) and never touches a
-`ResourceMonitor`, so wiring the framework integrations would not reach chamber
-cells at all. And the metric already exists as **`n_llm_calls`**, populated for
-every LLM-variant ok-cell in `runs/m4-pilot.parquet` (6 / 30 / 59-60 across the
-three budgets; null for `random` and `greedy_ig` because they issue no LLM
-calls). Lesson: check whether the consumer actually goes through the framework
-before calling something a blocker for it.
+- `MENU_SIZES` vs `available_experiments()` consistency assert — open.
+- An integration test that hits one real LLM call — open.
+- Rung-4 negotiation parser reads restatement as claim (spec §11) — open;
+  needs answer/restatement separation, not filtering.
+- `overlap_frac` is structurally 0.0 for rung 4 — state as a scope limit.
+- `ResourceConstraints.iterations` is honored only by Google ADK and Claude
+  Agent SDK; LiteLLM, LangChain and LangGraph neither track nor enforce it.
 
-**Separate, real gap (not an M6 blocker)**: `ResourceConstraints.iterations` is
-honored only by Google ADK (→ `max_llm_calls`) and Claude Agent SDK (→
-`max_turns`). LiteLLM, LangChain, and LangGraph neither track nor enforce it,
-and `contract.py`'s docstring wrongly claimed LangGraph mapped it to
-`recursion_limit` (corrected 2026-07-25). Worth closing for library users.
+## Harness lessons that changed a result
 
-**M4c (mostly complete after May 17 work)**
-- Checkpointing / resume from partial Parquet ✅ (commit `856beb8`)
-- Parallelism (`ThreadPoolExecutor` in `run_sweep`) — pending, M5 priority
-  (would cut WT+LT 5-budget sweep wall time from ~70h serial to ~18h on the
-  4-vCPU VPS)
-- MENU_SIZES vs `available_experiments()` consistency assert — still open
-- Integration test that hits one real LLM call — still open; would have
-  caught M4b root-cause bugs earlier
-- Tighter `_SELECTION_MAX_TOKENS` if 200 → 50 maintains quality — open
+Every defect, with its measurement, is in
+`docs/chamber-harness-validity-register.md` (forty entries). The transferable
+shape of them:
 
-**Other tracks (independent)**
-- AutoGen integration
-- CrewAI integration
-- Audit dashboards / policy management UI / cost attribution reports
-- **OR/optimization research ideas** (backlog, captured 2026-05-30) — stochastic
-  budget allocation in delegation, OR-backed chamber experiment-selection
-  baseline, heuristic-vs-optimum validation oracle. See
-  `docs/or_optimization_research_ideas.md`. Thesis: upgrade our allocation
-  heuristics to *stochastic/robust* optimization (exploits our indeterminacy
-  modeling), NOT the deterministic LP the source article assumes.
-
-## Operational notes (chamber pillar)
-
-- **Temperature was NEVER pinned, and pinning it would not help** (measured
-  2026-09-01, register §21). No DeepSeek run sent a `temperature` field —
-  pre-Aug-30 files have no column, Phase 2 files have it null in all 960 rows.
-  The arms are also inconsistent: scouts in `fan_in_*`/`team*` run at
-  `_SCOUT_TEMPERATURE = 1.0` while the loop, `one_shot`, `critique`,
-  `planner_reasoner` and `shared_blackboard` run unpinned. **But temperature
-  0.0 is itself nondeterministic here** — six distinct picks in nine draws, and
-  unset/1.0/0.0 are indistinguishable in diversity. So the mismatch is not a
-  meaningful confound, and "pin temperature for reproducibility" is a dead end;
-  where design diversity is needed, **shuffle the menu order per seed**.
-  Reproducibility in this pillar exists at the level of ARM MEANS over n seeds,
-  never at the cell — same conclusion as the BLAS finding.
-- **ROOT CAUSE of that nondeterminism** (register §26, 2026-09-01): a chaotic
-  branch point early in the reasoning trace. temperature=0 IS honoured — "17×3"
-  returns `51` byte-identically 6/6 with the same reasoning-token count, and the
-  long menu prompt with an unambiguous answer demanded returns `APPLE` 3/3 at
-  reasoning=51. But on the real task, four draws share only **20-114 characters**
-  of reasoning before forking at a semantically empty choice ("name" vs
-  "experiment name"), then run 20k-54k chars to four different answers.
-  Greedy decoding is deterministic given identical logits; fp8 MoE logits vary
-  with batch composition, a near-tie flips the argmax, and a long trace
-  amplifies it. **Isomorphic to the BLAS/PC finding** — a discrete decision on
-  top of a continuous computation reproducible only to kernel noise.
-  **Practical:** reasoning length is a variance multiplier, so **do not reuse
-  DeepSeek MDEs for another vendor** — measure each arm's sd in the replication
-  or a power difference will read as a failure to replicate.
-- **Endpoint reasoning DEFAULTS diverge 130x — and we already pin past them**
-  (probed 2026-08-31, register §25). With no `reasoning` parameter, one prompt
-  gives Z.AI 6,889 tokens / GMICloud 2,600 / DeepInfra 52 on `glm-5.3-flash`.
-  **The pipeline does not take that path**: every call sets `reasoning.effort`
-  (`_SELECTION_REASONING_EFFORT="low"`, `_COORDINATION_REASONING_EFFORT="high"`),
-  and with it pinned the endpoints land at 0-163 (`low`) and 1,605-2,450
-  (`high`). **When probing, replicate the production call path or the most
-  dramatic number will be an artifact of what you omitted.**
-  Real findings from that probe: `Relace` is **fp4** on both models and among
-  the cheapest, so price-first routing picks it — now declared ineligible; and
-  `Reka` is fp4 for deepseek but fp8 for GLM, so `PROVIDER_PRECISION`'s
-  provider-only keying is unsound in principle — fix before adding a third
-  model.
-- **A PINNED MODEL ID DOES NOT PIN THE COMPUTATION** (register §32,
-  2026-09-02; second instance after 2026-08-13). DeepSeek changed reasoning
-  per call **2.4x** mid-sweep under an unchanged model string, unchanged code
-  and `n_llm_calls` fixed at 26 — and it was still climbing (r=+0.44 with
-  launch order). Cells went 415s/67k tokens to ~1,500s/165k **overnight**.
-  Three standing rules: **never schedule arms in blocks of time**
-  (`iter_sweep_cells` now interleaves, `2c7c598` — the old `for spec: for
-  seed:` put each arm in its own window, so drift landed on one arm and no
-  post-hoc analysis recovers it); **re-measure cell cost before estimating any
-  sweep's wall time**, never reuse yesterday's; and **never pool across a
-  regime change** without checking arm means agree.
-- **The archive was audited, not assumed** (`analyze_drift.py`). 10 of 11
-  files CLEAN, residual trend within ±0.032 of zero, M4 pilot through M7 —
-  **no result retracted**. One block flags: `shared_blackboard` WT k=14, where
-  reasoning per call HALVED (5,520→3,210) while **F1 moved −0.004 vs MDE
-  0.023** — report that as a robustness bound. Scope: `window_overlap` is
-  0.00-0.15 everywhere, so the audit shows no drift *within* blocks, not that
-  between-block drift is impossible. **Probe = `tokens_out / n_llm_calls`, in
-  `started_at` order.** Two rejected probes, both of which produced
-  confident-looking tables: raw `tokens_out` is arm-dependent (r=+0.71 vs
-  +0.001 residualised), and throughput tracks OUR OWN concurrency (flagged 10
-  of 11 files). Threshold must scale as 3/√(n−3) — a flat cutoff over-flags
-  because a sweep reports the max |r| over 9-15 blocks.
+- **A scaffold failure rate that varies with the experiment's x-axis makes the
+  curve measure the harness.** `_SELECTION_MAX_TOKENS` truncated 0% of
+  selections at k=6 and ~43% at k=30, because reasoning tracks history length —
+  so "LLM selection stops helping as budget grows" was the cap. Instrument the
+  degradation paths and record them per cell.
 - **A "provisional until measured" gate is only as good as the measurement's
-  FEASIBILITY** (register §33, 2026-09-05). WT `team` ran 300 cells reporting
-  `conservation_certified = None` because its negotiate constant was never
-  isolated there — the safety property worked perfectly, but the
-  instrumentation to take the measurement did not exist, so the gate silently
-  deleted a number rather than protecting one. Fixed by per-call token
-  attribution (`_CountingLLM.tokens_by_kind`, keyed by
-  `llm_planner.call_kind`). **The offline shortcut was contaminated**: `team`
-  scouts minus `fan_in_spec` scouts at matched budget/role gives +11,118 at
-  k=7 but −4,059 / −2,698 at k=14/21, because the selection loops differ too.
-  **Measured: WT = 6,102 per call, 1.47x LT's 4,138 — the prompt-size
-  prediction was BACKWARDS.** WT's menu is half LT's and `_ROLE_C95` does
-  scale that way, but negotiation cost tracks REASONING length, not prompt
-  length. Not budget-keyed, and that is measured: medians 6,679/4,159/6,692,
-  flat, 1.61x, inside the 4x multiple. **Mid-run at n=1 those read
-  6,679/4,159/2,580 and looked cleanly monotone** — §27's failure mode again:
-  never read a shape off a partial sweep. **A VOIDED VERDICT MAY STILL BE
-  RECOVERABLE — CHECK BEFORE BUYING A RE-RUN.** "They ran under the wrong
-  grant, so re-run them" was wrong: `verify()` is a pure function of recorded
-  per-node spend, so `recertify.py` rebuilds the graph and calls the REAL
-  `verify()` (never a reimplementation — it carries a per-tool clause a scalar
-  comparison drops), validated **300/300** against the arms whose verdict was
-  recorded. **WT `team` = 202/300 = 67.3%, for $0**; WT H-C over all three
-  graph arms is 395/600 = 65.8% vs the 64.3% reported over two. The
-  precondition is that the old grant did not SHAPE the spend, and the
-  conservation failures prove it: 98 cells overspend by up to 13,833 tokens
-  and complete, 0 of 900 nodes sit on a ceiling. Valid here only because the
-  correction ENLARGED the grant.
-- **Classifier guards must test EXCLUSIVITY, not correctness.** A first-match
-  classifier passes a "does each input classify right?" test whenever rule
-  order happens to favour the right answer — which is how a bare `"designer"`
-  marker counted reconcile calls as negotiation. Assert *exactly one* rule
-  matches each input, and that no marker is a substring of another. Third
-  version of this classifier; the first keyed on `max_tokens` (ambiguous once
-  two caps shared a value), the second on menu size (zero margin).
-- **THE SINGLE-BACKEND RE-SCORE IS DONE AND NOTHING MOVED** (2026-09-05,
-  `runs/rescored-single-backend.parquet`, 2,604 cells / 19,854 design×seed
-  scorings / $0). All six coverage-oracle verdicts and 17 of 18 Phase 2
-  verdicts reproduce on one `accelerate` stamp, folding in sources that were
-  originally OpenBLAS. Register §31's cross-backend contamination was
-  confined to the coverage table; the rest of the corpus was clean.
-- **`critique` at LT k=30 is on its MDE boundary and should stop being
-  re-adjudicated.** −0.013/MDE 0.020 (reference file, n=30) vs −0.015/MDE
-  0.014 (pooled over three files, n=68). Pooling is legitimate — the three
-  means agree at 0.4211/0.4230/0.4259 — but a verdict that turns on it is not
-  a finding. Second flip for this same cell.
-- **The MDE formula must use the UNEQUAL-n form once you cluster by design.**
-  `2.8·sd·√(2/n)` assumes equal arms; clustering breaks that
-  (`wt_coverage_max` gives 27 distinct designs from 50 cells vs `llm_pc`'s 84).
-  Substituting `min(n_a,n_b)` inflates the MDE **1.23×** and flips WT k=21 on
-  its own. Use `2.8·pooled_sd·√(1/n_a + 1/n_b)`. Coverage arms will always hit
-  this, because a near-deterministic rule re-picks designs.
-- **COVERAGE IS A PLATEAU, NOT THE CEILING — measured 2026-09-09
-  (`oracle_probe.py`, results doc "THE ORACLE PROBE").** A ground-truth
-  oracle (greedy+swap set, and a static ranking by mean marginal gain)
-  re-scored at PC seeds DISJOINT from the search seeds sits above every arm
-  at every budget (ranking − best arm +0.03/+0.05/+0.03 LT, +0.02/+0.05/+0.07
-  WT, 5 of 6 resolved; oracle SET +0.15/+0.10/+0.13 on WT); LT core-20
-  0.284 vs the rule's 0.228 at k=30. On LT no LLM arm's purchases beat a
-  random draw on the oracle's marginal-gain scale; on WT only the loop does,
-  covering ~27% of the random→oracle range. **Threat "the task is
-  coverage-shaped" is no longer scoped, it is refuted** — the negative
-  topology result got stronger. Three rules from doing it: (1) an oracle's
-  own search score is a max over noisy candidates — ALWAYS re-score the
-  chosen set at fresh seeds before quoting it (greedy+swap read 0.474 at LT k=30
-  in-search and 0.432 fresh — and a swap accepted at 1e-9 over noisy means
-  is a max over noise, gate it on the measured floor); (2) greedy is a weak
-  optimiser under PC noise — a static ranking beat the greedy set on LT; (3) the chambers ship NO
-  lagged ground truth, so the lagged-estimator idea is dead, not deferred.
-- **FEEDBACK MOVES AN ARM OFF THE RANDOM LINE, BUT NOT PAST THE PLATEAU —
-  measured 2026-09-09 (`adaptive_feedback`, spec §8.7 row 7, pre-registered;
-  results doc "THE ADAPTIVE-FEEDBACK ARM").** The loop plus a PC estimate of
-  the data bought so far in the prompt every 5 purchases, LT k=30, n=30,
-  interleaved with a fresh loop control: purchases score above random on the
-  oracle scale (10.6 vs 9.7 ×10⁻³, MDE 0.79 — on the boundary, ratio 1.02,
-  Welch p=0.0065; the first LLM arm on LT to do so) and the arm resolves
-  above the same-sweep loop (+0.027, MDE 0.013), but it does NOT beat the
-  coverage rule (+0.008, MDE 0.017). 10% of the random→oracle range, 17% of
-  the rule→oracle headroom. Say all three; a reader who hears only "beats the
-  loop" over-reads it. Cheaper per cell than the loop (336 vs 395 s) despite
-  a 53% longer prompt. 1.8% of its picks fell back to random (loop: 0) —
-  biases AGAINST the arm, report it, don't correct it. Drift audit clean.
-  **THE WT REPLICATION REVERSED IT (2026-09-12, `runs/m7-adaptive-wt.parquet`,
-  200 cells / $8.26, pre-registered 2026-09-11, results doc "THE
-  ADAPTIVE-FEEDBACK ARM ON THE WIND TUNNEL").** Same arm, same-sweep loop
-  control, k=14/21, n=50: purchases sit BELOW the loop's on the oracle scale
-  at both budgets (0.4 vs 3.2, 0.6 vs 2.0 ×10⁻³, resolved; not above random),
-  F1 −0.049 [0.021] below the loop at k=14 (CI excludes the +0.012
-  prediction and zero) and +0.003 at k=21 (undecided), below the rule at
-  both (−0.030/−0.023, resolved). **AT 1500 ROWS IT INVERTS: the arm is
-  the only cap-invariant arm on WT (300→1500 drop 0.006/0.010 vs 0.04–0.05
-  for loop, rule and random), ties the loop at k=14 and beats it +0.047
-  [0.020] at k=21 (skeleton too), ties the rule on directed at both.
-  ROOT CAUSE (register §36, three $0 probes the same morning): not the buy
-  order (shuffled designs identical at both caps); ONE ENTRY,
-  `validate_osr_ambient`, which the feedback arm buys in 78–90%/98–100%
-  of cells (loop 18–26%/58–74%) because coverage-shaped feedback nominates
-  EVERY unbought variable and overrides the model's prior against `osr`
-  entries — and ADDING it to a loop design costs −0.086 at 300 rows /
-  −0.050 at 1500 (it makes PC drop `pot_2` as a fourth collinear column;
-  its only child `pressure_ambient` is a barometer PC often drops at
-  scoring). **NOT fixable by disclosure or by exclusion-on-drops (three
-  runs, 12 Sep): telling the model the sensors were removed changed the
-  buy rate by 0 points (run 2, $8.44, arm a replicate of itself to
-  ±0.005); excluding settings of dropped sensors cannot fire because at
-  feedback time the barometers are NOT collinear (min |r| 0.79 — run 3
-  killed at 11 cells). Rule: reconstruct what a prompt fix renders on
-  real cells offline BEFORE buying a sweep on it.** **AND THE SESSION SHIFT
-  (register §37): six of WT's 28 entries were recorded on a different day
-  2.3 kPa of ambient pressure apart; `osr_ambient` is the one with no
-  actuator change, so pooling it injects a pure day-shift regime —
-  correcting its barometers halves the 300-row harm and removes the
-  1500-row harm. Tabulate per-experiment means of uncontrolled sensors
-  and timestamps before pooling any released dataset. CLOSED the same
-  night ($0): a `--context session` JCI re-score of 1,637 WT designs
-  gives 0 sign flips among headline contrasts; the indicator is nearly
-  redundant with JCI's per-entry variable indicators (+0.001–0.005), and
-  exactly zero on designs without a low-session entry. Scope note in the
-  paper, not a retraction; absolute WT F1 under plain PC carries it,
-  contrasts do not.** **EFFECT FEEDBACK
-  (`effect_feedback`, `summarize_effects`: what each buy shifted, judged
-  pairwise vs the majority of other buys, no estimator in the loop) LOSES
-  on LT (2026-09-12, 90 cells / $12.16, three arms same day): −0.033
-  [0.014] vs coverage feedback, −0.019 vs the loop, purchases BELOW random
-  on the oracle scale (8.4 vs 9.7) — it buys MORE strong light (18.6 vs
-  16.3 per cell) because the summary truthfully says strong light shifts a
-  dozen sensors, and that is the pooled-regime harm. Coverage − loop
-  replicated (+0.015 [0.012]). Learnability of the headroom is closed,
-  negative, three ways; no feedback signal beats the rule. Costs 2.2× the
-  tokens of the loop.** The
-  "invariance" is that tax paid at a lower rate while the loop's
-  preferred entries (`pot_1`, `load_out_pressure_intake`) lose value with
-  rows; the k=21 win says the loop is cap-fragile, not that feedback is
-  right. Test a suspect entry by ADDING it to fixed designs, never by
-  swapping (confounded) or observational splits (understate 2.5×).
-  Report both caps.** MECHANISM AT 300 ROWS: the feedback
-  lists which variables the running estimate has not connected and the
-  model buys them — +1.4/+2.0 more distinct variables than the loop — and on
-  WT those are the `osr_*` settings the oracle ranks last (over-buys
-  `osr_ambient` rank 28/28, `osr_intake` rank 21; drops `pot_1` rank 5,
-  `osr_2` rank 1). It is uncertainty sampling inside the loop: pays where
-  the unconnected variables are informative-and-unbought (LT), costs where
-  they are unconnected BECAUSE uninformative (WT). Not cheaper on WT (1,935
-  vs 1,601 tokens/call). **At the cap of record say "one chamber, one
-  budget"; "feedback moves an arm off the random line" is withdrawn as a
-  cap-free claim (seventh retraction); at 1500 rows it reaches the rule and
-  no further, and it beats the rule nowhere.** Rule: a feedback signal that reports COVERAGE of the
-  estimate reproduces the coverage rule's blind spot; the unbuilt arm is
-  per-experiment "what varied". Scheduling note: budgets ran in blocks
-  (k=14 then k=21) with arms interleaved within each — within-budget
-  contrasts are protected, cross-budget ones are not.
-- **A CO-AUTHOR'S RING (two voices, one record, one shared estimate) IS THE
-  BEST ARM AT THE CAP OF RECORD AND THE WORST LLM ARM AT 1500 ROWS — 2026-09-14,
-  `runs/m7-blackboard-feedback-lt.parquet`, 120 cells / $12.89, pre-registered
-  B1–B4 (results doc "THE CO-AUTHOR'S RING").** `blackboard_feedback` =
-  `shared_blackboard_agents(feedback_interval=5)`. LT k=30, n=30, same-sweep
-  loop / blackboard / coverage-feedback controls. 300 rows: ring − rule
-  +0.013 (CI excludes zero, MDE tie by 0.0007; skeleton +0.027 resolved) — B1
-  fails on the registered CI rule; 1500 rows: −0.052 resolved below — B1
-  holds. Additivity (B2/B3) holds at 300, fails at 1500 (ring − feedback
-  −0.046 resolved). **B4 fails resolved: the ring buys FEWER distinct
-  variables (25.0 vs feedback 26.4 vs loop 27.8)** and instead fewer strong
-  light (1.2 vs 2.4), more `osr` (5.9 vs 3.7), more repeats (5.0 vs 2.2).
-  **ROOT CAUSE, same evening ($0, register §39): ONE ENTRY. The ring buys
-  the observational baseline `uniform_reference` in 2 of 30 cells (loop
-  30/30) because both role briefs ask for an intervention and the coverage
-  summary never nominates an entry that perturbs nothing; adding it back to
-  the ring's designs recovers +0.054 at 1500 rows (resolved, all metrics)
-  and is neutral-to-negative at 300. The `osr`/repeat/strong-light shifts
-  are all ties at both caps. Third cap-flip explained by a single entry
-  (§34, §36, §39): tabulate per-entry buy rates BEFORE writing
-  "composition shift".**
-  **AND IT IS CORPUS-WIDE (register §40, 2026-09-15, $0): the baseline is
-  charged against k, the role briefs and the coverage-feedback signal
-  cannot name it, and the rule/random reach it only at large k. Granting
-  it to every LT design (1,432, both caps, pre-registered G1–G5, all
-  hold) turns FOUR resolved verdicts into ties: the loop's k=6 win over
-  the rule and random (+0.037/+0.036 → 0; "the one regime where the LLM
-  knows something" = it buys the baseline first — retraction the eighth),
-  the blackboard's k=6 loss (two-thirds of it at 1500; residual at 300
-  still resolved), the single call's Phase 2 k=6 loss, and the ring's
-  1500-row losses (ring = feedback = rule once granted; +0.031 over the
-  loop is the feedback's gain). Every k=30/45 contrast between arms that
-  buy it, and every GLM contrast, unchanged to 3 dp; no arm above the
-  rule. Charged scoring stays the configuration of record. RULE: before
-  charging a menu entry against a budget, check that every arm's prompt
-  can name it; put per-entry buy rates by arm × budget in every results
-  table.**
-  **The coverage law does not cover feedback arms (2 of 6 rate × gap
-  predictions inside the CI)** — it predicts topology contrasts at fixed
-  information; a feedback signal moves the strength mix and the repeat rate
-  as well as coverage. Say so in the paper; Table 4's eleven-prediction
-  record is topology-only and unchanged. Coverage feedback − loop replicates
-  a third time (+0.016 / +0.031); coverage feedback is resolved above the
-  rule on the skeleton at 1500 (+0.020), the first arm above the rule on any
-  metric at the high cap. The 30 Aug blackboard − loop loss at LT k=30
-  (−0.019) did not replicate same-day (+0.012 / −0.007, ties). Cost per LT
-  k=30 cell in Sep 2026 is $0.09–0.13, not the $0.01 of the GLM run: quote
-  the arm's own vendor before promising a price.
-- **THE SELECTION EFFORT IS PART OF THE CONFIGURATION OF RECORD — 2026-09-16,
-  `runs/m7-effort-lt.parquet`, 150 cells / $2.17, pre-registered E1–E4,
-  two of four FAIL resolved (results doc "MORE REASONING LIFTS THE LOOP TO
-  THE RULE").** Every selection call in the corpus ran at `reasoning.effort
-  = low`. On GLM at `high` (`--selection-effort`, env-carried so workers
-  inherit it, recorded per cell) the loop buys **3.3 more distinct
-  variables (28.6 of 30)** and scores **+0.029 / +0.031** above the `low`
-  loop at 300 / 1500 rows — against TWO independent `low` days that agree
-  to 0.003 — reaching a TIE with the coverage rule at the cap of record
-  and +0.018 above it on the skeleton at 1500. Still below the rule on
-  directed F1 at 1500. Coverage law: +0.015 / +0.043 predicted. **More
-  reasoning buys coverage; it does not buy anything the rule lacks.** And
-  it makes identical scouts LESS diverse (distinct experiments 22.2→21.2,
-  19.7→17.2), so the three-scout penalty GROWS (−0.049 / −0.056). Within
-  the `high` sweep tokens-per-call predicts nothing (r 0.00): effort is a
-  regime switch, not a dial — consistent with §32. **Rules:** quote the
-  effort beside every absolute LLM-arm F1; check a cross-sweep contrast
-  against a SECOND same-setting day before buying a same-day replication
-  (two `low` days at 0.003 apart made the $1 re-run unnecessary); and do
-  not predict a null from "the drift moved nothing" — a within-regime
-  token drift and a regime change are different manipulations. The
-  prediction that effort would not lift the loop was wrong (ninth
-  retraction).
-- **THE ORACLE WAS AN ORACLE FOR THE HARNESS — register §34, 2026-09-09
-  night, supersedes the two bullets below it as TASK claims.** The best
-  selection depends on PC's row cap: at `max_rows=300` (configuration of
-  record) the 300-derived oracle ranking scores 0.468 and the coverage rule
-  0.437; at 1500 rows the rule scores **0.460** and that same ranking
-  **0.394**; at 5000 everything degrades. So "coverage is a plateau, not the
-  ceiling", "the headroom is sensor-setting depth" and "the models' prior
-  points the wrong way" are all statements about the estimator at 300 rows.
-  **Arm contrasts stand** (adaptive − loop +0.045 at 1500, resolved; every
-  arm ran under one estimator). **1500-row oracle DONE 2026-09-10** (results doc "THE
-  1500-ROW ORACLE"): headroom above the rule resolved at k=6 (+0.185 by
-  set) and k=45 (+0.068), a TIE at k=30 (+0.028, MDE 0.032) with the static
-  ranking resolved BELOW the rule — so "plateau, not ceiling" holds at the
-  ends and fails at the middle budget where every headline lives; say
-  "beatable at the ends, within noise in the middle". The 1500-row oracle
-  buys 22 distinct variables of 30 (coverage-like), not 15. **CORPUS AT TWO
-  CAPS (2026-09-10 midday, results doc "THE TWO-CAP CORPUS RE-SCORE"): "arm
-  contrasts stand" was too strong — 10 of 39 headline verdicts flip with the
-  cap on directed F1, 2 of 39 on the skeleton.** Mostly boundary, mostly
-  toward MORE separation at 1500: the rule beats the loop at LT k=30/45
-  (no LLM arm beats the rule at either cap); `one_shot` ties-or-beats the
-  loop; `critique` flips SIGN at LT k=30 (skeleton: tie everywhere — stop
-  adjudicating it, the directed verdict is orientation noise); WT k=21
-  varsplit resolves at 1500 and on the skeleton at both caps. Report every
-  arm contrast at both caps and both metrics. MECHANISM (same day, "WHY
-  STRONG INTERVENTIONS HURT"): a strong experiment is fine ALONE; pooling
-  regimes into one Gaussian test is the harm and it GROWS with rows (all
-  rows: F1 0.194→0.067 when one strong block joins five) — not the cap, not
-  the mean shift (centring is inert), not the chamber. JCI-PC (`jci.py`,
-  regime indicators) is monotone in rows where PC collapses (LT k=45 at 5000
-  rows: PC 0.255, JCI-PC 0.418) but pays an indicator penalty at 300 rows
-  that is confounded with coverage; GES (`ges.py`) is the cross-family
-  check — **RUN 2026-09-11 on the headline subset (LT k=30/45, WT k=21;
-  results doc "GES — THE CROSS-FAMILY CHECK")**: breadth-beats-depth,
-  rule-beats-random, no-LLM-arm-beats-the-rule and varsplit-beats-team
-  all hold under a score-based estimator (9 of 23 directed verdicts move,
-  5 of 23 skeleton, mostly boundary; `shared_blackboard` is resolved BELOW
-  the loop at LT k=30, −0.074, on every metric); and **the anti-prior
-  REVERSES** — core-20 slope on strong light buys +0.009/+0.017 at k=30/45
-  (r +0.43/+0.31) vs PC −0.009/−0.007. The dossier predicted GES would
-  reproduce it; it did not. So: absent under UT-IGSP, reversed under GES,
-  present only under the independence-test family (PC, JCI-PC) — say
-  "a property of the independence-test family on pooled data at a fixed
-  cap", not "of the estimator". And the BLAS
-  finding is GONE at the design level: 2,202/2,207 nine-seed design means
-  identical across Accelerate and OpenBLAS. **UT-IGSP (`igsp.py`, the
-  authors' never-pooled estimator; LT only; core-20 by construction; design
-  of record all samples capped at 1,000 rows, alpha 1e-4, calibrated on
-  neutral designs) — RUN ON THE LT CORPUS 2026-09-10 NIGHT, three
-  pre-registered predictions all hold:** every arm converges to core-20
-  0.615–0.642 (spread 0.015 at k=30 vs PC's 0.077; several arms ± 0.000 —
-  the estimator's ceiling, reached by almost any k=30 buy), nothing beats
-  anything by >0.008, and **the anti-prior is GONE** (strong-buy slope
-  +0.000/+0.001 at k=30/45, raw corr +0.25/+0.23, vs PC −0.31/−0.30). The
-  models' prior was right about the chamber and wrong about our judge;
-  "LLM arms carry the opposite of the needed knowledge" is WITHDRAWN. Every
-  selection-level claim is a property of PC-on-pooled-data at a fixed cap;
-  say so. The row effect also exists within ONE regime (PC on the reference
-  alone: core 0.205 → 0.114 from 1k to 10k rows) — the test family meets
-  uniform inputs and not-quite-linear sensors; pooling amplifies it. GES
-  ran on the headline subsets only (full corpus would take two days).
-  **The 5000-row JCI-PC corpus pass DID NOT LAND (2026-09-11): 2 workers
-  on LT k=30 stalled at 205/356 after 12 h — per-worker memory GROWS over
-  the run (2.4 GB at launch → 5.8 and 8.2 GB), filled 8 GB of swap, pace
-  fell to ~3 designs/h; killed, and the k=45/regime passes withdrawn. Two
-  rules: size workers by the END-of-run memory, not the launch reading;
-  and `rescore.py` has no checkpoint, so a kill loses the whole stage —
-  add a per-design sidecar before any pass longer than a few hours.**
-  **Rules:** sweep the estimator's nuisance parameters on neutral
-  designs BEFORE deriving an oracle; a penalty for adding data is a harness
-  signature, never explain it with physics; report every best-selection
-  claim at two caps. `oracle_probe.py --pc-max-rows`; `rescore.py` needs
-  the same override next.
-- **THE HEADROOM IS A DIFFERENT REGIME, NOT A BETTER COVERAGE — measured
-  2026-09-09 evening (results doc "WHAT THE HEADROOM IS").** In every LT
-  experiment the SAME 20 columns vary (light sources, polarisers, LED
-  currents, sensors); the intervened apparatus setting is CONSTANT inside its
-  own experiment and varies only across the pool. So light-source experiments
-  add no variation (they shift the range — `red` 171–255 vs 0–85; sensors
-  do NOT saturate, measured — the harm is losing input→sensor edges when a
-  shifted regime is pooled, mechanism under test vs `pc_max_rows`) and the 18 apparatus settings are the only informative buys, each
-  a two-level contrast, so DEPTH on them pays. One line — "sensor-setting
-  entries mid/strong first, fill from apparatus, never light sources/`osr`" —
-  scores 0.468 vs the rule's 0.437 at k=30 (RESOLVED, 67% of rule→oracle;
-  purchases 17.5 vs oracle 17.8). Data-only learners (uncertainty sampling,
-  family bandit) score BELOW the rule; uncertainty sampling buys exactly the
-  spurious-edge makers. **And the models' data-free prior is NEGATIVELY
-  correlated with the oracle across three models and two vendors**
-  (deepseek flash ρ −0.37, gpt-5.6-sol −0.28, glm-5.3-flash +0.07; 29/29
-  parsed draws put the strong light-source interventions in the top 30 with
-  "strong root interventions give signal-to-noise"; the oracle ranks them
-  last). A frontier model is not better, only more consistent. The LLM arms
-  carry the opposite of the needed knowledge. **Documentation (the README's
-  protocol paragraph) flips gpt-5.6-sol to ρ +0.32 (3/5 draws correct) and
-  does nothing for deepseek flash (−0.15)**: no model has the knowledge;
-  only the frontier model can derive it from the manual, unreliably. **Rules:** (1) before calling a ranking "not
-  describable", try rules that ABANDON coverage, not only reorder it; (2) the
-  next feedback arm must report per-experiment WHAT VARIED, not coverage.
-- **Core-20 is LT-only.** `f1_core_rescored` is 800/800 on LT and 0/1804 on WT
-  — `LT_CASE_STUDY_NODES` has no WT counterpart. "No LLM arm beats round-robin
-  coverage on the non-trivial subgraph" is an LT-only claim.
-- **OpenRouter rate limits**: `deepseek-v4-flash` is hosted by 8 providers; the orchestrator pins providers in order `(Novita, AtlasCloud, Parasail, SiliconFlow)` because per-provider throughput drifts day-to-day (May 9: Parasail was fastest; May 15: Novita was 7× faster). See `evaluation/chamber_pipeline/orchestrator.py:_CountingLLM.DEFAULT_PROVIDER_ORDER` and re-probe before any multi-hour sweep.
-- **Socket timeout**: `socket.setdefaulttimeout(30)` is set at `run_experiment.py` module load — without this, `litellm.completion(timeout=N)` doesn't propagate to the SSL socket and stuck calls hang the process forever.
-- **Max tokens**: `_llm_select_loop` caps output at 200 tokens (selection step) and `llm_only_agent` at **32768** (adjacency emission, was 4096 pre-M4b-fix). DeepSeek v4 Flash is a *reasoning model* — `reasoning_tokens` typically 95% of `completion_tokens`. At 38-node adjacency prompts the 4096 cap was entirely consumed by hidden reasoning before any `content` was emitted (verified via `usage.completion_tokens_details.reasoning_tokens` on a 2-node diagnostic, 2026-05-14).
-- **Cell timeout**: Pilot needs `--cell-timeout-seconds 1800` (was 600). LLM-only adjacency call at k=59 takes ~10min wall (612s measured 2026-05-14) since the model reasons over a ~22K-token data summary before emitting the 38-node graph.
-- **DeepSeek v4 Flash + summary statistics is unreasonably good** at causal discovery on LT — **CONFIRMED AT 30 SEEDS** (May 18 M4b pilot): SHD=26 / F1=0.75 at k/M=1.00, every other variant clusters at SHD≈53-57 / F1≈0.40-0.42. The §5.3 narrative has rotated: LLM-only-with-summary is the strong result, Planner+Reasoner is the "delegation has measurable cost" finding (F1 stays flat 0.385→0.397 from k=0.51→1.00, plus 8/30 timeouts at k=59).
-- **Checkpoint sidecar**: every pilot run writes one JSON line per cell to `<out>.jsonl` before the Parquet consolidates at sweep end. Resume-on-restart is automatic — re-running the same `--out` command after a kill skips already-done cells. The two May 15 and 16-17 overnight stalls lost ~217 cells each because this didn't exist; M4b May 18 pilot benefited from it (10 timeouts that would have wedged the older orchestrator instead just logged as errors and the sweep continued).
-- **VPS provisioned**: `173.212.217.40` (Ubuntu 24.04, 4 vCPU, 8 GiB RAM, 145 GB disk). Repo cloned at `/root/agent-contracts`, uv synced with `--all-extras`, `.env` transferred (0600 perms). Ready to launch any pilot via `ssh root@173.212.217.40 'cd /root/agent-contracts && export PATH="$HOME/.local/bin:$PATH" && tmux new -d -s pilot "uv run python -m evaluation.chamber_pipeline.run_experiment --pilot --cell-timeout-seconds 1800 --out runs/m4-pilot.parquet > runs/m4-pilot.log 2>&1"'`. Pull results back via `rsync -av root@173.212.217.40:/root/agent-contracts/runs/ ./runs-vps/`.
-
-## Session 2026-08-24: the harness was moderating the result
-
-Four findings, in descending order of consequence. All measured, not inferred.
-
-### 1. `_SELECTION_MAX_TOKENS` made the harness a moderator of the IV
-
-An instrumented k=30 cell (0731, providers pinned) attributed **every**
-selection failure to truncation: `{'length': 13, 'empty': 0, 'offmenu': 0,
-'ok': 17}`. 13 of 30 picks were `rng.choice`, because the 2048 cap was consumed
-by reasoning before any content was emitted.
-
-The cap has now been mis-sized **twice** (200, then 2048), both times
-calibrated on the loop's **first** call, where reasoning is 415-976 tokens.
-Reasoning scales with the prompt, and the prompt grows one spent-experiment
-line per step. Late-loop (25 chosen): flash-0731 **2,175**, flash **11,690**.
-
-Because the failure rate tracks history length, it was **0/36 at k=6 and ~43%
-at k=30** — correlated with the experiment's independent variable. In M4b,
-`llm_pc` beat `random` by **+0.034 F1 at k=6 (resolved)** and only **+0.018 at
-k=30 (below MDE)**. "LLM selection stops helping as budget grows" was this cap.
-
-**M6 exposure was worse.** The ladder's IV is how budget is *split across
-agents*, and splitting shortens each agent's history: two scouts at k=15
-truncate less than one loop at k=30. The fan-in rungs would have beaten the
-loop for reasons unrelated to coordination — **H-B could have come out positive
-as a pure `max_tokens` artifact.**
-
-Fixed in `6ae85e5`: selection, reconcile, and negotiate all raised to 32768
-(`max_tokens` is a ceiling, not a reservation — generosity is free).
-
-**Consequence for calibration:** `_A95_RECONCILE` (8557) and `_C95_NEGOTIATE`
-(4138) were measured against *truncated* calls. A truncated reconcile pinned
-aggregator spend to exactly 8192 — inside P2's window (6418, 12836] — so
-`tree_would_refuse` could read True *because the call truncated*. Both
-constants MUST be re-derived from untruncated late-loop measurements at k=45
-before any sweep reporting H-C or P2.
-
-### 2. M4b rows can no longer be reused
-
-Two independent reasons, either sufficient:
-
-- **Provider-side change.** DeepSeek raised default reasoning under unchanged
-  0423 weights (2026-08-13). `llm_pc` k=30 went from 244 s / 1,089 output
-  tokens per call to ~1,300 s / ~3,600. Decomposed exactly: **4.35x more
-  tokens x 1.55x lower throughput = 6.72x**, matching observed. (Throughput
-  really did drop, 134 -> 87 tok/s, consistent with the old snapshot getting
-  less compute — but it is the smaller factor.)
-- **Selection semantics changed** (`7f284be`, `6ae85e5`).
-
-The M6 plan's pilot-reuse for rungs 0 and 3 is therefore **void**; all five
-rungs must run fresh. Parallelism makes that affordable.
-
-### 2b. The BLAS backend is part of the configuration (2026-08-26)
-
-Supersedes two earlier explanations of the same observation, both wrong:
-"library drift breaks per-cell reproducibility" (`c77c610`) and, later the
-same day, "an unrecoverable uncommitted working tree" (`bd46b0d`). The actual
-cause is measured:
-
-**macOS/Accelerate and Linux/OpenBLAS produce different causal graphs from
-byte-identical inputs.** Verified directly, not by elimination: on the same
-LT matrix, `np.corrcoef` differs between the machines, and `inv(C)[0,1]`
-agrees to ~10 hex digits then diverges (`-0x1.a8471c316a312p+13` vs
-`-0x1.a8471c315c71bp+13`, relative ~1e-10). Dataset md5s match; `numpy`
-2.5.2, `scipy` 1.18.1, `causal-learn` 0.1.4.8 and `pandas` 3.0.5 are
-identical on both.
-
-PC converts that into *structural* noise. It is a sequence of accept/reject
-tests at alpha, each conditioned on the previous ones, so a perturbation that
-flips one borderline test forks the conditioning-set search rather than
-nudging a number. Seeded `random`, LT, no LLM:
-
-| k | seed | Accelerate (macOS) | OpenBLAS (VPS) |
-|---|---|---|---|
-| 15 | 0 | 0.3810 | 0.2857 |
-| 15 | 1 | 0.2889 | 0.2759 |
-| 59 | 0 | 0.3736 | 0.3864 |
-| 59 | 2 | 0.3871 | 0.4615 |
-
-**Which file came from which machine:**
-
-- **macOS / Accelerate**: `m4-pilot.parquet`, `curve-lt-random.parquet`,
-  `curve-wt-random.parquet`, `curve-wt-validate.parquet`.
-- **Linux / OpenBLAS (VPS)**: `m6-ladder.parquet`, `m6-wt-ladder.parquet`,
-  `m6-controls.parquet`.
-
-Two consequences, one reassuring and one not:
-
-1. **Both M6 ladders are OpenBLAS**, so the cross-chamber topology
-   replication (LT vs WT, §"M6 WT LADDER COMPLETE") is platform-consistent
-   and stands as reported.
-2. **Every loop-vs-random contrast recorded so far is cross-platform** — the
-   ladders are VPS, the random curves are local. The WT figures (+0.019 at
-   k=14, +0.037 at k=21) are therefore *not* yet a clean contrast and must be
-   recomputed against a VPS random baseline before use. Cheap: `random` runs
-   without an LLM.
-
-**Durable fix, `2e54aa1` + follow-up**: every `RunRecord` now carries
-`pc_alpha`, `pc_max_rows`, `pc_collinearity_threshold`, `blas_backend` and
-`platform_tag`. Never pool rows whose `blas_backend` differs.
-
-For the paper's reproducibility statement: in a constraint-based discovery
-algorithm, the seed does not determine the graph. Archive the resolved
-environment *including the linear-algebra backend*, and run every arm of a
-comparison on one machine.
-
-### 3. `deepseek-v4-flash-0731` is the better snapshot
-
-Same provider (Novita), late-loop call: **23.5 s / 2,175 tokens** against
-flash's **105.0 s / 8,828**, for ~25% more cost per call. At cell level (n=3,
-k=30) it reproduced M4b accuracy closely — F1 0.387 vs 0.379, SHD 57.3 vs 57.1
-— with far tighter spread (wall 500/547/579 s vs flash 991/1642). Selectable
-via the new `--model` flag; recorded per cell in `model_id`.
-
-`~deepseek/deepseek-v4-flash-latest` is **not routable** (404); the `~` marks a
-non-routable variant. `deepseek-v4-pro` truncates at 2048 with empty content
-and costs 3x.
-
-### 4. The seed does not control the LLM
-
-`llm_pc_agent` calls `_llm_select_loop(...)` with **no temperature**, so the
-provider default applies. Same seed, same config, two runs: **F1 0.330 and
-0.482**. The seed governs only the fallback RNG and PC. Every cell is an
-independent draw. Not yet changed — pinning temperature touches every LLM arm
-and needs its own replication check.
-
-### Infrastructure shipped
-
-- **`--max-workers N`** (`116ac05`): process-parallel sweep, M4c's deferred
-  item. Cells run at ~1.3% CPU (pure network wait). Measured **2.49x on 3
-  workers** (83% efficiency); ~700 MB per worker caps the 8 GB VPS at ~8.
-  Processes not threads: `_PcDegeneracyHandler` attaches to a *global* logger
-  per cell, so concurrent cells in one process would cross-contaminate
-  `n_pc_degeneracy`; and `_invoke_with_timeout` leaks a daemon thread per
-  timeout.
-- **`--model`** (`5f081ba`): applied after `static_kwargs` so an explicit flag
-  outranks a spec default; guarded on `accepts_llm`.
-
-### Known-open (recorded, deliberately not fixed blind)
-
-- **Rung 4 negotiation parser** reads restatement as claim: the revise prompt
-  shows the peer's proposals above the full menu and `_parse_name_list` scans
-  the whole response, so a scout restating the peer inflates `n_contested` —
-  rung 4's headline metric. Cannot be fixed by filtering (a genuine contest is
-  the signal); needs answer/restatement separation. See spec §11.
-- **The aggregator's reconcile output is discarded — RESOLVED as a threat
-  (2026-08-27).** Measured by the `fan_in_agg` ablation rather than argued;
-  see the section below. The paper still must not claim the aggregator
-  *improves* the result, but the negative fan-in finding is not an artifact
-  of a null aggregator.
-- **`overlap_frac` is structurally 0.0 for rung 4** (pools disjoint by
-  construction). State as a scope limit.
-
-### Harness validity gate (k=45, all five rungs) + calibration — then LAUNCH
-
-Ran a 15-cell gate at the largest budget, then 18 calibration cells at k=6/30,
-before committing to the sweep. Both clean of errors (0/33 at a generous
-timeout). What they established:
-
-| check | result |
-|---|---|
-| Truncation at k=45 | **0.7%** (2/270 calls), no `length` failures — was 43% at k=30 |
-| Timeouts | 0/15 at 7200 s; **max cell 1960 s** → sweep uses 5400 s, not M4b's 1800 |
-| PC degeneracy | 0.00 |
-| Conservation | 6/9 graph cells FAILED at k=45 → traced to `a95`, now fixed |
-| P2 | demonstrable where spend lands in-window |
-
-**`_A95_RECONCILE` → `_A95_RECONCILE_BY_K` at p75** (commit `fd7ee4c`).
-Aggregator cost grows with k, so one constant could not work:
-
-| k | p75 | spread | conserve | in P2 window |
-|---|---|---|---|---|
-| 6 | 7,646 | **48.8x** (500–24,415) | 7/9 | 2/9 |
-| 30 | 11,427 | 5.2x (4,648–24,001) | 8/9 | 5/9 |
-| 45 | 18,790 | 2.6x (9,783–25,168) | 9/9 | 6/9 |
-
-p75 not median, for a design asymmetry: `_ROLE_C95` medians get multiplied by
-`_PROVISION_MULTIPLE = 4`, but the aggregator gets `1.5 * a95` and **no
-multiple** (a margin would destroy P2), so the median was imported without its
-multiplier — and a median-sized budget overruns ~50% of executions by
-construction. Uncalibrated budgets now **raise** rather than extrapolate.
-
-**Two claims the paper must now qualify:**
-
-1. **P2's window width equals the fan-in degree.** `max_i a_i < c <= sum_i a_i`
-   gives `(f, n*f]` — 2x for two scouts. k=6's 48.8x spread cannot fit, so P2
-   is demonstrable at k=30/k=45 and effectively not at k=6. The lever is more
-   parents, not a better constant. Spec §12.
-2. **H-C conflates mechanism with forecast.** A conservation failure means
-   `verify()` correctly caught an overrun — the mechanism worked 100% of the
-   time; our cost prediction did not. Report separately or a reader concludes
-   the framework failed. Spec §6.
-
-**M6 SWEEP LAUNCHED 2026-08-24 10:51 UTC** — `--m6 --model
-openrouter/deepseek/deepseek-v4-flash-0731 --max-workers 6
---cell-timeout-seconds 5400 --out runs/m6-ladder.parquet`, 450 cells, ~20 h
-projected (98 h serial), ~$10–15. Resume after any interruption by re-running
-the identical command; the JSONL sidecar skips completed cells.
-
-**Early science from the gate (n=3, directional only):** role differentiation
-halves scout overlap (0.79 → 0.32) and recovers distinct coverage (27.6 → 38.0
-of 45) — H-B's mechanism, visible. `team` reaches full 45/45 coverage yet the
-worst F1 (0.319 vs loop 0.463), separating topology cost from accounting:
-splitting selection between blind scouts is worse than one sequential loop
-even at equal coverage.
-
-**Still open, recorded not fixed:** scout `c95` is unverified at k=45 (per-scout
-tokens now recorded so the next calibration can check); temperature unpinned on
-`llm_pc` so the seed does not control the LLM (variance, not bias); rung-4
-negotiation restatement (gate showed contested 4/45, negfail 0 — no inflation
-visible yet).
-
-### Test-integrity lesson (third occurrence today)
-
-Raising the caps broke **six tests** that classified call types by
-`max_tokens`, which became ambiguous the moment two caps shared a value — the
-same fragility as the `len(names) > 30` menu-size threshold with zero margin
-that was replaced earlier the same day. Replaced with a prompt-marker
-classifier in `conftest.call_kind`, guarded by
-`test_call_kind_markers_are_unambiguous`. A bare `"designer"` marker is
-insufficient: the reconcile system prompt says "one of two designers".
-
-## Session 2026-08-25: the provider and the WT dataset were both moderators
-
-Full detail, with measurements: **`docs/chamber-harness-validity-register.md`**
-(the running register of every harness defect that changed a result). Summary:
-
-1. **Provider order was costing 4.7x and mixing precisions.** One OpenRouter
-   model id is served by many endpoints at different prices: identical
-   `deepseek-v4-flash-0731` is $0.280/M out on Parasail/SiliconFlow/Baidu and
-   $1.320/M on Novita/AtlasCloud/DeepSeek/Cloudflare. M6 ran 422/450 cells on
-   Novita, billing **$54.53** total ($49.68 of it Novita's); the same token
-   counts at Parasail's prices predict **$12.10**. Re-probed: Parasail
-   17-34s vs Novita 21s, so there is no throughput reason to pay it. Order is
-   now `(Parasail, SiliconFlow, Baidu, Novita)`, commit `6fe16e5`.
-   - `Together` excluded despite the low price: it spends the whole 32768 cap
-     on reasoning and returns EMPTY content, which degrades to `rng.choice`.
-   - The comment claiming Novita and AtlasCloud were "both fp8" was wrong --
-     **AtlasCloud is fp4** and served 27 of the 450 M6 cells. Measured, not
-     distorting (residualised on arm x budget: -0.004 vs +0.000, p=0.61).
-     Now a `PROVIDER_PRECISION` table plus a mutation-verified test; the old
-     test asserted `order == DEFAULT_PROVIDER_ORDER`, true by construction.
-
-2. **WT switched `wt_walks_v1` -> `wt_validate_v1`** (commit `05a811c`). The
-   walks release is a random-walk time series, median lag-1 autocorrelation
-   **0.9999**, so 320,000 rows carry ~19 independent observations. Fisher-Z
-   assumes i.i.d., and on that input the budget response INVERTS. Same menu,
-   30 seeds/point: walks slope **-0.0007 (p=0.06)**, validate **+0.0042
-   (p=1.4e-13)**, LT reference **+0.0041**. Dynamic range 0.022 -> 0.107.
-   **An earlier write-up called the flat walks curve an external-validity
-   finding ("the wind tunnel is insensitive to selection"). That is retracted
-   -- the pipeline was insensitive, not the chamber.**
-
-3. **PC now drops collinear columns locally instead of aborting globally.**
-   WT's four barometers all read ambient pressure in `standard` (all six pairs
-   r>0.9998, none a true edge); `cond(R)` ~ 1e7 made Fisher-Z raise and return
-   all-zeros for **all 32 nodes**, F1=0. 15/60 runs; now 0/150. Cost: the four
-   are pure sinks and 13 of 42 true edges point into them; `pressure_upwind`
-   survives, so the three dropped sinks forfeit **9 of 42** -- a recall ceiling
-   of 0.786, stated as a WT scope limit.
-   Counted as `n_collinear_dropped` and flagged contaminating, because which
-   columns are duplicate depends on which experiments were bought (on WT the
-   rate moves 0.90 -> 1.00 with k).
-
-**Free results already extracted from the existing 450+180 cells** (no new
-compute; see the register and the analysis in-session):
-- **Cost-accuracy Pareto**: `planner_reasoner` is the ONLY Pareto-optimal arm
-  at k=30 AND k=45 -- cheapest and most accurate. Every fan-in topology is
-  strictly dominated. **This retires the M4b "delegation has measurable cost"
-  narrative.**
-- **Redundancy decomposition**: `fan_in_homog`'s residual against the loop's
-  own accuracy-vs-distinct-experiments curve is +0.006 at both k=30 and k=45 --
-  its entire -0.079 deficit is duplicated work, not worse selection. `team`
-  reaches identical 30/30 coverage and is still -0.047 (paired p=0.0005,
-  Holm-adjusted 0.0016 across the 6 within-budget contrasts; unpaired Welch
-  gives 0.0001 -- quote the Holm figure), so its cost is genuine coordination,
-  not redundancy. **WITHDRAWN 2026-08-30 (M7 Phase 1 + coverage sweeps).**
-  That coverage is identical at the EXPERIMENT level and not at the VARIABLE
-  level (team 23.4 vs the loop's 27.9): 5.6 variables are bought by both
-  scouts while `overlap_frac` reads 0.0 by construction. A direct LLM-free
-  manipulation of variable coverage (15 vs 30 variables, weak levels excluded,
-  n=30 each) gives **+0.0073 F1 per distinct variable**, which predicts -0.033
-  of the measured -0.048 -- **about two-thirds of team's deficit IS
-  redundancy**, and the -0.015 residual is below the contrast's own MDE.
-  An earlier edit the same day said the conclusion survived; that rested on a
-  flat-slope reading over the loop's narrow 25-30 range at n=10, now
-  withdrawn. See `docs/chamber-results.md` §"M7 PHASE 1" and register entry 20
-  (the first manipulation was confounded with intervention strength).
-- **Budget matching verified by identity**: solving `distinct = |A|+|B|-shared`
-  against `overlap_frac` gives implied scout budgets of exactly 3/15/22 with
-  zero non-integer cells across all fan-in cells.
-- **Noise floor**: at k=M selection freedom is zero, so spread there is pure PC
-  noise. LT k=59: sd 0.038, max-mean 0.069. WT `wt_validate_v1` k=28: sd 0.076,
-  max-mean 0.134. The 0.065 measured on `wt_walks_v1` is STALE.
-- **Seed pairing carries no information** (cross-arm r = -0.03), confirming the
-  unpinned-temperature note; unpaired MDEs are valid.
+  FEASIBILITY.** WT `team` ran 300 cells reporting `conservation_certified =
+  None` because the constant was never isolated there: the gate silently deleted
+  a number rather than protecting one.
+- **Passing tests are not sufficient evidence for an integration.** Every
+  integration wraps its SDK import in `try/except ImportError` that stubs to
+  `Any`, so the suite stays green with an SDK completely broken. Confirm the
+  `*_AVAILABLE` flags at runtime.
+- **Only inspecting the RESOLVED ARTIFACTS catches a silent dependency move** —
+  neither `google-adk` 1.x→2.x nor a disappearing platform wheel changes a
+  requirement string.
+- **Test-integrity: never classify on a value that two cases can share.** Call
+  kinds keyed on `max_tokens` broke the moment two caps matched; menu-size
+  thresholds broke at zero margin. Key on prompt markers and assert exclusivity.
+- **`UP042` (`class X(str, Enum)` → `StrEnum`) is not cosmetic** — a `str`+`Enum`
+  mixin renders `"X.A"` under `str()`, `StrEnum` renders `"a"`. Safe only where
+  every stringification goes through `.value`.
+- **Keep pre-commit and CI on the same linter version**; skew hides new rules.
 
 ## Chamber results → `docs/chamber-results.md`
 
-**All chamber-pillar results live in `docs/chamber-results.md`**, not here.
-This file is project memory loaded into every session; it holds instructions,
-operational lessons and status. Results are a growing archive and belong in a
-document you open deliberately.
+**All chamber-pillar results live in `docs/chamber-results.md`.** This file is
+project memory loaded into every session: it holds rules, specs and status.
+Results are a growing archive and belong in a document you open deliberately.
+Harness defects live in `docs/chamber-harness-validity-register.md` — read it
+before trusting a number.
 
-As of 2026-08-31: **3,441 cells, $108.39, zero errored cells**, two chambers,
-two models. Headlines, with the detail and the caveats in the results doc:
+Corpus as of 2026-09-20: **two chambers, four models, 19,384+ cells, ~$158.65,
+zero errored cells.** The standing headlines, each with its detail, scope and
+caveats in the results doc:
 
-- **Where the comparison resolves, no fan-in topology beats a single
-  sequential loop**, and where it resolves in the loop's favour the margin is
-  0.040-0.079 F1, on both chambers and under a 3.9x pricier model. Scoped
-  2026-08-29, WT `team` re-run 2026-08-30: of 24 topology-vs-loop contrasts,
-  10 resolve, 9 favouring the loop. The
-  exceptions travel with the claim — `team` beats the loop at WT k=7
-  (+0.040, resolved), nothing resolves at LT k=45, and the chain resolves in
-  neither direction anywhere.
-- **The gap to random closes because random catches up**, not because the
-  loop degrades — the loop saturates at F1 ≈ 0.42 by k=30.
+- **No LLM arm beats an LLM-free round-robin coverage rule**, on either chamber,
+  at any budget, under four models across three vendors and two model classes.
+- **Coordination is coverage**: `ΔF1 ≈ r · Δ(distinct variables)`, where `r` is
+  an exchange rate measured with no model in the loop and depends on the chamber
+  and the estimator's row cap. Eleven predictions, 8 close / 3 miss, two
+  pre-registered out of sample.
+- **Where the comparison resolves, no fan-in topology beats a single sequential
+  loop** — and the topology effect is `rate(cap) × gap(model)`, so a cheaper
+  model with a smaller coverage gap shows none at the cap of record.
+- **The running record is not load-bearing.** `one_shot` ties the loop
+  everywhere measured; its one loss did not replicate.
 - **The contract is a floor on effort, not only a ceiling on spend.**
-- **Topology is at least as large a lever as model choice, and cheaper.**
-  **WITHDRAWN AS STATED 2026-09-13 (cross-vendor replication on
-  `glm-5.3-flash`, 300 cells / $0.48, results doc "THE CROSS-VENDOR
-  REPLICATION").** At the cap of record NONE of the three DeepSeek topology
-  contrasts resolves on GLM (team − loop −0.009, varsplit − team +0.007, WT
-  team − loop +0.006; all ties, CIs exclude DeepSeek's estimates); at 1500
-  rows C1/C2 REPLICATE (−0.035 / +0.029, resolved, DeepSeek's direction at
-  60–70 % of its size). The two-factor model explains both: the coverage
-  exchange rate is CAP-SPECIFIC (LT 0.0045 per distinct variable at 300
-  rows, **0.0131 at 1500**, single-backend re-fit) and GLM's coverage gaps
-  are smaller (team − loop −2.8 variables vs DeepSeek's −4.8; varsplit −
-  team +2.4 vs +5.5) — rate × gap lands inside the measured CI for **all
-  six GLM predictions at both caps** (full record over eleven: 8
-  inside, 1 on the bound, 2 outside — the 13 Sep correction from the
-  unrounded intervals; on point estimates WT k=14 is a third miss). So the topology effect is
-  `rate(estimator cap) × gap(model)`; a cheaper model with a smaller gap
-  shows none at the cap of record. What IS vendor-independent: no LLM arm
-  beats the coverage rule (C4, all four GLM arms resolved below at both
-  caps), `one_shot` ties the loop at the cap of record (C3; its 1500-row
-  directed verdict flips sign with the vendor, +0.040 vs −0.037, skeleton
-  and core-20 agree — GLM's single call gives 44 distinct designs in 50
-  cells, DeepSeek's 6 in 30), and conservation certifies **100 %** on GLM
-  under DeepSeek-sized grants (GLM negotiates at 28 % of the tokens: the
-  mechanism is vendor-independent, the calibration is not). GLM facts: 75
-  output tokens per selection call at `low` effort, 1–3 % of picks fall
-  back to `rng.choice` (DeepSeek 0), drift clean, 6–8x cheaper per cell,
-  MDEs tighter than DeepSeek's at n=50. The `shared_blackboard` k=6
-  control (60 cells, same day) replicates the 30 Aug −0.057 at both caps
-  (−0.055 / −0.043, resolved). Register §38: provider precision drifted
-  per (provider, model) and was caught the evening before launch.
-- The aggregator is **inert by measurement**, not by omission (30/30 cells).
-- **The running record is not load-bearing** (M7 Phase 2, 2026-08-31, 960
-  cells). `one_shot` — ONE call picking all k experiments, no record at all —
-  ties the loop at LT k=30/45 and at all three WT budgets, losing only at
-  LT k=6 (−0.059) — **and that one loss DID NOT REPLICATE (2026-09-11,
-  register §35): same day, same regime, fresh loop control, 57 single-call
-  designs vs 30 loop designs: −0.006 [0.024] at both caps and all three
-  metrics. The record pays nowhere we have measured.** The M6 ordering
-  replicates, but **the record-survival axis we built the ladder on does
-  not explain it**; do not draft from that axis. **Two rules from it:** a
-  resolved n=30 verdict the paper rests on gets re-run on another day with
-  its comparator before it is written as resolved ($1.33 here); and
-  estimate a sweep's wall time from the ARM'S OWN call count (`one_shot` is
-  one call per cell: 90 cells in 8 minutes, forecast "hours" from the loop's
-  pace). **Menu shuffling per seed (`one_shot_shuffle`) is a dead end for
-  §24's k=30 bound**: 7 distinct sets vs 6, the dominant set identical, no
-  position bias to remove — the model's canonical k=30 answer is its prior,
-  not the layout.
-- **What the axis DOES buy, on both chambers, at the middle budget only**:
-  sharing a record beats *splitting* one. `shared_blackboard` vs
-  `fan_in_spec` — same two role prompts — gives +0.053 (LT k=30) and +0.046
-  (WT k=14), both resolved, nothing at the small or large budget. Sharing a
-  record with yourself (the loop) is worth nothing. Cross-run; WT sits on the
-  MDE boundary after drift adjustment.
-- **Report equivalences with their bound and their power**, never as nulls.
-  `one_shot`'s cells are NOT independent draws (register §24): a single call
-  re-picks the same design, 6 distinct across 30 cells at LT k=30. Every Phase
-  2 verdict survives selection-level re-analysis, but that bound widens to
-  ±0.051. **Any single-call arm must be analysed at the selection level, and
-  distinct-selection counts belong in every results table.**
-- **`critique` TIES the loop** (corrected 2026-09-01 by design-level
-  re-scoring): a reviewer pass costs 3 extra flat calls and moves accuracy by
-  |Δ| < 0.022 on either chamber at any budget. The earlier "resolved worse at
-  LT k=30/45" rested on a single favourable PC draw and is **retracted**.
-- **AN LLM-FREE COVERAGE RULE MATCHES EVERY LLM ARM** (2026-09-01, see the
-  results doc's "THE COVERAGE ORACLE"). `coverage_max_ms` — round-robin over
-  distinct variables, no model — ties the best LLM arm at LT k=6/30/45; none
-  resolves above it. **But it is only near-optimal where coverage binds**: at
-  k=6 the rule beats random by just +0.007 while the loop beats random by
-  +0.056 and the rule by +0.034. So the LLM's contribution is confined to the
-  tight-budget regime; above k/M≈0.5 every arm converges on the coverage
-  optimum. Treat the rule as a **computable near-oracle** — rare in agent
-  benchmarks — and report every arm as distance-from-optimum. **BOTH CHAMBERS**
-  (`wt_coverage_max`, `wt_menu_taxonomy.py`, 28 entries / 21 variables).
-  **CORRECTED 2026-09-02 — five of the six contrasts crossed BLAS backends**
-  (coverage arms local/Accelerate, LLM arms VPS/OpenBLAS; register §31; only
-  LT k=30 was clean). Re-scored on one backend at 9 seeds, **two verdicts
-  move and they move in OPPOSITE directions**: the loop RESOLVES above the
-  rule at LT k=6 (+0.036, MDE 0.030) and the rule RESOLVES above every LLM
-  arm at WT k=21 (+0.030, MDE 0.024). A crossing is a better result than a
-  flat row of ties. **But the LT k=6 win does NOT survive core-20 scoring**
-  (+0.036 → +0.014, below MDE): the LLM's one advantage over a ten-line rule
-  lives largely in the 18 apparatus edges. On the non-trivial subgraph no LLM
-  arm beats round-robin coverage at any budget — state it that way.
-  Same small-budget escape on both (rule − random is +0.002 at WT k=7, +0.007
-  at LT k=6, rising to +0.045 / +0.073 at the large budgets).
-- **Breadth beats depth even where the fat menu entries ARE the real drivers.**
-  `wt_coverage_min` was pre-registered to WIN (its variables `hatch`/`load_in`/
-  `load_out` have out-degree 6/8/8) and lost badly (0.124/0.165/0.229 vs
-  0.188/0.232/0.282). Buying a driver's several entries makes ONE variable vary
-  repeatedly; breadth activates a new source each time. **Out-degree is not
-  what the budget buys — a distinct varying variable is.**
-- **All 9 case studies read** (2026-09-01). Only two are causal discovery:
-  `causal_discovery_iid` (LT, GES/UT-IGSP, 20 vars) and `causal_discovery_time`
-  (WT, PCMCI+ on `wt_walks_v1`, 16 vars). The others are ICA, changepoints,
-  symbolic regression, mechanistic models and three OOD tasks — different
-  problems. `lt_interventions_standard_v1` (ours) is also used by `ood_sensors`.
-- **The CONTEMPORANEOUS ground truth is bipartite, depth 1, ZERO mediators**
-  (register §29). lt/standard 29 sources + 9 sinks; wt/standard 21 + 11. But
-  it is **not degenerate** — 172 unshielded colliders on LT, 66 on WT, so
-  skeleton recovery and collider orientation are real work; what is absent is
-  mediation and high-order conditioning. **The chamber's depth is TEMPORAL**
-  (`load_in(t)→rpm_in(t+1)→pressure(t+2)`) and our pooled-i.i.d. reduction
-  discards the dimension it lives in.
-- **`wt/pressure-control` has real depth but NO MENU — checked and closed
-  2026-09-01.** 24 length-2 paths, 45% of its 44 edges on one, against 0% in
-  standard. But both its releases ship exactly ONE experiment
-  (`wt_pc_validate_v1`: `validate_pressure_downwind_loads`;
-  `wt_pressure_control_v1`: `hatch_0`), so a budgeted selection task is
-  impossible there. The mediators exist; the interventions revealing them are
-  not purchasable.
-- **We only ever ran `standard`** — 10,104 LT and 11,086 WT cells, zero on any
-  other configuration. It was the CLI default, never a considered choice — but
-  it is also the only WT config with a menu, so the oversight was in not
-  checking, not in the outcome.
-- **`team_varsplit`'s WT non-replication is PREDICTED, not a failure**
-  (2026-09-02, 300 cells, n=50, re-scored at 9 PC seeds). LT k=30 **+0.043
-  RESOLVED**; WT k=14 **−0.000**, k=21 **+0.017 below MDE (0.024)**. An
-  LLM-free two-factor model gets **3/3 on the verdict**:
-  `predicted gain = coverage exchange rate × variables recovered`
-  (`analyze_headroom.py`). Rates regressed on LLM-free arms with budget as a
-  fixed effect: **LT 0.0061 ± 0.0005, WT 0.0111 ± 0.0006**. Predicted /
-  measured: LT k=30 +0.033 / +0.043, WT k=14 +0.010 / −0.000, WT k=21
-  **+0.015 / +0.017**. **WT's exchange rate is nearly DOUBLE LT's** — the
-  moderator is not "WT is worse" but **headroom in the ACTION SPACE** (menu
-  entries per variable: LT 1.97, WT 1.33). Headroom is computable before any
-  run (`a_priori_headroom`, a ~1.5× under-predicting lower bound that ranks
-  the chambers right).
-- **THE WT k=21 CONFIRMATION LANDED: predicted +0.0149, measured +0.0139**
-  (2026-09-02, n=132 pooled, 95% CI [+0.0032, +0.0246], p=0.0117; bootstrap
-  100k agrees at p=0.0103). Pre-registered before launch (`c673121`). Error
-  −0.0010. **But 2.53σ does NOT clear the pillar's 2.8σ bar** (needs n≈154):
-  significant at conventional levels, not at ours — **say both, and do not
-  switch bars to the one that pays**. Model record is **2 close, 1 miss**
-  (LT k=30 +0.033→+0.043; WT k=14 +0.010→−0.000 MISS; WT k=21
-  +0.0149→+0.0139); quoting "3/3" counts verdicts, not predictions.
-- **A threshold decision rule cannot evaluate a point prediction.** The
-  pre-registration said "below MDE → FALSIFIED"; that branch fired while the
-  estimate matched the prediction to 0.001. Key such rules on the INTERVAL
-  (contains prediction / excludes zero), never on a significance threshold.
-- **Neither bootstrapping nor more PC seeds buys power** (both measured, not
-  assumed). Bootstrap reproduces the t-interval to 4 decimals — it estimates
-  the same sampling distribution. Inference noise is only **18%** of the
-  remaining variance at m=9, so m→∞ moves σ 2.53→2.80, i.e. exactly onto the
-  bar; a verdict turning on that is an analytic choice. **Only more data adds
-  power, and it must be an INDEPENDENT replication at pre-specified n, never
-  an extension of a sample already seen.**
-- **Arm means ignored a 2.4× reasoning shift** (pre-registered pooling check):
-  `team` +0.0049, `team_varsplit` +0.0001 across the regime change. Second
-  such measurement (see `shared_blackboard`). Report as robustness, not caveat.
-- The varsplit arm is **infeasible at k/M = 0.75** — **8 of 132 (6.1%)** k=21
-  cells raise because a variable partition cannot leave both scouts a pool
-  above budget. The guard fires before anything is bought or scored, so
-  selection is on partition structure, not outcome. Quote 6.1%, not the 4%
-  seen at n=50.
-- **The cell-level version of that contrast said the opposite** (+0.0155 at
-  k=14, +0.0160 at k=21, "stable across budgets"). Nine-seed re-scoring took
-  k=14 to zero. §27's failure mode, recurring: **never read a WT contrast off
-  single-draw scores.**
-- **The authors' own WT case study uses PCMCI+ on `wt_walks_v1`**
-  (`causal_discovery_time.ipynb`, tau_max=10, alpha=1e-2, 16 variables). We
-  rejected walks for autocorrelation — correct GIVEN PC, but their answer to
-  the same autocorrelation is a different METHOD, not a different dataset.
-  State our switch as an estimator-forced deviation. **Read every case study a
-  testbed ships with, not just the one matching your method.**
-- **WT is the worse chamber, not the safer one**: 17 trivial sources carrying
-  **40%** of its 42 edges (LT: 18 / 32%), core 15 nodes / 25 edges, plus 9
-  in-edges on the collinear-dropped barometers (6 from real drivers).
-- **Our node set is 38; the chambers' own case study uses 20** (register §28).
-  The 18 extra are ALL pure sources (out-degree 1, in-degree 0) — apparatus
-  settings (`t_*`, `osr_*`, `v_*`, `diode_*`) each driving one sensor — and
-  they carry 18 of 57 true edges. **78% of the LT loop's budget response sits
-  on those edges** (full F1 0.206→0.421 vs core-20 0.176→0.223). Comparisons
-  are unaffected (all arms share the node set; Phase 2 verdicts hold under
-  directed, skeleton AND core-20 scoring) but **never quote an absolute F1
-  without the core-20 figure beside it**. The authors also use GES/UT-IGSP not
-  PC, grid-search alpha, score the whole CPDAG, and do not subsample — state
-  each as a deviation.
-- **Re-score offline before believing a contrast** (`rescore.py`, register
-  §27, §30). **Key the work by the ORDERED buy** — pooling concatenates in
-  sequence and PC subsamples 300 rows, so `[a,b]` and `[b,a]` score
-  differently (0.133 vs 0.105 on LT). `design_key` joins; `selection_key`
-  clusters. A frame without `design_key` predates the fix and is refused.
-  `--max-workers N` is process-parallel (**3.13x on 4 vCPU**, output
-  byte-identical at every setting; BLAS thread count verified not to change
-  PC's output — re-probe on a new machine). `chosen_experiments` lets any M7 cell be rebuilt and scored at m PC
-  seeds for **$0**; 9 seeds cut MDEs ~35% (LT k=30 0.031→0.019) because the
-  averaged-away half is inference noise, not arm. **Cluster by distinct design
-  first** (§24). Validated 191/191 exact against production. Only M7-era files
-  have the column — M6 ladders and the axis test stay at cell-level MDEs and
-  must not be quoted beside the tighter ones.
-- **Why the middle budget** (variance probe, 2026-08-31, 3,150 LLM-free PC
-  runs). Untying the two things `seed` controls — the buy and PC's 300-row
-  subsample — decomposes the spread: **selection variance falls 8x with budget
-  (sd 0.036 -> 0.005) while PC noise rises (0.032 -> 0.041)**, so the flat
-  total sd hides an inversion. Meanwhile the loop captures 2.1 selection-sd at
-  k=30 against 1.3 at k=6. **Room to differ falls with budget; skill at
-  exploiting it rises; the payoff peaks where they cross.** That accounts for
-  the inverted-U on both chambers, the axis test resolving only mid-range, and
-  `one_shot` sitting exactly on random at LT k=6 (0.160 vs 0.163) yet matching
-  the loop at k=30.
-- **WT half-replicates it** (same day, 3,150 more runs). Skill peaks mid-range
-  on both (loop captures +1.4 selection-sd at WT k=14 vs −0.3 at k=7), but
-  **WT's room does NOT fall monotonically** (0.046 → 0.027 → 0.040 → 0.007).
-  Use the chamber-general sentence — "the payoff peaks mid-range because that
-  is where agents exploit the room best" — not the LT-only "room falls while
-  skill rises".
-- **Most of our MDE is PC noise, not arm variability.** If two arms selected
-  identically, noise alone would give MDE 0.031 (LT k=30, n=30) and 0.029
-  (WT k=21, n=50) — at or above several observed MDEs. **WT's nine Phase 2
-  ties are partly a power result**: WT noise doubles across the budget range
-  (0.033 → 0.067). Resolving a 0.02 gap needs **n≈110 (WT k=21)** or **n≈75
-  (LT k=30)**. Quote this beside every "below MDE" so it reads as power, not
-  as a null. No agent design closes a floor set by the inference procedure.
-
-Paper readiness, the ranked open threats, and the per-dataset index are in
-that document's final section. Harness defects stay in
-`docs/chamber-harness-validity-register.md` — read it before trusting a number.
+- **The aggregator is inert by measurement**, not by omission.
+- **Coverage is a plateau, not the ceiling** — but the oracle above it is an
+  oracle for the estimator at a fixed cap, and beatable only at the budget ends.
+- **Most of the MDE is PC noise, not arm variability.** No agent design closes a
+  floor set by the inference procedure.
 
 ## References
 
@@ -1638,9 +792,9 @@ that document's final section. Harness defects stay in
 
 ---
 
-*Last Updated: 2026-09-16 (selection effort is part of the configuration of record: `high` lifts the GLM loop +0.03 to a tie with the rule via +3.3 variables; identical scouts converge; three-agent ablation T1–T5 hold; previous: the observational baseline is charged against the budget and only some prompts buy it — register §39/§40; four verdicts become ties under the grant, incl. the loop's k=6 win over the rule; 'judge' → 'estimator' in the draft)*
+*Last Updated: 2026-09-20 (claude.md restructured: results migrated to `docs/chamber-results.md`, 1,647 -> 797 lines, rules and status only. System-One probe: `typesafe/jev-1.13` scores AUC 0.879 on which variables are connected and rho -0.44 on which experiment to buy — it knows the chamber, not the estimator; no arm above `loop` is constructible from a model that emits no text; C4 holds in a fourth model. Three retractions recorded.)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
-*Chamber corpus: two chambers, three models, 19,284 cells / $158.58 — see `docs/chamber-results.md`*
-*Next: AAMAS 2027 main track (abstract 1 Oct, paper 8 Oct 2026; skeleton in `paper/aamas2027/`, untracked). Adaptive-feedback arm run at LT k=30 and replicated-in-reverse on WT (spec §8.7 row 7); cross-vendor replication DONE 13 Sep ($0.48); the LT budget ends remain optional; next is the draft*
+*Chamber corpus: two chambers, three arm models, 19,284 orchestrator cells / $158.58 — see `docs/chamber-results.md`*
+*Next: the AAMAS 2027 draft. Abstract 1 Oct, paper 8 Oct 2026 (AoE); skeleton in `paper/aamas2027/`, untracked. All planned experiments are complete; the write-up is the remaining work.*
