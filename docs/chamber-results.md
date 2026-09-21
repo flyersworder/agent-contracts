@@ -92,6 +92,123 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## PRE-REGISTERED (2026-09-21, before launch): completing Figure 2 — `team` and `team_varsplit` at the four budgets where they have no re-scorable designs (LT k=6, LT k=45, WT k=7), DeepSeek, with a same-day loop control
+
+**Why.** The paper's distance-from-the-rule figure plots five arms at six
+budgets, but `team` and `team_varsplit` exist as re-scorable designs only at
+LT k=30 and WT k=14/21. `team` did run at LT k=6/45 and WT k=7 in the M6
+ladder, but that sweep predates `chosen_experiments` and the collinear fix, so
+it can be neither re-scored nor pooled; `team_varsplit` never ran there. The
+co-author's rewrite dropped the cell-level ladder table, which leaves the
+abstract's "no multi-agent arm beats the single-agent loop" with no evidence
+at four of six budgets. This run fills the six missing points and turns each
+into an out-of-sample test of the coverage law.
+
+**Design.** `runs/fig2-fill.parquet`. DeepSeek `flash-0731` (the paper's main
+vendor; Figure 2 is DeepSeek), selection effort pinned at `low` as in the
+corpus, `--cell-timeout-seconds 1800`. Three arms interleaved within each
+budget via `iter_sweep_cells`: `llm_pc` (same-day loop control), `team`,
+`team_varsplit`. n=30 per arm at LT k=6 and k=45, n=50 at WT k=7, matching
+the corpus: 330 cells. The coverage rule and random need no LLM; their
+existing designs are re-scored on the same backend. Run on the VPS
+(OpenBLAS, matching `rescored-vps`); re-scored at 9 PC seeds, clustered by
+distinct design, at 300 and 1500 rows, directed / skeleton / core-20.
+
+**Before launch, in this order:** (1) re-probe DeepSeek provider order and
+confirm `flash-0731` is still served; (2) cost probe, one cell per arm per
+budget, and re-estimate from those cells, not from the figures below;
+(3) smoke `team_varsplit` at LT k=45 — `partition_pools_by_variable` raises
+when a pool is at or below its budget, and its own docstring puts the worst
+case at 20 entries, below k=45's 22/23 per-scout budgets, so a lopsided claim
+can make a cell infeasible. Commit this entry before (1).
+
+**Estimated cost**, from recorded cells (`m7-p2-ref` loop, `m7-varsplit` and
+`m6-wt-team-rerun` team): loop $0.005 / $0.046 / $0.004 per cell at LT 6 /
+LT 45 / WT 7, team and varsplit about 1.2x the loop at LT and $0.011 at WT
+7. About **$7** ($6-10) and **~220k cell-seconds** — about 10 h on six
+workers, an overnight run.
+
+**The coverage predictor, validated before use.** Two scouts that each buy
+k/2 breadth-first from ONE menu of V variables, without coordinating,
+overlap by (k/2)²/V in expectation, so team coverage is k − (k/2)²/V (capped
+at V). Checked against every budget where team designs exist, before this
+entry was written:
+
+| budget | V | predicted team variables | measured | error |
+|---|---|---|---|---|
+| LT 30 | 30 | 22.50 | 22.90 | +0.40 |
+| WT 14 | 21 | 11.67 | 11.52 | −0.15 |
+| WT 21 | 21 | 15.75 | 16.17 | +0.42 |
+
+`team_varsplit` partitions variables, so there is no duplication across
+scouts: predicted equal to the loop (measured +0.7 / +0.7 / +0.2 above it at
+the three budgets above). The loop's coverage is read from its existing
+designs: 5.90 (LT 6), 30.00 (LT 45), 6.78 (WT 7).
+
+| budget | loop | team (pred.) | varsplit (pred.) | Δv team − loop | Δv varsplit − team |
+|---|---|---|---|---|---|
+| LT 6 | 5.90 | 5.70 | 5.90 | −0.20 | +0.20 |
+| LT 45 | 30.00 | 28.13 | 30.00 | −1.88 | +1.88 |
+| WT 7 | 6.78 | 6.42 | 6.78 | −0.36 | +0.36 |
+
+**Predictions** (rate × Δv; rates LT 0.0045 / 0.0131 per variable at 300 /
+1500 rows, WT 0.0111 at 300; **no WT 1500-row rate has been measured, so WT
+k=7 at 1500 rows is reported, not predicted**):
+
+| contrast | LT 6 @300 | LT 6 @1500 | LT 45 @300 | LT 45 @1500 | WT 7 @300 |
+|---|---|---|---|---|---|
+| team − loop | −0.001 | −0.003 | −0.008 | **−0.025** | −0.004 |
+| varsplit − team | +0.001 | +0.003 | +0.008 | **+0.025** | +0.004 |
+| varsplit − loop | 0 | 0 | 0 | 0 | 0 |
+
+- **P1 (coverage).** Team's cell-mean distinct variables falls within ±0.5
+  of the predicted value at each budget (the in-sample error band was ≤ 0.45),
+  and varsplit's within ±0.8 of the loop's. Reported as measured − predicted,
+  with the CI.
+- **P2 (the law, out of sample).** For each of the 10 cells above with a
+  prediction (team − loop and varsplit − team), the 95 % CI of the measured
+  contrast contains the prediction. Every one enters Table 2 as a
+  pre-registered row, in the order made. **Stated plainly: eight of the ten
+  predict less than one MDE (~0.02 at these n), so they test that no gap
+  appears where coverage predicts none — weak confirmation.** The
+  informative cell is **LT 45 at 1500 rows**, where the law predicts a
+  resolved −0.025 for team − loop and +0.025 for varsplit − team. The law's
+  two recorded misses (LT 30 at 300 rows, team deficit about a third larger
+  than coverage predicts) say that if LT 45 at 300 misses, it misses toward a
+  larger team deficit.
+- **P3 (the headline).** No multi-agent arm resolves above the same-day loop
+  at any new budget, at either cap. *Falsified* if the CI of team − loop or
+  varsplit − loop excludes zero on the positive side anywhere. **The cell to
+  watch is WT k=7**: the M6 ladder had team − loop = **+0.040, resolved**,
+  there — explained at the time as a broken denominator, because the loop
+  itself scored below random at WT k=7 (−0.036, p = 0.0015).
+- **P4 (the denominator).** Loop − random at WT k=7, both caps, reported
+  against the existing random designs on the same backend. If the loop is
+  again below random (CI below zero), any team − loop win at WT 7 is also
+  reported as team − rule and team − random, and is described in the paper as
+  a win over a loop that is itself below random, not as a team advantage.
+- **P5 (the rule).** No arm resolves above the coverage rule at any new budget
+  **at 300 rows**. At 1500 rows, LT k=6 is excluded in advance: the rule is
+  known to fall below random there (0.152 vs 0.181, the 1500-row oracle
+  section), so an arm above the rule at LT 6 @1500 is expected and is not a
+  counterexample.
+
+**Pre-committed use in the paper.** All six new points enter Figure 2 whatever
+they show. If P3 fails anywhere, the abstract's sentence is scoped to the
+budgets where it holds and names the exception; it is not dropped and not
+left unqualified. The ten P2 rows enter Table 2 with the asterisk. Decision
+rules are keyed on intervals, never on a significance threshold.
+
+**Hygiene.** Same-day, interleaved comparator (§32). Mean pairwise design
+overlap reported against the pigeonhole floor max(0, 2k − M)/k — 0 at LT 6,
+**0.69 at LT 45**, 0 at WT 7 — so single-design re-picks at LT 45 are not
+mistaken for replication. Selection fallbacks and partition-infeasibility
+raises are reported per arm from `status` and `n_selection_fallbacks`.
+Conservation is reported; a certification failure is a provisioning
+statement, not a result.
+
+---
+
 ## A SYSTEM-ONE DECISION MODEL KNOWS THE CHAMBER AND NOT THE ESTIMATOR (2026-09-20, local/Accelerate, `runs/jev-probe-lt.parquet`, `runs/jev-probe-edges.json`, ~750 LLM calls / **$0.074**; cross-family and backend-matched re-scores added 2026-09-21 at $0): `typesafe/jev-1.13` scores AUC 0.879 on which variables are connected and rho -0.44 on which experiment to buy — and is resolved below every loop and the rule under PC, JCI-PC and GES alike
 
 Exploratory probe, prompted by the release of `typesafe/jev-1.13` (TypeSafe,
