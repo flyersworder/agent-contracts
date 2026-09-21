@@ -626,11 +626,19 @@ def _response_has_finish_reason_error(response: Any) -> bool:
 # low price: it spends the whole token cap on reasoning and returns empty
 # content, which degrades to `rng.choice`. `BaseTen` is excluded because it
 # rate-limited on the probe itself.
+#
+# Re-probed 2026-09-21 and REORDERED again: Baidu repriced 15x, $0.090/M ->
+# $1.32/M out ($0.44/M in), now among the dearest of 29 endpoints, and a
+# 9-cell probe that routed every call to it cost ~5x the recorded cells.
+# CoreWeave ($0.13/M in, $0.28/M out, fp8, second-fastest above) moves first;
+# Baidu drops to last resort. All four remain fp8. The negotiate calibration
+# below was measured on Baidu -- see its SCOPE note before trusting
+# certification on the new routing.
 _FLASH_PROVIDER_ORDER: tuple[str, ...] = (
-    "Baidu",
     "CoreWeave",
     "DeepInfra",
     "Parasail",
+    "Baidu",
 )
 
 # GLM endpoints, probed 2026-08-31 (register entry 25).
@@ -1380,7 +1388,7 @@ _PROVISIONAL_CALIBRATION: frozenset[tuple[str, int]] = frozenset()
 # selection PLUS negotiation.
 #
 # SCOPE: all 27 calibration cells were served by a SINGLE endpoint (Baidu,
-# the current first choice in `_FLASH_PROVIDER_ORDER`), while production
+# first in `_FLASH_PROVIDER_ORDER` until 2026-09-21, now last), while production
 # rotates over four -- the WT k=21 confirmation ran 422 Baidu / 158 CoreWeave
 # / 6 DeepInfra / 2 Parasail. Negotiate cost is driven by reasoning length,
 # and endpoints differ there (register §25), so this figure is representative
