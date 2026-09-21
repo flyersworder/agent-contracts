@@ -65,6 +65,9 @@ table below is the arithmetic of record.)
 | `runs/rescored-vps-ges-rows1500-subset.parquet` (+`-bykey`) | 1,190 designs | $0.00 | LT k=30/45 + WT k=21 under GES at 1500 rows, 3 seeds — the cross-family check |
 | `runs/jev-probe-lt.parquet` | 30 designs | $0.02 | `typesafe/jev-1.13` selection arms at LT k=30 (general prompt, coverage-in-prompt, fan-out, in-rule) scored at both caps; NOT orchestrator cells — a direct-API probe |
 | `runs/jev-probe-edges.json` | — | $0.02 | the same model's edge prior over all 1,406 LT node pairs, 5 order-shuffled draws (AUC 0.879 source→sink) |
+| `runs/rescored-jev-ges-rows{300,1500}.parquet` | 50 designs | $0.00 | the probe's designs under GES at both caps — the cross-family check on the Jev verdict (GES@1500 widens it to −0.105; GES@300 resolves nothing for anyone) |
+| `runs/rescored-jev-jci-rows1500.parquet` | 50 designs | $0.00 | the same under JCI-PC at 1500 (−0.044, resolved below) |
+| `runs/rescored-jev-loopmatched-rows{300,1500}.parquet` | 180 designs | $0.00 | the probe's 50 designs plus the LT k=30 `llm_pc` designs of `m7-p2-ref` / `xv-glm-lt` / `m7-effort-lt`, re-scored together on ONE backend — the backend-matched Jev-vs-loop contrast that replaces retraction 2's cross-BLAS figure |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -89,7 +92,7 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
-## A SYSTEM-ONE DECISION MODEL KNOWS THE CHAMBER AND NOT THE ESTIMATOR (2026-09-20, local/Accelerate, `runs/jev-probe-lt.parquet`, `runs/jev-probe-edges.json`, ~750 LLM calls / **$0.074**): `typesafe/jev-1.13` scores AUC 0.879 on which variables are connected and rho -0.44 on which experiment to buy
+## A SYSTEM-ONE DECISION MODEL KNOWS THE CHAMBER AND NOT THE ESTIMATOR (2026-09-20, local/Accelerate, `runs/jev-probe-lt.parquet`, `runs/jev-probe-edges.json`, ~750 LLM calls / **$0.074**; cross-family and backend-matched re-scores added 2026-09-21 at $0): `typesafe/jev-1.13` scores AUC 0.879 on which variables are connected and rho -0.44 on which experiment to buy — and is resolved below every loop and the rule under PC, JCI-PC and GES alike
 
 Exploratory probe, prompted by the release of `typesafe/jev-1.13` (TypeSafe,
 2026-09-18) — the first "System One" model: it returns typed decisions with
@@ -217,6 +220,98 @@ own thesis: a verifier pays when it catches errors the score punishes; the error
 here is under-coverage; coverage is `len({experiment_variable(x) for x in d})`;
 and the code version *is* the coverage rule, which beats every LLM arm.
 
+### Cross-family and backend-matched re-scores (2026-09-21, local/Accelerate, `runs/rescored-jev-ges-rows{300,1500}.parquet`, `runs/rescored-jev-jci-rows1500.parquet`, `runs/rescored-jev-loopmatched-rows{300,1500}.parquet`, $0)
+
+The probe as first written had two gaps. Every contrast above is **PC-only**,
+so "Jev loses to the rule" could not be told apart from "PC dislikes Jev's
+designs". And retraction 2's "`v1` sits ~0.045 below the DeepSeek loop"
+**crossed BLAS backends** — the probe is Accelerate, every loop sweep is
+OpenBLAS, and the corpus's own cross-backend gap is 0.055, larger than the
+effect being claimed (§10). Both are closed here by re-scoring recorded
+designs at no LLM cost.
+
+**Estimator robustness.** The 50 probe designs under three families,
+directed F1, design-clustered, unequal-n MDE:
+
+| `jev_loop_general_v1` - `coverage_rule` | delta | verdict |
+|---|---|---|
+| PC @300 | -0.051 | resolved below |
+| PC @1500 | -0.097 | resolved below |
+| JCI-PC @1500 | -0.044 | resolved below |
+| **GES @1500** | **-0.105** | **resolved below** |
+| GES @300 | -0.048 | **undetermined** |
+
+`jev_fanout_F1` - rule runs -0.057 / -0.130 / -0.077 / **-0.206** / +0.015 over
+the same five cells. The two rule-fed arms (`F2`, `v2`) tie the rule in every
+cell, as they must.
+
+**GES @300 resolves nothing for anyone**, including `random` - rule (-0.035,
+MDE 0.077). It is a low-power cell, not a reversal: the coverage-F1 slope there
+is +0.0038/variable at r = +0.35, against +0.0194 at r = +0.88 for GES @1500,
+and its design-mean spread is only 1.20x the within-arm sd (2.85x at 1500).
+Report it as undetermined.
+
+**So the Jev verdict is not a PC artefact, and GES makes the case harder, not
+easier** — the estimator under which the anti-prior REVERSES is also the one
+that prices Jev's coverage shortfall highest, because its exchange rate is
+2.7x PC's. The two facts are compatible because they answer different
+questions: which experiment helps (estimator-relative) versus how many
+variables were touched (upstream of the estimator).
+
+**Backend-matched loop comparison.** All 180 designs re-scored together on one
+machine — the probe's 50 plus the LT k=30 `llm_pc` designs from
+`m7-p2-ref` (DeepSeek), `xv-glm-lt` (GLM at `low`) and `m7-effort-lt`
+(GLM at `high`) — PC, 9 seeds, both caps.
+
+| `jev_loop_general_v1` - | @300 | @1500 |
+|---|---|---|
+| `loop_deepseek` | **-0.039 R-** | **-0.060 R-** |
+| `loop_glm` @`low` | -0.015 tie | **-0.048 R-** |
+| `loop_glm` @`high` | **-0.047 R-** | **-0.076 R-** |
+
+`jev_fanout_F1` is below all three at 1500 (-0.094 / -0.082 / -0.110) and below
+two of three at 300. **The protocol-consistent Jev arms do not reach any loop.**
+Validity check: the same re-score reproduces the corpus's own verdicts on this
+backend — `loop_deepseek` - rule reads -0.011 tie @300 and -0.037 R- @1500
+against the corpus's -0.001 tie / -0.032 R-. The published probe table and this
+re-score agree on every shared arm to <= 0.015 (all below MDE), which is
+seed-set noise between two 9-seed averages.
+
+**Do not read `jev_in_rule_F2` - `loop_deepseek` = +0.027 R+ @1500 as Jev
+beating the loop.** `F2` is the coverage round-robin in Python with the model
+picking only strengths; that contrast is the RULE beating the loop, which the
+corpus already reports.
+
+**One line absorbs all of it.** Regressing design F1 on distinct variables
+across all 180 designs: **+0.0121 per variable at 1500 rows, r = +0.82**
+(+0.0066, r = +0.69 at 300).
+
+| arm | distinct vars | F1@1500 | law | residual |
+|---|---|---|---|---|
+| `jev_loop_general_v1` (no reasoning) | 19.8 | 0.353 | 0.324 | +0.029 |
+| `jev_fanout_F1` | 20.4 | 0.319 | 0.331 | -0.012 |
+| `random` | 20.7 | 0.303 | 0.335 | -0.032 |
+| `loop_glm` @`low` | 25.2 | 0.401 | 0.389 | +0.012 |
+| `loop_deepseek` | 27.4 | 0.413 | 0.416 | -0.003 |
+| `loop_glm` @`high` | 28.6 | 0.429 | 0.431 | -0.002 |
+| `coverage_rule` (no LLM) | 30.0 | **0.450** | 0.448 | +0.002 |
+
+Nine arms, four models, three vendors, two model classes, two reasoning
+settings and one LLM-free rule on a single line, every residual within 0.032.
+**Reasoning effort, model choice, vendor and call topology are not four levers;
+they are one lever with four handles**, and the top of the ladder has no model
+in it. The within-model reasoning contrast (`loop_glm` `high` - `low`,
++0.032 @300 / +0.030 @1500, both resolved, and independently pre-registered as
+E2) is the clean evidence for the reasoning leg; Jev is the bottom rung and
+illustrates the mechanism rather than establishing it, because a Jev-vs-loop
+gap confounds model, vendor, API shape and prompt fit at once (retraction 2).
+
+**Scope.** Re-scoring moves designs, never selections: no arm re-picked, so
+this changes what the estimators say about fixed buys and nothing about how
+the buys were made. UT-IGSP was not run — it needs the `igsp` extra plus an
+OpenMP runtime, absent on this machine; three families already bracket the
+question.
+
 ### Three retractions, and what caused each
 
 1. **"`jev_loop_v1` - `coverage_rule` resolves even at n=5" — WRONG.** The five
@@ -227,11 +322,30 @@ and the code version *is* the coverage rule, which beats every LLM arm.
    pigeonhole floor of 0.03). Corpus check run in response: 50 arm x budget
    groups, median distinct ratio 1.00, and only `one_shot` falls below — already
    known and already re-analysed. **No existing result changes.**
+   **Amended 2026-09-21: this is not confined to `v1`.** Mean pairwise overlap
+   over the probe's own arms is `jev_fanout_F1` **0.965** (n=10),
+   `jev_loop_general_v1` **0.947** (n=5) and `jev_in_rule_F2` **0.942** (n=10),
+   against `coverage_rule` 0.647 and `random` 0.499 on the same floor of 0.033.
+   **The model is near-deterministic in selection**, so all three Jev arms have
+   an effective n far below their nominal one, and every MDE quoted for them
+   above is optimistic in the same way. The effect sizes survive it — `v1` −
+   rule and `F1` − rule clear even a doubled MDE and agree in sign and order
+   across three estimator families and two backends (cross-family section
+   above) — but the VERDICT LABELS for `F1` and `F2` carry the `v1` caveat and
+   should be read as directional. The arm MEANS are sound: near-identical
+   designs estimate their own score precisely. What is unknown is where a
+   differently-drawn Jev design would land.
 2. **"A non-reasoning model matches the DeepSeek loop at 1/700th the cost" —
    WRONG.** It paired a measured cost ratio with an unmeasured capability
    equality across two model classes, two API shapes and asymmetric tuning. The
-   protocol-consistent arm is `v1`, which sits ~0.045 *below* the DeepSeek loop
-   at 300 rows.
+   protocol-consistent arm is `v1`, which sits *below* the DeepSeek loop.
+   **Corrected 2026-09-21:** the "~0.045 at 300 rows" first written here
+   compared an Accelerate probe against an OpenBLAS sweep — a §10 violation on
+   an effect smaller than the 0.055 cross-backend gap. Re-scored on one
+   machine the figure is **−0.039 at 300 rows and −0.060 at 1500**, both
+   resolved, and `v1` is resolved below the GLM loop at `high` effort as well
+   (−0.047 / −0.076). The direction was right; the number was not quotable as
+   published.
 3. **"The `v1`-vs-`F1` gap at 1500 rows threatens the `one_shot` claim" —
    WRONG.** `F1` is not a `one_shot` analogue: `one_shot` is one generative call
    picking a *set*, while `F1` is 59 *independent* Nouls ranked in code, which

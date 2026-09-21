@@ -582,6 +582,11 @@ trusting any number.
   Linux/OpenBLAS produce different graphs from byte-identical inputs; PC turns a
   1e-10 divergence into a structural one. Run every arm of a comparison on one
   machine. (Gone at the DESIGN level: 2,202/2,207 nine-seed design means agree.)
+  **This binds hardest when a NEW probe is set against a CORPUS number** — the
+  probe is local, the corpus is the VPS, and the 0.055 cross-backend gap is
+  larger than most effects. Re-score the comparator's recorded designs beside
+  the probe's; it costs $0 and needs no LLM call. Caught this way in the
+  System-One probe, where a reported −0.045 became −0.039 / −0.060.
 - **Report every arm contrast at BOTH row caps and BOTH metrics** (directed and
   skeleton). 10 of 39 headline verdicts flip with the cap on directed F1.
 - **Never quote an absolute LLM-arm F1 without the core-20 figure and the
@@ -717,7 +722,11 @@ caveats in the results doc:
 - **Coordination is coverage**: `ΔF1 ≈ r · Δ(distinct variables)`, where `r` is
   an exchange rate measured with no model in the loop and depends on the chamber
   and the estimator's row cap. Eleven predictions, 8 close / 3 miss, two
-  pre-registered out of sample.
+  pre-registered out of sample. **Reasoning effort, model choice, vendor and
+  call topology are one lever with four handles**: nine arms across four models,
+  three vendors, two model classes and two effort settings fit one line at
+  +0.0121 F1 per distinct variable (r = +0.82, 180 designs, residuals ≤ 0.032),
+  and the top of that ladder is the LLM-free rule.
 - **Where the comparison resolves, no fan-in topology beats a single sequential
   loop** — and the topology effect is `rate(cap) × gap(model)`, so a cheaper
   model with a smaller coverage gap shows none at the cap of record.
@@ -792,7 +801,7 @@ caveats in the results doc:
 
 ---
 
-*Last Updated: 2026-09-20 (claude.md restructured: results migrated to `docs/chamber-results.md`, 1,647 -> 797 lines, rules and status only. System-One probe: `typesafe/jev-1.13` scores AUC 0.879 on which variables are connected and rho -0.44 on which experiment to buy — it knows the chamber, not the estimator; no arm above `loop` is constructible from a model that emits no text; C4 holds in a fourth model. Three retractions recorded.)*
+*Last Updated: 2026-09-21 (System-One follow-up, $0: the Jev verdict re-scored under GES and JCI-PC — resolved below the rule in four of five estimator x cap cells, widest under GES (-0.105); the fifth, GES@300, resolves nothing for anyone. Jev-vs-loop re-measured BACKEND-MATCHED, replacing a cross-BLAS figure in retraction 2: -0.039 / -0.060 against the DeepSeek loop, -0.047 / -0.076 against the GLM loop at `high`. Nine arms fit one coverage line at +0.0121 F1/variable, r = +0.82. Retraction 1's overlap caveat extended to `jev_fanout_F1` and `jev_in_rule_F2`.)*
 *Status: Production-ready, v0.5.0, 1718 tests passing (1 skipped), 91% coverage*
 *Integrations: LiteLLM, LangChain, LangGraph, Google ADK, Claude Agent SDK, Causal Chambers*
 *Features: SkillSpec, Per-Tool Limits, Indeterminacy Evaluator, Evaluation Pipelines, JSONL Checkpoint Sidecar, Delegation Graphs*
