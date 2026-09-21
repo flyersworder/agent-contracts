@@ -68,6 +68,7 @@ table below is the arithmetic of record.)
 | `runs/rescored-jev-ges-rows{300,1500}.parquet` | 50 designs | $0.00 | the probe's designs under GES at both caps — the cross-family check on the Jev verdict (GES@1500 widens it to −0.105; GES@300 resolves nothing for anyone) |
 | `runs/rescored-jev-jci-rows1500.parquet` | 50 designs | $0.00 | the same under JCI-PC at 1500 (−0.044, resolved below) |
 | `runs/rescored-jev-loopmatched-rows{300,1500}.parquet` | 180 designs | $0.00 | the probe's 50 designs plus the LT k=30 `llm_pc` designs of `m7-p2-ref` / `xv-glm-lt` / `m7-effort-lt`, re-scored together on ONE backend — the backend-matched Jev-vs-loop contrast that replaces retraction 2's cross-BLAS figure |
+| `runs/rescored-t4-{k30,ends}-{pc5000,jci5000,jcireg5000}.parquet` | 380 designs | $0.00 | LT loop / team / varsplit / rule / random at 5000 rows under PC and JCI-PC (per-variable and per-regime indicators): pooling distortion is shared by every arm; the rewrite's tradeoff is not supported |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -89,6 +90,118 @@ cross-backend gap is ΔF1 = 0.055, larger than most effects reported below.
 Chambers: light tunnel (LT) 38 nodes / 57 edges / 59-experiment menu; wind
 tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
+
+---
+
+## POOLING DISTORTION IS REAL AT 5000 ROWS AND SHARED BY EVERY ARM (2026-09-21, local/Accelerate, `runs/rescored-t4-*.parquet`, $0): the rewrite's "coverage vs. pooling distortion" tradeoff is not supported, and neither is "broader coverage distorts more"
+
+**Why.** The co-author rewrite (`paper/aamas2027/main_jt.pdf`, 18 Sep) makes a
+tradeoff its third contribution: broader coverage helps recovery, but pooling
+more heterogeneous experiments distorts PC, and multi-agent buying makes that
+worse. Its Table 4 (PC vs JCI-PC at 5000 rows) had one filled cell. A second
+co-author hypothesis the same day: results should get LESS robust as the
+number of bought experiments grows. Both are testable on recorded designs.
+
+**Test, stated before the result.** Per design, score the SAME buy under plain
+PC and under JCI-PC, both at 5000 rows, 9 subsample seeds; recovery = JCI − PC.
+If multi-agent buying worsens pooling distortion, the team recovers more than
+the loop. If broader coverage distorts more, recovery rises with distinct
+variables. Designs: the `rescored-vps` LT designs of `llm_pc`, `team`,
+`team_varsplit`, `coverage_max_ms` (the rule) and `random` at k=30 (200), and
+of loop / rule / random at k=6 and k=45 (180); `runs/t4-designs.parquet`.
+All scored together on one machine.
+
+**First pass: JCI-PC with one indicator per intervened VARIABLE (the
+estimator's default) appeared to support the rewrite.** At k=30 the team
+recovered +0.022 more than the loop (resolved), and recovery fell with
+coverage (r = −0.71 over all designs). But that configuration is confounded
+with coverage twice over: a broad design gets more indicator nodes (more
+tests, more forks), and merging a variable's weak and strong regimes into one
+indicator mis-models exactly the depth buys a narrow design makes
+(`jci.regime_label`'s docstring measured the second at ~0.010 F1 per merged
+pair). The confound was flagged before the run.
+
+**Deciding pass: one indicator per REGIME (`--context regime`).** Every design
+buys exactly k experiments, so every design gets the same number of
+indicators, and each strength is its own regime. LT k=30, 5000 rows:
+
+| arm | distinct vars | PC | JCI (variable) | JCI (regime) | recovery (regime) |
+|---|---|---|---|---|---|
+| rule | 30.0 | 0.354 | 0.399 | 0.399 | +0.045 |
+| varsplit | 28.2 | 0.302 | 0.389 | 0.379 | +0.076 |
+| loop | 27.5 | 0.284 | 0.378 | 0.368 | +0.084 |
+| team | 22.9 | 0.240 | 0.355 | 0.324 | +0.085 |
+| random | 21.7 | 0.210 | 0.349 | 0.282 | +0.071 |
+
+The rule scores 0.399 under both JCI variants, as it must: it buys one entry
+per variable, so the two indicator schemes coincide. A built-in check that
+passed.
+
+| contrast, LT k=30, 5000 rows | PC | JCI (regime) | recovery difference |
+|---|---|---|---|
+| team − loop | −0.044 R− | **−0.043 R−** | **+0.001 tie** (variable context: +0.022 R+) |
+| varsplit − team | +0.063 R+ | +0.054 R+ | −0.008 tie |
+| varsplit − loop | +0.019 tie | +0.011 tie | −0.008 tie |
+| loop − rule | −0.071 R− | −0.032 R− | +0.039 R+ |
+| rule − random | +0.144 R+ | +0.118 R+ | −0.027 R− |
+
+Recovery against distinct variables under the regime context: r = −0.23
+pooled (p = 0.001); within the loop −0.42, within varsplit −0.68, within
+random +0.19 and within team +0.13 (both n.s.).
+
+**Readings.**
+
+1. **Pooling distortion at 5000 rows is large and real** — the loop gains
+   +0.084 when regimes are modelled — **and every arm suffers it about
+   equally.** It is a property of PC on pooled data at a large cap, not of
+   any topology.
+2. **The rewrite's claim is not supported.** With regimes modelled, the team's
+   extra recovery is +0.001: the team's whole deficit against the loop
+   (−0.043) survives the correction unchanged, so it is coverage, not
+   pooling. The +0.022 of the first pass was the per-variable indicator.
+3. **"Broader coverage distorts more" is not supported.** With indicator
+   counts equalised the correlation stays negative (−0.23), and the broadest
+   design, the rule, recovers least. The one place recovery does move with
+   design is loop − rule (+0.039): the loop's depth buys (a variable at two
+   strengths) are what JCI repairs, the opposite direction to the hypothesis.
+4. **Every topology verdict survives at 5000 rows under both estimators**,
+   extending the paper's robustness table to a third row cap.
+
+**For the paper.** Contribution (3) should not be stated as a finding. What the
+data support: PC on pooled interventional data degrades at large caps, the
+degradation is shared across arms, and every topology conclusion survives a
+regime-aware estimator — which is why the paper reports two caps and several
+estimators. The rewrite's Table 4 can be replaced by the contrast table above,
+with no blank cells.
+
+**The other budgets, all three estimators (loop / rule / random; team and
+varsplit do not exist there yet).**
+
+| LT, 5000 rows | k=6 | k=45 |
+|---|---|---|
+| loop: PC / JCI variable / JCI regime | 0.184 / 0.196 / 0.194 | 0.266 / 0.425 / 0.335 |
+| rule | 0.165 / 0.180 / 0.180 | 0.278 / 0.408 / 0.321 |
+| random | 0.174 / 0.194 / 0.194 | 0.233 / 0.444 / 0.295 |
+| rule − random: PC / JCI variable / JCI regime | tie / tie / tie | +0.045 R+ / **−0.036 R−** / +0.026 tie |
+| loop − random, JCI regime | +0.000 tie | +0.040 R+ |
+| recovery (regime) vs distinct variables | r = +0.21 (range 5.8–6.0, uninformative) | r = −0.03 |
+
+At k=45 the per-variable flip of rule − random disappears under the regime
+context: it was the indicator scheme, not coverage. **No budget shows broader
+coverage distorting more.** What does grow is the pooling distortion itself,
+with the number of pooled experiments: the loop's regime recovery is +0.010 at
+k=6, +0.084 at k=30 and +0.069 at k=45 — present once many regimes are
+pooled, flat beyond, and shared across arms at every budget. That is the true
+part of the co-author's "less robust as k grows" intuition.
+
+**Levels are not comparable across indicator schemes.** Per-regime JCI puts
+more indicator nodes into the graph at k=45 (up to 45 against ≤30) and scores
+every arm lower (loop 0.335 vs 0.425). The rewrite's Table 4 figure of 0.418
+at k=45 is the per-variable level. Only contrasts carry.
+
+**Scope.** LT only; one large cap (5000); one regime-aware estimator. The team
+and varsplit rows at k=6/45 do not exist yet — they come from the
+pre-registered Figure 2 sweep below.
 
 ---
 
