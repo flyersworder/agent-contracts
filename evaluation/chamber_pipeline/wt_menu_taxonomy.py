@@ -37,6 +37,8 @@ from __future__ import annotations
 import random as _random
 from collections import defaultdict
 
+from .menu_taxonomy import repair_infeasible_split
+
 _PREFIX = "validate_"
 
 
@@ -132,6 +134,7 @@ def partition_pools_by_variable(
     budget_a: int,
     budget_b: int,
     seed: int,
+    stats: dict[str, int] | None = None,
 ) -> tuple[set[str], set[str]]:
     """WT twin of `menu_taxonomy.partition_pools_by_variable`.
 
@@ -167,6 +170,20 @@ def partition_pools_by_variable(
         side = "a" if size["a"] <= size["b"] else "b"
         owner[variable] = side
         size[side] += len(groups[variable])
+
+    # Same repair as LT (see `repair_infeasible_split`); a feasible deal is
+    # left exactly as dealt.
+    repairs = repair_infeasible_split(
+        owner,
+        groups,
+        {experiment_variable(n, node_names) for n in claim_a},
+        {experiment_variable(n, node_names) for n in claim_b},
+        budget_a,
+        budget_b,
+        f"wtvarsplit-repair:{seed}",
+    )
+    if stats is not None:
+        stats["partition_repairs"] = repairs
 
     pool_a = {n for v, o in owner.items() if o == "a" for n in groups[v]}
     pool_b = {n for v, o in owner.items() if o == "b" for n in groups[v]}

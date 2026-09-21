@@ -2015,7 +2015,7 @@ def run_cell(
                 # Aggregator-ablation diagnostics (`fan_in_agg` only). Absent
                 # for every other arm, which is why they live in `extra`
                 # rather than becoming columns that are null 8 times in 9.
-                **{k: v for k, v in coord.items() if k.startswith("agg_")},
+                **{k: v for k, v in coord.items() if k.startswith(("agg_", "partition_"))},
                 # Full per-call-kind token attribution, so the promise made by
                 # `tokens_by_kind` -- that a non-empty "unknown" bucket is a
                 # defect -- is checkable AFTER a sweep. It was not: the

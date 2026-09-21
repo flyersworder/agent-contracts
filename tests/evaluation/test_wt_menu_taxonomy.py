@@ -184,6 +184,27 @@ class TestWtPartitionPools:
         assert "validate_hatch_pressures" in a, "a variable claimed by both goes to A"
         assert not any(experiment_variable(n, NODES) == "hatch" for n in b)
 
+    def test_a_lopsided_claim_is_repaired_not_raised(self) -> None:
+        """A claims every variable but the smallest, leaving B one entry
+        against a budget of one; the repair must hand B a claimed variable."""
+        groups = group_by_variable(self.MENU, NODES)
+        smallest = min(groups, key=lambda v: (len(groups[v]), v))
+        claim_a = [names[0] for v, names in groups.items() if v != smallest]
+        stats: dict[str, int] = {}
+        a, b = partition_pools_by_variable(
+            self.MENU,
+            NODES,
+            claim_a,
+            [],
+            budget_a=1,
+            budget_b=len(groups[smallest]),
+            seed=0,
+            stats=stats,
+        )
+        assert len(a) > 1 and len(b) > len(groups[smallest])
+        assert not a & b and a | b == set(self.MENU)
+        assert stats["partition_repairs"] >= 1
+
     def test_infeasible_split_raises_rather_than_running_inert(self) -> None:
         """A pool at or below budget makes that scout's selection loop inert."""
         with pytest.raises(ValueError, match="selection loop is inert"):
