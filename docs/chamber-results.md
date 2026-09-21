@@ -320,6 +320,43 @@ raises are reported per arm from `status` and `n_selection_fallbacks`.
 Conservation is reported; a certification failure is a provisioning
 statement, not a result.
 
+**Amendment, 2026-09-21 evening, before launch (pre-flight results; no
+prediction changes).** Code on branch `fig2-fill-coreweave`.
+
+- **Providers reordered: CoreWeave, DeepInfra, Parasail, Baidu** (`76298ea`).
+  Re-probe of `GET /models/deepseek/deepseek-v4-flash-0731/endpoints`: Baidu,
+  first in the pinned order since 29 Aug, repriced 15x ($0.090/M → $1.32/M
+  out). Probe A (9 cells, Baidu) cost ~5x the recorded cells and projected
+  ~$30. Probe B (same 9 cells, CoreWeave first): about 4x cheaper per cell
+  (LT k=45 loop $0.057 vs $0.203). A call-level check on a k=45 late-loop
+  prompt kept CoreWeave first over the cheaper DeepInfra: CoreWeave 4 / 4
+  calls at 93 tok/s, DeepInfra 1 / 4 (three instant failures) at 37 tok/s.
+  All four endpoints fp8.
+- **`team_varsplit` repair** (`3278b42`, review fix `9b14695`). Probe B's k=45
+  varsplit cell raised: the negotiation claims left scout B 10 entries
+  against a budget of 22. `repair_infeasible_split` moves least-contested
+  variables only when a pool is at or below budget; feasible deals are
+  untouched, so no recorded cell changes. Repairs are recorded per cell in
+  `extra.partition_repairs`. **Varsplit at k=45 is reported as "negotiated
+  split, repaired where infeasible", with its repair rate.** A repaired-code
+  smoke (`runs/fig2-smoke-varsplit45.parquet`, seeds 0-2, not pooled): 3 / 3
+  ok and certified on CoreWeave, repairs 0 / 4 / 5 variables — two of three
+  k=45 cells needed the repair, so without it the arm would have been mostly
+  undefined there. One selection fallback in two of the cells.
+- **Cell timeout 1800 s → 7200 s.** Recorded k=45 cells already ran past
+  1800 s (`m7-p2-ref` loop p90 1,869 s), and on CoreWeave probe B's k=45 loop
+  cell took 2,066 s; a loop cell is 45 calls averaging ~80 s at this speed.
+  A cap that kills slow-but-healthy cells would select against them.
+- **Workers and files.** `runs/fig2-fill-lt.parquet` (LT k=6/45, n=30,
+  180 cells, 8 workers) and `runs/fig2-fill-wt.parquet` (WT k=7, n=50,
+  150 cells, 3 workers), in parallel; probe B peaked at 3.3 GB with 9
+  workers. Budgets are fractions verified with `_budget_k_for`: LT 0.10 → 6,
+  0.76 → 45; WT 0.25 → 7. Projected ~$9 and ~9 h.
+- **Certification on the new routing:** every team and varsplit probe cell on
+  CoreWeave certified (LT k=6, WT k=7). The negotiate calibration was
+  measured on Baidu alone; certification is reported per cell and a failure
+  is a provisioning statement.
+
 ---
 
 ## A SYSTEM-ONE DECISION MODEL KNOWS THE CHAMBER AND NOT THE ESTIMATOR (2026-09-20, local/Accelerate, `runs/jev-probe-lt.parquet`, `runs/jev-probe-edges.json`, ~750 LLM calls / **$0.074**; cross-family and backend-matched re-scores added 2026-09-21 at $0): `typesafe/jev-1.13` scores AUC 0.879 on which variables are connected and rho -0.44 on which experiment to buy — and is resolved below every loop and the rule under PC, JCI-PC and GES alike
