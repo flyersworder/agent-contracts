@@ -76,7 +76,8 @@ ConfigId = Literal["standard", "pressure-control"]
 # TIME SERIES: median lag-1 autocorrelation 0.9999, so its 320,000 rows per
 # experiment carry roughly 19 independent observations. Feeding it to PC's
 # Fisher-Z test -- which assumes i.i.d. samples -- inverted the budget
-# response. Measured over the same 28-experiment menu, 12 seeds per point:
+# response. Measured over each release's own 28-experiment menu (the menus
+# share only the count -- register §5 correction), 12 seeds per point:
 #
 #   k/M               0.11   0.25   0.50   0.75   1.00
 #   wt_walks_v1       0.181  0.178  0.157  0.144  0.155   F1 DECLINES
@@ -84,7 +85,8 @@ ConfigId = Literal["standard", "pressure-control"]
 #
 # Under wt_walks_v1, SHD worsened 55 -> 67 and predicted edges grew 25 -> 38
 # as more data arrived: spurious density from a violated test assumption,
-# not a property of the wind tunnel. `wt_validate_v1` covers the same menu
+# not a property of the wind tunnel. `wt_validate_v1` is the authors'
+# edge-validation protocol (one variable toggled per entry, register §41)
 # with lag-1 autocorrelation 0.14 and reproduces LT's qualitative shape,
 # which is what makes the two chambers comparable at all.
 #

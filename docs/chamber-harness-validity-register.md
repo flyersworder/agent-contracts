@@ -118,7 +118,8 @@ carry roughly **19 independent observations**. LT's
 Fisher-Z assumes i.i.d. samples. Fed the walks release, the budget response
 **inverts**: F1 falls as experiments are added, SHD worsens 54.6 → 68.8, and
 predicted edges grow 23.5 → 38.8 — spurious density, not a property of the wind
-tunnel. Same menu, 30 seeds per point:
+tunnel. Each release's own 28-experiment menu, 30 seeds per point (the two
+menus share only the count; see the correction below):
 
 | k/M | 0.11 | 0.25 | 0.50 | 0.75 | 1.00 | slope |
 |---|---|---|---|---|---|---|
@@ -126,9 +127,20 @@ tunnel. Same menu, 30 seeds per point:
 | `wt_validate_v1` | 0.147 | 0.190 | 0.220 | 0.249 | 0.254 | **+0.0042 (p=1.4e-13)** |
 | LT reference | | | | | | **+0.0041 (p=7.3e-52)** |
 
-`wt_validate_v1` covers the same 28-experiment menu at lag-1 autocorrelation
+`wt_validate_v1` is a 28-experiment menu at lag-1 autocorrelation
 0.14 and responds to budget at a rate statistically indistinguishable from
 LT's. Dynamic range 0.022 → 0.107.
+
+**Correction (2026-09-22): the two releases do NOT share a menu.** This entry
+said `wt_validate_v1` "covers the same 28-experiment menu". Checked against the
+official dataset READMEs (github.com/juangamella/causal-chamber,
+`datasets/*/README.md`): `wt_walks_v1`'s 28 experiments are 16
+`actuators_random_walk_*` runs, 10 `loads_hatch_mix_{slow,fast}_run_*`
+(sinusoid / square-wave) runs and two `regime_jumps_{single,multi}` runs — none
+of them one-per-variable. The count matching is a coincidence. The conclusion
+is unchanged (walks is a time series and Fisher-Z is invalid on it); the
+comparison above is between two different menus, not one menu under two
+recordings. What `wt_validate_v1` actually is: §41.
 
 **I recorded the wrong conclusion first.** Before finding this, the flat walks
 curve was written up as an external-validity finding — "the wind tunnel's
@@ -2343,3 +2355,58 @@ rates by arm × budget as a standing column in every results table — the
 same table would have caught §36 and §39 on the day. (c) Any "the LLM
 knows something the rule does not" claim must survive granting the
 cheapest thing the LLM buys first.
+
+## 41. WT's menu is the authors' edge-validation protocol: one variable toggled against a fixed background that differs per experiment (2026-09-22)
+
+**How it was found.** A co-author asked why WT uses `wt_validate_v1` and
+whether the `validate`/`test` releases are smaller ML-style splits. Answering
+from the official dataset READMEs (github.com/juangamella/causal-chamber,
+`datasets/*/README.md`) rather than from experiment names found the §5 error
+above and this entry.
+
+**What the releases are, per their READMEs.** `validate` / `test` are NOT
+train/validation/test splits:
+
+| release | official description | experiments | rows / experiment |
+|---|---|---|---|
+| `lt_interventions_standard_v1` | single-target interventions of different strengths on every manipulable variable; all other manipulables sampled as in `uniform_reference` | 59 | 1,000 (reference 10,000) |
+| `lt_validate_v1` / `wt_validate_v1` | "randomized experiments to validate the ground-truth graph" (Nature MI appendix V): one variable set repeatedly to a random choice of x^A or x^B | 29 / 28 | mostly 50 / 49–8,000 |
+| `lt_test_v1` / `wt_test_v1` | "experiments to characterize the different effects between variables … calibration tasks and figures in appendix III" | 4 / 10 | 3k–65k, lag-1 autocorr ≥ 0.97 |
+| `wt_walks_v1`, `wt_bernoulli_v1`, `wt_changepoints_v1`, `wt_intake_impulse_v1` | time series (random walks, waves, impulses) | 28 / 3 / 10 / 5 | lag-1 autocorr 0.97–0.9999 |
+| `wt_pc_validate_v1` / `wt_pressure_control_v1` | pressure-control configuration: one validation experiment / one PID-controlled run (`hatch_0`) | 1 / 1 | 50 / 10,000 |
+
+So `wt_validate_v1` remains the only WT release that is a menu of
+near-i.i.d. single-variable interventions, and `lt_interventions_standard_v1`
+the right LT one (`lt_validate_v1` has half the entries at ~50 rows).
+
+**The finding: the two chambers' menus have different designs.** LT shifts the
+target's range while every other manipulable is still randomised. WT's
+validation protocol (`wt_standard_validation_configs.csv`, one row per
+experiment with its own N, wait time T, x^A / x^B and a FIXED value for every
+other manipulable) toggles one variable while **everything else is held
+constant — at settings that differ between experiments**. Verified on the data
+(21 distinct variables toggled across the 28 entries; the hatch, `load_in` and
+`load_out` each have several entries, one per validated edge):
+
+| background (load_in, load_out) | entries | fan speed rpm_in / rpm_out |
+|---|---|---|
+| (0.01, 0.01) | `osr_1/2/mic`, `pot_1/2`, `v_1/2/in/mic/out` | ≈ 287 / 293 |
+| (0, 0) | `osr_ambient/downwind/intake/upwind` | ≈ 750–855 / 780–880 |
+| (1, 1) | `res_in`, `res_out` | ≈ 2,970 / 3,050 |
+| one fan at 1, the other at 0.01 | `hatch_*`, `osr_in`, `osr_out`, `load_*_current_*` | ≈ 900–2,940 / 1,200–2,950 |
+| one load toggled, other at 0.01 / 0.1 | `load_in`, `load_out`, `*_mic`, `load_out_pressure_intake` | varies |
+
+**What it changes.** No arm contrast: every arm buys from the same menu,
+and JCI's per-entry indicators already absorb per-entry shifts (§37's
+session check flipped no verdict). But (1) a pooled WT design mixes
+different fixed operating points as well as different targets — the
+heterogeneity §37 found in the weather is also in the protocol, by design;
+(2) inside one WT entry only the toggled variable and its descendants
+vary, so an entry informs about that variable's out-edges and nothing
+else — the coverage law's premise holds more literally on WT than on LT;
+(3) WT absolute F1 is a property of this protocol and is not comparable
+with LT's in level. The paper's Setup must state both designs.
+
+**Rule.** Read a released dataset's official description and its protocol
+files before characterising it; experiment names and matching counts are
+not a description.
