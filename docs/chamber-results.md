@@ -94,6 +94,74 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## PRE-REGISTERED (2026-09-22, before launch): the contract-as-floor control, re-run with purchase lists — `uncontracted` vs a same-day contracted loop, LT k=30 and WT k=21, DeepSeek
+
+**Why.** The paper's Setup now states the floor result (the ungoverned loop
+stops at 28.9/59 on LT and ties; at 12.8/28 on WT, where a k=21 contract
+beats it by +0.058, p=0.0007). It rests on `runs/uncontracted.parquet`
+(2026-08-27): one day, n=30, and **no purchase lists**, so it was never
+re-scored at 9 PC seeds or at 1500 rows, and its contracted comparators came
+from other files. Our own rule says a resolved n=30 verdict that the paper
+rests on must be re-run on another day with its comparator before it is
+written as resolved. This run does both, and the recorded purchase lists let
+the floor be tested as a coverage effect.
+
+**Design.** Branch `uncontracted-rerun`. DeepSeek `flash-0731`, selection
+effort pinned at `low` (as the 27 Aug run and the corpus), provider order as
+merged in #104 (CoreWeave first), `--cell-timeout-seconds 7200`. Two arms
+interleaved by `iter_sweep_cells`: `uncontracted` (cap = menu size, a
+physical limit) and `llm_pc` (the same-day contracted loop). **LT at
+fraction 0.51 (k=30) and WT at fraction 0.75 (k=21), n=50 per arm per
+chamber**: 200 cells, `runs/floor-rerun-{lt,wt}.parquet`. n=50 rather than
+the original 30, to tighten the equivalence bound on LT. On the VPS
+(OpenBLAS); re-scored at 9 PC seeds, clustered by distinct design, at 300
+and 1500 rows, directed / skeleton / core-20. LT k=59 is not re-run: it was
+a tie, it costs the most, and the paper will cite k=30 only.
+
+**Before launch, in order:** (1) commit this entry; (2) re-probe the flash
+provider order; (3) a smoke / cost probe of one cell per arm per chamber
+that confirms `uncontracted` can still stop voluntarily under the current
+harness and that `chosen_experiments` is recorded for it; re-estimate from
+those cells.
+
+**Estimated cost** from the recorded cells (`uncontracted` $0.026 / $0.010
+per cell LT / WT; loop $0.021 at LT 30, $0.004 at WT 21): **about $3**,
+~130k cell-seconds, about 4–5 h on eight workers.
+
+**Coverage predictions.** From the corpus loop designs: distinct variables
+27.51 at LT k=30; 6.78 / 11.68 / 17.11 at WT k=7 / 14 / 21. Interpolating
+the loop's coverage curve at the 27 Aug stopping points (LT 28.9, WT 12.8)
+gives WT ≈ 10.8 variables for the ungoverned loop, so Δv(loop@21 −
+uncontracted) ≈ +6.3 and the law predicts **+0.070 at 300 rows**
+(0.0111 × 6.3); on LT, Δv ≈ +0.9 and the prediction is **+0.004** (a tie).
+
+- **F1 (stopping, replication).** Mean experiments bought by `uncontracted`
+  falls within ±3 of 28.9 on LT and ±2 of 12.8 on WT, and the menu cap binds
+  in no cell. A shift is reported, not corrected: the provider has changed
+  since 27 Aug.
+- **F2 (the floor, the headline).** WT, loop@21 − uncontracted, 300 rows:
+  *replicates* if the 95 % CI excludes zero on the positive side;
+  *consistent* if it contains both zero and +0.058; *fails* if it excludes
+  +0.058 on the low side. Reported at 1500 rows too, where no WT rate has
+  been measured, so no prediction is made there.
+- **F3 (no cost at the knee).** LT, uncontracted − loop@30, both caps: the CI
+  contains zero, reported with its MDE as an equivalence bound, not as "no
+  effect".
+- **F4 (the law).** The measured WT contrast's CI contains +0.070 at 300
+  rows, and the measured Δv is within ±1.5 of +6.3.
+- **F5 (spend variance is outcome variance).** Within `uncontracted`, the
+  correlation between experiments bought and F1 is positive in both chambers
+  (the 27 Aug r ≈ +0.5); reported with the CI, and again with distinct
+  variables in place of experiments bought.
+
+**Pre-committed use in the paper.** The re-run replaces the 27 Aug numbers in
+the Setup paragraph whatever it shows, and the footnote's "did not record
+purchase lists" clause is removed. If F2 replicates at 300 rows but not at
+1500, the claim is scoped to the 300-row cap and says so. If F2 fails, the
+paragraph keeps only what survives (the stopping points and F5) and states
+that the WT floor effect did not replicate. Decision rules are keyed on
+intervals, never on a significance threshold.
+
 ## THE FIGURE 2 FILL: NO MULTI-AGENT ARM BEATS THE LOOP AT THE NEW BUDGETS, AND THE LAW PREDICTS 9 OF 10 NEW CONTRASTS (2026-09-22, VPS/OpenBLAS, `runs/fig2-fill-{lt,wt}.parquet`, `runs/rescored-fig2-rows{300,1500}*.parquet`, 330 cells / $8.60, pre-registered below)
 
 **What ran.** As pre-registered and amended (below): `llm_pc`, `team`,
