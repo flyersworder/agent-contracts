@@ -130,6 +130,13 @@ def test_agent_feeds_the_dropped_columns_into_the_prompt_on_wt() -> None:
     # WT's four barometers are collinear in `standard`; PC drops three of them
     # on every estimate, so the feedback line must appear once an estimate exists.
     adapter = create_contracted_chamber_agent(chamber="wt", intervention_budget=6)
+    # `causalchamber` lists experiments in filesystem (glob) order, which
+    # differs between machines and between fresh extractions, so "the first
+    # three on the menu" is a different buy on every CI runner (register §42).
+    # Pin the order so the buy -- and whether PC sees the barometers as
+    # collinear -- is the same everywhere.
+    menu = sorted(adapter.available_experiments())
+    adapter.available_experiments = lambda: list(menu)  # type: ignore[method-assign]
     llm = FakeLLM(responder=_first_on_menu)
     adaptive_feedback_agent(adapter, llm=llm, feedback_interval=3)
     bodies = [c["messages"][-1]["content"] for c in llm.calls]

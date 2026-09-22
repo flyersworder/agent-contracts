@@ -2410,3 +2410,39 @@ with LT's in level. The paper's Setup must state both designs.
 **Rule.** Read a released dataset's official description and its protocol
 files before characterising it; experiment names and matching counts are
 not a description.
+
+## 42. The menu ORDER is filesystem order, and it differs between machines (2026-09-22)
+
+**How it was found.** CI on `main` failed once, after the #104 merge, in
+`test_agent_feeds_the_dropped_columns_into_the_prompt_on_wt`, which passed on
+the PR run minutes earlier, on the Mac, and 6/6 on the VPS. At the first
+feedback point, CI's estimate dropped the zero-variance columns but not the
+collinear barometers, so the "REMOVED from the estimate" line was absent.
+
+**What it was.** `causalchamber.datasets.Dataset` builds its experiment list
+with `Path.glob(f"{name}/*.csv")` and never sorts it, so
+`available_experiments()` returns directory order. That order depends on the
+filesystem and on the extraction. Measured on the same code: the Mac and the
+VPS give different orders in both chambers (LT sha `f6f2f52f19` vs
+`06ade702eb`, WT `1a5dc087fd` vs `bc6f3621f7`; neither sorted), and a fresh
+CI runner gives its own. The test's fake LLM buys "the first three on the
+menu", so each runner bought a different three.
+
+**What it touches.** Every LLM prompt renders the menu in this order, and
+every seeded shuffle (`random`, claim capping, top-ups) starts from it. So
+(1) the same seed draws different designs on different machines, and
+(2) a probe run locally showed the model a different menu order than the VPS
+corpus it was compared with. **No arm contrast in the corpus is affected**:
+every sweep ran on the VPS with one fixed extraction, and re-scoring reads
+the recorded ordered buys. Local probes that made live LLM calls (the Jev
+probe) carry an uncontrolled menu-order difference against the VPS loops they were
+set against. That is recorded as a caveat, not measured.
+
+**Now prevented by.** The test pins the menu to sorted order. The adapter is
+**deliberately not changed mid-project**: sorting `available_experiments()`
+would change every future prompt relative to the whole corpus. Post-deadline,
+sort it in the adapter and record the order's hash per cell.
+
+**Rule.** Never let a test or an arm depend on the order a third-party
+package lists files in. Before comparing a locally-run probe with the VPS
+corpus, check that the menu order matches, as well as the BLAS backend.
