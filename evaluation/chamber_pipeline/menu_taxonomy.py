@@ -137,6 +137,64 @@ def coverage_ordered(
     return chosen
 
 
+def repair_infeasible_split(
+    owner: dict[str, str],
+    groups: dict[str, list[str]],
+    claimed_a: set[str],
+    claimed_b: set[str],
+    budget_a: int,
+    budget_b: int,
+    seed_tag: str,
+) -> int:
+    """Move whole variables between pools until each exceeds its budget.
+
+    Runs only where the claims-first deal left a pool at or below its budget,
+    and returns the number of variables moved, so 0 means the deal was
+    feasible and was left exactly as dealt. On LT this never fires at k=30 (a
+    scout taking the 15 fattest variables still leaves 20 entries against a
+    budget of 15) but does at k=45: each scout needs more than 22 of the 59
+    entries, the negotiation's claims cover most of the menu, and A wins
+    ties, so a lopsided claim can leave B with 10 entries. Measured on the
+    2026-09-21 pre-launch probe; without the repair the arm is undefined in
+    those cells and the cells that survive are a selected sample.
+
+    Donation order, least-contested first, each tier in a seeded shuffle:
+    unclaimed variables (moving one overrides no claim), then variables BOTH
+    scouts claimed (the receiver wanted it too), then variables only the
+    donor claimed. A move is taken only if the donor stays above its own
+    budget. Mutates `owner`; the caller's feasibility check still raises if
+    no sequence of moves suffices.
+    """
+    budgets = {"a": budget_a, "b": budget_b}
+    claimed = {"a": claimed_a, "b": claimed_b}
+
+    def size(side: str) -> int:
+        return sum(len(groups[v]) for v, o in owner.items() if o == side)
+
+    rng = _random.Random(seed_tag)
+    moved = 0
+    for receiver, donor in (("a", "b"), ("b", "a")):
+        if size(receiver) > budgets[receiver]:
+            continue
+        candidates = sorted(v for v, o in owner.items() if o == donor)
+        rng.shuffle(candidates)
+
+        def tier(v: str, donor: str = donor, receiver: str = receiver) -> int:
+            if v not in claimed[donor] and v not in claimed[receiver]:
+                return 0
+            return 1 if v in claimed[receiver] else 2
+
+        candidates.sort(key=tier)  # stable: keeps the shuffle within a tier
+        for variable in candidates:
+            if size(receiver) > budgets[receiver]:
+                break
+            if size(donor) - len(groups[variable]) <= budgets[donor]:
+                continue
+            owner[variable] = receiver
+            moved += 1
+    return moved
+
+
 def partition_pools_by_variable(
     menu: list[str],
     claim_a: list[str],
@@ -144,6 +202,7 @@ def partition_pools_by_variable(
     budget_a: int,
     budget_b: int,
     seed: int,
+    stats: dict[str, int] | None = None,
 ) -> tuple[set[str], set[str]]:
     """Split the menu so every entry of a variable lands in ONE scout's pool.
 
@@ -173,7 +232,12 @@ def partition_pools_by_variable(
        count of picks. The shuffle is seeded, because the menu is grouped by
        family and an unshuffled deal hands the same families to the same scout
        in every seed.
-    3. **Feasibility is asserted, not hoped for.** A pool at or below its
+    3. **An infeasible deal is repaired** by `repair_infeasible_split`,
+       which moves the least-contested variables until both pools exceed
+       their budgets; the count lands in `stats["partition_repairs"]` when a
+       dict is passed. Added 2026-09-21 for k=45, where the claims alone
+       left a pool below budget; a deal that was feasible is untouched.
+    4. **Feasibility is asserted, not hoped for.** A pool at or below its
        budget makes the selection loop inert -- every name gets queried and
        the LLM's choice cannot matter -- which is the degeneracy the
        name-level code reserves shortfalls to avoid. On LT the worst case is
@@ -204,6 +268,18 @@ def partition_pools_by_variable(
         side = "a" if size["a"] <= size["b"] else "b"
         owner[variable] = side
         size[side] += len(groups[variable])
+
+    repairs = repair_infeasible_split(
+        owner,
+        groups,
+        {experiment_variable(n) for n in claim_a},
+        {experiment_variable(n) for n in claim_b},
+        budget_a,
+        budget_b,
+        f"varsplit-repair:{seed}",
+    )
+    if stats is not None:
+        stats["partition_repairs"] = repairs
 
     pool_a = {n for v, o in owner.items() if o == "a" for n in groups[v]}
     pool_b = {n for v, o in owner.items() if o == "b" for n in groups[v]}
@@ -259,4 +335,5 @@ __all__ = [
     "group_by_variable",
     "partition_pools_by_variable",
     "partition_pools_by_variable_n",
+    "repair_infeasible_split",
 ]

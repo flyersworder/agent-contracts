@@ -678,7 +678,7 @@ trusting any number.
 ## Harness lessons that changed a result
 
 Every defect, with its measurement, is in
-`docs/chamber-harness-validity-register.md` (forty entries). The transferable
+`docs/chamber-harness-validity-register.md` (forty-one entries). The transferable
 shape of them:
 
 - **A scaffold failure rate that varies with the experiment's x-axis makes the

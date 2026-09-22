@@ -2302,6 +2302,7 @@ def team_agents(
     # strength, so `rest[0::2]` handed scout_a 0 of 3 `osr_c` and 0 of 2 `red`
     # experiments on LT -- the same blind spot in all 30 seeds, since nothing
     # about the slice depends on the seed.
+    partition_stats: dict[str, int] = {}
     if partition == "variable":
         # Same negotiation, same A-wins-ties rule, same budgets; only the
         # GRANULARITY of the split changes. See
@@ -2323,10 +2324,17 @@ def team_agents(
                 scout_a_budget,
                 scout_b_budget,
                 seed,
+                stats=partition_stats,
             )
         else:
             pool_a, pool_b = partition_pools_by_variable(
-                menu, claim_a, claim_b, scout_a_budget, scout_b_budget, seed
+                menu,
+                claim_a,
+                claim_b,
+                scout_a_budget,
+                scout_b_budget,
+                seed,
+                stats=partition_stats,
             )
     elif partition == "experiment":
         rest = [m for m in menu if m not in set(claim_a) | set(claim_b)]
@@ -2403,10 +2411,17 @@ def team_agents(
         # The larger scout's claim as a share of what it could see. The cap
         # only matters in proportion to this: at 0.1 the shuffled leftover
         # dominates the pool, at 0.77 the claim does.
+        # Counts only claimed names that are still in the claimant's pool: a
+        # variable split repair (`repair_infeasible_split`) can hand a
+        # donor-claimed variable to the peer, and counting it against the
+        # donor's now-smaller pool would overstate the share.
         "claim_pool_share": max(
-            len(claim_a) / len(pool_a) if pool_a else 0.0,
-            len(claim_b) / len(pool_b) if pool_b else 0.0,
+            len(set(claim_a) & pool_a) / len(pool_a) if pool_a else 0.0,
+            len(set(claim_b) & pool_b) / len(pool_b) if pool_b else 0.0,
         ),
+        # Variables moved by `repair_infeasible_split` (variable partition
+        # only; absent otherwise). Rides into `extra`, like `agg_*`.
+        **partition_stats,
     }
     if not dfs:
         return _empty_adjacency(nodes)

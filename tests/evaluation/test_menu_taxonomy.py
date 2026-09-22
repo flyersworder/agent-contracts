@@ -295,8 +295,54 @@ class TestVariablePartition:
             assert len(a) > 15 and len(b) > 15
 
     def test_an_infeasible_budget_raises_rather_than_going_inert(self) -> None:
+        """Budgets whose sum reaches the menu size cannot both be exceeded,
+        so no repair exists and the split still raises."""
+        menu = _synthetic_menu()
         with pytest.raises(ValueError, match="selection loop is inert"):
-            partition_pools_by_variable(_synthetic_menu(), [], [], 40, 15, 0)
+            partition_pools_by_variable(menu, [], [], len(menu) - 10, 10, 0)
+
+    @staticmethod
+    def _lopsided_claim_a(menu: list[str], n_vars: int) -> list[str]:
+        """One claimed name on each of the `n_vars` fattest variables: A wins
+        them whole, which is what starves B at k=45."""
+        groups = sorted(group_by_variable(menu).items(), key=lambda kv: -len(kv[1]))
+        return [names[0] for _, names in groups[:n_vars]]
+
+    def test_a_lopsided_claim_at_k45_is_repaired_not_raised(self) -> None:
+        """The 2026-09-21 probe cell: claims left B 10 entries against 22."""
+        menu = _synthetic_menu()
+        claim_a = self._lopsided_claim_a(menu, 20)
+        stats: dict[str, int] = {}
+        a, b = partition_pools_by_variable(menu, claim_a, [], 22, 23, 0, stats=stats)
+        assert len(a) > 22 and len(b) > 23
+        assert not a & b and a | b == set(menu)
+        for names in group_by_variable(menu).values():
+            assert set(names) <= a or set(names) <= b
+        assert stats["partition_repairs"] > 0
+
+    def test_a_feasible_deal_is_left_exactly_as_dealt(self) -> None:
+        """The repair must not touch any cell the corpus already ran."""
+        for seed in range(10):
+            stats: dict[str, int] = {}
+            partition_pools_by_variable(_synthetic_menu(), [], [], 15, 15, seed, stats=stats)
+            assert stats["partition_repairs"] == 0
+
+    def test_the_repair_gives_away_unclaimed_variables_before_claimed_ones(self) -> None:
+        menu = _synthetic_menu()
+        claim_a = self._lopsided_claim_a(menu, 12)
+        a, _ = partition_pools_by_variable(menu, claim_a, [], 22, 23, 0, stats={})
+        # 12 claimed fat variables hold 30+ entries: enough for A's budget, so
+        # every claim survives and only free variables were moved to B.
+        assert set(claim_a) <= a
+
+    def test_the_repair_is_deterministic_in_the_seed(self) -> None:
+        menu = _synthetic_menu()
+        claim_a = self._lopsided_claim_a(menu, 20)
+        runs = {
+            tuple(sorted(partition_pools_by_variable(menu, claim_a, [], 22, 23, 3)[0]))
+            for _ in range(3)
+        }
+        assert len(runs) == 1
 
     def test_the_seed_changes_the_split(self) -> None:
         seen = {tuple(sorted(self._pools([], [], seed=s)[0])) for s in range(8)}
