@@ -154,6 +154,24 @@ uncontracted) ≈ +6.3 and the law predicts **+0.070 at 300 rows**
   (the 27 Aug r ≈ +0.5); reported with the CI, and again with distinct
   variables in place of experiments bought.
 
+**Amendment before launch (2026-09-22, after the smoke run; no prediction
+changed).** Smoke: one cell per arm per chamber on the VPS, 4/4 ok, all
+served by CoreWeave, 0 fallbacks, `chosen_experiments` recorded, the safety
+cap never bound. Two measured shifts, recorded before any full-run cell:
+(a) **WT reasoning has roughly doubled** — median output per call 3,580
+(loop) / 4,160 (uncontracted), against 1,750 in the corpus loop (Baidu),
+2,490 on 27 Aug (Parasail) and 2,690 in the Figure 2 fill (CoreWeave); LT is
+stable (3,360–3,520 against 3,390). (b) The single WT uncontracted cell
+bought **24** experiments against the 27 Aug mean of 12.8. If that holds,
+F1 fails on WT and F2's prediction (built on 12.8) no longer applies: the
+coverage prediction is then recomputed from the measured stopping points
+with the same formula and reported beside the registered one, and the
+paper's paragraph reports the new stopping point whatever it is. The
+same-day comparison is unaffected, since both arms share the provider and
+the day. **Cost re-estimated from the smoke cells: ~$5.7** (LT $0.032 per
+cell both arms, WT $0.022 / $0.030), ~215k cell-seconds, two processes of
+four workers, ~7.5 h.
+
 **Pre-committed use in the paper.** The re-run replaces the 27 Aug numbers in
 the Setup paragraph whatever it shows, and the footnote's "did not record
 purchase lists" clause is removed. If F2 replicates at 300 rows but not at
