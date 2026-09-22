@@ -118,7 +118,7 @@ and the corpus loop stays the plotted one.
 | | outcome |
 |---|---|
 | **P1** coverage predictor | **holds 3/3**: team 5.97 / 28.27 / 6.64 variables vs predicted 5.70 / 28.13 / 6.42 (±0.5); varsplit within 0.12 of the loop |
-| **P2** law, 10 rows | **9 of 10 in CI.** The miss is the informative cell, LT k=45 at 1500 rows: team − loop predicted −0.0246, measured −0.0133, CI [−0.024, −0.003] — out by 0.0006, sign right |
+| **P2** law, 10 rows | **9 of 10 in CI.** The miss is the informative cell, LT k=45 at 1500 rows: team − loop predicted −0.0246, measured −0.0133, CI [−0.024, −0.003] — out by 0.0007 (0.0006 in the first draft subtracted a rounded bound), sign right |
 | **P3** no multi-agent arm above the loop | **fails once on the interval rule**: varsplit − loop at WT k=7, 300 rows, +0.018, CI [+0.002, +0.034]; under the 2.8σ MDE a tie (MDE 0.023) |
 | **P4** WT k=7 denominator | **loop below random again** at 300 rows (−0.020, CI [−0.036, −0.004]); not at 1500. As pre-committed, P3's exception is a win over a loop that is itself below random: varsplit − rule −0.006 and varsplit − random −0.002, both ties |
 | **P5** no arm above the rule at 300 rows | **fails at LT k=6**: loop − rule +0.037 (MDE 0.028), resolved. **A pre-registration error, not a new finding**: the corpus already had the loop above the rule at LT k=6 (register §40 traces it to the observational baseline), and P5 should have excluded it. Team (+0.027) and varsplit (+0.022) there are ties under the MDE |
