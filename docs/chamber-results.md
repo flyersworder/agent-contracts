@@ -10,7 +10,7 @@ before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-20**: **19,284 orchestrator cells, $158.58, zero errored cells** across two chambers and three arm models (`deepseek-v4-flash-0731`, `deepseek-v4-pro`, `glm-5.3-flash`). Unchanged since 2026-09-14 — the 2026-09-20 System-One probe (`typesafe/jev-1.13`, $0.07) ran through the direct Decisions API and produced designs, not cells, so it is listed below but deliberately NOT added to that count. (2026-09-13 read 19,164 / $145.69; 2026-09-12 evening 18,804 / $145.10; the GLM cross-vendor replication adds 300 cells / $0.48 and the `shared_blackboard` k=6 control 60 / $0.11.)
+**Corpus as of 2026-09-22**: **19,635 orchestrator cells, $168.44, one errored cell** (a pre-launch probe: the `team_varsplit` partition raise at LT k=45 that motivated the repair) across two chambers and three arm models. 2026-09-22 adds the Figure 2 fill (330 cells, $8.60) and its pre-launch probes (21 cells, $1.26); 2026-09-20 read 19,284 / $158.58 (`deepseek-v4-flash-0731`, `deepseek-v4-pro`, `glm-5.3-flash`). Unchanged since 2026-09-14 — the 2026-09-20 System-One probe (`typesafe/jev-1.13`, $0.07) ran through the direct Decisions API and produced designs, not cells, so it is listed below but deliberately NOT added to that count. (2026-09-13 read 19,164 / $145.69; 2026-09-12 evening 18,804 / $145.10; the GLM cross-vendor replication adds 300 cells / $0.48 and the `shared_blackboard` k=6 control 60 / $0.11.)
 Two further models appear in prior-elicitation probes only, never as arms:
 `gpt-5.6-sol` and `typesafe/jev-1.13`. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
@@ -69,6 +69,7 @@ table below is the arithmetic of record.)
 | `runs/rescored-jev-jci-rows1500.parquet` | 50 designs | $0.00 | the same under JCI-PC at 1500 (−0.044, resolved below) |
 | `runs/rescored-jev-loopmatched-rows{300,1500}.parquet` | 180 designs | $0.00 | the probe's 50 designs plus the LT k=30 `llm_pc` designs of `m7-p2-ref` / `xv-glm-lt` / `m7-effort-lt`, re-scored together on ONE backend — the backend-matched Jev-vs-loop contrast that replaces retraction 2's cross-BLAS figure |
 | `runs/rescored-t4-{k30,ends}-{pc5000,jci5000,jcireg5000}.parquet` | 380 designs | $0.00 | LT loop / team / varsplit / rule / random at 5000 rows under PC and JCI-PC (per-variable and per-regime indicators): pooling distortion is shared by every arm; the rewrite's tradeoff is not supported |
+| `runs/fig2-fill-{lt,wt}.parquet` (+ `rescored-fig2-rows{300,1500}`) | 330 | $8.60 | the pre-registered Figure 2 fill: team / varsplit / same-day loop at LT k=6/45 and WT k=7, DeepSeek on CoreWeave; P1 3/3, P2 9/10, P3 one interval-rule fail against a loop below random, P5 a pre-registration error at LT k=6 |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
 sweep above ran on Linux / `scipy-openblas` except `runs/m4-pilot.parquet`
@@ -90,6 +91,65 @@ cross-backend gap is ΔF1 = 0.055, larger than most effects reported below.
 Chambers: light tunnel (LT) 38 nodes / 57 edges / 59-experiment menu; wind
 tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
+
+---
+
+## THE FIGURE 2 FILL: NO MULTI-AGENT ARM BEATS THE LOOP AT THE NEW BUDGETS, AND THE LAW PREDICTS 9 OF 10 NEW CONTRASTS (2026-09-22, VPS/OpenBLAS, `runs/fig2-fill-{lt,wt}.parquet`, `runs/rescored-fig2-rows{300,1500}*.parquet`, 330 cells / $8.60, pre-registered below)
+
+**What ran.** As pre-registered and amended (below): `llm_pc`, `team`,
+`team_varsplit` at LT k=6 and k=45 (n=30) and WT k=7 (n=50), DeepSeek
+`flash-0731`, CoreWeave-first routing, interleaved, 7200 s cap. 330/330 ok,
+0 timeouts (slowest cell 3,491 s), selection fallbacks 26 of 5,640 picks
+(0.5 %). Re-scored at 9 PC seeds on the VPS at 300 and 1500 rows beside the
+`rescored-vps` rule and random designs; clustered by design.
+
+**Audit.** Certification (team / varsplit): LT k=6 26/30 / 21/30, LT k=45
+30/30 / 30/30, WT k=7 47/50 / 43/50 — the misses sit at the small budgets,
+where the Baidu-calibrated negotiate grant is a large share of a small token
+grant; the experiment budget k was exact in every cell. **The varsplit repair
+fired in 24 of 30 LT k=45 cells** (mean 3.3 variables moved) and in none at
+k=6 or WT k=7: at k=45 the arm is "negotiated split, repaired where
+infeasible". **The same-day loop reproduces the corpus loop** at every budget
+and both caps (|Δ| ≤ 0.007, all ties), so the provider change moved nothing
+and the corpus loop stays the plotted one.
+
+**Pre-registered predictions, directed F1 (the paper's primary metric):**
+
+| | outcome |
+|---|---|
+| **P1** coverage predictor | **holds 3/3**: team 5.97 / 28.27 / 6.64 variables vs predicted 5.70 / 28.13 / 6.42 (±0.5); varsplit within 0.12 of the loop |
+| **P2** law, 10 rows | **9 of 10 in CI.** The miss is the informative cell, LT k=45 at 1500 rows: team − loop predicted −0.0246, measured −0.0133, CI [−0.024, −0.003] — out by 0.0006, sign right |
+| **P3** no multi-agent arm above the loop | **fails once on the interval rule**: varsplit − loop at WT k=7, 300 rows, +0.018, CI [+0.002, +0.034]; under the 2.8σ MDE a tie (MDE 0.023) |
+| **P4** WT k=7 denominator | **loop below random again** at 300 rows (−0.020, CI [−0.036, −0.004]); not at 1500. As pre-committed, P3's exception is a win over a loop that is itself below random: varsplit − rule −0.006 and varsplit − random −0.002, both ties |
+| **P5** no arm above the rule at 300 rows | **fails at LT k=6**: loop − rule +0.037 (MDE 0.028), resolved. **A pre-registration error, not a new finding**: the corpus already had the loop above the rule at LT k=6 (register §40 traces it to the observational baseline), and P5 should have excluded it. Team (+0.027) and varsplit (+0.022) there are ties under the MDE |
+
+**The contrasts** (directed F1; R = resolved at the 2.8σ MDE):
+
+| | LT 6 @300 | LT 6 @1500 | LT 45 @300 | LT 45 @1500 | WT 7 @300 | WT 7 @1500 |
+|---|---|---|---|---|---|---|
+| team − loop | −0.010 | +0.004 | **−0.016 R** | −0.013 | +0.009 | +0.011 |
+| varsplit − team | −0.004 | −0.005 | **+0.014 R** | **+0.018 R** | +0.009 | +0.002 |
+| varsplit − loop | −0.014 | −0.001 | −0.003 | +0.005 | +0.018 | +0.013 |
+| loop − rule | **+0.037 R** | +0.022 | +0.005 | **−0.015 R** | **−0.024 R** | −0.019 |
+
+**Readings.**
+
+1. **No multi-agent arm resolves above the loop at any new budget, either
+   cap, under the MDE bar.** The one interval-rule exception is against a
+   loop below random. The old M6 WT k=7 team win (+0.040) does not
+   replicate (+0.009 / +0.011).
+2. **The law extends to three new budgets.** Its coverage input is right to
+   within 0.3 variables, and 9 of 10 predictions land in the measured
+   interval. Where it misses, it over-predicts the team's LT k=45 deficit at
+   1500 rows — the opposite direction to its two recorded misses at LT 300.
+3. **Varsplit − team replicates at a new budget**, LT k=45, at both caps.
+4. **LT k=6 remains the budget where the loop beats the rule.** This is the
+   corpus's standing exception, reproduced on a new day, and it is the one
+   place Figure 2 shows a filled dot above zero.
+
+Skeleton F1 moves the same way and adds one interval-rule fail
+(varsplit − loop, LT k=45 at 1500, CI lower bound +0.000) and resolves
+team − loop below at WT k=7 @1500 (−0.031).
 
 ---
 
