@@ -10,7 +10,7 @@ before trusting any number here. `docs/causal_chamber_validation_plan.md` is
 the experiment plan; `docs/superpowers/specs/2026-08-22-m6-coordination-ladder-design.md`
 is the ladder's design spec.
 
-**Corpus as of 2026-09-22**: **19,635 orchestrator cells, $168.44, one errored cell** (a pre-launch probe: the `team_varsplit` partition raise at LT k=45 that motivated the repair) across two chambers and three arm models. 2026-09-22 adds the Figure 2 fill (330 cells, $8.60) and its pre-launch probes (21 cells, $1.26); 2026-09-20 read 19,284 / $158.58 (`deepseek-v4-flash-0731`, `deepseek-v4-pro`, `glm-5.3-flash`). Unchanged since 2026-09-14 — the 2026-09-20 System-One probe (`typesafe/jev-1.13`, $0.07) ran through the direct Decisions API and produced designs, not cells, so it is listed below but deliberately NOT added to that count. (2026-09-13 read 19,164 / $145.69; 2026-09-12 evening 18,804 / $145.10; the GLM cross-vendor replication adds 300 cells / $0.48 and the `shared_blackboard` k=6 control 60 / $0.11.)
+**Corpus as of 2026-09-23**: **19,839 orchestrator cells, $175.27, one errored cell** (a pre-launch probe: the `team_varsplit` partition raise at LT k=45 that motivated the repair) across two chambers and three arm models. 2026-09-23 adds the contract-as-floor re-run (200 cells, $6.71) and its smoke (4 cells, $0.12); 2026-09-22 added the Figure 2 fill (330 cells, $8.60) and its pre-launch probes (21 cells, $1.26); 2026-09-20 read 19,284 / $158.58 (`deepseek-v4-flash-0731`, `deepseek-v4-pro`, `glm-5.3-flash`). Unchanged since 2026-09-14 — the 2026-09-20 System-One probe (`typesafe/jev-1.13`, $0.07) ran through the direct Decisions API and produced designs, not cells, so it is listed below but deliberately NOT added to that count. (2026-09-13 read 19,164 / $145.69; 2026-09-12 evening 18,804 / $145.10; the GLM cross-vendor replication adds 300 cells / $0.48 and the `shared_blackboard` k=6 control 60 / $0.11.)
 Two further models appear in prior-elicitation probes only, never as arms:
 `gpt-5.6-sol` and `typesafe/jev-1.13`. (The 2026-08-30 line read "2,221 / $94.05";
 it predated the seven M7 files, which add 1,220 cells and $14.34, and the two
@@ -69,6 +69,7 @@ table below is the arithmetic of record.)
 | `runs/rescored-jev-jci-rows1500.parquet` | 50 designs | $0.00 | the same under JCI-PC at 1500 (−0.044, resolved below) |
 | `runs/rescored-jev-loopmatched-rows{300,1500}.parquet` | 180 designs | $0.00 | the probe's 50 designs plus the LT k=30 `llm_pc` designs of `m7-p2-ref` / `xv-glm-lt` / `m7-effort-lt`, re-scored together on ONE backend — the backend-matched Jev-vs-loop contrast that replaces retraction 2's cross-BLAS figure |
 | `runs/rescored-t4-{k30,ends}-{pc5000,jci5000,jcireg5000}.parquet` | 380 designs | $0.00 | LT loop / team / varsplit / rule / random at 5000 rows under PC and JCI-PC (per-variable and per-regime indicators): pooling distortion is shared by every arm; the rewrite's tradeoff is not supported |
+| `runs/floor-rerun-{lt,wt}.parquet` (+ `rescored-floor-rows{300,1500}`) | 200 | $6.71 | the pre-registered contract-as-floor re-run: `uncontracted` vs same-day `llm_pc`, LT k=30 / WT k=21, n=50, purchase lists recorded, DeepSeek on CoreWeave |
 | `runs/fig2-fill-{lt,wt}.parquet` (+ `rescored-fig2-rows{300,1500}`) | 330 | $8.60 | the pre-registered Figure 2 fill: team / varsplit / same-day loop at LT k=6/45 and WT k=7, DeepSeek on CoreWeave; P1 3/3, P2 9/10, P3 one interval-rule fail against a loop below random, P5 a pre-registration error at LT k=6 |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
@@ -93,6 +94,150 @@ tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
+
+## THE CONTRACT IS A FLOOR, AGAIN — SMALLER, AND ONLY AT THE CAP OF RECORD (2026-09-23, VPS/OpenBLAS, `runs/floor-rerun-{lt,wt}.parquet`, `runs/rescored-floor-rows{300,1500}*.parquet`, 200 cells / $6.71, pre-registered below)
+
+The 27 Aug ungoverned control re-run on another day, n=50 per arm, against a
+same-day interleaved contracted loop, with purchase lists recorded and
+re-scored at 9 PC seeds on the corpus backend. 200/200 ok after one resume:
+one LT cell had crashed because litellm's retry path imports `tenacity`,
+which the VPS environment lacked (in the lock via another extra; installed at
+the locked 9.1.4, and the cell re-ran). Providers: CoreWeave for 182 of 200
+cells, the rest mixed with Parasail / DeepInfra / Baidu inside the pinned
+order.
+
+| | LT k=30 @300 | LT @1500 | WT k=21 @300 | WT @1500 |
+|---|---|---|---|---|
+| loop F1 | 0.4279 | 0.4304 | 0.2596 | 0.2069 |
+| uncontracted F1 | 0.4234 | 0.4300 | 0.2233 | 0.1919 |
+| **loop − uncontracted** | +0.0045 [0.018] tie | +0.0004 [0.021] tie | **+0.0363 [0.026] R+**, CI [+0.018, +0.055], p=0.0002 | +0.0150 [0.019] tie, CI [+0.001, +0.029] |
+| skeleton | +0.008 tie | +0.008 tie | +0.019 [0.021] tie, CI excl. 0 | +0.014 [0.018] tie, CI excl. 0 |
+| core-20 | +0.002 tie | −0.008 tie | — | — |
+| distinct variables, loop / unc | 27.76 / 28.10 | | 16.60 / 12.46 | |
+
+Design-clustered (50 distinct designs per arm everywhere), unequal-n MDE in
+brackets.
+
+**Scored against the registration.**
+
+- **F1 holds.** Experiments bought: LT **28.55** (CI 27.3–29.8, range
+  12–33) against 28.9; WT **14.34** (CI 13.1–15.6, range 8–26) against
+  12.8; both inside their bands (±3 / ±2). The cap bound in 0/99. The smoke
+  cell's 24 was a tail value, not a regime shift in stopping — although WT
+  reasoning per call did double (amendment).
+- **F2: direction replicates, size does not.** +0.036 at 300 rows, resolved
+  and CI above zero; the CI excludes the 27 Aug +0.058 from below. **The
+  registered rule is defective here**: "replicates if the CI excludes zero on
+  the positive side" and "fails if it excludes +0.058 on the low side" both
+  fire, and the entry did not order them. Recorded as a pre-registration
+  error; reported as "the direction replicated, the size is smaller", not as
+  either branch. At 1500 rows +0.015, below its MDE (the interval is just
+  above zero), so under the pre-committed use **the WT floor claim is scoped
+  to the 300-row cap**.
+- **F3 holds.** LT ties at both caps; equivalence bound |Δ| ≲ 0.02.
+- **F4: the registered number fails, the law holds.** +0.070 is outside the
+  CI and Δv = +4.14 misses +6.3 ± 1.5 — both because the agent stopped at
+  14.3, not 12.8. The amendment's recomputation from the measured coverage,
+  0.0111 × 4.14 = **+0.046**, is inside the CI [+0.018, +0.055]. The floor
+  effect is a coverage effect: the contract buys ~4 more variables.
+- **F5 holds, more strongly.** Within `uncontracted`, r(bought, F1) =
+  **+0.83** [+0.72, +0.90] on LT and **+0.55** [+0.32, +0.72] on WT at 300
+  rows; with distinct variables +0.88 / +0.51. At 1500 rows WT falls to
+  +0.30 [+0.03, +0.54] (+0.28 with variables, CI touching zero).
+
+**What goes into the paper** (per the pre-committed use): the Setup paragraph
+takes these numbers — LT stops at 28.6/59 and ties at k=30 at both caps; WT
+stops at 14.3/28 and a k=21 contract beats it by +0.036 at 300 rows (4.1
+more variables; the law predicts +0.046), not resolved at 1500 rows;
+stopping point predicts F1 at r = +0.83 / +0.55. The LT k=59 comparison and
+the footnote's "no purchase lists" clause are dropped; the prompt caveat
+stays.
+
+## PRE-REGISTERED (2026-09-22, before launch): the contract-as-floor control, re-run with purchase lists — `uncontracted` vs a same-day contracted loop, LT k=30 and WT k=21, DeepSeek
+
+**Why.** The paper's Setup now states the floor result (the ungoverned loop
+stops at 28.9/59 on LT and ties; at 12.8/28 on WT, where a k=21 contract
+beats it by +0.058, p=0.0007). It rests on `runs/uncontracted.parquet`
+(2026-08-27): one day, n=30, and **no purchase lists**, so it was never
+re-scored at 9 PC seeds or at 1500 rows, and its contracted comparators came
+from other files. Our own rule says a resolved n=30 verdict that the paper
+rests on must be re-run on another day with its comparator before it is
+written as resolved. This run does both, and the recorded purchase lists let
+the floor be tested as a coverage effect.
+
+**Design.** Branch `uncontracted-rerun`. DeepSeek `flash-0731`, selection
+effort pinned at `low` (as the 27 Aug run and the corpus), provider order as
+merged in #104 (CoreWeave first), `--cell-timeout-seconds 7200`. Two arms
+interleaved by `iter_sweep_cells`: `uncontracted` (cap = menu size, a
+physical limit) and `llm_pc` (the same-day contracted loop). **LT at
+fraction 0.51 (k=30) and WT at fraction 0.75 (k=21), n=50 per arm per
+chamber**: 200 cells, `runs/floor-rerun-{lt,wt}.parquet`. n=50 rather than
+the original 30, to tighten the equivalence bound on LT. On the VPS
+(OpenBLAS); re-scored at 9 PC seeds, clustered by distinct design, at 300
+and 1500 rows, directed / skeleton / core-20. LT k=59 is not re-run: it was
+a tie, it costs the most, and the paper will cite k=30 only.
+
+**Before launch, in order:** (1) commit this entry; (2) re-probe the flash
+provider order; (3) a smoke / cost probe of one cell per arm per chamber
+that confirms `uncontracted` can still stop voluntarily under the current
+harness and that `chosen_experiments` is recorded for it; re-estimate from
+those cells.
+
+**Estimated cost** from the recorded cells (`uncontracted` $0.026 / $0.010
+per cell LT / WT; loop $0.021 at LT 30, $0.004 at WT 21): **about $3**,
+~130k cell-seconds, about 4–5 h on eight workers.
+
+**Coverage predictions.** From the corpus loop designs: distinct variables
+27.51 at LT k=30; 6.78 / 11.68 / 17.11 at WT k=7 / 14 / 21. Interpolating
+the loop's coverage curve at the 27 Aug stopping points (LT 28.9, WT 12.8)
+gives WT ≈ 10.8 variables for the ungoverned loop, so Δv(loop@21 −
+uncontracted) ≈ +6.3 and the law predicts **+0.070 at 300 rows**
+(0.0111 × 6.3); on LT, Δv ≈ +0.9 and the prediction is **+0.004** (a tie).
+
+- **F1 (stopping, replication).** Mean experiments bought by `uncontracted`
+  falls within ±3 of 28.9 on LT and ±2 of 12.8 on WT, and the menu cap binds
+  in no cell. A shift is reported, not corrected: the provider has changed
+  since 27 Aug.
+- **F2 (the floor, the headline).** WT, loop@21 − uncontracted, 300 rows:
+  *replicates* if the 95 % CI excludes zero on the positive side;
+  *consistent* if it contains both zero and +0.058; *fails* if it excludes
+  +0.058 on the low side. Reported at 1500 rows too, where no WT rate has
+  been measured, so no prediction is made there.
+- **F3 (no cost at the knee).** LT, uncontracted − loop@30, both caps: the CI
+  contains zero, reported with its MDE as an equivalence bound, not as "no
+  effect".
+- **F4 (the law).** The measured WT contrast's CI contains +0.070 at 300
+  rows, and the measured Δv is within ±1.5 of +6.3.
+- **F5 (spend variance is outcome variance).** Within `uncontracted`, the
+  correlation between experiments bought and F1 is positive in both chambers
+  (the 27 Aug r ≈ +0.5); reported with the CI, and again with distinct
+  variables in place of experiments bought.
+
+**Amendment before launch (2026-09-22, after the smoke run; no prediction
+changed).** Smoke: one cell per arm per chamber on the VPS, 4/4 ok, all
+served by CoreWeave, 0 fallbacks, `chosen_experiments` recorded, the safety
+cap never bound. Two measured shifts, recorded before any full-run cell:
+(a) **WT reasoning has roughly doubled** — median output per call 3,580
+(loop) / 4,160 (uncontracted), against 1,750 in the corpus loop (Baidu),
+2,490 on 27 Aug (Parasail) and 2,690 in the Figure 2 fill (CoreWeave); LT is
+stable (3,360–3,520 against 3,390). (b) The single WT uncontracted cell
+bought **24** experiments against the 27 Aug mean of 12.8. If that holds,
+F1 fails on WT and F2's prediction (built on 12.8) no longer applies: the
+coverage prediction is then recomputed from the measured stopping points
+with the same formula and reported beside the registered one, and the
+paper's paragraph reports the new stopping point whatever it is. The
+same-day comparison is unaffected, since both arms share the provider and
+the day. **Cost re-estimated from the smoke cells: ~$5.7** (LT $0.032 per
+cell both arms, WT $0.022 / $0.030), ~215k cell-seconds, two processes of
+four workers, ~7.5 h.
+
+**Pre-committed use in the paper.** The re-run replaces the 27 Aug numbers in
+the Setup paragraph whatever it shows, and the footnote's "did not record
+purchase lists" clause is removed. If F2 replicates at 300 rows but not at
+1500, the claim is scoped to the 300-row cap and says so. If F2 fails, the
+paragraph keeps only what survives (the stopping points and F5) and states
+that the WT floor effect did not replicate. Decision rules are keyed on
+intervals, never on a significance threshold.
 
 ## THE FIGURE 2 FILL: NO MULTI-AGENT ARM BEATS THE LOOP AT THE NEW BUDGETS, AND THE LAW PREDICTS 9 OF 10 NEW CONTRASTS (2026-09-22, VPS/OpenBLAS, `runs/fig2-fill-{lt,wt}.parquet`, `runs/rescored-fig2-rows{300,1500}*.parquet`, 330 cells / $8.60, pre-registered below)
 
