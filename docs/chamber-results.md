@@ -70,7 +70,7 @@ table below is the arithmetic of record.)
 | `runs/rescored-jev-loopmatched-rows{300,1500}.parquet` | 180 designs | $0.00 | the probe's 50 designs plus the LT k=30 `llm_pc` designs of `m7-p2-ref` / `xv-glm-lt` / `m7-effort-lt`, re-scored together on ONE backend — the backend-matched Jev-vs-loop contrast that replaces retraction 2's cross-BLAS figure |
 | `runs/rescored-t4-{k30,ends}-{pc5000,jci5000,jcireg5000}.parquet` | 380 designs | $0.00 | LT loop / team / varsplit / rule / random at 5000 rows under PC and JCI-PC (per-variable and per-regime indicators): pooling distortion is shared by every arm; the rewrite's tradeoff is not supported |
 | `runs/floor-rerun-{lt,wt}.parquet` (+ `rescored-floor-rows{300,1500}`) | 200 | $6.71 | the pre-registered contract-as-floor re-run: `uncontracted` vs same-day `llm_pc`, LT k=30 / WT k=21, n=50, purchase lists recorded, DeepSeek on CoreWeave |
-| `runs/estimator-probe-2026-09-25/` | 1,662 designs + probes | ~$1.00 | the estimator-headroom follow-up, local/Accelerate: wiring and settings-first oracles, the withdrawn regression estimator and its null test, PC with background knowledge on rule lists, every Figure-2 arm under PC + manipulable exogeneity (`arms-exo.parquet`), JCI variants, the LT edge split, GES + knowledge, and the estimation-stage LLM probes (Jev prior into PC; DeepSeek and Jev emitting graphs, real vs anonymised names, ~$1); scripts alongside |
+| `runs/estimator-probe-2026-09-25/` | 1,662 designs + probes | ~$1.00 | the estimator-headroom follow-up, local/Accelerate: wiring and settings-first oracles, the withdrawn regression estimator and its null test, PC with background knowledge on rule lists, every Figure-2 arm under PC + manipulable exogeneity (`arms-exo.parquet`), JCI variants, the LT edge split, GES + knowledge, and the estimation-stage LLM probes (Jev prior into PC; DeepSeek and Jev emitting graphs, real vs anonymised names, ~$1); scripts alongside. VPS/OpenBLAS files: `vps-exo-pass.jsonl` (items 4–5, confirmed), `vps-greedy-ceiling.jsonl`, `vps-ceiling-v2.jsonl` (item 10); `make_exo_table.py` writes the paper's supplement Table 9 |
 | `runs/fig2-fill-{lt,wt}.parquet` (+ `rescored-fig2-rows{300,1500}`) | 330 | $8.60 | the pre-registered Figure 2 fill: team / varsplit / same-day loop at LT k=6/45 and WT k=7, DeepSeek on CoreWeave; P1 3/3, P2 9/10, P3 one interval-rule fail against a loop below random, P5 a pre-registration error at LT k=6 |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
@@ -96,7 +96,7 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
-## THE HEADROOM IS IN THE ESTIMATOR, AND HOW MUCH OF THE GRAPH IS VISIBLE WITHOUT BUYING DECIDES WHETHER A BETTER ESTIMATOR WIDENS THE ARM GAPS (2026-09-25/26, local/Accelerate, `runs/estimator-probe-2026-09-25/`, $0 except item 9's ~$1 of LLM calls; FOLLOW-UP, NOT PRE-REGISTERED — chosen after the main results; VPS confirmation pending)
+## THE HEADROOM IS IN THE ESTIMATOR, AND HOW MUCH OF THE GRAPH IS VISIBLE WITHOUT BUYING DECIDES WHETHER A BETTER ESTIMATOR WIDENS THE ARM GAPS (2026-09-25/26, local/Accelerate, `runs/estimator-probe-2026-09-25/`, $0 except item 9's ~$1 of LLM calls; FOLLOW-UP, NOT PRE-REGISTERED — chosen after the main results; items 4–5 CONFIRMED on the VPS/OpenBLAS 2026-09-26, the rest Accelerate only)
 
 Prompted by a review of Figure 2's dashed "oracle" line, which turned out to
 be the static ranking (`rank_at_k`) − rule from the Accelerate 300-row probe,
@@ -172,6 +172,18 @@ The loop's one win dissolves — consistent with (not shown to be) the
 observational baseline it bought at k=6 supplying what the exogeneity
 constraint now supplies to every arm; untested.
 
+*VPS confirmation (2026-09-26, `vps-exo-pass.jsonl`, 6,648 scores = 1,662
+lists × 2 caps × {plain, exo}, 9 seeds, `scipy-openblas`, 0 errors).* The
+VPS scores equal this Mac's to 1e-15 on 6,647 of 6,648; the one exception
+(a WT list, plain PC, 300 rows) differs by 0.024 and moves no contrast.
+Every number in this table and in item 5's mean-gain column holds on
+OpenBLAS unchanged. Checked in all 12 cells on the VPS scores: no arm
+resolves above the rule and no team or varsplit team above the loop under
+PC + exogeneity. The rule's gain from the constraint is +0.073 to +0.245.
+In the paper as PR #3 of the paper repo (a Results paragraph, supplement
+S2 with Table 9, one future-work sentence); Table 9 is written by
+`make_exo_table.py`, which asserts both verdicts.
+
 **5. The moderator: how much of the graph is visible without buying.** LT:
 39 of 57 edges come from sources randomised in every experiment, so only 18
 (32%) depend on the purchase; WT: all 42 (100%). Prediction: where most
@@ -185,6 +197,13 @@ of the estimator's gain on distinct variables:
 | LT @1500 | +0.139 | −0.0021 (se 0.0007) |
 | WT @300 | +0.117 | **+0.0061** (se 0.0008) |
 | WT @1500 | +0.182 | **+0.0082** (se 0.0010) |
+
+On the VPS scores, with a per-list OLS and a fixed effect per budget (the
+specification the paper quotes), the slopes are LT −0.0004 (p = 0.43) /
+−0.0027 (p = 1e-4), WT +0.0061 / +0.0082 (both p < 1e-14), chamber
+interaction p ≤ 2e-12 at both caps. The LT slopes differ from the table's
+(+0.0006 / −0.0021) because the specification differs, not the backend;
+the reading is the same.
 
 Held on WT; on LT the slope is flat at 300 rows and slightly NEGATIVE at
 1500 (−0.0021, about 3σ), so "lifts every arm equally" is right at 300 rows
@@ -376,8 +395,8 @@ Knowing the wiring does not give the cause: effect sizes, functional form
 (`osr_*` act on noise, not means), shared-child redundancy, the WT session
 shift and the estimator all sit outside the graph.
 
-**Open.** VPS/OpenBLAS pass of the PC + exogeneity estimator before any
-number enters the paper. A direct refit of the coverage rate per
+**Open.** ~~VPS/OpenBLAS pass of the PC + exogeneity estimator before any
+number enters the paper~~ — done 2026-09-26, see item 4. A direct refit of the coverage rate per
 estimator. FGES/BOSS with knowledge tiers (future work unless cheap).
 
 **Future work.** (1) A SEMI-SYNTHETIC test that separates structure from
