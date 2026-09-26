@@ -70,6 +70,7 @@ table below is the arithmetic of record.)
 | `runs/rescored-jev-loopmatched-rows{300,1500}.parquet` | 180 designs | $0.00 | the probe's 50 designs plus the LT k=30 `llm_pc` designs of `m7-p2-ref` / `xv-glm-lt` / `m7-effort-lt`, re-scored together on ONE backend — the backend-matched Jev-vs-loop contrast that replaces retraction 2's cross-BLAS figure |
 | `runs/rescored-t4-{k30,ends}-{pc5000,jci5000,jcireg5000}.parquet` | 380 designs | $0.00 | LT loop / team / varsplit / rule / random at 5000 rows under PC and JCI-PC (per-variable and per-regime indicators): pooling distortion is shared by every arm; the rewrite's tradeoff is not supported |
 | `runs/floor-rerun-{lt,wt}.parquet` (+ `rescored-floor-rows{300,1500}`) | 200 | $6.71 | the pre-registered contract-as-floor re-run: `uncontracted` vs same-day `llm_pc`, LT k=30 / WT k=21, n=50, purchase lists recorded, DeepSeek on CoreWeave |
+| `runs/estimator-probe-2026-09-25/` | 1,662 designs + probes | ~$1.00 | the estimator-headroom follow-up, local/Accelerate: wiring and settings-first oracles, the withdrawn regression estimator and its null test, PC with background knowledge on rule lists, every Figure-2 arm under PC + manipulable exogeneity (`arms-exo.parquet`), JCI variants, the LT edge split, GES + knowledge, and the estimation-stage LLM probes (Jev prior into PC; DeepSeek and Jev emitting graphs, real vs anonymised names, ~$1); scripts alongside. VPS/OpenBLAS files: `vps-exo-pass.jsonl` (items 4–5, confirmed), `vps-greedy-ceiling.jsonl`, `vps-ceiling-v2.jsonl` (item 10); `make_exo_table.py` writes the paper's supplement Table 9 |
 | `runs/fig2-fill-{lt,wt}.parquet` (+ `rescored-fig2-rows{300,1500}`) | 330 | $8.60 | the pre-registered Figure 2 fill: team / varsplit / same-day loop at LT k=6/45 and WT k=7, DeepSeek on CoreWeave; P1 3/3, P2 9/10, P3 one interval-rule fail against a loop below random, P5 a pre-registration error at LT k=6 |
 
 **Never pool rows whose `blas_backend` differs** — see register §10. Every
@@ -94,6 +95,319 @@ tunnel (WT) 32 / 42 / 28. PC with Fisher-Z at alpha=0.05, 300-row subsample,
 collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
+
+## THE HEADROOM IS IN THE ESTIMATOR, AND HOW MUCH OF THE GRAPH IS VISIBLE WITHOUT BUYING DECIDES WHETHER A BETTER ESTIMATOR WIDENS THE ARM GAPS (2026-09-25/26, local/Accelerate, `runs/estimator-probe-2026-09-25/`, $0 except item 9's ~$1 of LLM calls; FOLLOW-UP, NOT PRE-REGISTERED — chosen after the main results; items 4–5 CONFIRMED on the VPS/OpenBLAS 2026-09-26, the rest Accelerate only)
+
+Prompted by a review of Figure 2's dashed "oracle" line, which turned out to
+be the static ranking (`rank_at_k`) − rule from the Accelerate 300-row probe,
+hard-coded into `make_figures.py` and plotted against OpenBLAS arms — the
+weakest of the three ground-truth policies (−0.012 at WT k=7 where the
+greedy set is +0.117), cross-backend, and a 300-row-only quantity (the
+1500-row re-derivation has LT k=30 within noise of the rule). Every number
+below is from ONE machine (this Mac), 9 PC seeds 0–8, design-clustered,
+unequal-n MDE. The rule's plain-PC F1 here matches the VPS corpus within
+0.006 at all six budgets, and the plain-PC arm contrasts reproduce Figure 2
+(e.g. loop +0.037 R at LT k=6).
+
+**1. A wiring oracle adds nothing over the rule under PC.** Buying the
+variables with the most true out-edges first (same strength filter and
+tie-breaking as the rule, only the variable order differs) is −0.123 R /
+−0.136 R at LT k=6 and ties everywhere else (|Δ| ≤ 0.011). Two reasons:
+LT's 11 light sources and polarisers (39 of 57 edges) are randomised in
+EVERY experiment, so buying them unlocks nothing and a strong shift hurts
+(directed TP 0.7 vs 9.7); on WT, PC recovers 2 of `load_out`'s 8 edges —
+sensors with up to three hub parents are hard at 300 rows, so edges touched
+≠ edges detectable. The corrected LT order (the 18 apparatus settings
+first) is +0.040 R / +0.047 R at k=6, ties at k=30 at both caps, +0.024 R at
+k=45 at 300 only. Both graphs are bipartite (no node both receives and sends).
+
+**2. The regression estimator is WITHDRAWN.** Per sensor, OLS on every
+varying manipulable variable, Holm 0.05, edges manipulable→sensor only. It
+scored 0.61–0.83 on LT and 0.40–0.52 on WT (≈2× PC), but: it assumes no
+sensor→sensor edges (knowledge of the graph's shape, not the design); it
+FAILS the null test (sensors permuted: ≥1 false edge in 11/30 designs at LT
+k=30 and 9/50 at WT k=21, where Holm allows 5%) because a variable varied in
+one experiment is an indicator of that experiment and absorbs its batch
+shift; and its precision FALLS with rows (LT k=30: 0.97 / 0.88 / 0.55 at
+300 / 1500 / all rows). Do not cite it.
+
+**3. What knowledge buys the gain (rule purchase lists).** PC's own
+`background_knowledge`, manipulable variables read from the menu (29 LT,
+21 WT), never from the graph:
+
+| F1, rule lists | LT 6 | LT 30 | LT 45 | WT 7 | WT 14 | WT 21 |
+|---|---|---|---|---|---|---|
+| PC, 300 | 0.170 | 0.427 | 0.421 | 0.193 | 0.241 | 0.289 |
+| PC + no edge into a manipulable variable, 300 | 0.260 | 0.501 | 0.494 | 0.282 | 0.372 | 0.433 |
+| … + no sensor→sensor (graph shape), 300 | 0.334 | 0.588 | 0.582 | 0.316 | 0.396 | 0.470 |
+| PC, 1500 | 0.172 | 0.444 | 0.445 | 0.185 | 0.205 | 0.249 |
+| PC + no edge into a manipulable variable, 1500 | 0.322 | 0.560 | 0.574 | 0.316 | 0.395 | 0.494 |
+| … + no sensor→sensor, 1500 | 0.416 | 0.679 | 0.692 | 0.353 | 0.410 | 0.495 |
+
+The fair row is the second: exogeneity of what the experimenter sets (JCI's
+assumption, applied to the manipulable variables rather than to regime
+indicators). It gains **+0.07 to +0.15 on LT and +0.09 to +0.25 on WT**, and
+the gain GROWS with rows, unlike the regression's.
+
+Ten LT edges are invisible to any mean/correlation estimator: |r| ≤ 0.04
+with every row (`l_*`→ir/vis, `osr_c`→current, `osr_angle_1`→angle_1). The
+"ideal ceiling" (every edge whose source varied, nothing false) therefore
+overstates what is reachable; do not quote it as a ceiling.
+
+**4. Every Figure-2 arm under the fair estimator** (1,662 distinct purchase
+lists, 560 LT + 1,102 WT, arm − rule, R = resolved):
+
+| | plain PC | PC + manipulable exogeneity |
+|---|---|---|
+| any arm resolved ABOVE the rule (12 cells) | loop, LT k=6 @300 (+0.037) | **none** |
+| LT loop k=6 @300 | +0.037 R | −0.003 |
+| LT team k=30 @300 / @1500 | −0.048 R / −0.075 R | −0.050 R / −0.036 R |
+| LT loop k=30 @1500 | −0.032 R | +0.006 |
+| WT loop k=21 @300 / @1500 | −0.026 R / −0.038 R | −0.053 R / −0.088 R |
+| WT team k=21 @300 / @1500 | −0.042 R / −0.056 R | −0.064 R / −0.104 R |
+
+No team or varsplit team resolves above the loop under either estimator;
+`team` − loop stays resolved below at LT k=30 (−0.049 / −0.043) and WT k=14.
+The loop's one win dissolves — consistent with (not shown to be) the
+observational baseline it bought at k=6 supplying what the exogeneity
+constraint now supplies to every arm; untested.
+
+*VPS confirmation (2026-09-26, `vps-exo-pass.jsonl`, 6,648 scores = 1,662
+lists × 2 caps × {plain, exo}, 9 seeds, `scipy-openblas`, 0 errors).* The
+VPS scores equal this Mac's to 1e-15 on 6,647 of 6,648; the one exception
+(a WT list, plain PC, 300 rows) differs by 0.024 and moves no contrast.
+Every number in this table and in item 5's mean-gain column holds on
+OpenBLAS unchanged. Checked in all 12 cells on the VPS scores: no arm
+resolves above the rule and no team or varsplit team above the loop under
+PC + exogeneity. The rule's gain from the constraint is +0.073 to +0.245.
+In the paper as PR #3 of the paper repo (a Results paragraph, supplement
+S2 with Table 9, one future-work sentence); Table 9 is written by
+`make_exo_table.py`, which asserts both verdicts.
+
+**5. The moderator: how much of the graph is visible without buying.** LT:
+39 of 57 edges come from sources randomised in every experiment, so only 18
+(32%) depend on the purchase; WT: all 42 (100%). Prediction: where most
+edges are free, a better estimator lifts every arm equally; where every edge
+is bought, it raises the value of each variable bought. Within-budget slope
+of the estimator's gain on distinct variables:
+
+| | mean gain | gain per extra distinct variable |
+|---|---|---|
+| LT @300 | +0.075 | +0.0006 (se 0.0005) |
+| LT @1500 | +0.139 | −0.0021 (se 0.0007) |
+| WT @300 | +0.117 | **+0.0061** (se 0.0008) |
+| WT @1500 | +0.182 | **+0.0082** (se 0.0010) |
+
+On the VPS scores, with a per-list OLS and a fixed effect per budget (the
+specification the paper quotes), the slopes are LT −0.0004 (p = 0.43) /
+−0.0027 (p = 1e-4), WT +0.0061 / +0.0082 (both p < 1e-14), chamber
+interaction p ≤ 2e-12 at both caps. The LT slopes differ from the table's
+(+0.0006 / −0.0021) because the specification differs, not the backend;
+the reading is the same.
+
+Held on WT; on LT the slope is flat at 300 rows and slightly NEGATIVE at
+1500 (−0.0021, about 3σ), so "lifts every arm equally" is right at 300 rows
+only (item 7 finds the same cap split within LT). On WT the better estimator
+raises the coverage exchange rate by about
+half (0.0111 → ≈0.017 per variable at 300 rows, by addition — not yet fitted
+directly), which is why the rule's lead WIDENS there and shrinks on LT. Two
+chambers: a hypothesis the data fit, not a law.
+
+**What it does to the paper.** (a) Drop the oracle line from Figure 2; the
+greedy set is a lower bound for one estimator at one cap, and the plotted
+ranking was the weakest policy, on another backend. (b) The abstract's "a
+ground-truth oracle remains above that rule, so the headroom is real" is
+superseded: selection headroom for a fixed estimator is concentrated on WT
+and at the LT budget ends; the larger headroom is in the estimator, and
+every agent already held the knowledge that unlocks it. (c) Neither
+headline changes under the better estimator. (d) Estimation and selection
+interact through the visible-without-buying share.
+
+**6. JCI-PC, and JCI-PC + manipulable exogeneity** (same 1,662 lists,
+`arms-jci.parquet`). Adding JCI's per-variable indicators on top of the
+exogeneity constraint never helps: rule F1 is 0.01–0.05 lower everywhere
+and 0.15 lower at LT k=45 (0.347 vs 0.494 @300), where JCI's skeleton pays
+for one indicator per distinct variable and the rule buys the most. Under
+PLAIN JCI-PC the rule is beaten at LT k=45 at both caps (loop / varsplit
++0.03 to +0.06, and at 1500 RANDOM +0.02 to +0.03 — the estimator
+penalising coverage, not the arms selecting well) and at WT k=14 @300 by
+the loop (+0.02; a tie at 1500). Under PC + manipulable exogeneity no arm
+resolves above the rule in any of the 12 cells. PC + manipulable
+exogeneity alone is the best fair estimator of the four in every cell.
+
+**7. The mechanism, within one chamber** (`edge-split-lt.parquet`). LT
+directed F1 scored separately on edges out of the 18 apparatus settings
+(visible only if bought) and out of the 11 always-randomised sources,
+within-budget slope of the estimator's gain, SE clustered by arm × budget:
+
+| | 300 rows | 1500 rows |
+|---|---|---|
+| settings edges, per extra distinct setting | **+0.0071** (se 0.0025, p=0.004) | −0.0021 (p=0.73) |
+| always-visible edges, per extra distinct variable | +0.0004 (p=0.57) | −0.0006 (p=0.81) |
+
+Supported at 300 rows, NOT at 1500. The chamber interaction itself is
+significant at both caps (WT − LT slope +0.0055, clustered p = 3e-7, and
++0.0102, p = 5e-6; 36 clusters; permutation p = 0.002 at both, the floor
+of 500 draws). State it as: the chambers differ at both caps; the
+visible-without-buying mechanism is supported within a chamber at the cap
+of record only. Plain PC recovers settings edges far better than
+always-visible ones (0.60 vs 0.23 at 300) — the always-visible edges are
+also the hard ones, so "visible share" and "edge difficulty" are not
+separated by this test.
+
+**8. GES + manipulable exogeneity, applied to GES's output**
+(`ges-knowledge-v2.parquet`; rule lists, 3 seeds; causal-learn's GES takes
+no background knowledge). Two versions from the SAME GES run: orient only
+the edges GES left undirected (then Meek R1–R3), or also FLIP edges GES
+committed into a manipulable variable.
+
+| rule F1 | plain GES | orient-only | flip |
+|---|---|---|---|
+| LT k=30 @300 / @1500 | 0.605 / 0.651 | 0.613 / 0.657 | 0.642 / 0.674 |
+| LT k=6 @300 / @1500 | 0.376 / 0.423 | 0.382 / 0.439 | 0.472 / 0.538 |
+| WT k=21 @300 / @1500 | 0.314 / 0.292 | 0.316 / 0.294 | 0.450 / 0.438 |
+
+The clean version gains +0.002 to +0.016 everywhere. The whole GES gain is
+the flip: GES commits 1–4 edges per run INTO a manipulable variable on LT
+and 6–8 on WT, confidently wrong. Overriding them lets the design overrule
+the data after the search — defensible, but not the same as PC's
+constraint inside the search. The principled test is a search that takes
+the knowledge (Tetrad FGES/BOSS with tiers); until then do NOT write "the
+same fact helps both families". Plain GES is still the best LT estimator
+by level (0.65–0.68 at 1500 vs 0.56–0.57 for PC + exogeneity). On WT PC +
+exogeneity beats plain and orient-only GES everywhere, but the post-hoc
+FLIP variant exceeds it in 5 of 6 WT cells (e.g. k=7 0.361 / 0.386 vs
+0.282 / 0.316; k=21 @300 0.450 vs 0.433) — PC + exogeneity is ahead only
+at k=21 @1500 (0.494 vs 0.438). "Best on WT" holds only among estimators
+that apply the knowledge inside the search.
+
+**9. Can a language model help in the ESTIMATION stage? Only through the
+names** (2026-09-26, ~$1.00 total; `prior-pc.parquet`,
+`llm-estimator-n10*.parquet`, `pc-5000.parquet`, `jev-estimator-n10.parquet`).
+Probe A: 30 coverage-rule lists per budget at LT k=6/30/45 (the corpus
+lists of items 3–4). Probe B and the Jev estimator: LT k=30, the first 10
+of those lists (seeds 0–9), so Probe A's baselines are 30-list means and
+Probe B's are 10-list means. The register's warning
+applied: the names are lexical ground truth on a depth-1 bipartite graph, so
+every LLM condition was run with REAL and ANONYMISED names (variables V01..
+in a per-design shuffled order, experiments `exp<i>_on_Vxx_<strength>`; an
+automatic check found no original name in any anonymised prompt).
+
+*Probe A — Jev's name-only edge prior as PC background knowledge ($0,
+`runs/jev-probe-edges.json`, order verified: AUC 0.863 vs truth).* Forbidding
+the bottom half of pairs by prior on top of manipulable exogeneity: k=6
+0.260 → 0.283 @300, 0.322 → 0.352 @1500; k=30 0.501 → 0.534, 0.560 → 0.613;
+k=45 0.494 → 0.530, 0.574 → 0.630 (+0.02 to +0.06, smallest at k=6). The
+same sparsity with the prior SHUFFLED loses 0.08–0.15 (0.08–0.12 at k=6),
+so the gain is content. Forbidding 80% hurts. By construction this is name knowledge.
+
+*Probe B — the model emits the graph from the per-experiment mean table*
+(production `build_adjacency_prompt` / `parse_adjacency_response`, DeepSeek
+v4 flash-0731, effort `high`, pinned providers; Jev via the Decisions API,
+one call per sensor with one `noul` per candidate cause, told which
+variables are manipulable and never asked what causes them). The table is
+built from EXACTLY the rows PC gets (same pooled order, same subsample
+seed). `max_tokens` 32768 truncated the first anonymised DeepSeek call
+(`finish=length`, empty); raised to 65536.
+
+| LT k=30, 10 lists | 300 rows | 5000 rows | all rows (39k) |
+|---|---|---|---|
+| plain PC | 0.432 | 0.373 | — (>14 min per run; stopped) |
+| PC + manipulable exogeneity | 0.505 | **0.573** (sd 0.017) | — |
+| DeepSeek, real names | 0.31 (≈300 edges) | 0.785 | 0.850 |
+| DeepSeek, anonymised | 0.24 (≈420 edges) | 0.377 (3/10 empty; 0.538 on 7 valid, sd 0.24) | 0.776 (sd 0.14) |
+| Jev, real names | — | 0.699 | 0.720 |
+| Jev, anonymised | — | 0.467 (sd 0.07) | 0.478 |
+
+Paired against PC + exogeneity at 5000 rows: DeepSeek real **+0.212, 9/10,
+Wilcoxon p = 0.004**; DeepSeek anonymised −0.196, 3/10, p = 0.105; Jev real
+**+0.126, 9/10, p = 0.004**; Jev anonymised **−0.106, 0/10, p = 0.002**.
+
+Reading. (a) The advantage is the names: at 5000 rows anonymising costs Jev
+0.232 (0.699 → 0.467, all 10 lists valid) and DeepSeek 0.408 on the same 10
+lists with empty outputs scored 0 (0.785 → 0.377), or 0.247 against its 7
+valid anonymised outputs (0.538) — recall, not inference, on this benchmark. (b) From
+data alone neither model beats PC with one design assumption at a matched
+sample; Jev is reliably below it, DeepSeek below on average and unreliable
+(empty outputs; 111–181 edges for 57 true). (c) DeepSeek improves with rows
+(0.54 → 0.78 anonymised), Jev does not (0.47 → 0.48). (d) At the paper's
+300-row cap an LLM is a WORSE estimator than PC (per-experiment means of ~10
+rows read as shifts everywhere). Paper: one future-work sentence — a fair
+test of LLM priors needs systems whose names do not reveal the wiring.
+PC at all rows was stopped twice (once by a memory-pressure reap at 8
+workers, once by us at 2 workers after >14 min per run); 5000 rows is the
+paper's existing pooling-check cap.
+
+**10. Figure 2's selection-ceiling line — decision rule, fixed 2026-09-26
+BEFORE the new-seed scores were read.** Correction first: calling the static
+ranking "the weakest of the three ground-truth policies" (top of this
+section) holds on WT only. On LT the ranking BEATS the greedy set at k=30
+(0.483 vs 0.437) and k=45 (0.449 vs 0.435) and ties it at k=6 (0.239 vs
+0.249), as the oracle probe's item 3 already said. Rule: plot the RANKING
+(`rank_at_k`: ONE top-k set learned from 20 random contexts, averaged
+over 10 purchase orders — not 10 lists) on LT and the GREEDY+SWAP set on WT, at every
+budget — justified by the probe's context-dependence measurement (LT gain
+variation at the PC noise floor, so a ranking suffices; WT above it at k=7
+and k=21, so sets matter), not by which scores higher. Scored on the VPS at
+NEW PC seeds 200–208 with the corpus rule lists (`vps-ceiling-v2.jsonl`,
+both candidates at every budget, so the supplement can show the other).
+The first redraw (PR #2 on the paper repo, greedy everywhere, seeds 100–108)
+is superseded.
+
+*Item 10's result (VPS, seeds 200–208, `vps-ceiling-v2.jsonl`).* The rule
+held on the new seeds: LT ranking ≥ greedy at every budget (tie at k=45),
+WT greedy far above the ranking. Plotted line (policy − corpus rule mean):
+LT +0.071 / +0.045 / +0.030 (ranking; greedy +0.061 / +0.006 / +0.030),
+WT +0.122 / +0.136 / +0.115 (greedy; ranking +0.012 / +0.045 / +0.050).
+Selection headroom exists at every budget for PC at 300 rows and no arm
+reaches it anywhere (closest: loop at LT k=6, +0.037). Figure 2 redrawn in
+the paper repo's PR #2.
+
+**11. REFUTED: WT hubs do not complement each other through colliders**
+(2026-09-26, local/Accelerate, `hub-interaction.parquet`, $0). Proposed
+mechanism for item 10's chamber difference: PC orients an edge from a
+collider, which needs two varying parents of one sensor; LT's randomised
+sources supply them for free, WT's hubs (`load_in`, `load_out`, `hatch`,
+sharing most children) would need to be bought together. Pre-registered in
+chat: P1 WT hub-pair interaction > 0; P2 the gain appears as ORIENTED pair
+edges; P3 LT setting pairs sharing a child ≈ 0. Design: per pair, 30 random
+base lists of non-pair experiments (WT m=5, LT m=10), then base / +A / +B /
++A+B, interaction = F(AB) − F(A) − F(B) + F(base), directed F1 at 300 rows,
+seeds 0–8.
+
+| pair | interaction (directed F1) | oriented pair edges, interaction |
+|---|---|---|
+| WT load_in + load_out | **−0.018** (se 0.007, p=0.02) | −0.33 |
+| WT load_in + hatch | +0.001 (p=0.92) | −0.17 |
+| WT load_out + hatch | −0.004 (p=0.54) | −0.19 |
+| LT t_ir_1 + diode_ir_1 | **−0.017** (se 0.006, p=0.005) | +0.01 |
+| LT t_vis_1 + diode_vis_1 | +0.001 (p=0.79) | +0.06 |
+| LT osr_c + v_c | +0.009 (p=0.10) | −0.05 |
+
+P1 and P2 FAIL; P3 holds loosely (one LT pair substitutes). The hubs are
+substitutes, not complements, and PC barely sees their edges: of about 16
+true out-edges of a hub pair, about 12 are missed even with both bought
+(load_in + load_out: 12.6 missed at base, 11.6 with both). Item 10's
+per-chamber rule is unaffected — it rests on the measured context
+dependence, not on a mechanism — but NO mechanism may be stated for it, and
+the "visible without buying" story is NOT extended to the selection side.
+Knowing the wiring does not give the cause: effect sizes, functional form
+(`osr_*` act on noise, not means), shared-child redundancy, the WT session
+shift and the estimator all sit outside the graph.
+
+**Open.** ~~VPS/OpenBLAS pass of the PC + exogeneity estimator before any
+number enters the paper~~ — done 2026-09-26, see item 4. A direct refit of the coverage rate per
+estimator. FGES/BOSS with knowledge tiers (future work unless cheap).
+
+**Future work.** (1) A SEMI-SYNTHETIC test that separates structure from
+data: simulate from the true graphs with linear mechanisms and clean
+Gaussian noise, re-run the context-dependence measurement and the item-5
+moderator test. If WT stays context-dependent and LT does not, the graph's
+structure is the cause; if the difference vanishes, it is the real data
+(effect sizes, noise-acting mechanisms, the WT session shift). About a day.
+(2) Estimators that take the design knowledge inside the search (Tetrad
+FGES/BOSS with tiers; GIES with known targets). (3) LLM priors tested on a
+system whose variable names do not reveal the wiring (item 9).
 
 ## THE CONTRACT IS A FLOOR, AGAIN — SMALLER, AND ONLY AT THE CAP OF RECORD (2026-09-23, VPS/OpenBLAS, `runs/floor-rerun-{lt,wt}.parquet`, `runs/rescored-floor-rows{300,1500}*.parquet`, 200 cells / $6.71, pre-registered below)
 
