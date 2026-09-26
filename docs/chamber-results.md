@@ -186,7 +186,10 @@ of the estimator's gain on distinct variables:
 | WT @300 | +0.117 | **+0.0061** (se 0.0008) |
 | WT @1500 | +0.182 | **+0.0082** (se 0.0010) |
 
-Held. On WT the better estimator raises the coverage exchange rate by about
+Held on WT; on LT the slope is flat at 300 rows and slightly NEGATIVE at
+1500 (−0.0021, about 3σ), so "lifts every arm equally" is right at 300 rows
+only (item 7 finds the same cap split within LT). On WT the better estimator
+raises the coverage exchange rate by about
 half (0.0111 → ≈0.017 per variable at 300 rows, by addition — not yet fitted
 directly), which is why the rule's lead WIDENS there and shrinks on LT. Two
 chambers: a hypothesis the data fit, not a law.
@@ -252,13 +255,20 @@ the data after the search — defensible, but not the same as PC's
 constraint inside the search. The principled test is a search that takes
 the knowledge (Tetrad FGES/BOSS with tiers); until then do NOT write "the
 same fact helps both families". Plain GES is still the best LT estimator
-by level (0.65–0.68 at 1500 vs 0.56–0.57 for PC + exogeneity); PC +
-exogeneity is best on WT.
+by level (0.65–0.68 at 1500 vs 0.56–0.57 for PC + exogeneity). On WT PC +
+exogeneity beats plain and orient-only GES everywhere, but the post-hoc
+FLIP variant exceeds it in 5 of 6 WT cells (e.g. k=7 0.361 / 0.386 vs
+0.282 / 0.316; k=21 @300 0.450 vs 0.433) — PC + exogeneity is ahead only
+at k=21 @1500 (0.494 vs 0.438). "Best on WT" holds only among estimators
+that apply the knowledge inside the search.
 
 **9. Can a language model help in the ESTIMATION stage? Only through the
 names** (2026-09-26, ~$1.00 total; `prior-pc.parquet`,
 `llm-estimator-n10*.parquet`, `pc-5000.parquet`, `jev-estimator-n10.parquet`).
-LT k=30, the same 10 coverage-rule lists throughout. The register's warning
+Probe A: 30 coverage-rule lists per budget at LT k=6/30/45 (the corpus
+lists of items 3–4). Probe B and the Jev estimator: LT k=30, the first 10
+of those lists (seeds 0–9), so Probe A's baselines are 30-list means and
+Probe B's are 10-list means. The register's warning
 applied: the names are lexical ground truth on a depth-1 bipartite graph, so
 every LLM condition was run with REAL and ANONYMISED names (variables V01..
 in a per-design shuffled order, experiments `exp<i>_on_Vxx_<strength>`; an
@@ -266,10 +276,11 @@ automatic check found no original name in any anonymised prompt).
 
 *Probe A — Jev's name-only edge prior as PC background knowledge ($0,
 `runs/jev-probe-edges.json`, order verified: AUC 0.863 vs truth).* Forbidding
-the bottom half of pairs by prior on top of manipulable exogeneity: k=30
-0.501 → 0.534 @300, 0.560 → 0.613 @1500; k=45 0.494 → 0.530, 0.574 → 0.630.
-The same sparsity with the prior SHUFFLED loses 0.13–0.15, so the gain is
-content. Forbidding 80% hurts. By construction this is name knowledge.
+the bottom half of pairs by prior on top of manipulable exogeneity: k=6
+0.260 → 0.283 @300, 0.322 → 0.352 @1500; k=30 0.501 → 0.534, 0.560 → 0.613;
+k=45 0.494 → 0.530, 0.574 → 0.630 (+0.02 to +0.06, smallest at k=6). The
+same sparsity with the prior SHUFFLED loses 0.08–0.15 (0.08–0.12 at k=6),
+so the gain is content. Forbidding 80% hurts. By construction this is name knowledge.
 
 *Probe B — the model emits the graph from the per-experiment mean table*
 (production `build_adjacency_prompt` / `parse_adjacency_response`, DeepSeek
@@ -293,8 +304,10 @@ Paired against PC + exogeneity at 5000 rows: DeepSeek real **+0.212, 9/10,
 Wilcoxon p = 0.004**; DeepSeek anonymised −0.196, 3/10, p = 0.105; Jev real
 **+0.126, 9/10, p = 0.004**; Jev anonymised **−0.106, 0/10, p = 0.002**.
 
-Reading. (a) The advantage is the names: anonymising costs 0.23–0.25 at 5000
-rows for both models — recall, not inference, on this benchmark. (b) From
+Reading. (a) The advantage is the names: at 5000 rows anonymising costs Jev
+0.232 (0.699 → 0.467, all 10 lists valid) and DeepSeek 0.408 on the same 10
+lists with empty outputs scored 0 (0.785 → 0.377), or 0.247 against its 7
+valid anonymised outputs (0.538) — recall, not inference, on this benchmark. (b) From
 data alone neither model beats PC with one design assumption at a matched
 sample; Jev is reliably below it, DeepSeek below on average and unreliable
 (empty outputs; 111–181 edges for 57 true). (c) DeepSeek improves with rows
