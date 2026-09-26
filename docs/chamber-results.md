@@ -319,6 +319,21 @@ PC at all rows was stopped twice (once by a memory-pressure reap at 8
 workers, once by us at 2 workers after >14 min per run); 5000 rows is the
 paper's existing pooling-check cap.
 
+**10. Figure 2's selection-ceiling line — decision rule, fixed 2026-09-26
+BEFORE the new-seed scores were read.** Correction first: calling the static
+ranking "the weakest of the three ground-truth policies" (top of this
+section) holds on WT only. On LT the ranking BEATS the greedy set at k=30
+(0.483 vs 0.437) and k=45 (0.449 vs 0.435) and ties it at k=6 (0.239 vs
+0.249), as the oracle probe's item 3 already said. Rule: plot the RANKING
+(`rank_at_k`, 10 lists) on LT and the GREEDY+SWAP set on WT, at every
+budget — justified by the probe's context-dependence measurement (LT gain
+variation at the PC noise floor, so a ranking suffices; WT above it at k=7
+and k=21, so sets matter), not by which scores higher. Scored on the VPS at
+NEW PC seeds 200–208 with the corpus rule lists (`vps-ceiling-v2.jsonl`,
+both candidates at every budget, so the supplement can show the other).
+The first redraw (PR #2 on the paper repo, greedy everywhere, seeds 100–108)
+is superseded.
+
 **Open.** VPS/OpenBLAS pass of the PC + exogeneity estimator before any
 number enters the paper. A direct refit of the coverage rate per
 estimator. FGES/BOSS with knowledge tiers (future work unless cheap).
