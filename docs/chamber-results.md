@@ -325,7 +325,8 @@ ranking "the weakest of the three ground-truth policies" (top of this
 section) holds on WT only. On LT the ranking BEATS the greedy set at k=30
 (0.483 vs 0.437) and k=45 (0.449 vs 0.435) and ties it at k=6 (0.239 vs
 0.249), as the oracle probe's item 3 already said. Rule: plot the RANKING
-(`rank_at_k`, 10 lists) on LT and the GREEDY+SWAP set on WT, at every
+(`rank_at_k`: ONE top-k set learned from 20 random contexts, averaged
+over 10 purchase orders — not 10 lists) on LT and the GREEDY+SWAP set on WT, at every
 budget — justified by the probe's context-dependence measurement (LT gain
 variation at the PC noise floor, so a ranking suffices; WT above it at k=7
 and k=21, so sets matter), not by which scores higher. Scored on the VPS at
