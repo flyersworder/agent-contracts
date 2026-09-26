@@ -334,6 +334,15 @@ both candidates at every budget, so the supplement can show the other).
 The first redraw (PR #2 on the paper repo, greedy everywhere, seeds 100–108)
 is superseded.
 
+*Item 10's result (VPS, seeds 200–208, `vps-ceiling-v2.jsonl`).* The rule
+held on the new seeds: LT ranking ≥ greedy at every budget (tie at k=45),
+WT greedy far above the ranking. Plotted line (policy − corpus rule mean):
+LT +0.071 / +0.045 / +0.030 (ranking; greedy +0.061 / +0.006 / +0.030),
+WT +0.122 / +0.136 / +0.115 (greedy; ranking +0.012 / +0.045 / +0.050).
+Selection headroom exists at every budget for PC at 300 rows and no arm
+reaches it anywhere (closest: loop at LT k=6, +0.037). Figure 2 redrawn in
+the paper repo's PR #2.
+
 **11. REFUTED: WT hubs do not complement each other through colliders**
 (2026-09-26, local/Accelerate, `hub-interaction.parquet`, $0). Proposed
 mechanism for item 10's chamber difference: PC orients an edge from a
