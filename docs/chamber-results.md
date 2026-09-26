@@ -334,9 +334,51 @@ both candidates at every budget, so the supplement can show the other).
 The first redraw (PR #2 on the paper repo, greedy everywhere, seeds 100–108)
 is superseded.
 
+**11. REFUTED: WT hubs do not complement each other through colliders**
+(2026-09-26, local/Accelerate, `hub-interaction.parquet`, $0). Proposed
+mechanism for item 10's chamber difference: PC orients an edge from a
+collider, which needs two varying parents of one sensor; LT's randomised
+sources supply them for free, WT's hubs (`load_in`, `load_out`, `hatch`,
+sharing most children) would need to be bought together. Pre-registered in
+chat: P1 WT hub-pair interaction > 0; P2 the gain appears as ORIENTED pair
+edges; P3 LT setting pairs sharing a child ≈ 0. Design: per pair, 30 random
+base lists of non-pair experiments (WT m=5, LT m=10), then base / +A / +B /
++A+B, interaction = F(AB) − F(A) − F(B) + F(base), directed F1 at 300 rows,
+seeds 0–8.
+
+| pair | interaction (directed F1) | oriented pair edges, interaction |
+|---|---|---|
+| WT load_in + load_out | **−0.018** (se 0.007, p=0.02) | −0.33 |
+| WT load_in + hatch | +0.001 (p=0.92) | −0.17 |
+| WT load_out + hatch | −0.004 (p=0.54) | −0.19 |
+| LT t_ir_1 + diode_ir_1 | **−0.017** (se 0.006, p=0.005) | +0.01 |
+| LT t_vis_1 + diode_vis_1 | +0.001 (p=0.79) | +0.06 |
+| LT osr_c + v_c | +0.009 (p=0.10) | −0.05 |
+
+P1 and P2 FAIL; P3 holds loosely (one LT pair substitutes). The hubs are
+substitutes, not complements, and PC barely sees their edges: of about 16
+true out-edges of a hub pair, about 12 are missed even with both bought
+(load_in + load_out: 12.6 missed at base, 11.6 with both). Item 10's
+per-chamber rule is unaffected — it rests on the measured context
+dependence, not on a mechanism — but NO mechanism may be stated for it, and
+the "visible without buying" story is NOT extended to the selection side.
+Knowing the wiring does not give the cause: effect sizes, functional form
+(`osr_*` act on noise, not means), shared-child redundancy, the WT session
+shift and the estimator all sit outside the graph.
+
 **Open.** VPS/OpenBLAS pass of the PC + exogeneity estimator before any
 number enters the paper. A direct refit of the coverage rate per
 estimator. FGES/BOSS with knowledge tiers (future work unless cheap).
+
+**Future work.** (1) A SEMI-SYNTHETIC test that separates structure from
+data: simulate from the true graphs with linear mechanisms and clean
+Gaussian noise, re-run the context-dependence measurement and the item-5
+moderator test. If WT stays context-dependent and LT does not, the graph's
+structure is the cause; if the difference vanishes, it is the real data
+(effect sizes, noise-acting mechanisms, the WT session shift). About a day.
+(2) Estimators that take the design knowledge inside the search (Tetrad
+FGES/BOSS with tiers; GIES with known targets). (3) LLM priors tested on a
+system whose variable names do not reveal the wiring (item 9).
 
 ## THE CONTRACT IS A FLOOR, AGAIN — SMALLER, AND ONLY AT THE CAP OF RECORD (2026-09-23, VPS/OpenBLAS, `runs/floor-rerun-{lt,wt}.parquet`, `runs/rescored-floor-rows{300,1500}*.parquet`, 200 cells / $6.71, pre-registered below)
 
