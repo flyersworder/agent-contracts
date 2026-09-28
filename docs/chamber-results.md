@@ -96,6 +96,138 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## THE COVERAGE LAW'S SIZE MISS WAS MOSTLY CALIBRATION; AT 300 ROWS AN ARM-SPECIFIC ENTRY-CHOICE TERM REMAINS, AT 1500 ROWS THE LAW IS EXACT (2026-09-28, local/Accelerate, `runs/probe-cc-*`, $0, PRE-REGISTERED in `docs/superpowers/specs/2026-09-28-coverage-curve-prereg.md`, commit `d7151dc`; verdict **B at the primary setting, narrowly**)
+
+**What prompted it.** A co-author's review of the paper's coverage-law check
+(Table 3 / Fig. 3) at the main setting (DeepSeek, PC at 300 rows). Two things
+held up and one did not:
+
+- **Direction holds.** Every resolved arm contrast has the predicted sign.
+  Fitting measured on predicted gaps across rows (bootstrap over purchase
+  lists, one draw shared by all contrasts using an arm and by both caps), the
+  slope is **1.70 [1.34, 2.03]** on the 10 DeepSeek 300-row rows and **1.18
+  [0.63, 1.73]** without LT k=30 — so it is not one point. Rows with Δv ≈ 0
+  (LT 6, WT 7, WT 14) are consistency checks, not tests.
+- **Size does not, at 300 rows**: DeepSeek's light-tunnel gaps are ~2x the
+  prediction (slope 1.97 [1.56, 2.41]); at 1500 rows 0.81 [0.68, 0.94]; GLM at
+  300 rows 0.63, wide.
+- The co-author's table averaged DeepSeek and GLM at LT 30. Their coverage gaps
+  differ (−4.8 vs −2.8 variables), so the average mixes two predictions and
+  hid a real miss: DeepSeek team − loop −0.051 against −0.022 predicted, Welch
+  interval [−0.063, −0.038]. Per-row Welch and per-row bootstrap intervals
+  agree to 0.001; the bootstrap is needed only for the pooled slope.
+
+**Ruled out before the probe ($0):**
+
+1. **A team penalty beyond coverage.** F1 ~ coverage + arm within each
+   setting's own lists: every arm effect includes zero once coverage is held
+   (DeepSeek LT 30 team vs loop −0.012 ± 0.017). The gaps are coverage gaps.
+2. **Out-degree and strength weighting of coverage.** Replacing "distinct
+   variables" by "true out-edges reachable" makes the DeepSeek 300-row fit
+   worse (slope 3.8); counting only mid/strong interventions changes nothing.
+   The team does not drop high-degree variables — its edge coverage falls in
+   proportion to its variable count.
+3. **The old calibration was unrepresentative.** The paper's rate is one
+   straight line through LLM-free lists at ~11, 15, ~21 and 30 variables —
+   none at 26–29, where the arms operate — and the two low-coverage rule lists
+   score ABOVE random lists of similar coverage (0.344 at 11 variables vs
+   ~0.30 for random lists at 13–16), which flattens the line.
+
+**The probe.** 720 LLM-free lists covering EXACTLY m variables (random
+variables, random entries; reference always included and counted): LT k=30 at
+m = 13..30 and k=45 at m = 25..30, 30 per level. Scored on this Mac beside the
+DeepSeek LLM lists re-scored locally and GLM (already Accelerate), 9 PC seeds,
+both caps. The law's prediction = mean over each arm's lists of curve(coverage)
+— it never sees an arm's F1.
+
+**The coverage curve** (random lists, LT k=30, mean F1):
+
+| variables | 13 | 15 | 17 | 19 | 21 | 23 | 25 | 27 | 28 | 29 | 30 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 300 rows | 0.308 | 0.295 | 0.306 | 0.324 | 0.357 | 0.358 | 0.373 | 0.388 | 0.405 | 0.402 | 0.414 |
+| 1500 rows | 0.253 | 0.258 | 0.292 | 0.318 | 0.363 | 0.371 | 0.387 | 0.416 | 0.432 | 0.438 | 0.441 |
+
+Flat at the bottom at 300 rows, steady through the middle, **diminishing
+returns near full coverage** (28–30) at both caps. Local rate over 22–28
+variables ≈ 0.0065 at 300 rows (paper: 0.0045) and ≈ 0.011 at 1500 (paper:
+0.0131).
+
+**The law, old vs calibrated** (pooled slope, bootstrap 95%; 1 = size right):
+
+| | old rate | calibrated curve | pre-registered verdict |
+|---|---|---|---|
+| DeepSeek, 300 rows (primary) | 2.02 [1.66, 2.38] | **1.38 [1.04, 1.83]** | **B** (CI above 1, lower bound 1.04) |
+| GLM, 300 rows | 0.67 [−0.16, 1.44] | 0.45 [−0.11, 1.10] | A (contains 1, wide) |
+| DeepSeek, 1500 rows | 0.79 [0.66, 0.93] | **1.01 [0.81, 1.23]** | A |
+| GLM, 1500 rows | 0.92 [0.61, 1.23] | **1.06 [0.68, 1.52]** | A |
+
+(The analysis output's "line" column refits a straight line on the NEW lists —
+DeepSeek 300 rows 1.24 [1.00, 1.49] — which shows the new calibration data,
+not the curve's shape, does most of the work. The old-rate column above uses
+the paper's constants on the same locally scored contrasts.)
+
+**What is left at 300 rows is arm-specific entry choice.** LLM lists sit above
+the curve at their own coverage — DeepSeek LT 30 **+0.022 [+0.017, +0.026]**,
+GLM LT 30 **+0.029 [+0.024, +0.035]**, DeepSeek LT 45 +0.010 [+0.003, +0.017]
+— and at 1500 rows they do not (−0.004, +0.007, −0.015). The term differs by
+arm, and which arm gains more depends on the vendor:
+
+| 300 rows, above the curve | loop | team | varsplit |
+|---|---|---|---|
+| DeepSeek LT 30 | **+0.031** | +0.011 | +0.019 |
+| DeepSeek LT 45 | +0.014 | +0.010 | +0.012 |
+| GLM LT 30 | +0.018 | **+0.029** | +0.020 |
+
+DeepSeek's loop out-chooses its team by 0.020 (± ~0.011), which is exactly the
+residual team − loop miss (−0.051 measured vs −0.031 from coverage); GLM's
+team out-chooses its loop (borderline), which is why GLM's gaps come in BELOW
+the curve (0.45). Random lists choose variables uniformly, so the term is
+about WHICH ENTRIES are bought (strengths, which variables get the extra
+slots), not which variables — untested. For scale, the coverage rule's own
+preference for mid/strong entries is worth about 0.01 over plain maximum
+coverage at 30 variables (0.424 vs 0.412; random lists at 30: 0.414).
+
+**The calibrated law.**
+ΔF1(A−B) ≈ [mean g(v) over A's lists − mean g(v) over B's lists] + (b_A − b_B),
+with g the coverage curve of chance-chosen lists at the same budget and cap,
+and b the arm's entry-choice term: ≈ 0 for every arm at 1500 rows, 0.01–0.03
+and arm × vendor specific at 300 rows. Linear shorthand over the arms' range:
+r_local × Δv + (b_A − b_B).
+
+**What this changes.**
+
+- **The law is right about the mechanism and, calibrated where the arms
+  operate, right about the size once PC has enough rows** (1.01 and 1.06 at
+  1500 rows). "Coverage explains most of the gap" should be restated per cap:
+  direction everywhere; size at 1500 rows; at 300 rows a second-order
+  entry-choice term of up to 0.02 enters and can push either way.
+- **The earlier "LLM lists earn ~2x per variable" reading was a calibration
+  artefact**, and so was the apparent 1500-row LLM bonus under a straight
+  line (+0.014 / +0.032, gone against the curve). The real LLM effect is a
+  level shift at 300 rows only.
+- **The headline is untouched and gets a reason**: the rule wins or ties
+  because coverage is the first-order lever; entry-choice bonuses are small,
+  cap-dependent and inconsistent across arms, too small to buy back lost
+  coverage.
+- **"Above the LLM-free curve" means above chance-chosen lists of equal
+  coverage — never above the rule**, which always covers all 30 variables.
+
+**Caveats.** Verdict B is narrow (lower bound 1.04) and GLM points the other
+way. Light tunnel only: the WT law is unchanged and has no curve. Everything
+is scored on Accelerate — internally consistent, absolute F1 not the paper's
+VPS values. The probe was registered after the co-author review, not planned
+in advance; say so in the paper.
+
+**Files.** Lists `runs/probe-cc-lists.parquet`; re-scores
+`runs/probe-cc-lists-rescored-rows{300,1500}*`,
+`runs/probe-cc-ds-rescored-rows{300,1500}*` (sources `runs/probe-cc-src/`),
+old calibration lists `runs/probe-cc-oldcal-rescored-rows{300,1500}*`; output
+`runs/probe-cc-analysis.txt`. Code
+`evaluation/chamber_pipeline/coverage_curve_probe.py` (analysis unchanged
+since `d7151dc`), figure `evaluation/chamber_pipeline/coverage_curve_figure.py`.
+
+---
+
 ## THE HEADROOM IS IN THE ESTIMATOR, AND HOW MUCH OF THE GRAPH IS VISIBLE WITHOUT BUYING DECIDES WHETHER A BETTER ESTIMATOR WIDENS THE ARM GAPS (2026-09-25/26, local/Accelerate, `runs/estimator-probe-2026-09-25/`, $0 except item 9's ~$1 of LLM calls; FOLLOW-UP, NOT PRE-REGISTERED — chosen after the main results; items 4–5 CONFIRMED on the VPS/OpenBLAS 2026-09-26, the rest Accelerate only)
 
 Prompted by a review of Figure 2's dashed "oracle" line, which turned out to
