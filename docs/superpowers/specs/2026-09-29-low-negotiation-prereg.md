@@ -3,7 +3,7 @@
 **Amended 2026-09-29, before any cell ran: scope widened from LT k=30 to all six
 Figure 2 budgets (the co-author's main claims rest on all of them); GLM is not
 re-run and keeps its high-effort negotiation, disclosed.** **Amended again
-2026-09-29 15:30, before any GLM cell ran: GLM LT k=30 is re-run too (see
+2026-09-29 15:09 (commit e5a83eb), before any GLM cell ran: GLM LT k=30 is re-run too (see
 Amendment 2).**
 
 **Registered 2026-09-29, before any cell below was run.** Code: branch
@@ -91,7 +91,7 @@ this run's team against the corpus team at `high` -- is a **cross-day**
 comparison (different day, routing and price) and is reported as such, for
 coverage and F1, never as a verdict.
 
-## Amendment 2 (2026-09-29 15:30, before any GLM cell ran): GLM re-run
+## Amendment 2 (2026-09-29 15:09 (commit e5a83eb), before any GLM cell ran): GLM re-run
 
 The DeepSeek sweep is in progress (LT 144/270, WT 193/450 at 15:06); no GLM
 cell under this registration has run. **Scope widened to GLM**, so that no
