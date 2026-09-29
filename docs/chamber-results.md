@@ -146,7 +146,7 @@ Coverage alone accounts for about 66% of the mean gap at 300 rows and 84% at
   top of it, and the residual shrinks with more rows. The WT residual is the
   same size as the LT one (+0.01 to +0.03 at 300 rows).
 - **Every arm is below the rule, and every arm sits at or above random lists
-  of equal coverage** (point estimates; four of five intervals exclude zero at
+  of equal coverage** (point estimates; three of five intervals exclude zero at
   300 rows, one at 1500). The LLM buys slightly better entries than chance but
   loses more by covering fewer variables.
 - The 1500-row verdict is B by 0.001 on the lower bound; state it as "close
