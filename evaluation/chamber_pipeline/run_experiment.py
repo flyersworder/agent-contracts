@@ -226,7 +226,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--seeds",
         type=int,
         default=30,
-        help="Number of seeds (always range(N)). Default: 30. Custom-sweep only.",
+        help="Number of seeds: range(seed_start, seed_start + N). Default: 30. Custom-sweep only.",
+    )
+    parser.add_argument(
+        "--seed-start",
+        type=int,
+        default=0,
+        help=(
+            "First seed of the custom sweep (default 0). A replication on fresh seeds "
+            "shares no fallback or PC randomness with the run it replicates."
+        ),
     )
     parser.add_argument(
         "--configuration",
@@ -399,7 +408,7 @@ def _build_sweep_from_args(args: argparse.Namespace) -> SweepSpec:
         chambers=chambers,  # type: ignore[arg-type]
         budget_fractions=budgets,
         agent_names=agent_names,
-        seeds=tuple(range(args.seeds)),
+        seeds=tuple(range(args.seed_start, args.seed_start + args.seeds)),
         configuration=args.configuration,  # type: ignore[arg-type]
         pc_alpha=args.pc_alpha,
         cell_timeout_seconds=args.cell_timeout_seconds,
@@ -516,8 +525,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Chambers: {sweep.chambers}")
         print(f"Budget fractions: {sweep.budget_fractions}")
         print(f"Agents: {[s.name for s in sweep.selected_specs()]}")
-        seeds_max = max(sweep.seeds) if sweep.seeds else -1
-        print(f"Seeds: {len(sweep.seeds)} (range 0..{seeds_max})")
+        lo, hi = (min(sweep.seeds), max(sweep.seeds)) if sweep.seeds else (0, -1)
+        print(f"Seeds: {len(sweep.seeds)} (range {lo}..{hi})")
         print(f"Skipped cells (registry-incompatible): {len(cells) - len(compatible)}")
         return 0
 
