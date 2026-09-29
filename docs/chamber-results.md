@@ -96,6 +96,75 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## IN THE WIND TUNNEL, COVERAGE EXPLAINS ABOUT TWO THIRDS OF THE ARMS' GAP TO THE RULE AT 300 ROWS AND ABOUT 85% AT 1500; THE ARMS SIT SLIGHTLY ABOVE RANDOM LISTS OF EQUAL COVERAGE (2026-09-29, VPS/OpenBLAS, `runs-vps/cc/probe-wtcc-*`, $0, PRE-REGISTERED in `docs/superpowers/specs/2026-09-29-wt-coverage-curve-prereg.md`, commit `6a37079`; verdict **B at both caps**, predicted B at 300 and A at 1500)
+
+**What prompted it.** The light-tunnel probe below is post hoc. This is its
+out-of-sample test in the other chamber, registered before any WT list was
+scored. WT has 28 menu entries over 21 variables; 18 variables have one entry
+each and only `hatch` (3), `load_in` (3) and `load_out` (4) have more, so there
+is little room to overlap. k=21 (0.75 x 28, which happens to equal the variable
+count) is the only WT budget where arms fall measurably short of the rule
+(3.7-4.8 variables).
+
+**The probe.** 240 LLM-free lists at WT k=21 covering exactly m = 14..21
+variables, 30 per level, re-scored on the VPS (the corpus backend) at 9 PC
+seeds, both caps. The prediction for an arm is the mean over its lists of the
+interpolated curve at each list's coverage, minus the rule. It never sees an
+arm's F1. Arms are the five DeepSeek arms at WT k=21 in the corpus, clustered
+by distinct design. The informativeness check passed: curve(21) - curve(16) =
++0.048 [+0.032, +0.064] at 300 rows and +0.053 [+0.036, +0.069] at 1500.
+
+**The coverage curve** (random lists, WT k=21, mean F1):
+
+| variables | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | rule |
+|---|---|---|---|---|---|---|---|---|---|
+| 300 rows | 0.209 | 0.231 | 0.236 | 0.241 | 0.254 | 0.263 | 0.270 | 0.284 | 0.289 |
+| 1500 rows | 0.183 | 0.186 | 0.190 | 0.198 | 0.210 | 0.237 | 0.233 | 0.242 | 0.249 |
+
+**Arms: predicted gap to the rule (coverage alone), measured gap, residual**
+(95% bootstrap CI of the residual):
+
+| arm | designs | variables | 300: pred / meas | residual | 1500: pred / meas | residual |
+|---|---|---|---|---|---|---|
+| loop | 100 | 17.1 | -0.046 / -0.026 | +0.019 [+0.007, +0.032] | -0.048 / -0.038 | +0.010 [-0.001, +0.021] |
+| single call | 30 | 16.5 | -0.051 / -0.038 | +0.013 [-0.003, +0.030] | -0.048 / -0.041 | +0.007 [-0.004, +0.018] |
+| team | 132 | 16.2 | -0.053 / -0.042 | +0.010 [-0.000, +0.021] | -0.056 / -0.056 | +0.000 [-0.008, +0.009] |
+| varsplit | 124 | 17.3 | -0.043 / -0.029 | +0.014 [+0.003, +0.026] | -0.046 / -0.038 | +0.008 [-0.002, +0.018] |
+| blackboard | 50 | 16.3 | -0.052 / -0.027 | +0.025 [+0.011, +0.038] | -0.056 / -0.041 | +0.015 [+0.002, +0.027] |
+
+**Primary: mean residual over the five arms.** 300 rows **+0.016 [+0.008,
++0.025]**, verdict B (predicted B). 1500 rows **+0.008 [+0.001, +0.015]**,
+verdict B (predicted A; the upper bound misses the registered ±0.015
+equivalence margin by 0.0001, and the lower bound clears zero by 0.001).
+Coverage alone accounts for about 66% of the mean gap at 300 rows and 84% at
+1500; the team's residual at 1500 rows is 0.000.
+
+**What this changes.**
+
+- **The light-tunnel pattern replicates out of sample in the other chamber**:
+  coverage is the first-order term, a positive entry-choice residual sits on
+  top of it, and the residual shrinks with more rows. The WT residual is the
+  same size as the LT one (+0.01 to +0.03 at 300 rows).
+- **Every arm is below the rule, and every arm sits at or above random lists
+  of equal coverage** (point estimates; four of five intervals exclude zero at
+  300 rows, one at 1500). The LLM buys slightly better entries than chance but
+  loses more by covering fewer variables.
+- The 1500-row verdict is B by 0.001 on the lower bound; state it as "close
+  to exact at 1500 rows", not as exact.
+
+**Caveats.** The arm gaps were seen before registration (the curve was not).
+The team and varsplit points are high-effort negotiation cells; the all-low
+re-run (`2026-09-29-low-negotiation-prereg.md`) will replace them. DeepSeek
+only.
+
+**Files.** Lists `runs/probe-wtcc-lists.parquet`; VPS re-scores
+`runs-vps/cc/probe-wtcc-lists-rescored-rows{300,1500}*`; output
+`runs/probe-wtcc-analysis.txt`. Code
+`evaluation/chamber_pipeline/wt_coverage_curve_probe.py` (analysis frozen at
+`6a37079`).
+
+---
+
 ## THE COVERAGE LAW'S SIZE MISS WAS MOSTLY CALIBRATION; AT 300 ROWS AN ARM-SPECIFIC ENTRY-CHOICE TERM REMAINS, AT 1500 ROWS THE LAW IS EXACT (2026-09-28, local/Accelerate, `runs/probe-cc-*`, $0, PRE-REGISTERED in `docs/superpowers/specs/2026-09-28-coverage-curve-prereg.md`, commit `d7151dc`; verdict **B at the primary setting, narrowly**)
 
 **What prompted it.** A co-author's review of the paper's coverage-law check
