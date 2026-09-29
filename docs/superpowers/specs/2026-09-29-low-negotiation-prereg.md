@@ -2,7 +2,9 @@
 
 **Amended 2026-09-29, before any cell ran: scope widened from LT k=30 to all six
 Figure 2 budgets (the co-author's main claims rest on all of them); GLM is not
-re-run and keeps its high-effort negotiation, disclosed.**
+re-run and keeps its high-effort negotiation, disclosed.** **Amended again
+2026-09-29 15:30, before any GLM cell ran: GLM LT k=30 is re-run too (see
+Amendment 2).**
 
 **Registered 2026-09-29, before any cell below was run.** Code: branch
 `low-negotiation-rerun` (`--coordination-effort`, the environment-carried
@@ -88,6 +90,40 @@ selection fallbacks; certification. The effect of negotiation effort itself --
 this run's team against the corpus team at `high` -- is a **cross-day**
 comparison (different day, routing and price) and is reported as such, for
 coverage and F1, never as a verdict.
+
+## Amendment 2 (2026-09-29 15:30, before any GLM cell ran): GLM re-run
+
+The DeepSeek sweep is in progress (LT 144/270, WT 193/450 at 15:06); no GLM
+cell under this registration has run. **Scope widened to GLM**, so that no
+team result in the paper keeps high-effort negotiation. This supersedes "GLM is
+not re-run" above; nothing else in the DeepSeek design changes.
+
+- **Design:** `openrouter/z-ai/glm-5.3-flash`, LT k=30 (30/59) only -- the one
+  budget the corpus has GLM team data for. Arms `llm_pc`, `team`,
+  `team_varsplit`, interleaved, n=50 per arm (seeds 0-49, the corpus n), 150
+  cells, `runs/lownego-glm-lt.parquet`. `--selection-effort low
+  --coordination-effort low`, timeout 7200 s, 4 workers, on the VPS beside the
+  DeepSeek sweeps. `one_shot` makes no coordination call and is not re-run.
+- **Routing:** the pinned `_GLM_PROVIDER_ORDER` (GMICloud, Novita, Z.AI),
+  unchanged since the corpus run of 2026-09-12. Re-probed 2026-09-29: all three
+  up and fp8; output prices $0.30 / $0.28 / $0.50 per M (were $0.375 / $0.44 /
+  $0.50). Different providers from DeepSeek's CoreWeave, so the two runs do not
+  share endpoint throughput.
+- **Before launch:** a 3-cell probe (one per arm), checked for
+  `reasoning_effort == "low"` and certification.
+- **Cost:** about $0.50 (corpus GLM cells $0.0025-0.0031); about 2 h.
+- **Analysis:** as P1 and P2, same-day, on the interval, both caps, re-scored
+  on the VPS, clustered by distinct design. **P1-GLM:** `team - loop`, 300
+  rows. **P2-GLM:** `team_varsplit - team`, 300 rows. Both 1500-row contrasts
+  reported beside them. Secondary to the DeepSeek P1, which stays primary.
+- **Predictions, from the GLM corpus at `high` negotiation** (VPS re-score,
+  Welch 95% CI, 50 designs per arm): at 300 rows `team - loop` -0.009
+  [-0.021, +0.004] and `varsplit - team` +0.007 [-0.004, +0.018], both ties;
+  at 1500 rows -0.035 [-0.049, -0.020] and +0.029 [+0.015, +0.043], both
+  resolved. Distinct variables: loop 25.2, team 22.3, varsplit 24.8. We
+  predict the same pattern at `low`: ties at 300 rows, a team loss and a
+  varsplit repair at 1500 rows. No GLM multi-agent arm resolves above the
+  same-day loop at either cap (P3 extended to GLM).
 
 ## Pre-committed use in the paper
 
