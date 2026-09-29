@@ -36,7 +36,9 @@ from .coverage_two_chamber_figure import (
 )
 
 SINGLE_C, MULTI_C, INK2, GRID = "#2a78d6", "#eb6834", "#52514e", "#d9d8d3"
-MARKER = {"lt": "o", "wt": "D"}
+#: Print-safe: shape = single vs multi-agent, fill = chamber (hollow = WT, the
+#: pre-registered test). Colour only reinforces the shape.
+SHAPE = {False: "s", True: "^"}
 CAPS = (300, 1500)
 
 
@@ -81,18 +83,20 @@ def main(out: Path) -> None:
         ax.axhline(0, color=GRID, lw=0.6, zorder=0)
         ax.axvline(0, color=GRID, lw=0.6, zorder=0)
         for p in pts:
-            col = MULTI_C if p["arm"] in MULTI else SINGLE_C
+            multi = p["arm"] in MULTI
+            col = MULTI_C if multi else SINGLE_C
+            hollow = p["chamber"] == "wt"
             ax.plot(
-                [p["pred"], p["pred"]], [p["lo"], p["hi"]], color=col, lw=0.7, alpha=0.7, zorder=2
+                [p["pred"], p["pred"]], [p["lo"], p["hi"]], color=INK2, lw=0.6, alpha=0.6, zorder=2
             )
             ax.plot(
                 p["pred"],
                 p["meas"],
-                MARKER[p["chamber"]],
-                ms=5,
-                mfc=col,
-                mec="white",
-                mew=0.5,
+                SHAPE[multi],
+                ms=5.5,
+                mfc="white" if hollow else col,
+                mec=col if hollow else INK2,
+                mew=1.3 if hollow else 0.5,
                 zorder=3,
             )
         for ch, name in (("lt", "LT"), ("wt", "WT")):
@@ -117,18 +121,25 @@ def main(out: Path) -> None:
         arrowprops={"arrowstyle": "-", "lw": 0.5, "color": INK2},
     )
     handles = [
-        Line2D([], [], marker="s", ls="", mfc=SINGLE_C, mec=SINGLE_C, ms=5, label="single agent"),
-        Line2D([], [], marker="s", ls="", mfc=MULTI_C, mec=MULTI_C, ms=5, label="multi-agent"),
-        Line2D([], [], marker="o", ls="", mfc=INK2, mec=INK2, ms=5, label="light tunnel, k=30"),
+        Line2D(
+            [], [], marker="s", ls="", mfc=SINGLE_C, mec=INK2, mew=0.5, ms=5.5, label="single agent"
+        ),
+        Line2D(
+            [], [], marker="^", ls="", mfc=MULTI_C, mec=INK2, mew=0.5, ms=5.5, label="multi-agent"
+        ),
+        Line2D(
+            [], [], marker="o", ls="", mfc=INK2, mec=INK2, ms=5, label="filled: light tunnel, k=30"
+        ),
         Line2D(
             [],
             [],
-            marker="D",
+            marker="o",
             ls="",
-            mfc=INK2,
+            mfc="white",
             mec=INK2,
-            ms=4.5,
-            label="wind tunnel, k=21 (pre-registered)",
+            mew=1.3,
+            ms=5,
+            label="hollow: wind tunnel, k=21 (pre-registered)",
         ),
     ]
     fig.suptitle("F1 gap to the coverage rule", fontsize=8.5, x=0.08, ha="left")
