@@ -60,7 +60,10 @@ socket.setdefaulttimeout(_DEFAULT_SOCKET_TIMEOUT_SECONDS)
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-from .agents import SELECTION_EFFORT_ENV  # noqa: E402 (intentional: after socket.setdefaulttimeout)
+from .agents import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
+    COORDINATION_EFFORT_ENV,
+    SELECTION_EFFORT_ENV,
+)
 from .checkpoint import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
     append_record_jsonl,
     done_cell_keys,
@@ -295,8 +298,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Override the `reasoning.effort` sent on every SELECTION call "
             "(the loop, the single call, the scouts). The corpus ran at 'low'; "
-            "coordination calls stay at 'high' regardless. Recorded per cell "
-            "in `reasoning_effort`."
+            "coordination calls are set separately by --coordination-effort. "
+            "Recorded per cell in `reasoning_effort`."
+        ),
+    )
+    parser.add_argument(
+        "--coordination-effort",
+        choices=("low", "medium", "high"),
+        default=None,
+        help=(
+            "Override the `reasoning.effort` sent on every COORDINATION call "
+            "(negotiate/revise, reconcile, critique). The corpus ran at 'high'; "
+            "'low' matches the loop, which makes no coordination call. Recorded "
+            "per cell in `reasoning_effort`."
         ),
     )
     parser.add_argument(
@@ -471,6 +485,17 @@ def apply_selection_effort(effort: str | None) -> None:
         os.environ[SELECTION_EFFORT_ENV] = effort
 
 
+def apply_coordination_effort(effort: str | None) -> None:
+    """Publish the coordination-effort override to this process and its workers.
+
+    Same contract as `apply_selection_effort`; None leaves "high" in force.
+    """
+    if effort is None:
+        os.environ.pop(COORDINATION_EFFORT_ENV, None)
+    else:
+        os.environ[COORDINATION_EFFORT_ENV] = effort
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point. Returns process exit code (0 success / 1 error)."""
     parser = build_arg_parser()
@@ -622,6 +647,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.flush()
 
     apply_selection_effort(args.selection_effort)
+    apply_coordination_effort(args.coordination_effort)
     new_records = run_sweep(
         sweep,
         llm=llm,
