@@ -44,7 +44,7 @@ class RecordingLLM:
         messages: list[dict[str, str]],
         max_tokens: int | None = None,
         temperature: float | None = None,
-        **_: Any,
+        **extra: Any,
     ) -> dict:
         idx = len(self.calls)
         self.calls.append(
@@ -54,6 +54,7 @@ class RecordingLLM:
                 "idx": idx,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
+                "effort": (extra.get("extra_body") or {}).get("reasoning", {}).get("effort"),
             }
         )
         self.total_tokens += 100  # stands in for _CountingLLM's accumulation

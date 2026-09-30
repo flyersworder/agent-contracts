@@ -92,6 +92,12 @@ class TestArgParser:
         sweep = _build_sweep_from_args(args)
         assert sweep.seeds == (0, 1, 2, 3, 4)
 
+    def test_seed_start_offsets_the_range(self) -> None:
+        parser = build_arg_parser()
+        args = parser.parse_args(["--seeds", "3", "--seed-start", "100", "--out", "x.parquet"])
+        sweep = _build_sweep_from_args(args)
+        assert sweep.seeds == (100, 101, 102)
+
     def test_pc_alpha_propagates(self) -> None:
         parser = build_arg_parser()
         args = parser.parse_args(["--pc-alpha", "0.01", "--out", "x.parquet"])

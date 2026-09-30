@@ -60,7 +60,10 @@ socket.setdefaulttimeout(_DEFAULT_SOCKET_TIMEOUT_SECONDS)
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-from .agents import SELECTION_EFFORT_ENV  # noqa: E402 (intentional: after socket.setdefaulttimeout)
+from .agents import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
+    COORDINATION_EFFORT_ENV,
+    SELECTION_EFFORT_ENV,
+)
 from .checkpoint import (  # noqa: E402 (intentional: after socket.setdefaulttimeout)
     append_record_jsonl,
     done_cell_keys,
@@ -223,7 +226,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--seeds",
         type=int,
         default=30,
-        help="Number of seeds (always range(N)). Default: 30. Custom-sweep only.",
+        help="Number of seeds: range(seed_start, seed_start + N). Default: 30. Custom-sweep only.",
+    )
+    parser.add_argument(
+        "--seed-start",
+        type=int,
+        default=0,
+        help=(
+            "First seed of the custom sweep (default 0). A replication on fresh seeds "
+            "shares no fallback or PC randomness with the run it replicates."
+        ),
     )
     parser.add_argument(
         "--configuration",
@@ -295,8 +307,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help=(
             "Override the `reasoning.effort` sent on every SELECTION call "
             "(the loop, the single call, the scouts). The corpus ran at 'low'; "
-            "coordination calls stay at 'high' regardless. Recorded per cell "
-            "in `reasoning_effort`."
+            "coordination calls are set separately by --coordination-effort. "
+            "Recorded per cell in `reasoning_effort`."
+        ),
+    )
+    parser.add_argument(
+        "--coordination-effort",
+        choices=("low", "medium", "high"),
+        default=None,
+        help=(
+            "Override the `reasoning.effort` sent on every COORDINATION call "
+            "(negotiate/revise, reconcile, critique). The corpus ran at 'high'; "
+            "'low' matches the loop, which makes no coordination call. Recorded "
+            "per cell in `reasoning_effort`."
         ),
     )
     parser.add_argument(
@@ -385,7 +408,7 @@ def _build_sweep_from_args(args: argparse.Namespace) -> SweepSpec:
         chambers=chambers,  # type: ignore[arg-type]
         budget_fractions=budgets,
         agent_names=agent_names,
-        seeds=tuple(range(args.seeds)),
+        seeds=tuple(range(args.seed_start, args.seed_start + args.seeds)),
         configuration=args.configuration,  # type: ignore[arg-type]
         pc_alpha=args.pc_alpha,
         cell_timeout_seconds=args.cell_timeout_seconds,
@@ -471,6 +494,17 @@ def apply_selection_effort(effort: str | None) -> None:
         os.environ[SELECTION_EFFORT_ENV] = effort
 
 
+def apply_coordination_effort(effort: str | None) -> None:
+    """Publish the coordination-effort override to this process and its workers.
+
+    Same contract as `apply_selection_effort`; None leaves "high" in force.
+    """
+    if effort is None:
+        os.environ.pop(COORDINATION_EFFORT_ENV, None)
+    else:
+        os.environ[COORDINATION_EFFORT_ENV] = effort
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point. Returns process exit code (0 success / 1 error)."""
     parser = build_arg_parser()
@@ -491,8 +525,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Chambers: {sweep.chambers}")
         print(f"Budget fractions: {sweep.budget_fractions}")
         print(f"Agents: {[s.name for s in sweep.selected_specs()]}")
-        seeds_max = max(sweep.seeds) if sweep.seeds else -1
-        print(f"Seeds: {len(sweep.seeds)} (range 0..{seeds_max})")
+        lo, hi = (min(sweep.seeds), max(sweep.seeds)) if sweep.seeds else (0, -1)
+        print(f"Seeds: {len(sweep.seeds)} (range {lo}..{hi})")
         print(f"Skipped cells (registry-incompatible): {len(cells) - len(compatible)}")
         return 0
 
@@ -622,6 +656,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.flush()
 
     apply_selection_effort(args.selection_effort)
+    apply_coordination_effort(args.coordination_effort)
     new_records = run_sweep(
         sweep,
         llm=llm,

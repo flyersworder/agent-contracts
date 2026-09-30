@@ -207,6 +207,26 @@ _NEGOTIATE_MAX_TOKENS = 32768  # short proposals in the team arm
 # be stated rather than inherited.
 _COORDINATION_REASONING_EFFORT = "high"
 
+# Run-level override of the coordination effort, carried in the environment for
+# the same reason as SELECTION_EFFORT_ENV (worker processes inherit it). "high"
+# above was chosen as a drift fix and never matched against the loop, which
+# makes no coordination call; the override exists so the multi-agent arms can
+# be re-run with every call at "low" (register: the unmatched negotiation
+# effort). It governs every call that reads `coordination_reasoning_effort()`:
+# negotiate / revise, reconcile, critique, and llm_only's adjacency call.
+COORDINATION_EFFORT_ENV = "CHAMBER_COORDINATION_REASONING_EFFORT"
+
+
+def coordination_reasoning_effort() -> str:
+    """The `reasoning.effort` sent on every coordination call for this process."""
+    value = os.environ.get(COORDINATION_EFFORT_ENV, _COORDINATION_REASONING_EFFORT)
+    if value not in _REASONING_EFFORTS:
+        raise ValueError(
+            f"{COORDINATION_EFFORT_ENV}={value!r} is not one of {'/'.join(_REASONING_EFFORTS)}"
+        )
+    return value
+
+
 # Rung 1's two scouts run the SAME prompt, so `seed` cannot decorrelate them:
 # `_llm_select_loop` uses it only for the fallback RNG reached on an off-menu
 # or duplicate response. On the happy path both scouts receive byte-identical
@@ -943,7 +963,7 @@ def llm_only_agent(
         # reasoning call and the one with a documented history of returning
         # empty content when reasoning consumed the budget, so leaving it to
         # track a provider default is the worst place to do so.
-        extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+        extra_body={"reasoning": {"effort": coordination_reasoning_effort()}},
     )
     # A degenerate all-zero emission -- the M4b failure mode, where the model
     # spends its budget on hidden reasoning and returns empty content -- is
@@ -1658,7 +1678,7 @@ def fan_in_agents(
             model=model,
             messages=build_reconcile_prompt(*chosen_by),
             max_tokens=_RECONCILE_MAX_TOKENS,
-            extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+            extra_body={"reasoning": {"effort": coordination_reasoning_effort()}},
         )
 
     all_chosen = [c for chosen in chosen_by for c in chosen]
@@ -2107,7 +2127,7 @@ def critique_agents(
             model=model,
             messages=build_critique_prompt(menu, budget, proposed),
             max_tokens=_RECONCILE_MAX_TOKENS,
-            extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+            extra_body={"reasoning": {"effort": coordination_reasoning_effort()}},
         )
     critique_text = _response_text(review) or ""
 
@@ -2202,7 +2222,7 @@ def team_agents(
                 # and the negotiation contributes noise instead of a split --
                 # the degeneracy `_SCOUT_TEMPERATURE` exists to prevent.
                 temperature=_SCOUT_TEMPERATURE,
-                extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+                extra_body={"reasoning": {"effort": coordination_reasoning_effort()}},
             )
         return _parse_name_list(proposal, menu)
 
@@ -2220,7 +2240,7 @@ def team_agents(
                 # and the negotiation contributes noise instead of a split --
                 # the degeneracy `_SCOUT_TEMPERATURE` exists to prevent.
                 temperature=_SCOUT_TEMPERATURE,
-                extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+                extra_body={"reasoning": {"effort": coordination_reasoning_effort()}},
             )
         return _parse_name_list(revised, menu)
 
@@ -2384,7 +2404,7 @@ def team_agents(
             model=model,
             messages=build_reconcile_prompt(chosen_a, chosen_b),
             max_tokens=_RECONCILE_MAX_TOKENS,
-            extra_body={"reasoning": {"effort": _COORDINATION_REASONING_EFFORT}},
+            extra_body={"reasoning": {"effort": coordination_reasoning_effort()}},
         )
 
     seen: set[str] = set()
