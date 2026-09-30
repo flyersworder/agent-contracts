@@ -101,6 +101,15 @@ result: tokens by call kind per arm for both runs, and the note that a
 today's regime. Revised cost about $1 (varsplit cells about $0.008), about
 3-4 h; 6 workers.
 
+**Correction (2026-09-30, after launch).** The amendment above was committed
+at 08:56:12 when only FOUR varsplit probe cells had finished: seed 100 and
+seeds 102-104. The table's ranges come from those four. Seed 101 finished at
+08:59:19, after the commit and after the launch (08:56:22), and fits the same
+pattern: negotiate_propose 15,716, negotiate_revise 32,136, select 15,900
+(GMICloud, `low`, ok). With it, the ranges over five cells are propose
+7,614-17,922, revise 8,141-32,136, select 10,384-15,900; select stays inside
+the first run's range (max 23,218). Nothing in the decision changes.
+
 ## What this does not change
 
 The first run's P3 verdict stands whatever this shows. The abstract's
