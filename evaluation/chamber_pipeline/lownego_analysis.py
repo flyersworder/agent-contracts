@@ -39,13 +39,13 @@ CONTRASTS = (
 )
 
 
-def designs(stem: str, rows: int, chamber: str, var_of) -> pd.DataFrame:  # type: ignore[no-untyped-def]
-    """One row per (budget, arm, distinct design); OpenBLAS asserted."""
+def designs(stem: str, rows: int, chamber: str, var_of, effort: str = "low") -> pd.DataFrame:  # type: ignore[no-untyped-def]
+    """One row per (budget, arm, distinct design); OpenBLAS and the recorded effort asserted."""
     b = pd.read_parquet(f"{stem}-rows{rows}-bykey.parquet")
     assert b["blas_backend"].unique().tolist() == ["scipy-openblas"], b["blas_backend"].unique()
     c = pd.read_parquet(f"{stem}-rows{rows}.parquet")
     c = c[(c["status"] == "ok") & c["chosen_experiments"].notna() & (c["chamber"] == chamber)]
-    assert (c["reasoning_effort"] == "low").all(), c["reasoning_effort"].unique()
+    assert (c["reasoning_effort"] == effort).all(), c["reasoning_effort"].unique()
     d = c.drop_duplicates(["budget_k", "agent_name", "design_key"])[
         ["budget_k", "agent_name", "design_key", "chosen_experiments"]
     ]
@@ -113,5 +113,40 @@ def main(stem: str, chamber: str) -> None:
         print()
 
 
+EFFORT_MARGIN = 0.02
+
+
+def effort_verdict(lo: float, hi: float) -> str:
+    """2026-09-30-negotiation-effort-prereg: equivalence on the interval."""
+    if lo >= -EFFORT_MARGIN and hi <= EFFORT_MARGIN:
+        return "inert" + (" (nonzero, below the margin)" if lo > 0 or hi < 0 else "")
+    if lo > EFFORT_MARGIN or hi < -EFFORT_MARGIN:
+        return "effort matters"
+    return "not established"
+
+
+def effort_test(stem_high: str, stem_low: str) -> None:
+    """team@high - team@low at LT k=30, both caps, with the manipulation check's inputs."""
+    for rows in CAPS:
+        h = designs(stem_high, rows, "lt", lt_probe._var, effort="high,low")
+        lo_ = designs(stem_low, rows, "lt", lt_probe._var)
+        x = h.loc[h["agent_name"] == "team", "f1"].to_numpy()
+        y = lo_.loc[lo_["agent_name"] == "team", "f1"].to_numpy()
+        diff, lo, hi, mde = welch(x, y)
+        print(
+            f"team@high - team@low {rows:>4} rows  {diff:+.4f} [{lo:+.4f}, {hi:+.4f}]  "
+            f"MDE {mde:.3f}  n={len(x)},{len(y)}  -> {effort_verdict(lo, hi)}"
+        )
+        if rows == CAPS[0]:
+            dv, vlo, vhi, _ = welch(
+                h.loc[h["agent_name"] == "team", "nv"].to_numpy(dtype=float),
+                lo_.loc[lo_["agent_name"] == "team", "nv"].to_numpy(dtype=float),
+            )
+            print(f"distinct variables high - low  {dv:+.2f} [{vlo:+.2f}, {vhi:+.2f}]")
+
+
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "lt")
+    if sys.argv[1] == "effort":
+        effort_test(sys.argv[2], sys.argv[3])
+    else:
+        main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "lt")

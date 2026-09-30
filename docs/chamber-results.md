@@ -205,9 +205,35 @@ same-day test of negotiation effort is below.
 
 **Same-day negotiation effort test** (`2026-09-30-negotiation-effort-prereg.md`,
 `de03e31`; team at LT k=30, coordination `high` vs `low`, n=50 each, margin
-±0.02): [PENDING, running]. Noticed after launch, not registered:
-certification failures concentrate at `high` (4 of 17 cells vs 0 of 21 at
-`low` at 12:24).
+±0.02; 2026-09-30 09:45-17:52, $5.05, 100/100 ok, 50 distinct designs per
+setting): **inert at both caps**, as predicted. `team@high - team@low`
+**-0.006 [-0.015, +0.004]** at 300 rows (p=0.23) and **-0.003 [-0.014,
++0.008]** at 1500 (`runs-vps/lownego/negoeffort-analysis.txt`). Distinct
+variables 23.44 vs 23.40 (+0.04 [-0.50, +0.58]). Manipulation check passed:
+negotiation + reconcile tokens median 66k vs 35k (Mann-Whitney p = 2e-16);
+selection 142k vs 138k.
+
+*Why deliberation does nothing here* (post hoc, from the recorded diagnostics
+and the prompt): the negotiation is asked to avoid duplicate EXPERIMENTS
+("Any experiment you both named is wasted duplication"), and it does so
+completely at both efforts (0 duplicate experiments; contested claims 3.7 vs
+3.6). But LT has several experiments per variable, and both scouts still buy
+the same VARIABLE at another strength 6.6 times per cell at both efforts,
+which is the team's whole coverage deficit. More reasoning answers the
+question it is asked, already solved at `low`; it cannot answer the one it is
+not. Varsplit, which partitions by variable in code, is the variable-level
+version and ties the loop. Untested: a negotiation prompt that names variable
+duplication (its ceiling is varsplit).
+
+*Certification, noticed after launch, not registered:* 11 of 50 `high` cells
+are uncertified against 1 of 50 `low` (Fisher p = 0.004); negotiation
+failures 8 vs 1. In every uncertified cell, and in no certified one, the
+aggregator's reconcile call overran its grant of 1.5 x 11,427 = 17,140 tokens
+(uncertified median 19,374, max 25,324; certified `high` max 17,115; `low`
+certified max 11,773). The scouts are not involved. It is a provisioning miss
+the certificate caught: at `high` the reconcile call reasons about twice as
+long (median 11.8k vs 6.2k among certified cells) with a heavier tail. The
+calibration's effort level was not checked.
 
 **What this changes.**
 
