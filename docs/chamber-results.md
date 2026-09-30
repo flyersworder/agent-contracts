@@ -96,6 +96,141 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## WITH EVERY CALL AT `low`, THE TEAM STILL LOSES WHERE IT GIVES UP COVERAGE AND VARSPLIT STILL REPAIRS IT; "NO MULTI-AGENT ARM RESOLVES ABOVE THE LOOP" FAILS IN 4 OF 28 CONTRASTS, NONE OF WHICH SURVIVES MULTIPLICITY, AND THE ONE REPLICATED DOES NOT HOLD (2026-09-29/30, VPS/OpenBLAS, `runs-vps/lownego/`, $20.97, PRE-REGISTERED in `docs/superpowers/specs/2026-09-29-low-negotiation-prereg.md` (`e5ae71b`, amended `d143f59`, `e5a83eb`) and `2026-09-30-glm-varsplit-replication-prereg.md` (`1caf756`, amended `bc035b0`, corrected `9a69a8d`); verdicts **P1 holds, P2 holds, P3 falsified, P4 below random**)
+
+**What prompted it.** A co-author found that every multi-agent cell in the
+corpus records `reasoning_effort = "high,low"`: selection at `low` like the
+loop, but the negotiate / revise / reconcile calls at `high` (pinned in
+`ac386f1`, 2026-08-23, as a drift fix, never checked against the loop, never
+disclosed). No team cell had ever run with coordination at `low`. This run
+re-measures every topology contrast in Figure 2 with every call at `low`
+(`--coordination-effort low`, commit `e5ae71b`).
+
+**Design.** DeepSeek `flash-0731`, `llm_pc`, `team` and `team_varsplit`
+interleaved, LT k = 6 / 30 / 45 (n=30) and WT k = 7 / 14 / 21 (n=50): 720
+cells, 2026-09-29 10:06 to 2026-09-30 07:51, $19.33. GLM `glm-5.3-flash` at LT
+k=30, the same three arms, n=50: 150 cells, $0.27 (Amendment 2). Every cell
+`ok`, every cell `reasoning_effort = "low"`, 0 retries. Re-scored on the VPS
+at 9 PC seeds and both caps; contrasts over distinct designs (every arm 30 or
+50 designs except the LT k=6 loop, 29), 95% Welch CI, unequal-n MDE
+(`evaluation/chamber_pipeline/lownego_analysis.py`, `7838374`).
+
+**Primary and registered contrasts (DeepSeek unless marked):**
+
+| setting | team - loop 300 / 1500 | varsplit - team 300 / 1500 | varsplit - loop 300 / 1500 |
+|---|---|---|---|
+| LT 6 | +0.006 / **+0.023** [+0.002, +0.043] | +0.001 / -0.012 | +0.007 / +0.011 |
+| **LT 30 (P1, P2)** | **-0.040** [-0.051, -0.028] / **-0.040** [-0.054, -0.027] | **+0.034** [+0.022, +0.046] / **+0.047** [+0.034, +0.061] | -0.005 / +0.007 |
+| LT 45 | -0.008 / -0.008 | **+0.012** [+0.004, +0.021] / +0.006 | +0.004 / -0.002 |
+| WT 7 | **+0.017** [+0.001, +0.034] / +0.014 | -0.014 / -0.017 | +0.003 / -0.003 |
+| WT 14 | **-0.028** [-0.044, -0.012] / **-0.018** [-0.031, -0.005] | +0.017 / **+0.015** [+0.000, +0.029] | -0.011 / -0.003 |
+| WT 21 | **-0.019** [-0.036, -0.002] / +0.002 | **+0.024** [+0.007, +0.041] / **+0.021** [+0.005, +0.036] | +0.005 / **+0.022** [+0.008, +0.037] |
+| GLM LT 30 | -0.010 / **-0.027** [-0.042, -0.013] | **+0.021** [+0.010, +0.031] / **+0.031** [+0.017, +0.045] | **+0.011** [+0.001, +0.021] / +0.003 |
+
+Bold = the interval excludes zero; only those intervals are shown. P1:
+p = 1e-8 / 3e-7; P2: p = 7e-7 / 3e-9.
+
+- **P1 holds.** The team loses to the loop at LT k=30 with every call at
+  `low`, by -0.040 at both caps (the corpus with `high` negotiation: -0.051).
+- **P2 holds.** Varsplit repairs it at LT k=30, both caps, both vendors.
+- **P3 is falsified.** Of the 28 multi-agent - loop intervals (DeepSeek 6
+  budgets x 2 arms x 2 caps, GLM 1 x 2 x 2), four exclude zero on the
+  positive side: DeepSeek LT 6 team @1500 (+0.023, p=0.035), WT 7 team @300
+  (+0.017, p=0.043), WT 21 varsplit @1500 (+0.022, p=0.0021) and GLM LT 30
+  varsplit @300 (+0.011, p=0.036). **None survives Bonferroni over the 28**
+  (0.05/28 = 0.0018; WT 21 misses by 0.0003). Four positive exclusions
+  against about 0.7 expected under a zero effect (Poisson P(>=4) = 0.006
+  assuming independence, which overstates the evidence: the intervals share
+  arms and caps) suggest small real edges at some settings without
+  identifying which. Median power across the 28 is 28% to detect 0.01 and
+  78% to detect 0.02, so such edges resolve in some runs and not others.
+- **P4: at WT k=7 the loop is below random** at 300 rows (-0.020 [-0.035,
+  -0.005]; team - random -0.003, varsplit - random -0.016), against the
+  corpus's random designs on the same backend. The team's WT 7 win is a win
+  over a loop below random, not a team advantage. At 1500 rows the loop ties
+  random (+0.001). At LT k=6, 1500 rows, the loop also ties random (+0.011
+  [-0.014, +0.036]) while the team sits above it (+0.033 [+0.010, +0.057]).
+- **Predictions** (registered, 300 rows): team - loop below 0 at LT 30 (yes),
+  LT 45 (**no**: tie, -0.008) and WT 21 (yes); ties at LT 6 (yes), WT 7
+  (**no**: team above) and WT 14 (**no**: team loses); P3 holds everywhere
+  (**no**).
+
+**Coverage accounts for the robust contrasts.** Distinct variables at LT
+k=30: loop 28.0, team 23.7, varsplit 27.9. Against the random-list curve
+(`runs-vps/cc/probe-cc-lists-rescored`), coverage alone predicts team - loop
+-0.033 / -0.045 (measured -0.040 / -0.040) and varsplit - team +0.030 /
++0.045 (measured +0.034 / +0.047). GLM: predicted -0.015 / -0.023 (measured
+-0.010 / -0.027) and +0.020 / +0.030 (measured +0.021 / +0.031). At WT k=21
+varsplit covers 17.7 variables against the loop's 16.6, and the WT curve
+predicts +0.011 / +0.014 for varsplit - loop (measured +0.005 / +0.022). At LT 6 and WT 7
+every arm covers 5.9-6.8 variables; the differences there are selection, not
+coverage.
+
+**Against the coverage rule** (corpus rule designs, same backend): no arm is
+above the rule at LT 30, LT 45 or any WT budget, at either cap; gaps -0.001
+to -0.061 (GLM LT 30: -0.020 to -0.083). At LT k=6 every arm is above it at
+300 rows (+0.031 to +0.038) and the team and varsplit at 1500, where the rule
+has no coverage advantage (all arms cover about 6 variables) — the k=6
+caveat already in the results text.
+
+**GLM replication** (seeds 100-199, n=100 per arm, 2026-09-30, $0.77, 200/200
+ok). Primary, varsplit - loop at 300 rows: **-0.005 [-0.012, +0.003]**,
+p=0.21, MDE 0.010 → **not replicated** (predicted; the point estimate is just
+below the predicted 0 to +0.011). Pooled over both days (150 per arm, two days
+stated): +0.001 [-0.005, +0.007]. Coverage: varsplit 24.9 variables, loop
+25.2; coverage alone predicts -0.003. 1500 rows: [PENDING, re-score running].
+**Regime change, disclosed before launch:** GMICloud's GLM negotiation calls
+reasoned 4-6x longer than the day before at the same pinned `low` (median
+propose 7.9k vs 1.3k tokens, revise 6.9k vs 2.0k; selection 10.5k vs 10.6k),
+so the verdict is on varsplit under that regime. The GLM LT 30 exception is
+therefore one unreplicated interval.
+
+**Descriptive.** Uncertified multi-agent cells: 2 of 480 DeepSeek (LT 30 team
+seed 3, WT 14 team seed 47), 0 of 100 GLM, 0 of 100 in the replication (the
+corpus with `high` negotiation: 7 of 40 LT 30 team cells). Selection fallbacks
+at LT k=30 are 5 / 16 / 10 per 30 cells (loop / team / varsplit; the corpus
+5 and 3 per 30 for team and varsplit), 14 / 18 / 20 at LT 45, 1-12 per 50 on
+WT. Negotiation tokens at `low` are a quarter to a half of those at `high` (team
+median, LT 6: 14k vs 31k; WT 7: 7.9k vs 32.9k).
+
+**Cross-day, description only.** Against the corpus at `high` negotiation,
+every team and varsplit arm moves by at most 0.015 F1 and 0.8 distinct
+variables, the same size as the loop's own drift with unchanged settings (up
+to 0.016 F1, 0.5 variables; today's loop reasoned longer, 144k output tokens
+at LT 30 vs about 102k). At WT k=7 the corpus already had a positive
+multi-agent exception (varsplit - loop +0.018 [+0.002, +0.034] at 300 rows);
+at LT k=45 the corpus's resolved team loss (-0.016) is a tie here. The
+same-day test of negotiation effort is below.
+
+**Same-day negotiation effort test** (`2026-09-30-negotiation-effort-prereg.md`,
+`de03e31`; team at LT k=30, coordination `high` vs `low`, n=50 each, margin
+±0.02): [PENDING, running]. Noticed after launch, not registered:
+certification failures concentrate at `high` (4 of 17 cells vs 0 of 21 at
+`low` at 12:24).
+
+**What this changes.**
+
+- **The paper's first claims stand under matched effort**: the team loses
+  where it gives up coverage, varsplit repairs it, no arm beats the rule
+  wherever coverage is at stake, and coverage predicts the size of the
+  robust gaps.
+- **"No multi-agent arm resolves above the loop at any budget" must go**; the
+  abstract's "no multi-agent arm beats the loop robustly" survives, because
+  no exception survives multiplicity and the one replicated did not hold.
+  Outside the coverage-driven settings, topology differences are within
+  about ±0.02 and not stably resolved at n=30-50.
+- **Figure 2's team and varsplit points and every table row using them move
+  to this run** (pre-committed); the corpus's high-negotiation cells become a
+  robustness check labelled with their effort.
+
+**Files.** `runs-vps/lownego/lownego-{lt,wt,glm-lt,glm-rep}*` (re-scores
+`-rescored-rows{300,1500}*`), probes `lownego-probe-{lt,wt}`,
+`lownego-glm-probe`, `lownego-glm-rep-probe{,2}`; output
+`runs-vps/lownego/lownego-ds-analysis.txt`. Code `lownego_analysis.py`,
+`--coordination-effort` (`e5ae71b`), `--seed-start` (`797c6b0`).
+
+---
+
 ## IN THE WIND TUNNEL, COVERAGE EXPLAINS ABOUT TWO THIRDS OF THE ARMS' GAP TO THE RULE AT 300 ROWS AND ABOUT 85% AT 1500; THE ARMS SIT SLIGHTLY ABOVE RANDOM LISTS OF EQUAL COVERAGE (2026-09-29, VPS/OpenBLAS, `runs-vps/cc/probe-wtcc-*`, $0, PRE-REGISTERED in `docs/superpowers/specs/2026-09-29-wt-coverage-curve-prereg.md`, commit `6a37079`; verdict **B at both caps**, predicted B at 300 and A at 1500)
 
 **What prompted it.** The light-tunnel probe below is post hoc. This is its
