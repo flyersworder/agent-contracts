@@ -71,6 +71,36 @@ and +0.004 at 1500 (0.36 more distinct variables for varsplit, at the
 first run's own F1-per-variable slopes, 0.0066 at 300 and 0.0123 at 1500,
 which match the nine-arm corpus line, +0.0066 and +0.0121).
 
+## Amendment (2026-09-30, before any replication cell ran): GMICloud changed overnight
+
+The pre-launch checks passed as written: GMICloud, Novita and Z.AI unchanged
+in price and precision (fp8), and a 2-cell probe (seed 100) with both cells
+ok, at `low`, varsplit certified. But the varsplit probe cell's negotiation
+calls produced 25,360 tokens, against at most about 3,900 over the first
+run's 50 varsplit cells. Four more varsplit probe cells (seeds 101-104,
+`runs/lownego-glm-rep-probe2.parquet`) confirm it is systematic, not one cell:
+
+| call kind | first run, median (max) | today, 5 probe cells |
+|---|---|---|
+| negotiate_propose | 1,284 (1,591) | 7,614-17,922 |
+| negotiate_revise | 2,012 (2,344) | 8,141-15,634 |
+| select | 10,560 (23,218) | 10,384-10,883 |
+
+Selection is unchanged, so the loop is unaffected. Negotiation, at the same
+pinned `low` effort, the same model id and the same provider (every probe
+cell was served by GMICloud), now reasons 5-10x longer. Code is unchanged
+apart from `--seed-start`. Cause unknown (provider-side).
+
+**Decision: run as registered, unchanged, and report this beside the result.**
+The replication therefore compares the loop with a varsplit whose
+negotiation stage reasons much longer than it did in the first run, which is
+exactly the kind of between-day change the "another day" rule exists to
+expose. The decision rules and the prediction stand. Reported with the
+result: tokens by call kind per arm for both runs, and the note that a
+"replicated" or "not replicated" verdict here is a verdict on varsplit under
+today's regime. Revised cost about $1 (varsplit cells about $0.008), about
+3-4 h; 6 workers.
+
 ## What this does not change
 
 The first run's P3 verdict stands whatever this shows. The abstract's
