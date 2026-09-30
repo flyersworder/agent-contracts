@@ -178,7 +178,8 @@ ok). Primary, varsplit - loop at 300 rows: **-0.005 [-0.012, +0.003]**,
 p=0.21, MDE 0.010 → **not replicated** (predicted; the point estimate is just
 below the predicted 0 to +0.011). Pooled over both days (150 per arm, two days
 stated): +0.001 [-0.005, +0.007]. Coverage: varsplit 24.9 variables, loop
-25.2; coverage alone predicts -0.003. 1500 rows: [PENDING, re-score running].
+25.2; coverage alone predicts -0.003. 1500 rows: -0.008 [-0.018, +0.003], p=0.15
+(pooled over both days -0.004 [-0.013, +0.004]): a tie at both caps.
 **Regime change, disclosed before launch:** GMICloud's GLM negotiation calls
 reasoned 4-6x longer than the day before at the same pinned `low` (median
 propose 7.9k vs 1.3k tokens, revise 6.9k vs 2.0k; selection 10.5k vs 10.6k),
