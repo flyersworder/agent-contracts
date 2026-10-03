@@ -214,6 +214,53 @@ def exo() -> None:
     print("rule gain range", round(gains.min(), 3), round(gains.max(), 3))
     print("MDE range", round(min(mdes), 3), round(max(mdes), 3))
     print("\n".join(lines[:-1]))
+    tex = probe / "exo-table-rows.tex"
+    tex.write_text("\n".join(lines[:-1]) + "\n")
+    print(f"rows written to {tex}; mde range for the caption above")
+
+    # Moderator (PR #3's S2 paragraph): each list's gain on the distinct
+    # variables it covers, with a fixed effect per budget, per chamber and cap.
+    import statsmodels.formula.api as smf
+
+    from evaluation.chamber_pipeline import wt_menu_taxonomy as wtt
+    from evaluation.chamber_pipeline.oracle_probe import _load
+
+    wt_nodes = _load("wt")[3]
+    lists = pd.concat(
+        [
+            des[~des["agent_name"].isin(TEAM_ARMS)][
+                ["chamber", "budget_k", "design_key", "chosen_experiments"]
+            ]
+        ]
+        + [
+            design_frame(f"lownego-{ch}-rescored-rows300").query("agent_name in @TEAM_ARMS")[
+                ["chamber", "budget_k", "design_key", "chosen_experiments"]
+            ]
+            for ch in ("lt", "wt")
+        ]
+    ).drop_duplicates(["chamber", "design_key"])
+    lists["cov"] = [
+        mf.lt_variable_count(s)
+        if ch == "lt"
+        else len({wtt.experiment_variable(x, wt_nodes) for x in s.split(",")})
+        for ch, s in zip(lists["chamber"], lists["chosen_experiments"], strict=True)
+    ]
+    w = (
+        d.drop_duplicates(["chamber", "design_key", "rows", "mode"])
+        .pivot_table(index=["chamber", "design_key", "rows"], columns="mode", values="f1")
+        .reset_index()
+    )
+    w["gain"] = w["exo"] - w["plain"]
+    w = w.merge(lists[["chamber", "design_key", "cov", "budget_k"]], on=["chamber", "design_key"])
+    for rows in (300, 1500):
+        x = w[w["rows"] == rows]
+        fit = smf.ols("gain ~ cov*chamber + C(budget_k)", x).fit()
+        out = [f"interaction p={fit.pvalues['cov:chamber[T.wt]']:.1e}"]
+        for ch in ("lt", "wt"):
+            xc = x[x["chamber"] == ch]
+            rr = smf.ols("gain ~ cov + C(budget_k)", xc).fit()
+            out.append(f"{ch} slope {rr.params['cov']:+.4f} p={rr.pvalues['cov']:.1e} n={len(xc)}")
+        print(f"moderator {rows}: " + " | ".join(out))
 
 
 # ---------------------------------------------------------------- covlaw
