@@ -172,3 +172,8 @@ negotiation; this amendment closes it, as Amendment 2 intended.
   the GLM WT k=14 `team - loop` row of the cross-vendor figure and the
   supplement's GLM wind-tunnel table. The `xv-glm-wt` high-effort cells are
   then no longer used in the paper.
+
+**Amendment 3 outcome (2026-10-03):** P1-GLM-WT held. team - loop -0.000
+[-0.016, +0.016] at 300 rows, -0.008 [-0.022, +0.006] at 1500: a tie at both
+caps; team does not resolve above the same-day loop. Detail in
+`docs/chamber-results.md`.
