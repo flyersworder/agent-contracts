@@ -42,4 +42,6 @@ EOF2
 for R in 300 1500; do
   SRC=runs/rule-lt30.parquet job "rescored-rule-lt30-mac-rows$R" --pc-max-rows "$R"
 done
+# ... and under GES at 1500 rows, for the ring's GES contrast against the rule (S2).
+SRC=runs/rule-lt30.parquet job rescored-rule-lt30-mac-ges-rows1500 --estimator ges --pc-max-rows 1500
 echo ALLDONE
