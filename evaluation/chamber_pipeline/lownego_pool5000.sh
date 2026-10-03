@@ -5,6 +5,8 @@
 # rule and random rows (runs/rescored-t4-{k30,ends}-{pc5000,jcireg5000}),
 # because PC at 5000 rows takes ~190 s per design-seed on the 4-core VPS.
 # Input: the VPS sweep's lownego-lt.parquet, copied to runs-vps/lownego/.
+# --allow-backend-mismatch: the source cells were scored on the VPS; every
+# number in the table is a Mac re-score, never the source's own F1.
 # Resumable: a job whose output exists is skipped.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -16,7 +18,7 @@ job() {  # job <out-stem> <rescore args...>
   if [ -f "runs/$out.parquet" ]; then echo "skip $out"; return; fi
   echo "start $out $(date +%H:%M:%S)"
   uv run python -m evaluation.chamber_pipeline.rescore "$SRC" --max-workers "$W" \
-    --pc-max-rows 5000 --out "runs/$out.parquet" "$@" > "runs/$out.log" 2>&1
+    --pc-max-rows 5000 --allow-backend-mismatch --out "runs/$out.parquet" "$@" > "runs/$out.log" 2>&1
   echo "done  $out $(date +%H:%M:%S)"
 }
 
