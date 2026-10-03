@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -52,7 +53,9 @@ from .jci import (
     run_jci_pc,
     session_ids,
 )
+from .menu_taxonomy import experiment_variable as lt_experiment_variable
 from .scoring import f1_edges, f1_skeleton, shd
+from .wt_menu_taxonomy import experiment_variable as wt_experiment_variable
 
 SELECTION_KEY_COLUMN = "selection_key"
 #: The ordered buy — the unit of re-scoring work, and the join key.
@@ -95,9 +98,41 @@ LT_CASE_STUDY_NODES: tuple[str, ...] = (
 #: One unit of re-scoring work: everything a worker process needs, as plain
 #: picklable data. A tuple rather than a dataclass so it crosses the process
 #: boundary without the worker importing anything this module owns.
-ESTIMATORS = ("pc", "jci_pc", "ges", "utigsp")
+ESTIMATORS = ("pc", "jci_pc", "ges", "utigsp", "pc_exo")
 OBSERVATIONAL_ENTRY = {"lt": "uniform_reference"}
 CONTEXT_MODES = ("variable", "regime", "session")
+
+
+def manipulable_variables(chamber: str, menu: Sequence[str], nodes: Sequence[str]) -> list[str]:
+    """The chamber variables some menu entry sets, in node order.
+
+    Design knowledge, not graph knowledge: the experimenter knows which knobs
+    the released experiments turn, whether or not a purchase list buys them.
+    `pc_exo` treats exactly these as exogenous (the assumption JCI makes for
+    its context variables).
+    """
+    if chamber == "lt":
+        targets = {lt_experiment_variable(name) for name in menu}
+    else:
+        targets = {wt_experiment_variable(name, list(nodes)) for name in menu}
+    return [node for node in nodes if node in targets]
+
+
+def exogeneity_knowledge(knobs: Sequence[str]) -> Any:
+    """causal-learn background knowledge forbidding every edge INTO a knob.
+
+    Patterns are regexes over node names (`run_pc` passes the names through
+    only when background knowledge is given); names are escaped so a knob is
+    matched exactly.
+    """
+    from causallearn.utils.PCUtils.BackgroundKnowledge import (  # type: ignore[import-untyped]
+        BackgroundKnowledge,
+    )
+
+    pattern = "^(" + "|".join(re.escape(k) for k in knobs) + ")$"
+    return BackgroundKnowledge().add_forbidden_by_pattern(".*", pattern)
+
+
 _DesignTask = tuple[str, str, str, list[str], int, float, int | None, str, str]
 
 #: Columns a source frame must carry to be re-scorable.
@@ -239,6 +274,13 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
     else:
         pooled = pool_experiment_data(experiment_dfs, nodes)
         context = []
+    knowledge = (
+        exogeneity_knowledge(
+            manipulable_variables(chamber, list(adapter.available_experiments()), nodes)
+        )
+        if estimator == "pc_exo"
+        else None
+    )
     records: list[dict[str, Any]] = []
     for pc_seed in range(n_pc_seeds):
         if estimator == "jci_pc":
@@ -248,6 +290,17 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
         elif estimator == "ges":
             # Score-based, no alpha: `pc_alpha` does not apply (`ges.py`).
             predicted = run_ges(pooled, nodes, seed=pc_seed, max_rows=pc_max_rows)
+        elif estimator == "pc_exo":
+            # Plain PC on the same pool, with no edge allowed INTO a variable
+            # the menu can set (`manipulable_variables`).
+            predicted = run_pc(
+                pooled,
+                nodes,
+                alpha=pc_alpha,
+                seed=pc_seed,
+                max_rows=pc_max_rows,
+                background_knowledge=knowledge,
+            )
         else:
             predicted = run_pc(pooled, nodes, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows)
         records.append(
@@ -577,7 +630,9 @@ def main(argv: Iterable[str] | None = None) -> None:
             "'ges': score-based BIC search on the same pool (ges.py), the "
             "chamber authors' observational method; 'utigsp': never pooled — "
             "observational + one sample per experiment (igsp.py), LT only, "
-            "core-20 by construction; --pc-max-rows caps EACH sample."
+            "core-20 by construction; --pc-max-rows caps EACH sample; "
+            "'pc_exo': plain PC on the same pool with no edge into any "
+            "variable the menu can set (manipulable_variables)."
         ),
     )
     parser.add_argument(

@@ -512,3 +512,57 @@ def test_rescore_stamps_alpha_on_every_row() -> None:
     )
     out = rescore_selections(cells, n_pc_seeds=1, progress_every=0, pc_alpha=0.01)
     assert set(out["rescore_pc_alpha"]) == {0.01}
+
+
+def test_manipulable_variables_are_the_menu_targets() -> None:
+    """The exogenous set is what the MENU can set, not the true graph's roots:
+    29 LT knobs and 21 WT knobs (the supplement's S2 counts), and every one is
+    a chamber node."""
+    from evaluation.chamber_pipeline.oracle_probe import _load
+    from evaluation.chamber_pipeline.rescore import manipulable_variables
+
+    for chamber, expected in (("lt", 29), ("wt", 21)):
+        menu, _, _, nodes = _load(chamber)
+        knobs = manipulable_variables(chamber, menu, nodes)
+        assert len(knobs) == expected
+        assert set(knobs) <= set(nodes)
+        assert len(set(knobs)) == len(knobs)
+
+
+def test_pc_exo_draws_no_edge_into_a_manipulable_variable() -> None:
+    """`adj[i, j] = 1` means i -> j, so the constraint is an all-zero column
+    for every knob; plain PC on the same pool does draw such edges, so the
+    assertion is not vacuous."""
+    from evaluation.chamber_pipeline.inference import pool_experiment_data, run_pc
+    from evaluation.chamber_pipeline.oracle_probe import _load
+    from evaluation.chamber_pipeline.rescore import exogeneity_knowledge, manipulable_variables
+
+    menu, data, _, nodes = _load("lt")
+    names = [
+        "uniform_reference",
+        "uniform_red_strong",
+        "uniform_t_ir_1_mid",
+        "uniform_pol_1_strong",
+    ]
+    pooled = pool_experiment_data([data[n] for n in names], nodes)
+    knobs = manipulable_variables("lt", menu, nodes)
+    plain = run_pc(pooled, nodes, seed=0, max_rows=1500)
+    exo = run_pc(
+        pooled, nodes, seed=0, max_rows=1500, background_knowledge=exogeneity_knowledge(knobs)
+    )
+    assert plain[knobs].to_numpy().sum() > 0
+    assert exo[knobs].to_numpy().sum() == 0
+
+
+def test_rescore_can_score_with_pc_exo() -> None:
+    cells = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "status": ["ok"],
+            "chosen_experiments": ["uniform_reference,uniform_red_strong,uniform_t_ir_1_mid"],
+        }
+    )
+    out = rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="pc_exo")
+    assert set(out["rescore_estimator"]) == {"pc_exo"}
+    assert len(out) == 1 and 0.0 <= out["f1"].iloc[0] <= 1.0
