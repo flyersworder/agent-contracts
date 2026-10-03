@@ -4,7 +4,8 @@
 Figure 2 budgets (the co-author's main claims rest on all of them); GLM is not
 re-run and keeps its high-effort negotiation, disclosed.** **Amended again
 2026-09-29 15:09 (commit e5a83eb), before any GLM cell ran: GLM LT k=30 is re-run too (see
-Amendment 2).**
+Amendment 2).** **Amended a third time 2026-10-03, before any cell of it ran:
+GLM WT k=14 is re-run too (see Amendment 3).**
 
 **Registered 2026-09-29, before any cell below was run.** Code: branch
 `low-negotiation-rerun` (`--coordination-effort`, the environment-carried
@@ -132,3 +133,47 @@ contrasts at all six budgets (Figure 2's team and varsplit points and every
 table row that uses them), with every call at `low`, and the setup states
 the effort of every call kind. The corpus's high-negotiation cells become a
 robustness check, labelled with their effort.
+
+## Amendment 3 (2026-10-03, before any cell of it ran): GLM WT k=14 re-run
+
+**The omission.** Amendment 2 limited the GLM re-run to LT k=30, calling it
+"the one budget the corpus has GLM team data for". That was wrong: the corpus
+also holds 50 GLM `team` cells at WT k=14 against 50 GLM loop cells
+(`xv-glm-wt`, 2026-09-12, coordination at `high`), and the paper's
+cross-vendor figure used them. Found during the paper swap, 2026-10-03. It is
+the only team result in the main paper that still rests on high-effort
+negotiation; this amendment closes it, as Amendment 2 intended.
+
+- **Design:** `openrouter/z-ai/glm-5.3-flash`, WT k=14 (budget fraction 0.50),
+  arms `llm_pc` and `team`, interleaved, n=50 per arm (seeds 0-49, the corpus
+  n), 100 cells, `runs/lownego-glm-wt.parquet`. `--selection-effort low
+  --coordination-effort low`, timeout 7200 s, 4 workers, on the VPS. Code
+  unchanged since Amendment 2 (the sweep path; `rescore.py` gained only the
+  separate `pc_exo` estimator).
+- **Routing:** the pinned `_GLM_PROVIDER_ORDER` (GMICloud, Novita, Z.AI),
+  unchanged. Amendment 2's replication found GMICloud's negotiation calls
+  reasoning 4-6x longer one day later at the same pinned `low`; the loop
+  control runs the same day, interleaved, and negotiation tokens are reported
+  against the 2026-09-29 GLM run.
+- **Before launch:** a 2-cell probe (one per arm), checked for
+  `reasoning_effort == "low"` and certification.
+- **Cost:** about $0.10 (corpus GLM WT cells: $0.023 for 50 loop, $0.041 for
+  50 team); about 1 h.
+- **Analysis:** same-day, on the interval, both caps, re-scored on the VPS,
+  clustered by distinct design, Welch 95% CI, unequal-n MDE. **P1-GLM-WT:**
+  `team - loop` at 300 rows; the 1500-row contrast reported beside it.
+- **Prediction, from the GLM corpus at `high` negotiation** (re-score of
+  `xv-glm-wt`, Welch 95% CI, 50 designs per arm): `team - loop` +0.006
+  [-0.008, +0.019] at 300 rows and +0.003 [-0.012, +0.018] at 1500, both ties
+  (MDE 0.019 / 0.021). Distinct variables: loop 12.4, team 12.2. We predict a
+  tie at both caps at `low`: the interval contains zero, and `team` does not
+  resolve above the same-day loop (P3 extended).
+- **Use in the paper, pre-committed:** whatever it shows, this run replaces
+  the GLM WT k=14 `team - loop` row of the cross-vendor figure and the
+  supplement's GLM wind-tunnel table. The `xv-glm-wt` high-effort cells are
+  then no longer used in the paper.
+
+**Amendment 3 outcome (2026-10-03):** P1-GLM-WT held. team - loop -0.000
+[-0.016, +0.016] at 300 rows, -0.008 [-0.022, +0.006] at 1500: a tie at both
+caps; team does not resolve above the same-day loop. Detail in
+`docs/chamber-results.md`.

@@ -186,8 +186,24 @@ propose 7.9k vs 1.3k tokens, revise 6.9k vs 2.0k; selection 10.5k vs 10.6k),
 so the verdict is on varsplit under that regime. The GLM LT 30 exception is
 therefore one unreplicated interval.
 
+**GLM WT k=14** (Amendment 3, registered `ffa20da` before any cell; seeds
+0-49, n=50 per arm, 2026-10-03, $0.065, 100/100 ok, all 50 team cells
+certified, every call `low`; VPS re-score, 9 PC seeds). P1-GLM-WT, team -
+loop: **-0.000 [-0.016, +0.016]** at 300 rows (MDE 0.023), **-0.008
+[-0.022, +0.006]** at 1500 (MDE 0.019): a tie at both caps, as predicted
+from the corpus at `high` negotiation (+0.006 / +0.003). DeepSeek at the same
+budget: -0.028 / -0.018. Tokens: loop median 304 output tokens per cell (12
+Sep: 266), team negotiation median 1,487 (12 Sep, at `high`: 1,922); the
+2-cell probe's 17k-token loop cell is in the tail (max 18,423), not a regime
+change. This replaces the paper's high-effort GLM WT k=14 row; the
+multi-agent - loop count becomes 4 of 30 intervals above zero, none
+surviving Bonferroni over 30 (smallest corrected p 0.064). Files
+`runs-vps/lownego/lownego-glm-wt*`. A queued re-score lost ~50 min:
+`tmux has-session -t glmwt` matched the waiter's own session `glmwtrs`
+(prefix match); use `-t =NAME`.
+
 **Descriptive.** Uncertified multi-agent cells: 2 of 480 DeepSeek (LT 30 team
-seed 3, WT 14 team seed 47), 0 of 100 GLM, 0 of 100 in the replication (the
+seed 3, WT 14 team seed 47), 0 of 150 GLM (100 at LT 30, 50 at WT 14), 0 of 100 in the replication (the
 corpus with `high` negotiation: 7 of 40 LT 30 team cells). Selection fallbacks
 at LT k=30 are 5 / 16 / 10 per 30 cells (loop / team / varsplit; the corpus
 5 and 3 per 30 for team and varsplit), 14 / 18 / 20 at LT 45, 1-12 per 50 on
