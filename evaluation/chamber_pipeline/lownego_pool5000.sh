@@ -13,7 +13,7 @@ cd "$(dirname "$0")/../.."
 W=${W:-8}
 SRC=runs-vps/lownego/lownego-lt.parquet
 
-job() {  # job <out-stem> <rescore args...>
+job() {  # job <out-stem> <rescore args...>; later --pc-max-rows wins
   local out=$1; shift
   if [ -f "runs/$out.parquet" ]; then echo "skip $out"; return; fi
   echo "start $out $(date +%H:%M:%S)"
@@ -24,4 +24,11 @@ job() {  # job <out-stem> <rescore args...>
 
 job lownego-lt-jcireg5000 --estimator jci_pc --context regime
 job lownego-lt-pc5000 --estimator pc
+# The text compares the k=45 loop at 1500 and 5000 rows; score both here.
+uv run python - <<'EOF2'
+import pandas as pd
+c = pd.read_parquet("runs-vps/lownego/lownego-lt.parquet")
+c[(c.budget_k == 45) & (c.agent_name == "llm_pc")].to_parquet("runs/lownego-lt45-loop.parquet")
+EOF2
+SRC=runs/lownego-lt45-loop.parquet job lownego-lt45-loop-pc1500mac --estimator pc --pc-max-rows 1500
 echo ALLDONE

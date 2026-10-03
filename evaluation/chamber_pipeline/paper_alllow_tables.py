@@ -30,7 +30,12 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
-sys.path.insert(0, str(ROOT / "paper" / "aamas2027" / "figures"))
+_FIGURES = ROOT / "paper" / "aamas2027" / "figures"
+if not (_FIGURES / "make_figures.py").exists():
+    # The paper repo is private and nested; its contrast and MDE code is the
+    # one every paper number uses, so reuse it rather than copy it.
+    raise SystemExit(f"needs the paper repo checked out at {_FIGURES.parent}")
+sys.path.insert(0, str(_FIGURES))
 import make_figures as mf  # noqa: E402
 
 TEAM_ARMS = ("llm_pc", "team", "team_varsplit")
@@ -143,6 +148,10 @@ def pool5000() -> None:
             f"team - loop      {method:<6s} "
             + " ".join(f"{fmt(c)} [{c['lo']:+.3f},{c['hi']:+.3f}]" for c in cs)
         )
+    # The text's "loop falls from X at 1500 rows to Y at 5000": both on the Mac.
+    at1500 = mf.arm(design_frame("lownego-lt45-loop-pc1500mac", backend=acc), "llm_pc", "lt", 45)
+    at5000 = mf.arm(low["PC"], "llm_pc", "lt", 45)
+    print(f"loop LT45 PC: {at1500.mean():.3f} at 1500 rows -> {at5000.mean():.3f} at 5000 (Mac)")
 
 
 # ---------------------------------------------------------------- exo (PR #3)
@@ -199,11 +208,11 @@ def exo() -> None:
                 loop = e[e["agent_name"] == "llm_pc"]["f1"]
                 for a in ("team", "team_varsplit"):
                     c = mf.contrast(e[e["agent_name"] == a]["f1"], loop)
-                    mdes.append(c["mde"])
                     if c["d"] > c["mde"]:
                         above.append(("loop", a, ch, k, rows, round(c["d"], 3)))
-                    if a == "team":
+                    if a == "team":  # the only loop column the table shows
                         cells.append(fmt(c))
+                        mdes.append(c["mde"])
                 lines.append(f"{name} & {k} & {rows} & " + " & ".join(cells) + r" \\")
             lines.append(r"\addlinespace")
     print("resolved above (rule or loop):", above or "none")
