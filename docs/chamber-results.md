@@ -203,7 +203,7 @@ surviving Bonferroni over 30 (smallest corrected p 0.064). Files
 (prefix match); use `-t =NAME`.
 
 **Descriptive.** Uncertified multi-agent cells: 2 of 480 DeepSeek (LT 30 team
-seed 3, WT 14 team seed 47), 0 of 100 GLM, 0 of 100 in the replication (the
+seed 3, WT 14 team seed 47), 0 of 150 GLM (100 at LT 30, 50 at WT 14), 0 of 100 in the replication (the
 corpus with `high` negotiation: 7 of 40 LT 30 team cells). Selection fallbacks
 at LT k=30 are 5 / 16 / 10 per 30 cells (loop / team / varsplit; the corpus
 5 and 3 per 30 for team and varsplit), 14 / 18 / 20 at LT 45, 1-12 per 50 on

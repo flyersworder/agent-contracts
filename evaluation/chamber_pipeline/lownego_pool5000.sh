@@ -31,4 +31,15 @@ c = pd.read_parquet("runs-vps/lownego/lownego-lt.parquet")
 c[(c.budget_k == 45) & (c.agent_name == "llm_pc")].to_parquet("runs/lownego-lt45-loop.parquet")
 EOF2
 SRC=runs/lownego-lt45-loop.parquet job lownego-lt45-loop-pc1500mac --estimator pc --pc-max-rows 1500
+# The supplement's ring-vs-rule table: the ring sweep was re-scored on the Mac,
+# so the 30 LT k=30 rule lists it is compared with are re-scored here too.
+uv run python - <<'EOF2'
+import pandas as pd
+c = pd.read_parquet("runs/m7-coverage-ms.parquet")
+c = c[(c.agent_name == "coverage_max_ms") & (c.budget_k == 30) & (c.status == "ok")]
+c.to_parquet("runs/rule-lt30.parquet")
+EOF2
+for R in 300 1500; do
+  SRC=runs/rule-lt30.parquet job "rescored-rule-lt30-mac-rows$R" --pc-max-rows "$R"
+done
 echo ALLDONE
