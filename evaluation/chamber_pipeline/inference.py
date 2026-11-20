@@ -93,6 +93,64 @@ except ImportError:
     _causallearn_pc = None  # type: ignore[assignment]
 
 
+def equal_row_quotas(sizes: list[int], max_rows: int, rng: np.random.Generator) -> list[int]:
+    """Rows to draw from each experiment so the capped pool is as equal as possible.
+
+    Water-filling: every experiment gets the same quota; one with fewer rows
+    than the quota gives all it has and its shortfall is shared among the
+    rest. The total is `min(max_rows, sum(sizes))`, the same `n` the uniform
+    cap uses, so a uniform-vs-equal contrast isolates the WEIGHTING of
+    experiments and not the sample size. When every experiment has at least
+    `max_rows // k` rows the quotas are exactly equal up to a remainder of
+    fewer than `k` rows, which `rng` assigns.
+    """
+    if max_rows < 0:
+        raise ValueError(f"max_rows must be non-negative, got {max_rows}")
+    quotas = [0] * len(sizes)
+    remaining = min(max_rows, sum(sizes))
+    open_idx = [i for i, n in enumerate(sizes) if n > 0]
+    while remaining > 0 and open_idx:
+        share = remaining // len(open_idx)
+        if share == 0:
+            # Fewer rows left than open experiments: one extra row each to a
+            # seeded random subset, so no experiment is favoured by position.
+            for i in rng.permutation(open_idx)[:remaining]:
+                quotas[int(i)] += 1
+            break
+        for i in open_idx:
+            take = min(share, sizes[i] - quotas[i])
+            quotas[i] += take
+            remaining -= take
+        open_idx = [i for i in open_idx if quotas[i] < sizes[i]]
+    return quotas
+
+
+def pool_equal_rows(
+    experiment_dfs: list[pd.DataFrame],
+    node_names: list[str],
+    max_rows: int,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Pool with (near-)equal rows per bought experiment, at most `max_rows`.
+
+    The uniform cap in `run_pc` samples the concatenated pool, so an
+    experiment's weight is proportional to its row count (49 to 8000 on the
+    wind tunnel). This draws the capped sample per experiment instead; see
+    `equal_row_quotas`. The result has at most `max_rows` rows, so passing it
+    to `run_pc` with the same cap makes that cap a no-op.
+    """
+    if not experiment_dfs:
+        raise ValueError("experiment_dfs is empty — at least one experiment is required")
+    rng = np.random.default_rng(seed)
+    quotas = equal_row_quotas([len(df) for df in experiment_dfs], max_rows, rng)
+    sampled = [
+        df.sample(n=q, random_state=int(rng.integers(2**32)))
+        for df, q in zip(experiment_dfs, quotas, strict=True)
+        if q > 0
+    ]
+    return pool_experiment_data(sampled, node_names)
+
+
 def pool_experiment_data(experiment_dfs: list[pd.DataFrame], node_names: list[str]) -> pd.DataFrame:
     """Concatenate per-experiment rows and project to ground-truth nodes.
 

@@ -44,7 +44,13 @@ if TYPE_CHECKING:
 
 from .ges import run_ges
 from .igsp import run_utigsp
-from .inference import DEFAULT_MAX_ROWS, pool_experiment_data, run_pc, runtime_fingerprint
+from .inference import (
+    DEFAULT_MAX_ROWS,
+    pool_equal_rows,
+    pool_experiment_data,
+    run_pc,
+    runtime_fingerprint,
+)
 from .jci import (
     add_session_context,
     intervention_target,
@@ -101,6 +107,14 @@ LT_CASE_STUDY_NODES: tuple[str, ...] = (
 ESTIMATORS = ("pc", "jci_pc", "ges", "utigsp", "pc_exo")
 OBSERVATIONAL_ENTRY = {"lt": "uniform_reference"}
 CONTEXT_MODES = ("variable", "regime", "session")
+#: How the row cap draws from the bought experiments. "uniform" (the
+#: configuration of record) samples the concatenated pool, weighting each
+#: experiment by its row count; "equal" draws the same number of rows from
+#: each (`inference.pool_equal_rows`).
+ROW_SAMPLING_MODES = ("uniform", "equal")
+#: Estimators that run on one pooled table with no per-row context columns,
+#: and so can take a pre-drawn pool.
+_EQUAL_ROW_ESTIMATORS = ("pc", "pc_exo", "ges")
 
 
 def manipulable_variables(chamber: str, menu: Sequence[str], nodes: Sequence[str]) -> list[str]:
@@ -133,7 +147,7 @@ def exogeneity_knowledge(knobs: Sequence[str]) -> Any:
     return BackgroundKnowledge().add_forbidden_by_pattern(".*", pattern)
 
 
-_DesignTask = tuple[str, str, str, list[str], int, float, int | None, str, str]
+_DesignTask = tuple[str, str, str, list[str], int, float, int | None, str, str, str]
 
 #: Columns a source frame must carry to be re-scorable.
 REQUIRED_COLUMNS = ("chamber", "configuration", "chosen_experiments", "status")
@@ -202,6 +216,7 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
         pc_max_rows,
         estimator,
         context_mode,
+        row_sampling,
     ) = task
     adapter = create_contracted_chamber_agent(
         chamber=chamber,  # type: ignore[arg-type]
@@ -282,7 +297,15 @@ def _rescore_one_design(task: _DesignTask) -> list[dict[str, Any]]:
         else None
     )
     records: list[dict[str, Any]] = []
+    uniform_pool = pooled
     for pc_seed in range(n_pc_seeds):
+        if row_sampling == "equal":
+            # Drawn per seed, like the uniform cap it replaces. At most
+            # `pc_max_rows` rows, so the estimator's own cap below is a no-op.
+            assert pc_max_rows is not None  # checked in `rescore_selections`
+            pooled = pool_equal_rows(experiment_dfs, nodes, pc_max_rows, seed=pc_seed)
+        else:
+            pooled = uniform_pool
         if estimator == "jci_pc":
             predicted = run_jci_pc(
                 pooled, nodes, context, alpha=pc_alpha, seed=pc_seed, max_rows=pc_max_rows
@@ -378,6 +401,7 @@ def rescore_selections(
     pc_max_rows: int | None = DEFAULT_MAX_ROWS,
     estimator: str = "pc",
     context_mode: str = "variable",
+    row_sampling: str = "uniform",
 ) -> pd.DataFrame:
     """Score every DISTINCT recorded buy in `frame` under `n_pc_seeds` seeds.
 
@@ -412,6 +436,18 @@ def rescore_selections(
         raise ValueError(f"unknown estimator {estimator!r}; expected one of {ESTIMATORS}")
     if context_mode not in CONTEXT_MODES:
         raise ValueError(f"unknown context_mode {context_mode!r}; expected one of {CONTEXT_MODES}")
+    if row_sampling not in ROW_SAMPLING_MODES:
+        raise ValueError(
+            f"unknown row_sampling {row_sampling!r}; expected one of {ROW_SAMPLING_MODES}"
+        )
+    if row_sampling == "equal":
+        if estimator not in _EQUAL_ROW_ESTIMATORS:
+            raise ValueError(
+                f"row_sampling='equal' supports {_EQUAL_ROW_ESTIMATORS}, not {estimator!r}: "
+                "JCI-PC builds per-row context columns on the pool and UT-IGSP never pools"
+            )
+        if pc_max_rows is None:
+            raise ValueError("row_sampling='equal' needs a row cap; with no cap nothing is sampled")
     missing = [c for c in REQUIRED_COLUMNS if c not in frame.columns]
     if missing:
         raise ValueError(
@@ -464,6 +500,7 @@ def rescore_selections(
             pc_max_rows,
             estimator,
             context_mode,
+            row_sampling,
         )
         for (chamber, configuration, _), names in seen.items()
     ]
@@ -487,7 +524,12 @@ def rescore_selections(
     # Emit in submission order, never completion order, so `--max-workers`
     # changes only the wall time.
     records = [
-        record | {"blas_backend": runtime["blas"], "platform_tag": runtime["platform"]}
+        record
+        | {
+            "blas_backend": runtime["blas"],
+            "platform_tag": runtime["platform"],
+            "rescore_row_sampling": row_sampling,
+        }
         for task in tasks
         for record in by_key[task[0]]
     ]
@@ -647,6 +689,18 @@ def main(argv: Iterable[str] | None = None) -> None:
             "§37; WT has two sessions 2.3 kPa apart, LT one)."
         ),
     )
+    parser.add_argument(
+        "--row-sampling",
+        choices=ROW_SAMPLING_MODES,
+        default="uniform",
+        help=(
+            "how the row cap draws from the bought experiments: 'uniform' "
+            "(of record) samples the concatenated pool, so an experiment's "
+            "weight is its row count; 'equal' draws the same number of rows "
+            "from each, redistributing the shortfall of an experiment smaller "
+            "than its quota so n is unchanged. pc, pc_exo and ges only."
+        ),
+    )
     parser.add_argument("--out", default="runs/rescored.parquet")
     parser.add_argument(
         "--allow-backend-mismatch",
@@ -674,7 +728,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     else:
         pc_max_rows = int(args.pc_max_rows)
     print(
-        f"pc_max_rows={pc_max_rows} estimator={args.estimator} context={args.context} alpha={args.pc_alpha}",
+        f"pc_max_rows={pc_max_rows} estimator={args.estimator} context={args.context} "
+        f"alpha={args.pc_alpha} row_sampling={args.row_sampling}",
         flush=True,
     )
 
@@ -686,6 +741,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         pc_max_rows=pc_max_rows,
         estimator=args.estimator,
         context_mode=args.context,
+        row_sampling=args.row_sampling,
     )
     joined = attach_rescored(combined, rescored, allow_backend_mismatch=args.allow_backend_mismatch)
 

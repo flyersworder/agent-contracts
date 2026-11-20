@@ -566,3 +566,112 @@ def test_rescore_can_score_with_pc_exo() -> None:
     out = rescore_selections(cells, n_pc_seeds=1, progress_every=0, estimator="pc_exo")
     assert set(out["rescore_estimator"]) == {"pc_exo"}
     assert len(out) == 1 and 0.0 <= out["f1"].iloc[0] <= 1.0
+
+
+# --- equal-rows-per-experiment cap (AAMAS 2027 rebuttal, reviewer xQHG) ------
+
+
+@pytest.mark.parametrize(
+    ("sizes", "cap", "expected_sorted"),
+    [
+        # Every experiment larger than the quota: exactly equal.
+        ([1000, 1000, 1000], 300, [100, 100, 100]),
+        ([49, 200, 8000], 120, [40, 40, 40]),
+        # A small experiment gives all it has; the shortfall goes to the rest.
+        ([49, 200, 8000], 1500, [49, 200, 1251]),
+        ([49, 1000, 1000], 300, [49, 125, 126]),
+        # Pool smaller than the cap: everything, exactly as the uniform cap does.
+        ([10, 20], 300, [10, 20]),
+    ],
+)
+def test_equal_row_quotas_water_fill(
+    sizes: list[int], cap: int, expected_sorted: list[int]
+) -> None:
+    import numpy as np
+
+    from evaluation.chamber_pipeline.inference import equal_row_quotas
+
+    quotas = equal_row_quotas(sizes, cap, np.random.default_rng(0))
+    assert sum(quotas) == min(cap, sum(sizes))  # n matches the uniform cap
+    assert all(q <= n for q, n in zip(quotas, sizes, strict=True))
+    assert sorted(quotas) == expected_sorted
+    # Experiments with rows to spare differ by at most the remainder row.
+    spare = [q for q, n in zip(quotas, sizes, strict=True) if q < n]
+    assert not spare or max(spare) - min(spare) <= 1
+
+
+def test_pool_equal_rows_draws_the_quota_from_each_experiment() -> None:
+    import numpy as np
+
+    from evaluation.chamber_pipeline.inference import pool_equal_rows
+
+    rng = np.random.default_rng(0)
+    nodes = ["a", "b"]
+    # Tag each experiment by a constant in column "a" so rows are traceable.
+    dfs = [
+        pd.DataFrame({"a": float(tag), "b": rng.normal(size=n)})
+        for tag, n in enumerate([50, 400, 4000])
+    ]
+    pooled = pool_equal_rows(dfs, nodes, 90, seed=3)
+    assert pooled["a"].value_counts().to_dict() == {0.0: 30, 1.0: 30, 2.0: 30}
+    # Seeded: same seed, same rows; another seed, other rows.
+    assert pooled.equals(pool_equal_rows(dfs, nodes, 90, seed=3))
+    assert not pooled.equals(pool_equal_rows(dfs, nodes, 90, seed=4))
+
+
+def test_rescore_equal_row_sampling_is_stamped_and_leaves_uniform_untouched() -> None:
+    """The flag changes WT scores (row counts differ 49..8000) and is recorded;
+    the default path must be what it was before the flag existed."""
+    pytest.importorskip("causallearn")
+    from agent_contracts.integrations.causalchamber import create_contracted_chamber_agent
+
+    try:
+        menu = list(
+            create_contracted_chamber_agent(
+                chamber="wt", configuration="standard", intervention_budget=1
+            ).available_experiments()
+        )
+    except Exception as exc:  # dataset not cached on this machine
+        pytest.skip(f"wind-tunnel data unavailable: {exc}")
+    frame = pd.DataFrame(
+        {
+            "chamber": ["wt"],
+            "configuration": ["standard"],
+            "chosen_experiments": [",".join(menu[:10])],
+            "status": ["ok"],
+        }
+    )
+    default = rescore_selections(frame, n_pc_seeds=2, progress_every=0)
+    uniform = rescore_selections(frame, n_pc_seeds=2, progress_every=0, row_sampling="uniform")
+    equal = rescore_selections(frame, n_pc_seeds=2, progress_every=0, row_sampling="equal")
+    assert set(default["rescore_row_sampling"]) == {"uniform"}
+    assert set(equal["rescore_row_sampling"]) == {"equal"}
+    pd.testing.assert_frame_equal(default, uniform)
+    assert not default["shd"].equals(equal["shd"]) or not default["f1"].equals(equal["f1"])
+
+
+@pytest.mark.parametrize("estimator", ["jci_pc", "utigsp"])
+def test_rescore_equal_row_sampling_rejects_unsupported_estimators(estimator: str) -> None:
+    frame = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "chosen_experiments": ["x"],
+            "status": ["ok"],
+        }
+    )
+    with pytest.raises(ValueError, match="row_sampling='equal' supports"):
+        rescore_selections(frame, estimator=estimator, row_sampling="equal")
+
+
+def test_rescore_equal_row_sampling_needs_a_cap() -> None:
+    frame = pd.DataFrame(
+        {
+            "chamber": ["lt"],
+            "configuration": ["standard"],
+            "chosen_experiments": ["x"],
+            "status": ["ok"],
+        }
+    )
+    with pytest.raises(ValueError, match="needs a row cap"):
+        rescore_selections(frame, pc_max_rows=None, row_sampling="equal")

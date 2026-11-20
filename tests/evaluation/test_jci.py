@@ -268,6 +268,8 @@ def test_rescore_session_context_runs_and_labels_records() -> None:
     from evaluation.chamber_pipeline.rescore import _rescore_one_design
 
     names = ["validate_osr_ambient", "validate_v_out", "validate_load_in"]
-    recs = _rescore_one_design(("k", "wt", "standard", names, 2, 0.05, 300, "jci_pc", "session"))
+    recs = _rescore_one_design(
+        ("k", "wt", "standard", names, 2, 0.05, 300, "jci_pc", "session", "uniform")
+    )
     assert len(recs) == 2 and all(r["rescore_context"] == "session" for r in recs)
     assert all(0.0 <= r["f1"] <= 1.0 for r in recs)
