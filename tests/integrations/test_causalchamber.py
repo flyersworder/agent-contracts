@@ -181,9 +181,14 @@ class TestM2BudgetEnforcement:
 
     def test_query_intervention_returns_real_dataframe(self) -> None:
         a = create_contracted_chamber_agent(chamber="lt", intervention_budget=1)
-        names = a.available_experiments()
-        df = a.query_intervention(names[0])
-        # LT experiments are 1000 samples by 46 columns per the plan §3.3.
+        # Name the experiment: `available_experiments()` inherits the
+        # causalchamber library's `Path.glob` order, which is filesystem
+        # directory order. On ext4 it varies per runner, so `names[0]` was
+        # sometimes `uniform_reference` (10000 rows) and this test flaked.
+        name = "uniform_t_ir_1_mid"
+        assert name in a.available_experiments()
+        df = a.query_intervention(name)
+        # LT intervention experiments are 1000 samples by 46 columns (plan §3.3).
         assert df.shape == (1000, 46)
         assert "intervention" in df.columns
 
