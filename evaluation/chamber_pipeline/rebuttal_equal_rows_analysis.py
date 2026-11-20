@@ -51,7 +51,7 @@ UNIFORM_SOURCES = ("lownego-lt-rescored", "lownego-wt-rescored", "rescored-vps")
 def frames(rows: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     """(uniform, equal) design-level frames over the same designs."""
     cells = pd.read_parquet(RUNS / f"rebuttal-eqrows-rows{rows}.parquet")
-    designs = cells.drop_duplicates(["design_key", "agent_name"])[
+    designs = cells.drop_duplicates(["design_key", "agent_name", "chamber", "budget_k"])[
         ["design_key", "agent_name", "chamber", "budget_k"]
     ]
     eq = pd.read_parquet(RUNS / f"rebuttal-eqrows-rows{rows}-bykey.parquet")

@@ -675,3 +675,10 @@ def test_rescore_equal_row_sampling_needs_a_cap() -> None:
     )
     with pytest.raises(ValueError, match="needs a row cap"):
         rescore_selections(frame, pc_max_rows=None, row_sampling="equal")
+
+
+def test_pool_equal_rows_rejects_a_non_positive_cap() -> None:
+    from evaluation.chamber_pipeline.inference import pool_equal_rows
+
+    with pytest.raises(ValueError, match="max_rows must be positive"):
+        pool_equal_rows([pd.DataFrame({"a": [1.0, 2.0]})], ["a"], 0)

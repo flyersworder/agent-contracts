@@ -141,6 +141,8 @@ def pool_equal_rows(
     """
     if not experiment_dfs:
         raise ValueError("experiment_dfs is empty — at least one experiment is required")
+    if max_rows <= 0:
+        raise ValueError(f"max_rows must be positive, got {max_rows}")
     rng = np.random.default_rng(seed)
     quotas = equal_row_quotas([len(df) for df in experiment_dfs], max_rows, rng)
     sampled = [

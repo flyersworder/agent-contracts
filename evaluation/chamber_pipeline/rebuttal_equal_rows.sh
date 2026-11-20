@@ -31,6 +31,10 @@ corpus = corpus[
     corpus["agent_name"].isin(CORPUS_ARMS)
     & corpus.apply(lambda r: r["budget_k"] in BUDGETS.get(r["chamber"], []), axis=1)
 ].rename(columns={"source_file": "orig_source_file"})
+# One model and one selection effort per arm, or an "arm" is a mixture. (The
+# rule and random make no LLM call and carry nulls.)
+mixed = corpus.groupby(["chamber", "agent_name"])[["model_id", "reasoning_effort"]].nunique()
+assert (mixed <= 1).all().all(), f"a corpus arm mixes models or efforts:\n{mixed}"
 src = pd.concat([low, corpus], ignore_index=True)
 src = src.drop(columns=[c for c in ADDED if c in src.columns])
 src = src[(src["status"] == "ok") & src["chosen_experiments"].notna()]
