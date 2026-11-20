@@ -10,6 +10,11 @@
 #   runs/rescored-vps-rows{300,1500}               (random, single call, the rule)
 # all scored on the VPS (OpenBLAS), so run this on the VPS too. Resumable: a
 # job whose output exists is skipped.
+#
+# --allow-backend-mismatch: the LLM-free coverage sweeps at LT k=6/45 and on WT
+# were PRODUCED on a Mac, so their source rows say `accelerate`. Only their
+# purchase lists are used; every score compared is a VPS re-score, on both
+# sides (the analysis script asserts it), which is the flag's stated use.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 W=${W:-3}
@@ -47,7 +52,7 @@ for R in 300 1500; do
   if [ -f "runs/$out.parquet" ]; then echo "skip $out"; continue; fi
   echo "start $out $(date -u +%H:%M:%S)"
   uv run python -m evaluation.chamber_pipeline.rescore runs/rebuttal-eqrows-src.parquet \
-    --row-sampling equal --pc-max-rows "$R" --max-workers "$W" \
+    --row-sampling equal --pc-max-rows "$R" --max-workers "$W" --allow-backend-mismatch \
     --out "runs/$out.parquet" > "runs/$out.log" 2>&1
   echo "done  $out $(date -u +%H:%M:%S)"
 done
