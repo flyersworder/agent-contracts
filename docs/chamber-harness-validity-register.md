@@ -2443,6 +2443,15 @@ set against. That is recorded as a caveat, not measured.
 would change every future prompt relative to the whole corpus. Post-deadline,
 sort it in the adapter and record the order's hash per cell.
 
+**Deferred again (2026-11-20): not before the AAMAS rebuttal closes.** A
+rebuttal re-run must match the corpus, so the VPS extraction's order stays
+the reference until then. The sort is a regime change: once it lands, never
+pool post-sort cells with the corpus without checking arm means agree. CI hit
+the same cause again on 2026-11-20 (`test_query_intervention_returns_real_dataframe`
+took `names[0]` and sometimes drew the 10000-row `uniform_reference`), and
+`query_observation()` still sources rows from `available_experiments()[0]`;
+no pipeline calls it.
+
 **Rule.** Never let a test or an arm depend on the order a third-party
 package lists files in. Before comparing a locally-run probe with the VPS
 corpus, check that the menu order matches, as well as the BLAS backend.
