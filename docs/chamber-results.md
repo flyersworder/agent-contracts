@@ -96,6 +96,64 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## THE RULE'S SMALLER JCI-PC GAIN AT LT k=30 IS PARTLY ITS MILDER LIGHT-SOURCE INTERVENTIONS; A PRE-REGISTERED STRENGTH SWAP CLOSES A THIRD OF THE GAP (2026-11-21, local/Accelerate, `runs/rebuttal-jci-gain-diagnose.parquet`, `runs/rebuttal-jci-swap-*`, $0)
+
+**Why.** AAMAS 2027 reviewer xQHG: in the paper's 5000-row table the rule
+gains least from JCI-PC although it covers the most variables. The rebuttal's
+first answer (JCI repairs one variable bought at two strengths, and the rule
+has no such pair) was asserted without a test and does not survive one.
+
+**The fact is a k=30 fact.** Gain = F1(JCI-PC, regime context) − F1(PC), 5000
+rows. At k=30 the rule gains +0.045, resolved below every arm (loop −0.035
+[0.016], team −0.048, varsplit −0.033, random −0.027). At k=45 it is not the
+lowest (team +0.036 against the rule's +0.043, a tie).
+
+**Ruled out** (`rebuttal_jci_gain_diagnose.py`, the 120 non-rule lists at
+k=30, each candidate asked to predict the rule's +0.045):
+
+| candidate | correlation with gain | predicts for the rule |
+|---|---|---|
+| distinct variables | −0.05 | — |
+| repeated variables | +0.04 | — |
+| ceiling (gain on PC F1) | −0.16 | +0.071 |
+| between-experiment share of pooled variance (the paper's Section 3.2 quantity) | +0.11 | +0.080 |
+| number of strong, or of non-mid, experiments | +0.14 / +0.19 | +0.073 / +0.062 |
+
+The Section 3.2 quantity not predicting which lists JCI-PC helps is a result
+in its own right.
+
+**What predicts it.** A per-experiment ridge fit (lambda 10) on the non-rule
+lists predicts the rule's gain at +0.049 (lambda 1: +0.036) and rule − loop
+at −0.031 against −0.035 measured. By group: `mid` on light sources −0.014,
+`strong` on light sources −0.010, `strong` elsewhere −0.005. The rule buys
+the light sources at `mid` where the loop buys them at `strong`. At k=45 the
+same fit puts the difference elsewhere (`mid` on other variables, −0.026), so
+this is not a general account.
+
+**The swap, pre-registered**
+(`docs/superpowers/specs/2026-11-21-jci-gain-strength-swap-prereg.md`, commit
+`5745f04` before launch). In 29 of the rule's 30 k=30 lists, each `mid`
+light-source experiment replaced in position by the `strong` one on the same
+variable (2.3 swaps per list); coverage and budget unchanged. Paired by list,
+95% t interval:
+
+| strong − original | measured | predicted |
+|---|---|---|
+| P1 gain | **+0.011** [+0.006, +0.017] | +0.017 |
+| P2 F1 under JCI-PC | **+0.014** [+0.006, +0.022] | +0.022 |
+| P3 F1 under PC | +0.003 [−0.005, +0.011] | +0.005 |
+
+**Supported** under the registered rule (P1 above zero), at about two thirds
+of the predicted size. The originals reproduce the table (PC 0.354, JCI-PC
+0.398). The swap closes 0.011 of the rule's 0.035 gap to the loop; the rest is
+unexplained. Note what moved: PC F1 did not change, JCI-PC F1 rose. Strong
+light-source interventions are not hurting pooled PC here; JCI-PC extracts
+more from them.
+
+**For the paper.** "Broader coverage distorts more" is not what the 5000-row
+table shows, and the tradeoff should be worded as distortion against rows
+pooled, not against coverage at a fixed budget.
+
 ## UNDER AN EQUAL-ROWS CAP THE TEAM VERDICTS HOLD AND THE WIND-TUNNEL RULE LOSES ITS 1500-ROW LEAD OVER RANDOM; A PRE-REGISTERED SWAP CONFIRMS WHY (2026-11-20/21, VPS/OpenBLAS, `runs/rebuttal-eqrows-*`, `runs/rebuttal-swap-*`, $0)
 
 **Why.** AAMAS 2027 reviewer xQHG: the row cap samples the pooled rows
