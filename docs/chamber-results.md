@@ -96,6 +96,79 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## UNDER AN EQUAL-ROWS CAP THE TEAM VERDICTS HOLD AND THE WIND-TUNNEL RULE LOSES ITS 1500-ROW LEAD OVER RANDOM; A PRE-REGISTERED SWAP CONFIRMS WHY (2026-11-20/21, VPS/OpenBLAS, `runs/rebuttal-eqrows-*`, `runs/rebuttal-swap-*`, $0)
+
+**Why.** AAMAS 2027 reviewer xQHG: the row cap samples the pooled rows
+uniformly, so an experiment's weight is its row count (LT: 1000 each, the
+observational reference 10,000; WT: 49 to 8000). Would an equal number of rows
+per bought experiment change the comparisons?
+
+**Test.** `rescore --row-sampling equal` (`inference.pool_equal_rows`:
+water-filling, so n matches the uniform cap). The 1,440 cells behind Figure 2
+and the team contrasts (six arms, six budgets), plain PC, 9 seeds, 300 and
+1500 rows. Gate before launch: the new code's uniform path reproduces the
+stored VPS scores on 216/216 (design, seed) pairs. Analysis:
+`rebuttal_equal_rows_analysis.py`, the paper's own contrast and MDE code.
+
+**Result.** 25 of 96 verdicts change (LT 11 of 48, WT 14 of 48), one a
+resolved sign flip (`team_varsplit` − `llm_pc`, WT k=21, 1500 rows: +0.022 →
+−0.030).
+
+| contrast | uniform 300 / 1500 | equal 300 / 1500 |
+|---|---|---|
+| team − loop, LT k=30 | −0.040 / −0.040 | −0.044 / −0.038 |
+| varsplit − team, LT k=30 | +0.034 / +0.047 | +0.043 / +0.045 |
+| rule − random, LT k=30 | +0.065 / +0.099 | +0.078 / +0.132 |
+| rule − random, WT k=21 | +0.056 / +0.059 | +0.046 / **+0.004** |
+
+Multi-agent − loop resolves above zero in 1 of 24 contrasts under equal rows
+(+0.021, LT k=45, 1500 rows); arm − rule in 2 of 60 (4 under uniform). The
+agent arms' lead over the rule at LT k=6, 300 rows, becomes a tie. At WT k=21,
+1500 rows, all five arm − rule gaps become ties. Equal rows also raises WT
+k=21 F1 at 300 rows by 0.07 to 0.09 for every arm.
+
+**Why the WT rule loses its lead at 1500 rows**
+(`rebuttal_equal_rows_diagnose.py`). Under the uniform cap a WT k=21 pool is
+effectively 4 to 5 entries (top entry about 40% of rows). `load_in`,
+`load_out` and `hatch` carry 22 of 42 true edges and are the only variables
+with several menu entries; the rule buys one entry per variable and so mostly
+skips their repeats, including `validate_hatch_mic` (4000 rows) and
+`validate_load_out_pressure_intake` (3000). Per-entry OLS on the 230 non-rule
+lists, times the rule − random buy-rate difference, splits the 1500-row gap:
+the two big repeats +0.017 under uniform and −0.027 under equal; one-edge OSR
+settings +0.017 and +0.001; predicted total +0.044 and −0.022 against measured
++0.059 and +0.004. F1 per distinct variable among non-rule lists: +0.011
+uniform, −0.015 equal.
+
+**The swap, pre-registered**
+(`docs/superpowers/specs/2026-11-21-equal-rows-swap-prereg.md`, commit
+`f53002a` before launch). The two big repeats swapped into the rule's k=21
+lists in place of seeded one-edge OSR entries (`big`), with a small repeat on
+the same hubs as size control (`small`). Paired by list, 95% t interval,
+primary sample the 27 lists lacking both entries, 1500 rows:
+
+| contrast | uniform (predicted) | equal (predicted) |
+|---|---|---|
+| P1 big − original | **−0.089** [−0.100, −0.077] (−0.046) | **+0.028** [+0.015, +0.040] (+0.056) |
+| P2 big − small | **−0.075** [−0.087, −0.063] (−0.045) | +0.009 [−0.003, +0.020] (+0.045) |
+| P3 small − original | −0.014 [−0.027, −0.001] (0.00) | +0.019 [+0.006, +0.032] (+0.01) |
+
+**Confirmed and size confirmed** under the registered rule: P1 lies below zero
+under uniform and above zero under equal rows; P2 lies below zero under
+uniform. The signs were right and the sizes were not: the uniform harm is
+about twice the regression's figure and the equal-rows gain about half. Under
+equal rows big and small are indistinguishable (P2 contains zero), which is
+what removing the row-count weighting should do. Secondary sample (47 lists):
+same signs, P1 −0.077 and +0.014. At 300 rows: big − original −0.068 under
+uniform (predicted −0.039) and −0.008 [−0.017, −0.000] under equal (predicted
++0.002).
+
+**For the paper.** The team and multi-agent conclusions do not depend on the
+sampling scheme. "The rule beats random on the wind tunnel across checks"
+holds at 300 rows and, at 1500 rows, only under the uniform cap, where part of
+the rule's lead is that it skips two entries that swamp the pool. Report both
+samplings.
+
 ## WITH EVERY CALL AT `low`, THE TEAM STILL LOSES WHERE IT GIVES UP COVERAGE AND VARSPLIT STILL REPAIRS IT; "NO MULTI-AGENT ARM RESOLVES ABOVE THE LOOP" FAILS IN 4 OF 28 CONTRASTS, NONE OF WHICH SURVIVES MULTIPLICITY, AND THE ONE REPLICATED DOES NOT HOLD (2026-09-29/30, VPS/OpenBLAS, `runs-vps/lownego/`, $20.97, PRE-REGISTERED in `docs/superpowers/specs/2026-09-29-low-negotiation-prereg.md` (`e5ae71b`, amended `d143f59`, `e5a83eb`) and `2026-09-30-glm-varsplit-replication-prereg.md` (`1caf756`, amended `bc035b0`, corrected `9a69a8d`); verdicts **P1 holds, P2 holds, P3 falsified, P4 below random**)
 
 **What prompted it.** A co-author found that every multi-agent cell in the
