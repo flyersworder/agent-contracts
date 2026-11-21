@@ -64,7 +64,9 @@ def frames(rows: int) -> tuple[pd.DataFrame, pd.DataFrame]:
     # One machine, one estimator, one cap on both sides.
     assert set(uni["blas_backend"]) == set(eq["blas_backend"]) == {"scipy-openblas"}
     assert set(uni["rescore_pc_max_rows"]) == {rows}
-    assert set(uni.get("rescore_estimator", pd.Series(["pc"]))) == {"pc"}
+    # `rescored-vps` predates the estimator stamp (plain PC was the only
+    # estimator then), so the column is null there; no other value is allowed.
+    assert set(uni["rescore_estimator"].dropna()) <= {"pc"}
     out = []
     for scored in (uni, eq):
         f1 = scored.groupby("design_key")["f1"].mean().rename("f1")
