@@ -119,8 +119,17 @@ k=30, each candidate asked to predict the rule's +0.045):
 | between-experiment share of pooled variance (the paper's Section 3.2 quantity) | +0.11 | +0.080 |
 | number of strong, or of non-mid, experiments | +0.14 / +0.19 | +0.073 / +0.062 |
 
-The Section 3.2 quantity not predicting which lists JCI-PC helps is a result
-in its own right.
+**The Section 3.2 quantity is a between-budget account, not a within-budget
+one** (`rebuttal_section32_check.py`). Within k=30 it barely varies across
+lists (sd 0.039; 0.017 at k=45), which is why it cannot rank them. Across the
+three budgets it tracks the gain: 0.34 at k=6 against 0.70 and 0.71 at k=30
+and 45, with gains of about 0.015 against 0.06 to 0.08, and a pooled
+correlation of +0.63 over all 449 lists. So the paper's use of it (more
+experiments pooled, more distortion) stands. One qualification for the text:
+the between-experiment term is not only "the problem". About 38% of its
+off-diagonal mass falls on true edges and 62% on non-edges, and at k=30 and
+45 a larger between share goes with HIGHER PC F1 (+0.44, +0.41). The term
+carries the interventional signal as well as the distortion.
 
 **What predicts it.** A per-experiment ridge fit (lambda 10) on the non-rule
 lists predicts the rule's gain at +0.049 (lambda 1: +0.036) and rule − loop
