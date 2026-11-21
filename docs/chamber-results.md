@@ -96,6 +96,146 @@ collinearity threshold 0.999. MDE = 2.8 * sd * sqrt(2/n) throughout.
 
 ---
 
+## THE RULE'S SMALLER JCI-PC GAIN AT LT k=30 IS PARTLY ITS MILDER LIGHT-SOURCE INTERVENTIONS; A PRE-REGISTERED STRENGTH SWAP CLOSES A THIRD OF THE GAP (2026-11-21, local/Accelerate, `runs/rebuttal-jci-gain-diagnose.parquet`, `runs/rebuttal-jci-swap-*`, $0)
+
+**Why.** AAMAS 2027 reviewer xQHG: in the paper's 5000-row table the rule
+gains least from JCI-PC although it covers the most variables. The rebuttal's
+first answer (JCI repairs one variable bought at two strengths, and the rule
+has no such pair) was asserted without a test and does not survive one.
+
+**The fact is a k=30 fact.** Gain = F1(JCI-PC, regime context) − F1(PC), 5000
+rows. At k=30 the rule gains +0.045, resolved below every arm (loop −0.035
+[0.016], team −0.048, varsplit −0.033, random −0.027). At k=45 it is not the
+lowest (team +0.036 against the rule's +0.043, a tie).
+
+**Ruled out** (`rebuttal_jci_gain_diagnose.py`, the 120 non-rule lists at
+k=30, each candidate asked to predict the rule's +0.045):
+
+| candidate | correlation with gain | predicts for the rule |
+|---|---|---|
+| distinct variables | −0.05 | — |
+| repeated variables | +0.04 | — |
+| ceiling (gain on PC F1) | −0.16 | +0.071 |
+| between-experiment share of pooled variance (the paper's Section 3.2 quantity) | +0.11 | +0.080 |
+| number of strong, or of non-mid, experiments | +0.14 / +0.19 | +0.073 / +0.062 |
+
+**The Section 3.2 quantity is a between-budget account, not a within-budget
+one** (`rebuttal_section32_check.py`). Within k=30 it barely varies across
+lists (sd 0.039; 0.017 at k=45), which is why it cannot rank them. Across the
+three budgets it tracks the gain: 0.34 at k=6 against 0.70 and 0.71 at k=30
+and 45, with gains of about 0.015 against 0.06 to 0.08, and a pooled
+correlation of +0.63 over all 449 lists. So the paper's use of it (more
+experiments pooled, more distortion) stands. One qualification for the text:
+the between-experiment term is not only "the problem". About 38% of its
+off-diagonal mass falls on true edges and 62% on non-edges, and at k=30 and
+45 a larger between share goes with HIGHER PC F1 (+0.44, +0.41). The term
+carries the interventional signal as well as the distortion.
+
+**What predicts it.** A per-experiment ridge fit (lambda 10) on the non-rule
+lists predicts the rule's gain at +0.049 (lambda 1: +0.036) and rule − loop
+at −0.031 against −0.035 measured. By group: `mid` on light sources −0.014,
+`strong` on light sources −0.010, `strong` elsewhere −0.005. The rule buys
+the light sources at `mid` where the loop buys them at `strong`. At k=45 the
+same fit puts the difference elsewhere (`mid` on other variables, −0.026), so
+this is not a general account.
+
+**The swap, pre-registered**
+(`docs/superpowers/specs/2026-11-21-jci-gain-strength-swap-prereg.md`, commit
+`5745f04` before launch). In 29 of the rule's 30 k=30 lists, each `mid`
+light-source experiment replaced in position by the `strong` one on the same
+variable (2.3 swaps per list); coverage and budget unchanged. Paired by list,
+95% t interval:
+
+| strong − original | measured | predicted |
+|---|---|---|
+| P1 gain | **+0.011** [+0.006, +0.017] | +0.017 |
+| P2 F1 under JCI-PC | **+0.014** [+0.006, +0.022] | +0.022 |
+| P3 F1 under PC | +0.003 [−0.005, +0.011] | +0.005 |
+
+**Supported** under the registered rule (P1 above zero), at about two thirds
+of the predicted size. The originals reproduce the table (PC 0.354, JCI-PC
+0.398). The swap closes 0.011 of the rule's 0.035 gap to the loop; the rest is
+unexplained. Note what moved: PC F1 did not change, JCI-PC F1 rose. Strong
+light-source interventions are not hurting pooled PC here; JCI-PC extracts
+more from them.
+
+**For the paper.** "Broader coverage distorts more" is not what the 5000-row
+table shows, and the tradeoff should be worded as distortion against rows
+pooled, not against coverage at a fixed budget.
+
+## UNDER AN EQUAL-ROWS CAP THE TEAM VERDICTS HOLD AND THE WIND-TUNNEL RULE LOSES ITS 1500-ROW LEAD OVER RANDOM; A PRE-REGISTERED SWAP CONFIRMS WHY (2026-11-20/21, VPS/OpenBLAS, `runs/rebuttal-eqrows-*`, `runs/rebuttal-swap-*`, $0)
+
+**Why.** AAMAS 2027 reviewer xQHG: the row cap samples the pooled rows
+uniformly, so an experiment's weight is its row count (LT: 1000 each, the
+observational reference 10,000; WT: 49 to 8000). Would an equal number of rows
+per bought experiment change the comparisons?
+
+**Test.** `rescore --row-sampling equal` (`inference.pool_equal_rows`:
+water-filling, so n matches the uniform cap). The 1,440 cells behind Figure 2
+and the team contrasts (six arms, six budgets), plain PC, 9 seeds, 300 and
+1500 rows. Gate before launch: the new code's uniform path reproduces the
+stored VPS scores on 216/216 (design, seed) pairs. Analysis:
+`rebuttal_equal_rows_analysis.py`, the paper's own contrast and MDE code.
+
+**Result.** 25 of 96 verdicts change (LT 11 of 48, WT 14 of 48), one a
+resolved sign flip (`team_varsplit` − `llm_pc`, WT k=21, 1500 rows: +0.022 →
+−0.030).
+
+| contrast | uniform 300 / 1500 | equal 300 / 1500 |
+|---|---|---|
+| team − loop, LT k=30 | −0.040 / −0.040 | −0.044 / −0.038 |
+| varsplit − team, LT k=30 | +0.034 / +0.047 | +0.043 / +0.045 |
+| rule − random, LT k=30 | +0.065 / +0.099 | +0.078 / +0.132 |
+| rule − random, WT k=21 | +0.056 / +0.059 | +0.046 / **+0.004** |
+
+Multi-agent − loop resolves above zero in 1 of 24 contrasts under equal rows
+(+0.021, LT k=45, 1500 rows); arm − rule in 2 of 60 (4 under uniform). The
+agent arms' lead over the rule at LT k=6, 300 rows, becomes a tie. At WT k=21,
+1500 rows, all five arm − rule gaps become ties. Equal rows also raises WT
+k=21 F1 at 300 rows by 0.07 to 0.09 for every arm.
+
+**Why the WT rule loses its lead at 1500 rows**
+(`rebuttal_equal_rows_diagnose.py`). Under the uniform cap a WT k=21 pool is
+effectively 4 to 5 entries (top entry about 40% of rows). `load_in`,
+`load_out` and `hatch` carry 22 of 42 true edges and are the only variables
+with several menu entries; the rule buys one entry per variable and so mostly
+skips their repeats, including `validate_hatch_mic` (4000 rows) and
+`validate_load_out_pressure_intake` (3000). Per-entry OLS on the 230 non-rule
+lists, times the rule − random buy-rate difference, splits the 1500-row gap:
+the two big repeats +0.017 under uniform and −0.027 under equal; one-edge OSR
+settings +0.017 and +0.001; predicted total +0.044 and −0.022 against measured
++0.059 and +0.004. F1 per distinct variable among non-rule lists: +0.011
+uniform, −0.015 equal.
+
+**The swap, pre-registered**
+(`docs/superpowers/specs/2026-11-21-equal-rows-swap-prereg.md`, commit
+`f53002a` before launch). The two big repeats swapped into the rule's k=21
+lists in place of seeded one-edge OSR entries (`big`), with a small repeat on
+the same hubs as size control (`small`). Paired by list, 95% t interval,
+primary sample the 27 lists lacking both entries, 1500 rows:
+
+| contrast | uniform (predicted) | equal (predicted) |
+|---|---|---|
+| P1 big − original | **−0.089** [−0.100, −0.077] (−0.046) | **+0.028** [+0.015, +0.040] (+0.056) |
+| P2 big − small | **−0.075** [−0.087, −0.063] (−0.045) | +0.009 [−0.003, +0.020] (+0.045) |
+| P3 small − original | −0.014 [−0.027, −0.001] (0.00) | +0.019 [+0.006, +0.032] (+0.01) |
+
+**Confirmed and size confirmed** under the registered rule: P1 lies below zero
+under uniform and above zero under equal rows; P2 lies below zero under
+uniform. The signs were right and the sizes were not: the uniform harm is
+about twice the regression's figure and the equal-rows gain about half. Under
+equal rows big and small are indistinguishable (P2 contains zero), which is
+what removing the row-count weighting should do. Secondary sample (47 lists):
+same signs, P1 −0.077 and +0.014. At 300 rows: big − original −0.068 under
+uniform (predicted −0.039) and −0.008 [−0.017, −0.000] under equal (predicted
++0.002).
+
+**For the paper.** The team and multi-agent conclusions do not depend on the
+sampling scheme. "The rule beats random on the wind tunnel across checks"
+holds at 300 rows and, at 1500 rows, only under the uniform cap, where part of
+the rule's lead is that it skips two entries that swamp the pool. Report both
+samplings.
+
 ## WITH EVERY CALL AT `low`, THE TEAM STILL LOSES WHERE IT GIVES UP COVERAGE AND VARSPLIT STILL REPAIRS IT; "NO MULTI-AGENT ARM RESOLVES ABOVE THE LOOP" FAILS IN 4 OF 28 CONTRASTS, NONE OF WHICH SURVIVES MULTIPLICITY, AND THE ONE REPLICATED DOES NOT HOLD (2026-09-29/30, VPS/OpenBLAS, `runs-vps/lownego/`, $20.97, PRE-REGISTERED in `docs/superpowers/specs/2026-09-29-low-negotiation-prereg.md` (`e5ae71b`, amended `d143f59`, `e5a83eb`) and `2026-09-30-glm-varsplit-replication-prereg.md` (`1caf756`, amended `bc035b0`, corrected `9a69a8d`); verdicts **P1 holds, P2 holds, P3 falsified, P4 below random**)
 
 **What prompted it.** A co-author found that every multi-agent cell in the
